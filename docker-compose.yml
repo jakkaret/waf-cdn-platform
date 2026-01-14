@@ -6,7 +6,8 @@ services:
       - "8080:8080"
       - "8443:8443"
     volumes:
-      - ./modsecurity:/etc/modsecurity
+      - ./modsecurity/custom-rules:/etc/modsecurity.d/custom-rules
+      - ./nginx/conf.d:/etc/nginx/conf.d
       - ./logs:/var/log/modsecurity
     environment:
       PARANOIA: 1
