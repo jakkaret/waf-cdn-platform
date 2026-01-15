@@ -17,19 +17,20 @@ SecResponseBodyLimit 1048576
 SecResponseBodyLimitAction ProcessPartial
 SecTmpDir /tmp/modsecurity/tmp
 SecDataDir /tmp/modsecurity/data
+
+# Audit Log Configuration (Serial Mode)
 SecAuditEngine RelevantOnly
 SecAuditLogRelevantStatus "^(?:5|4(?!04))"
 SecAuditLogParts ABIJDEFHZ
 SecAuditLogType Serial
-SecAuditLog /dev/stdout
+SecAuditLog /var/log/modsecurity/audit/audit.json
+SecAuditLogFormat JSON
 SecArgumentSeparator &
 SecCookieFormat 0
 SecUnicodeMapFile unicode.mapping 20127
 SecStatusEngine Off
 
 # Additional directives
-SecAuditLogFormat JSON
-SecAuditLogStorageDir /var/log/modsecurity/audit/
 SecDebugLog /dev/null
 SecDebugLogLevel 0
 SecDisableBackendCompression Off

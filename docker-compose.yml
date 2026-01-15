@@ -2,14 +2,18 @@ services:
   waf:
     image: owasp/modsecurity-crs:nginx
     container_name: waf-nginx
+    user: root
     ports:
       - "8080:8080"
       - "8443:8443"
     volumes:
       - ./nginx/templates/conf.d/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
       - ./nginx/templates/modsecurity.d/setup.conf.template:/etc/nginx/templates/modsecurity.d/setup.conf.template:ro
+      - ./nginx/templates/modsecurity.d/modsecurity.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity.conf.template:ro
+      - ./nginx/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
       - ./modsecurity/custom-rules:/opt/custom-rules:ro
-      - ./logs:/var/log/modsecurity
+      - ./logs/modsecurity:/var/log/modsecurity
+      - ./logs/nginx:/var/log/nginx
     environment:
       PARANOIA: 1
       ANOMALY_INBOUND: 10

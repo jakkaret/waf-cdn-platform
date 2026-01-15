@@ -8,9 +8,7 @@ services:
     volumes:
       - ./nginx/templates/conf.d/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
       - ./nginx/templates/modsecurity.d/setup.conf.template:/etc/nginx/templates/modsecurity.d/setup.conf.template:ro
-     # - ./modsecurity/custom-rules:/opt/custom-rules:ro
-     # - ./nginx/templates:/etc/nginx/templates:ro
-      - ./logs:/var/log/modsecurity
+      - ./modsecurity/custom-rules:/opt/custom-rules:ro
     environment:
       PARANOIA: 1
       ANOMALY_INBOUND: 10
