@@ -30,6 +30,12 @@ server {
         root /usr/share/nginx/html;
     }
 
+    error_page 403 /403.html; 
+    
+    location = /403.html { 
+	root /usr/share/nginx/html; internal; 
+    }
+
     include includes/location_common.conf;
 
 }
@@ -70,6 +76,12 @@ server {
 
         index index.html index.htm;
         root /usr/share/nginx/html;
+    }
+
+    error_page 403 /403.html;
+
+    location = /403.html {
+        root /usr/share/nginx/html; internal;
     }
 
     include includes/location_common.conf;

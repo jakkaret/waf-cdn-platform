@@ -14,6 +14,9 @@ services:
       - ./modsecurity/custom-rules:/opt/custom-rules:ro
       - ./logs/modsecurity:/var/log/modsecurity
       - ./logs/nginx:/var/log/nginx
+      - ./html/403.html:/usr/share/nginx/html/403.html:ro
+      - ./nginx/templates/conf/server.key:/etc/nginx/conf/server.key
+      - ./nginx/templates/conf/server.crt:/etc/nginx/conf/server.crt
     environment:
       PARANOIA: 1
       ANOMALY_INBOUND: 10
