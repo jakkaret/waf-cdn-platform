@@ -22,7 +22,20 @@ services:
       ANOMALY_INBOUND: 10
       ANOMALY_OUTBOUND: 10
       TZ: Asia/Bangkok
+    depends_on:
+      - dvwa
     restart: unless-stopped
+    networks:
+      - waf-net
+
+  dvwa:
+    image: sagikazarmark/dvwa
+    container_name: dvwa
+    environment:
+      - MYSQL_HOSTNAME=dvwa-db
+      - MYSQL_DATABASE=dvwa
+      - MYSQL_USERNAME=dvwa
+      - MYSQL_PASSWORD=dvwa
     networks:
       - waf-net
 
