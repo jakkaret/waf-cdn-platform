@@ -1,0 +1,116 @@
+"""
+WAF Dashboard - Main FastAPI Application
+"""
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import os
+
+# ========== Import API Routers ==========
+from api import rules  # 🆕 เพิ่มบรรทัดนี้
+
+app = FastAPI(
+    title="WAF Security Dashboard",
+    description="Dashboard สำหรับจัดการและติดตามระบบ WAF",
+    version="1.0.0"
+)
+
+# ========== CORS Configuration ==========
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ========== Static Files ==========
+frontend_path = os.path.join(os.path.dirname(__file__), "../Frontend")
+app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")), name="assets")
+
+# ========== API Routes ==========
+@app.get("/")
+async def root():
+    return FileResponse(os.path.join(frontend_path, "index.html"))
+
+@app.get("/api/health")
+async def health_check():
+    return {
+        "status": "ok",
+        "service": "WAF Dashboard API",
+        "version": "1.0.0"
+    }
+
+@app.get("/api/system/info")
+async def system_info():
+    return {
+        "waf_status": "online",
+        "dashboard_version": "1.0.0",
+        "backend": "FastAPI",
+        "frontend": "HTML/CSS/JS"
+    }
+
+# ========== Include API Routers ==========
+app.include_router(rules.router)  # 🆕 เพิ่มบรรทัดนี้
+
+# ========== HTML Routes ==========
+@app.get("/index.html")
+async def serve_index():
+    return FileResponse(os.path.join(frontend_path, "index.html"))
+
+@app.get("/logs.html")
+async def serve_logs():
+    return FileResponse(os.path.join(frontend_path, "logs.html"))
+
+@app.get("/rules.html")
+async def serve_rules():
+    return FileResponse(os.path.join(frontend_path, "rules.html"))
+
+@app.get("/alerts.html")
+async def serve_alerts():
+    return FileResponse(os.path.join(frontend_path, "alerts.html"))
+
+# ========== Error Handlers ==========
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc):
+    return JSONResponse(
+        status_code=404,
+        content={"error": "Resource not found", "path": str(request.url)}
+    )
+
+@app.exception_handler(500)
+async def internal_error_handler(request: Request, exc):
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error"}
+    )
+
+# ========== Startup & Shutdown Events ==========
+@app.on_event("startup")
+async def startup_event():
+    print("=" * 50)
+    print("🛡️  WAF Dashboard API Starting...")
+    print("=" * 50)
+    print("📊 Dashboard: http://localhost:8000")
+    print("📖 API Docs: http://localhost:8000/docs")
+    print("🔧 Health: http://localhost:8000/api/health")
+    print("⚙️  Rules API: http://localhost:8000/api/rules/")  # 🆕 เพิ่มบรรทัดนี้
+    print("=" * 50)
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    print("🛑 WAF Dashboard API Shutting down...")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

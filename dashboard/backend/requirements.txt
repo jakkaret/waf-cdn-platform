@@ -1,0 +1,12 @@
+# FastAPI Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# HTTP Requests (สำหรับ Telegram API)
+requests==2.31.0
+
+# Python ASGI Server
+python-multipart==0.0.6
+
+# Additional utilities
+python-dotenv==1.0.0
