@@ -1,0 +1,174 @@
+ * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Inter', -apple-system, sans-serif; 
+            background: #f5f7fa;
+        }
+        
+        .container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 250px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+        }
+        
+        .sidebar h2 {
+            margin-bottom: 30px;
+            font-size: 20px;
+        }
+        
+        .sidebar nav a {
+            display: block;
+            padding: 12px 15px;
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar nav a:hover,
+        .sidebar nav a.active {
+            background: rgba(255,255,255,0.2);
+            color: white;
+        }
+        
+        /* Main Content */
+        .main {
+            flex: 1;
+            padding: 30px;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            color: #2d3748;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        /* Rules Table */
+        .rules-table {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        th {
+            background: #f7fafc;
+            color: #4a5568;
+            font-weight: 600;
+        }
+        
+        .severity {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .severity.critical { background: #fee; color: #c53030; }
+        .severity.high { background: #fef5e7; color: #dd6b20; }
+        .severity.medium { background: #fefce8; color: #d69e2e; }
+        .severity.low { background: #e6fffa; color: #38b2ac; }
+        
+        .actions button {
+            padding: 6px 12px;
+            margin-right: 5px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .btn-delete {
+            background: #fc8181;
+            color: white;
+        }
+        
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            width: 500px;
+            max-width: 90%;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #4a5568;
+            font-weight: 500;
+        }
+        
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+        }

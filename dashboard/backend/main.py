@@ -1,14 +1,11 @@
-"""
-WAF Dashboard - Main FastAPI Application
-"""
+
+#WAF Dashboard 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
-
-# ========== Import API Routers ==========
-from api import rules  # 🆕 เพิ่มบรรทัดนี้
+from api import rules
 
 app = FastAPI(
     title="WAF Security Dashboard",
@@ -16,7 +13,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# ========== CORS Configuration ==========
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,11 +21,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ========== Static Files ==========
-frontend_path = os.path.join(os.path.dirname(__file__), "../Frontend")
+#Static Files
+frontend_path = os.path.join(os.path.dirname(__file__), "../frontend")
 app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")), name="assets")
 
-# ========== API Routes ==========
+#API Routes 
 @app.get("/")
 async def root():
     return FileResponse(os.path.join(frontend_path, "index.html"))
@@ -51,10 +47,10 @@ async def system_info():
         "frontend": "HTML/CSS/JS"
     }
 
-# ========== Include API Routers ==========
-app.include_router(rules.router)  # 🆕 เพิ่มบรรทัดนี้
+#Include API Routers 
+app.include_router(rules.router)
 
-# ========== HTML Routes ==========
+#HTML Routes
 @app.get("/index.html")
 async def serve_index():
     return FileResponse(os.path.join(frontend_path, "index.html"))
@@ -71,7 +67,7 @@ async def serve_rules():
 async def serve_alerts():
     return FileResponse(os.path.join(frontend_path, "alerts.html"))
 
-# ========== Error Handlers ==========
+#Error Handlers
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -89,7 +85,7 @@ async def internal_error_handler(request: Request, exc):
         content={"error": "Internal server error"}
     )
 
-# ========== Startup & Shutdown Events ==========
+#Startup & Shutdown
 @app.on_event("startup")
 async def startup_event():
     print("=" * 50)
@@ -98,7 +94,7 @@ async def startup_event():
     print("📊 Dashboard: http://localhost:8000")
     print("📖 API Docs: http://localhost:8000/docs")
     print("🔧 Health: http://localhost:8000/api/health")
-    print("⚙️  Rules API: http://localhost:8000/api/rules/")  # 🆕 เพิ่มบรรทัดนี้
+    print("⚙️  Rules API: http://localhost:8000/api/rules/")
     print("=" * 50)
 
 @app.on_event("shutdown")
