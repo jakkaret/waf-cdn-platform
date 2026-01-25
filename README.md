@@ -61,7 +61,7 @@ python3 main.py
 |---------|-----|----------|
 | **Dashboard** | http://localhost:8000 | หน้าแรก Overview |
 | **API Docs** | http://localhost:8000/docs | Swagger UI |
-| **WAF** | http://localhost:8080 | ModSecurity WAF |
+| **WAF** | http://localhost:8080 | ModSecurity WAF (Reverse Proxy) |
 | **DVWA** | http://localhost:8080 | Vulnerable Web App (ทดสอบ) |
 
 ---
