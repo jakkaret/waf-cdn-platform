@@ -1,6 +1,6 @@
-# 🛡️ WAF Dashboard - Web Application Firewall Management System
+# 🛡️ WAF Automated - Web Application Firewall Management System
 
-ระบบ Dashboard สำหรับจัดการและติดตามการทำงานของ Web Application Firewall (WAF) ที่ใช้ ModSecurity
+ระบบ Dashboard สำหรับจัดการและติดตามการทำงานของ Web Application Firewall (WAF) ที่ใช้ ModSecurity + ML
 
 ---
 
