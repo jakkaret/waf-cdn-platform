@@ -3,7 +3,7 @@ import re
 from typing import List, Dict
 
 class RuleManager:
-    def __init__(self, rules_dir="../nginx/templates/modsecurity.d/rules"):
+    def __init__(self, rules_dir="../../nginx/templates/modsecurity.d/rules"):
         self.rules_dir = rules_dir
     
     def list_rules(self) -> List[Dict]:
