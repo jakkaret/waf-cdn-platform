@@ -21,14 +21,14 @@ cd dashboard/backend
 pip3 install -r requirements.txt
 ```
 
-หรือใช้ Virtual Environment (แนะนำ):
+ลง FastAPI และ Uni:
 
 ```bash
 cd dashboard/backend
-python3 -m venv venv
-source venv/bin/activate  # Linux/Mac
-# หรือ venv\Scripts\activate  # Windows
-pip install -r requirements.txt
+python3 -m pip install fastapi uvicorn
+หรือ 
+sudo apt update
+sudo apt install python3-fastapi python3-uvicorn
 ```
 
 3️⃣ เริ่มต้น WAF Container
