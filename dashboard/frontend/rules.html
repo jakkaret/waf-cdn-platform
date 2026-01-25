@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom Rules - WAF Dashboard</title>
+    <link rel="stylesheet" href="assets/css/rules.css">    
+</head>
+<body>
+     <div class="container">
+        <!-- ========== SIDEBAR ========== -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>
+                    <span>🛡️</span>
+                    <span>Automated WAF</span>
+                </h2>
+                <p>Security Dashboard</p>
+            </div>
+            <nav>
+                <a href="index.html" class="active">
+                    <span class="icon">📊</span>
+                    <span>แดชบอร์ด</span>
+                </a>
+                <a href="logs.html">
+                    <span class="icon">📝</span>
+                    <span>รายงานการโจมตี</span>
+                </a>
+                <a href="rules.html">
+                    <span class="icon">⚙️</span>
+                    <span>ปรับแต่งกฎ</span>
+                </a>
+                <!-- <a href="alerts.html">
+                    <span class="icon">🔔</span>
+                    <span>การแจ้งเตือน</span>
+                </a>
+                <a href="#" class="separator">
+                    <span class="icon">🤖</span>
+                    <span>กฎอัจฉริยะจาก AI/ML</span>
+                </a>
+                <a href="#">
+                    <span class="icon">🔧</span>
+                    <span>ตั้งค่าระบบ</span>
+                </a>
+                <a href="#">
+                    <span class="icon">📄</span>
+                    <span>รายงาน</span>
+                </a>
+                <a href="#">
+                    <span class="icon">🎨</span>
+                    <span>ธีม/แสดงผล</span>
+                </a>
+                <a href="#">
+                    <span class="icon">👥</span>
+                    <span>ผู้ใช้และสิทธิ์</span>
+                </a> -->
+            </nav>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="main">
+            <div class="header">
+                <h1>⚙️ จัดการกฎ (Custom Rules)</h1>
+                <button class="btn btn-primary" onclick="openModal()">
+                    ➕ เพิ่มกฎใหม่
+                </button>
+            </div>
+            
+            <div class="rules-table">
+                <table id="rulesTable">
+                    <thead>
+                        <tr>
+                            <th>Rule ID</th>
+                            <th>Variable</th>
+                            <th>Operator</th>
+                            <th>Severity</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- ข้อมูลจะโหลดจาก API -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal สำหรับเพิ่ม Rule -->
+    <div class="modal" id="ruleModal">
+        <div class="modal-content">
+            <h2 style="margin-bottom: 20px;">เพิ่มกฎใหม่</h2>
+            <form id="ruleForm">
+                <div class="form-group">
+                    <label>Rule ID</label>
+                    <input type="text" name="id" required placeholder="เช่น 999001">
+                </div>
+                
+                <div class="form-group">
+                    <label>Variable</label>
+                    <select name="variable">
+                        <option value="REQUEST_URI">REQUEST_URI</option>
+                        <option value="ARGS">ARGS</option>
+                        <option value="REQUEST_HEADERS">REQUEST_HEADERS</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Operator (Pattern)</label>
+                    <input type="text" name="operator" required placeholder="เช่น @rx .*admin.*">
+                </div>
+                
+                <div class="form-group">
+                    <label>Severity</label>
+                    <select name="severity">
+                        <option value="CRITICAL">Critical</option>
+                        <option value="HIGH">High</option>
+                        <option value="MEDIUM">Medium</option>
+                        <option value="LOW">Low</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Message</label>
+                    <textarea name="message" required placeholder="คำอธิบายกฎนี้"></textarea>
+                </div>
+                
+                <div style="display: flex; gap: 10px;">
+                    <button type="submit" class="btn btn-primary">บันทึก</button>
+                    <button type="button" class="btn" onclick="closeModal()">ยกเลิก</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        // โหลดข้อมูล Rules
+        async function loadRules() {
+            const res = await fetch('/api/rules/');
+            const data = await res.json();
+            
+            const tbody = document.querySelector('#rulesTable tbody');
+            tbody.innerHTML = '';
+            
+            data.rules.forEach(rule => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${rule.id}</td>
+                    <td>${rule.variable}</td>
+                    <td>${rule.operator}</td>
+                    <td><span class="severity ${rule.severity.toLowerCase()}">${rule.severity}</span></td>
+                    <td class="actions">
+                        <button class="btn-delete" onclick="deleteRule('${rule.id}')">ลบ</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+        
+        // เพิ่ม Rule
+        document.getElementById('ruleForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData);
+            
+            await fetch('/api/rules/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            closeModal();
+            loadRules();
+        });
+        
+        // ลบ Rule
+        async function deleteRule(id) {
+            if (confirm('ต้องการลบกฎนี้?')) {
+                await fetch(`/api/rules/${id}`, { method: 'DELETE' });
+                loadRules();
+            }
+        }
+        
+        function openModal() {
+            document.getElementById('ruleModal').classList.add('active');
+        }
+        
+        function closeModal() {
+            document.getElementById('ruleModal').classList.remove('active');
+        }
+        
+        // โหลดข้อมูลตอน page load
+        loadRules();
+    </script>
+</body>
+</html>
