@@ -15,7 +15,7 @@
                     <span>🛡️</span>
                     <span>Automated WAF</span>
                 </h2>
-                <p>Security Dashboard</p>
+
             </div>
             <nav>
                 <a href="index.html" class="active">
@@ -79,6 +79,7 @@
                     </thead>
                     <tbody>
                         <!-- ข้อมูลจะโหลดจาก API -->
+                        
                     </tbody>
                 </table>
             </div>
@@ -135,25 +136,54 @@
     <script>
         // โหลดข้อมูล Rules
         async function loadRules() {
-            const res = await fetch('/api/rules/');
-            const data = await res.json();
-            
-            const tbody = document.querySelector('#rulesTable tbody');
-            tbody.innerHTML = '';
-            
-            data.rules.forEach(rule => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td>${rule.id}</td>
-                    <td>${rule.variable}</td>
-                    <td>${rule.operator}</td>
-                    <td><span class="severity ${rule.severity.toLowerCase()}">${rule.severity}</span></td>
-                    <td class="actions">
-                        <button class="btn-delete" onclick="deleteRule('${rule.id}')">ลบ</button>
-                    </td>
-                `;
-                tbody.appendChild(tr);
-            });
+            try {
+                console.log('กำลังโหลดข้อมูล...');
+                
+                const res = await fetch('/api/rules/');
+
+                console.log('Response status:', res.status);
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
+                const data = await res.json();
+                console.log('ข้อมูลที่ได้:', data);
+                console.log('จำนวน rules:', data.rules.length);
+                
+                const tbody = document.querySelector('#rulesTable tbody');
+                tbody.innerHTML = '';
+                
+                if (!data.rules || data.rules.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">ยังไม่มี Rules</td></tr>';
+                    return;
+                }
+                
+                data.rules.forEach((rule, index) => {
+                    console.log(`Rule ${index}:`, rule);
+                    
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${rule.id || 'N/A'}</td>
+                        <td>${rule.variable || 'N/A'}</td>
+                        <td>${rule.operator || 'N/A'}</td>
+                        <td><span class="severity ${(rule.severity || 'medium').toLowerCase()}">${rule.severity || 'N/A'}</span></td>
+                        <td class="actions">
+                            <button class="btn-delete" onclick="deleteRule('${rule.id}')">ลบ</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+                
+                console.log('โหลดเสร็จสิ้น');
+                
+            } catch (error) {
+                console.error('Error:', error);
+                alert('เกิดข้อผิดพลาด: ' + error.message);
+                
+                const tbody = document.querySelector('#rulesTable tbody');
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:red;">เกิดข้อผิดพลาดในการโหลดข้อมูล</td></tr>';
+            }
         }
         
         // เพิ่ม Rule
