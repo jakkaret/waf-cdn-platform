@@ -6,6 +6,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 from api import rules
+import asyncio
+from services.telegram_listener import alert_worker
+
 
 app = FastAPI(
     title="WAF Security Dashboard",
@@ -25,7 +28,7 @@ app.add_middleware(
 frontend_path = os.path.join(os.path.dirname(__file__), "../frontend")
 app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")), name="assets")
 
-#API Routes 
+#API Routes
 @app.get("/")
 async def root():
     return FileResponse(os.path.join(frontend_path, "index.html"))
@@ -96,6 +99,8 @@ async def startup_event():
     print("🔧 Health: http://localhost:8000/api/health")
     print("⚙️  Rules API: http://localhost:8000/api/rules/")
     print("=" * 50)
+    # 🔥 start background task
+    asyncio.create_task(alert_worker())
 
 @app.on_event("shutdown")
 async def shutdown_event():
