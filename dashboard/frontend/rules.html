@@ -61,7 +61,7 @@
         <div class="main">
             <div class="header">
                 <h1>⚙️ จัดการกฎ (Custom Rules)</h1>
-                <button class="btn btn-primary" onclick="openModal()">
+                <button class="btn btn-primary" onclick="openCreateModal()">
                     ➕ เพิ่มกฎใหม่
                 </button>
             </div>
@@ -74,6 +74,7 @@
                             <th>Variable</th>
                             <th>Operator</th>
                             <th>Severity</th>
+                            <th>Message</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -91,6 +92,7 @@
         <div class="modal-content">
             <h2 style="margin-bottom: 20px;">เพิ่มกฎใหม่</h2>
             <form id="ruleForm">
+                <input type="hidden" name="mode" value="create">
                 <div class="form-group">
                     <label>Rule ID</label>
                     <input type="text" name="id" required placeholder="เช่น 999001">
@@ -167,12 +169,29 @@
                         <td>${rule.id || 'N/A'}</td>
                         <td>${rule.variable || 'N/A'}</td>
                         <td>${rule.operator || 'N/A'}</td>
-                        <td><span class="severity ${(rule.severity || 'medium').toLowerCase()}">${rule.severity || 'N/A'}</span></td>
+                        <td><span class="severity ${(rule.severity || 'medium').toLowerCase()}">${severityBadge(rule.severity || 'N/A')}</span></td>
+                        <td>${rule.message || 'N/A'}</td>
                         <td class="actions">
-                            <button class="btn-delete" onclick="deleteRule('${rule.id}')">ลบ</button>
+                            <button class="btn-edit" data-rule='${JSON.stringify(rule)}'>แก้ไข</button>
+                            <button class="btn-delete" data-id="${rule.id}">ลบ</button>
                         </td>
                     `;
                     tbody.appendChild(tr);
+                });
+                
+                // เพิ่ม Event Listeners หลังจากสร้าง DOM
+                document.querySelectorAll('.btn-edit').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const ruleData = JSON.parse(this.getAttribute('data-rule'));
+                        editRule(ruleData);
+                    });
+                });
+                
+                document.querySelectorAll('.btn-delete').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const ruleId = this.getAttribute('data-id');
+                        deleteRule(ruleId);
+                    });
                 });
                 
                 console.log('โหลดเสร็จสิ้น');
@@ -189,18 +208,29 @@
         // เพิ่ม Rule
         document.getElementById('ruleForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData);
-            
-            await fetch('/api/rules/', {
-                method: 'POST',
+
+            let url = '/api/rules/';
+            let method = 'POST';
+
+            if (data.mode === 'edit') {
+                url = `/api/rules/${editingRuleId}`;
+                method = 'PUT';
+                delete data.id; // PUT ไม่ควรส่ง id
+            }
+
+            await fetch(url, {
+                method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
-            
+
             closeModal();
             loadRules();
         });
+
         
         // ลบ Rule
         async function deleteRule(id) {
@@ -209,15 +239,65 @@
                 loadRules();
             }
         }
+
         
         function openModal() {
             document.getElementById('ruleModal').classList.add('active');
         }
+
+
         
         function closeModal() {
             document.getElementById('ruleModal').classList.remove('active');
         }
         
+        function openCreateModal() {
+            const form = document.getElementById('ruleForm');
+            form.reset();
+            form.mode.value = 'create';
+            form.id.disabled = false; // เปิดการแก้ไข ID
+            editingRuleId = null;
+
+            document.querySelector('#ruleModal h2').innerText = 'เพิ่มกฎใหม่';
+            openModal();
+        }
+
+
+        function severityBadge(sev) {
+            // เปลี่ยน severity เป็น badge
+            const map = {
+                CRITICAL: "badge-danger",
+                HIGH: "badge-warning",
+                MEDIUM: "badge-info",
+                LOW: "badge-secondary"
+            };
+            return `<span class="badge ${map[sev] || 'badge-light'}">${sev}</span>`;
+        }
+
+        // เปิดแก้ไข Rule
+        
+        let editingRuleId = null;
+
+        function editRule(ruleData) {
+            console.log('Edit Rule:', ruleData);
+            
+            editingRuleId = ruleData.id;
+
+            const form = document.getElementById('ruleForm');
+
+            form.mode.value = 'edit';
+            form.id.value = ruleData.id;
+            form.id.disabled = true;  // ปิดการแก้ไข ID
+            form.variable.value = ruleData.variable;   
+            form.operator.value = ruleData.operator;
+            form.severity.value = ruleData.severity;
+            form.message.value = ruleData.message;
+
+            document.querySelector('#ruleModal h2').innerText = 'แก้ไขกฎ';
+            openModal(); 
+        }
+
+
         // โหลดข้อมูลตอน page load
         loadRules();
     </script>
