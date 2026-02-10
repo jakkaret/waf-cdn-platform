@@ -36,12 +36,12 @@ async def alert_403_if_new(ip, url):
 
     alerted_events[key] = now
 
-    msg = f"""
-🚨 WAF ALERT (403)
-IP: {ip}
-URL: {url}
-Status: 403
-"""
+    msg =   f"""
+            🚨 WAF ALERT (403)
+            IP: {ip}
+            URL: {url}
+            Status: 403
+            """
     await send_alert(msg)
 
 
