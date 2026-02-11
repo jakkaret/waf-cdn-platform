@@ -1,4 +1,4 @@
- * { margin: 0; padding: 0; box-sizing: border-box; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
             font-family: 'Inter', -apple-system, sans-serif; 
             background: #f5f7fa;
@@ -124,6 +124,19 @@
         .btn-delete {
             background: #fc8181;
             color: white;
+        }
+        
+        .btn-edit {
+            background: #4299e1;
+            color: white;
+        }
+        
+        .btn-edit:hover {
+            background: #3182ce;
+        }
+        
+        .btn-delete:hover {
+            background: #f56565;
         }
         
         /* Modal */

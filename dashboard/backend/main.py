@@ -6,6 +6,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 from api import rules
+import asyncio
+from services.telegram_listener import alert_worker
+
 
 app = FastAPI(
     title="WAF Security Dashboard",
@@ -25,7 +28,7 @@ app.add_middleware(
 frontend_path = os.path.join(os.path.dirname(__file__), "../frontend")
 app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")), name="assets")
 
-#API Routes 
+#API Routes
 @app.get("/")
 async def root():
     return FileResponse(os.path.join(frontend_path, "index.html"))
@@ -33,10 +36,11 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     return {
-        "status": "ok",
-        "service": "WAF Dashboard API",
-        "version": "1.0.0"
+        "api": "ok",
+        "waf_container": "waf-nginx",
+        "rules_loaded": True
     }
+
 
 @app.get("/api/system/info")
 async def system_info():
@@ -80,10 +84,12 @@ async def not_found_handler(request: Request, exc):
 
 @app.exception_handler(500)
 async def internal_error_handler(request: Request, exc):
+    print("🔥 Internal Error:", exc)
     return JSONResponse(
         status_code=500,
-        content={"error": "Internal server error"}
+        content={"error": str(exc)}
     )
+
 
 #Startup & Shutdown
 @app.on_event("startup")
@@ -96,6 +102,9 @@ async def startup_event():
     print("🔧 Health: http://localhost:8000/api/health")
     print("⚙️  Rules API: http://localhost:8000/api/rules/")
     print("=" * 50)
+    # 🔥 start background task
+    if not hasattr(app.state, "alert_task"):
+        app.state.alert_task = asyncio.create_task(alert_worker())
 
 @app.on_event("shutdown")
 async def shutdown_event():
