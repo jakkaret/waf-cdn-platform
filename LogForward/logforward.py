@@ -89,7 +89,7 @@ def read_json(log_file):
         # หลังจากอ่านเสร็จ → บันทึกตำแหน่งล่าสุด
         with open(POINTER_FILE, "w", encoding="utf-8") as pointer_file:
             pointer_file.write(str(f.tell()))
-def append_event_to_file(event, output_file="LogForward/events.jsonl"):
+def append_event_to_file(event, output_file="logs/modsecurity/events.jsonl"):
     SEEN_IDS = set()
     if event["unique_id"] in SEEN_IDS:
         return
