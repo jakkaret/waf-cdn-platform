@@ -1,15 +1,22 @@
-
 import os
 import json
 import threading
 import urllib.request
 import urllib.error
 from datetime import datetime
+import time
+
+SEEN_IDS = set()
+
+
+def compute_ttl(seconds=60 * 60 * 24 * 90):
+    return int(time.time()) + seconds
+
 
 # Configuration
 LOG_FILES = [
     {
-        "path": "logs/modsecurity/audit/audit.json",
+        "path": "logs/modsecurity/audit.json",
         "type": "json",
     }
     # {
@@ -20,17 +27,20 @@ LOG_FILES = [
 
 DESTINATION_URL = "http://localhost:9000/log"
 POINTER_FILE = "LogForward/pointer.txt"
+
+
 def read_json(log_file):
     offset = 0
     # โหลด offset ล่าสุด
     if os.path.exists(POINTER_FILE):
         with open(POINTER_FILE, "r", encoding="utf-8") as pointer_file:
-            offset = int(pointer_file.read() or 0)
+            offset = int((pointer_file.read() or "0").strip() or 0)
 
-    with open(log_file, "r", encoding="utf-8") as f:
+    with open(log_file, "rb") as f:
         f.seek(offset)  # ไปตำแหน่งล่าสุด
         for line in f:
             try:
+                line = line.decode("utf-8", errors="ignore")
                 json_data = json.loads(line)
                 tx = json_data.get("transaction", {})
 
@@ -79,7 +89,8 @@ def read_json(log_file):
                     "unique_id": tx.get("unique_id")
                 }
 
-                append_event_to_file(event)
+                normalized = normalize_event(event)
+                append_event_to_file(normalized)
 
             except json.JSONDecodeError:
                 continue
@@ -89,19 +100,50 @@ def read_json(log_file):
         # หลังจากอ่านเสร็จ → บันทึกตำแหน่งล่าสุด
         with open(POINTER_FILE, "w", encoding="utf-8") as pointer_file:
             pointer_file.write(str(f.tell()))
-def append_event_to_file(event, output_file="logs/modsecurity/events.jsonl"):
-    SEEN_IDS = set()
-    if event["unique_id"] in SEEN_IDS:
-        return
-    SEEN_IDS.add(event["unique_id"])
+
+
+def normalize_event(event):
+    status = event["response"]["http_code"]
+    try:
+        status_code = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        status_code = None
+
+    return {
+        # ใส่จริงจากระบบ auth ภายหลัง
+        "timestamp": event["timestamp"],
+        "ingest_time": event["ingest_time"],
+        "source": "modsec",
+        "client_ip": event["client"]["ip"],
+        "method": event["request"]["method"],
+        "path": event["request"]["uri"],
+        "status_code": status_code,
+        "user_agent": event["request"]["headers"].get("User-Agent"),
+        "rule_triggered": True if status_code == 403 else False,
+        "unique_id": event["unique_id"],
+        "processed": False,
+        "ttl": compute_ttl(),
+    }
+
+
+def append_event_to_file(event, output_file="LogForward/events.jsonl"):
+    unique_id = event.get("unique_id")
+    if unique_id:
+        if unique_id in SEEN_IDS:
+            return
+        SEEN_IDS.add(unique_id)
+
+    output_dir = os.path.dirname(output_file)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
     with open(output_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
-# def normalize_json(json_data):
-#     return json_data
+
 
 def main():
     read_json(LOG_FILES[0]["path"])
+
 
 if __name__ == "__main__":
     main()
