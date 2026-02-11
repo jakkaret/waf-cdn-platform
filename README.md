@@ -49,6 +49,8 @@ docker-compose ps
 ```bash
 cd dashboard/backend
 python3 main.py
+หรือ
+uvicorn main:app -​-reload 
 ```
 
 ---
