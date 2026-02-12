@@ -1,5 +1,7 @@
 from telethon import TelegramClient
 from dotenv import load_dotenv
+from services.dynamodb_service import save_alert
+
 import asyncio
 import os
 import time
@@ -14,6 +16,7 @@ CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID"))
 alerted_events = {} # key -> timestamp
 ALERT_TTL = 600  # 10 นาที
 
+
 async def send_alert(message: str):
     client = TelegramClient(
         "waf_alert_bot",
@@ -25,23 +28,45 @@ async def send_alert(message: str):
     await client.send_message(CHAT_ID, message)
     await client.disconnect()
 
+# async def alert_403_if_new(ip, url):
+#     key = f"{ip}|{url}"
+#     now = time.time()
+
+#     if key in alerted_events and now - alerted_events[key] < ALERT_TTL:
+#         return
+
+#     alerted_events[key] = now
+
+#     # บันทึกลง DynamoDB
+#     await save_alert("default-user", str(int(now)), ip, url, "403")
+
+#     msg = f"""
+#     🚨 WAF ALERT (403)
+#     IP: {ip}
+#     URL: {url}
+#     Status: 403
+#     """
+#     await send_alert(msg)
+
 
 async def alert_403_if_new(ip, url):
     key = f"{ip}|{url}"
     now = time.time()
 
-    if key in alerted_events:
-        if now - alerted_events[key] < ALERT_TTL:
-            return  # ยังไม่ถึงเวลา
+    if key in alerted_events and now - alerted_events[key] < ALERT_TTL:
+        return
 
     alerted_events[key] = now
 
-    msg =   f"""
-            🚨 WAF ALERT (403)
-            IP: {ip}
-            URL: {url}
-            Status: 403
-            """
+    # บันทึกลง DynamoDB (sync)
+    save_alert("default-user", str(int(now)), ip, url, "403")
+
+    msg = f"""
+    🚨 WAF ALERT (403)
+    IP: {ip}
+    URL: {url}
+    Status: 403
+    """
     await send_alert(msg)
 
 
