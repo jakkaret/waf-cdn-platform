@@ -1,6 +1,7 @@
 from telethon import TelegramClient
 from dotenv import load_dotenv
-from services.dynamodb_service import save_alert
+from services.dynamodb_service import DynamoDBService
+
 
 import asyncio
 import os
@@ -12,7 +13,7 @@ API_ID = int(os.getenv("TELEGRAM_API_ID"))
 API_HASH = os.getenv("TELEGRAM_API_HASH")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID"))
-
+db = DynamoDBService()
 alerted_events = {} # key -> timestamp
 ALERT_TTL = 600  # 10 นาที
 
@@ -58,30 +59,36 @@ async def alert_403_if_new(ip, url):
 
     alerted_events[key] = now
 
-    # บันทึกลง DynamoDB (sync)
-    save_alert("default-user", str(int(now)), ip, url, "403")
-
     msg = f"""
-    🚨 WAF ALERT (403)
-    IP: {ip}
-    URL: {url}
-    Status: 403
-    """
+🚨 WAF ALERT (403)
+IP: {ip}
+URL: {url}
+Status: 403
+"""
+
+    db.save_alert(
+        "default-user",
+        str(int(now)),
+        ip,
+        url,
+        "403",
+        msg
+    )
+
     await send_alert(msg)
 
 
+async def main():
+    msg = """
+        🚨 WAF ALERT
+        IP: 192.168.1.1
+        URL: /login.php
+        Attack: SQL Injection
+        Score: 0.91
+        Action: BLOCK
+        """
+    await send_alert(msg)
 
-#async def main():
-#    msg = """
-#        🚨 WAF ALERT
-#        IP: 192.168.1.1
-#        URL: /login.php
-#        Attack: SQL Injection
-#        Score: 0.91
-#        Action: BLOCK
-#        """
-#    await send_alert(msg)
-# asyncio.run(main())
 
 # 🔁 background worker
 async def alert_worker():
@@ -92,3 +99,6 @@ async def alert_worker():
         await alert_403_if_new("192.168.1.1", "/login.php")
 
         await asyncio.sleep(10)  # กัน CPU พัง
+
+if __name__ == "__main__":
+    asyncio.run(main())
