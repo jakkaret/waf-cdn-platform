@@ -3,6 +3,7 @@ import json
 import os
 import time
 from services.dynamodb_service import DynamoDBService
+from decimal import Decimal
 
 db = DynamoDBService()
 BASE_DIR = os.path.abspath(
