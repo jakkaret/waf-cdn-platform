@@ -15,7 +15,13 @@ server {
 
     server_name _;
     set $always_redirect off;
-
+    access_log /var/log/nginx/access.log json_combined;
+    modsecurity on;
+    modsecurity_transaction_id "$request_id";
+    access_log /var/log/nginx/access.log json_combined;
+    location = /healthz {
+    access_log off;
+}
     location / {
 	    proxy_pass http://dvwa_backend;
         proxy_set_header Host $host;
