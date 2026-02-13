@@ -1,2 +1,16 @@
+# Environment
 .env
+.env.*
+
+# Virtual Environment
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# AWS Installer
 AWSCLIV2.pkg
+
+# OS
+.DS_Store
