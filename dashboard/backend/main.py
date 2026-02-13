@@ -1,14 +1,14 @@
-
 #WAF Dashboard 
+import os
+import asyncio
+
+from fastapi.responses import FileResponse
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-import os
 from api import rules
-import asyncio
+from services.log_forward import log_forward_worker
 from services.telegram_listener import alert_worker
-
 
 app = FastAPI(
     title="WAF Security Dashboard",
@@ -33,13 +33,13 @@ app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")
 async def root():
     return FileResponse(os.path.join(frontend_path, "index.html"))
 
-@app.get("/api/health")
-async def health_check():
-    return {
-        "api": "ok",
-        "waf_container": "waf-nginx",
-        "rules_loaded": True
-    }
+# @app.get("/api/health")
+# async def health_check():
+#     return {
+#         "api": "ok",
+#         "waf_container": "waf-nginx",
+#         "rules_loaded": True
+#     }
 
 
 @app.get("/api/system/info")
@@ -105,6 +105,8 @@ async def startup_event():
     # 🔥 start background task
     if not hasattr(app.state, "alert_task"):
         app.state.alert_task = asyncio.create_task(alert_worker())
+    if not hasattr(app.state, "log_forward_task"):
+        app.state.log_forward_task = asyncio.create_task(log_forward_worker())
 
 @app.on_event("shutdown")
 async def shutdown_event():

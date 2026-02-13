@@ -5,7 +5,7 @@ import uuid
 from dotenv import load_dotenv
 from typing import List, Dict, Any
 from datetime import datetime
-
+from decimal import Decimal
 load_dotenv()
 
 class DynamoDBService:
@@ -27,27 +27,34 @@ class DynamoDBService:
         self.alerts_table = self.dynamodb.Table(self.alerts_table_name)
         self.logs_table = self.dynamodb.Table(self.logs_table_name)
         self.rules_table = self.dynamodb.Table(self.rules_table_name)
-
-   
+    
+    def convert_floats(self, obj):
+        if isinstance(obj, float):
+            return Decimal(str(obj))
+        elif isinstance(obj, dict):
+            return {k: self.convert_floats(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self.convert_floats(i) for i in obj]
+        else:
+            return obj
     # -----------------------------
     # LOGS
     # -----------------------------
-    def save_log(self, event: Dict[str, Any]) -> bool:
+    def save_log(self, event):
         try:
-            # ถ้าไม่มี log_id → ใช้ค่า test 'mew'
-            event["log_id"] = event.get("log_id", "mew")
-            # ถ้าไม่มี user_id → ใช้ default
+            event = self.convert_floats(event)
+
+            # ✅ เติม primary key ถ้าไม่มี
             event["user_id"] = event.get("user_id", "default-user")
-            # timestamp ต้องเป็น String (เพราะ schema ของ table เป็น S)
+            event["log_id"] = event.get("log_id", str(uuid.uuid4()))
+
             event["timestamp"] = event.get("timestamp", int(time.time()))
-            
+            event["alert"] = event.get("alert", False)
             self.logs_table.put_item(Item=event)
             print("✅ Saved log")
-            return True
+
         except Exception as e:
             print("❌ Failed to save log:", e)
-            return False
-
 
     def get_logs(self, limit: int = 10) -> List[Dict]:
         try:
@@ -101,23 +108,23 @@ class DynamoDBService:
     # -----------------------------
     # TEST CONNECTION
     # -----------------------------
-    def test_connection(self) -> bool:
-        try:
-            self.alerts_table.put_item(
-                Item={
-                    "user_id": "test-user",
-                    "alert_id": str(int(time.time())),
-                    "ip": "127.0.0.1",
-                    "url": "/healthcheck",
-                    "status": "200",
-                    "timestamp": datetime.now().isoformat() + "Z",  # ใช้ ISO format
-                }
-            )
-            print("✅ DynamoDB connection OK")
-            return True
-        except Exception as e:
-            print("❌ DynamoDB connection failed:", e)
-            return False
+    # def test_connection(self) -> bool:
+    #     try:
+    #         self.alerts_table.put_item(
+    #             Item={
+    #                 "user_id": "test-user",
+    #                 "alert_id": str(int(time.time())),
+    #                 "ip": "127.0.0.1",
+    #                 "url": "/healthcheck",
+    #                 "status": "200",
+    #                 "timestamp": datetime.now().isoformat() + "Z",  # ใช้ ISO format
+    #             }
+    #         )
+    #         print("✅ DynamoDB connection OK")
+    #         return True
+    #     except Exception as e:
+    #         print("❌ DynamoDB connection failed:", e)
+    #         return False
 
 
 # -----------------------------
@@ -125,8 +132,6 @@ class DynamoDBService:
 # -----------------------------
 if __name__ == "__main__":
     db = DynamoDBService()
-
-    db.test_connection()
 
     db.save_alert(
         user_id="user123",
