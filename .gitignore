@@ -4,3 +4,13 @@ logs/
 *.log
 *.session
 waf_alert_bot.session
+
+# Virtual Environment
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# AWS Installer
+AWSCLIV2.pkg
