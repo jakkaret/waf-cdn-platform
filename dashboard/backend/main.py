@@ -1,11 +1,12 @@
 #WAF Dashboard 
 import os
 import asyncio
-from routers.rules import router as rules_router
+
 from fastapi.responses import FileResponse
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from api import rules
 from services.log_forward import log_forward_worker
 from services.telegram_listener import alert_worker
 
@@ -51,7 +52,7 @@ async def system_info():
     }
 
 #Include API Routers 
-app.include_router(rules_router)
+app.include_router(rules.router)
 
 #HTML Routes
 @app.get("/index.html")
