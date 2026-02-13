@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 from typing import List, Dict, Any
 from datetime import datetime
 from decimal import Decimal
+from boto3.dynamodb.conditions import Attr
+
+
 load_dotenv()
 
 class DynamoDBService:
@@ -97,13 +100,33 @@ class DynamoDBService:
             print("❌ Failed to save alert:", e)
             return False
 
-    def get_alerts(self, limit: int = 10) -> List[Dict]:
+
+    def get_unalerted_403_logs(self):
         try:
-            response = self.alerts_table.scan(Limit=limit)
+            response = self.logs_table.scan(
+                FilterExpression=Attr("status").eq("403") & Attr("alert").eq(False)
+            )
             return response.get("Items", [])
         except Exception as e:
-            print("❌ Failed to fetch alerts:", e)
+            print("❌ Failed to fetch 403 logs:", e)
             return []
+
+    def mark_log_alerted(self, user_id, timestamp):
+        try:
+            self.logs_table.update_item(
+                Key={
+                    "user_id": user_id,
+                    "timestamp": timestamp
+                },
+                UpdateExpression="SET alert = :val",
+                ExpressionAttributeValues={
+                    ":val": True
+                }
+            )
+            print("✅ Marked as alerted:", timestamp)
+        except Exception as e:
+            print("❌ Failed to update alert flag:", e)
+
 
     # -----------------------------
     # TEST CONNECTION
