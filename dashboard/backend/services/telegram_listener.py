@@ -13,7 +13,7 @@ API_HASH = os.getenv("TELEGRAM_API_HASH")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID"))
 db = DynamoDBService()
-db = DynamoDBService()
+
 alerted_events = {} # key -> timestamp
 ALERT_TTL = 600  # 10 นาที
 
