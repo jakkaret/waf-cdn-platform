@@ -4,292 +4,155 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Automated WAF - Security Dashboard</title>
-    <link rel="stylesheet" href="assets/css/style.css">
+
+    <!-- Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/assets/css/style.css">
+
+    <style>
+        /* =========================
+           STATUS COLOR SYSTEM
+        ========================== */
+
+        .status-badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        /* 200 - Normal */
+        .status-200 {
+            background-color: #e6f9f0;
+            color: #0f9d58;
+        }
+
+        /* 403 - Warning */
+        .status-403 {
+            background-color: #fff4e5;
+            color: #f57c00;
+        }
+
+        /* 500+ - Alert */
+        .status-500 {
+            background-color: #fdecea;
+            color: #d93025;
+        }
+
+        /* Row highlight */
+        .row-200 { background-color: #f8fffb; }
+        .row-403 { background-color: #fffaf3; }
+        .row-500 { background-color: #fff5f5; }
+
+        /* Allow table to expand fully (no inner scroll) */
+        .table-responsive {
+            overflow-x: auto;
+            overflow-y: visible;
+        }
+    </style>
 </head>
+
 <body>
-    <div class="container">
-        <!-- sidebar -->
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <h2>
-                    <span>🛡️</span>
-                    <span>Automated WAF</span>
-                </h2>
-                
-                <p>Security Dashboard</p>
-            </div>
-            <nav>
-                <a href="index.html" class="active">
-                    <span class="icon">📊</span>
-                    <span>แดชบอร์ด</span>
-                </a>
-                <a href="logs.html">
-                    <span class="icon">📝</span>
-                    <span>รายงานการโจมตี</span>
-                </a>
-                <a href="rules.html">
-                    <span class="icon">⚙️</span>
-                    <span>ปรับแต่งกฎ</span>
-                </a>
-                <!-- <a href="alerts.html">
-                    <span class="icon">🔔</span>
-                    <span>การแจ้งเตือน</span>
-                </a>
-                <a href="#" class="separator">
-                    <span class="icon">🤖</span>
-                    <span>กฎอัจฉริยะจาก AI/ML</span>
-                </a>
-                <a href="#">
-                    <span class="icon">🔧</span>
-                    <span>ตั้งค่าระบบ</span>
-                </a>
-                <a href="#">
-                    <span class="icon">📄</span>
-                    <span>รายงาน</span>
-                </a>
-                <a href="#">
-                    <span class="icon">🎨</span>
-                    <span>ธีม/แสดงผล</span>
-                </a>
-                <a href="#">
-                    <span class="icon">👥</span>
-                    <span>ผู้ใช้และสิทธิ์</span>
-                </a> -->
-            </nav>
+<div class="container-fluid">
+
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2>🛡️ Automated WAF</h2>
+            <p>Security Dashboard</p>
         </div>
+        <nav>
+            <a href="/" class="active">📊 แดชบอร์ด</a>
+            <a href="/logs">📝 ดู Log</a>
+            <a href="/rules">⚙️ ปรับแต่งกฎ</a>
+        </nav>
+    </div>
 
-        <!--  MAIN CONTENT  -->
-        <div class="main">
-            <!--  HEADER  -->
-            <div class="header">
-                <div class="header-left">
-                    <div class="search-box">
-                        <input type="text" placeholder="ค้นหา IP, Request ID, กฎ...">
-                    </div>
+    <!-- MAIN -->
+    <div class="main">
+        <div class="content">
+            <h1 class="mb-4">📊 Live Dashboard</h1>
+
+            <!-- STATS -->
+            <div class="stats-grid">
+
+                <div class="stat-card">
+                    <div class="stat-title">อีเวนท์ทั้งหมด</div>
+                    <div id="total-events" class="stat-value">0</div>
                 </div>
-                <div class="header-right">
-                    <div class="date-range">
-                        📅 24 มกราคม 2568
+
+                <div class="stat-card">
+                    <div class="stat-title">Blocked</div>
+                    <div id="blocked-count" class="stat-value text-danger">0</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-title">Allow</div>
+                    <div id="allowed-count" class="stat-value text-success">0</div>
+                </div>
+
+            </div>
+
+            <!-- FILTER CARD -->
+            <div class="card shadow-sm mb-4">
+                <div class="card-body d-flex gap-3 flex-wrap align-items-center">
+
+                    <div>
+                        <label class="form-label fw-semibold">จำนวนรายการ</label>
+                        <select id="limit-select" class="form-select">
+                            <option value="5">5</option>
+                            <option value="10" selected>10</option>
+                            <option value="20">20</option>
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                        </select>
                     </div>
-                    <button class="export-btn">
-                        📥 Export
-                    </button>
-                    <div class="status-badge">
-                        Online
+
+                    <div>
+                        <label class="form-label fw-semibold">Status</label>
+                        <select id="status-filter" class="form-select">
+                            <option value="">ทั้งหมด</option>
+                            <option value="200">Allow (200)</option>
+                            <option value="403">Blocked (403)</option>
+                            <option value="500">Server Error (500+)</option>
+                        </select>
                     </div>
-                    <div class="notification">
-                        🔔
-                        <span class="badge">3</span>
-                    </div>
-                    <div class="user-menu">
-                        <div class="user-info">
-                            <div class="name">Admin User</div>
-                            <div class="email">admin@corp.local</div>
-                        </div>
-                        <div class="user-avatar">AD</div>
+
+                </div>
+            </div>
+
+            <!-- LIVE TABLE -->
+            <div class="card shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Time</th>
+                                    <th>IP</th>
+                                    <th>Method</th>
+                                    <th>URI</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="live-logs-body"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
 
-            <!--  CONTENT  -->
-            <div class="content">
-                <h1 class="page-title">📊 แดชบอร์ด</h1>
-                <p class="page-subtitle">ภาพรวมการทำงานของระบบ WAF</p>
-
-                <!--  FILTER SECTION  -->
-                <div class="filter-section">
-                    <div class="filter-header">
-                        🔽 ตัวกรองข้อมูล
-                    </div>
-                    <div class="filter-tabs">
-                        <button class="active">ทั้งหมด</button>
-                        <button>SQL Injection</button>
-                        <button>XSS</button>
-                        <button>SSRF</button>
-                        <button>RCE</button>
-                        <button>LFI</button>
-                        <button>RFI</button>
-                        <button>Path Traversal</button>
-                        <button>Command Injection</button>
-                        <button>อื่นๆ</button>
-                    </div>
-                    <div class="filter-selects">
-                        <select>
-                            <option>ช่วงเวลา: ทั้งหมด</option>
-                        </select>
-                        <select>
-                            <option>ความรุนแรง: ทั้งหมด</option>
-                        </select>
-                        <select>
-                            <option>การจัดการ: ทั้งหมด</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!--  STATS CARDS  -->
-                <div class="stats-grid">
-                    <!-- Card 1 -->
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div>
-                                <div class="stat-title">📈 อีเวนท์ทั้งหมด</div>
-                            </div>
-                            <div class="stat-icon" style="background: #e6f2ff; color: #0066cc;">
-                                📊
-                            </div>
-                        </div>
-                        <div class="stat-value">128,450</div>
-                        <div class="stat-change up">↑ 3.2% จากเมื่อวาน</div>
-                    </div>
-
-                    <!-- Card 2 -->
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div>
-                                <div class="stat-title">🎯 มัลแวร์</div>
-                            </div>
-                            <div class="stat-icon" style="background: #ffe6e6; color: #cc0000;">
-                                ⚠️
-                            </div>
-                        </div>
-                        <div class="stat-value">6,210</div>
-                        <div class="stat-change up">↑ 12% จากเมื่อวาน</div>
-                    </div>
-
-                    <!-- Card 3 -->
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div>
-                                <div class="stat-title">📈 อัตราการบล็อก</div>
-                            </div>
-                            <div class="stat-icon" style="background: #fff3e6; color: #cc6600;">
-                                📊
-                            </div>
-                        </div>
-                        <div class="stat-value">4.83%</div>
-                        <div class="stat-change down">↓ 3.2% จากเมื่อวาน</div>
-                    </div>
-
-                    <!-- Card 4 -->
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div>
-                                <div class="stat-title">⚠️ เหตุการณ์วิกฤติ</div>
-                            </div>
-                            <div class="stat-icon" style="background: #f3e6ff; color: #6600cc;">
-                                ⚠️
-                            </div>
-                        </div>
-                        <div class="stat-value">132</div>
-                        <div class="stat-change up">Critical • High</div>
-                    </div>
-
-                    <!-- Card 5 -->
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div>
-                                <div class="stat-title">🎯 คะแนนความผิดปกติ</div>
-                            </div>
-                            <div class="stat-icon" style="background: #e6f0ff; color: #0052cc;">
-                                🔵
-                            </div>
-                        </div>
-                        <div class="stat-value">0.37</div>
-                        <div class="stat-change up">WAF Anomaly Score</div>
-                    </div>
-
-                    <!-- Card 6 -->
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div>
-                                <div class="stat-title">⏱️ MTTR การตอบสนอง</div>
-                            </div>
-                            <div class="stat-icon" style="background: #e6ffe6; color: #00cc00;">
-                                ⏱️
-                            </div>
-                        </div>
-                        <div class="stat-value">14m</div>
-                        <div class="stat-change down">Mean Time to Resolve</div>
-                    </div>
-                </div>
-
-                <!--  ATTACK TYPE CARDS  -->
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-title">SQL Injection</div>
-                            <div class="stat-icon" style="background: #ffe6e6; color: #cc0000;">⚠️</div>
-                        </div>
-                        <div class="stat-value">1,820</div>
-                        <div style="font-size: 13px; color: #718096;">SQLi attacks</div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-title">Cross-Site Scripting</div>
-                            <div class="stat-icon" style="background: #fff3e6; color: #cc6600;">🔶</div>
-                        </div>
-                        <div class="stat-value">680</div>
-                        <div style="font-size: 13px; color: #718096;">XSS attacks</div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-title">Server-Side Request Forgery</div>
-                            <div class="stat-icon" style="background: #e6f2ff; color: #0066cc;">🔵</div>
-                        </div>
-                        <div class="stat-value">245</div>
-                        <div style="font-size: 13px; color: #718096;">SSRF attacks</div>
-                    </div>
-                </div>
-
-                <!--  CHARTS  -->
-                <div class="charts-grid">
-                    <!-- Chart 1: Trend -->
-                    <div class="chart-card">
-                        <div class="chart-header">ประมวลการโจมตีตามเวลา</div>
-                        <div class="chart-subtitle">แสดงการโจมตีตามเวลาแบบเรียลไทม์</div>
-                        <div class="chart-placeholder">
-                            📊 [Chart.js Graph] ← เพื่อนเติมข้อมูลตรงนี้
-                        </div>
-                    </div>
-
-                    <!-- Chart 2: Donut -->
-                    <div class="chart-card">
-                        <div class="chart-header">สัดส่วนประเภทการโจมตี</div>
-                        <div class="chart-subtitle">การจัดเรียงตามประเภทการโจมตี</div>
-                        <div class="chart-placeholder">
-                            🍩 [Donut Chart] ← เพื่อนเติมข้อมูลตรงนี้
-                        </div>
-                    </div>
-                </div>
-
-                <!--  ATTACK TABLE  -->
-                <div class="attack-table-section">
-                    <div class="table-header">
-                        <div class="table-title">📋 รายการการโจมตีล่าสุด</div>
-                    </div>
-                    <div class="table-placeholder">
-                        📝 [Attack Logs Table] ← เพื่อนเติมข้อมูลตรงนี้
-                        <br><br>
-                        <small style="color: #a0aec0;">
-                            ตารางนี้จะแสดง: Timestamp, Source IP, Method, URI, Rule ID, Action, Severity
-                        </small>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 
-    <!-- Optional: JavaScript for interactivity -->
-    <script>
-        // Filter tabs functionality
-        document.querySelectorAll('.filter-tabs button').forEach(btn => {
-            btn.addEventListener('click', function() {
-                document.querySelectorAll('.filter-tabs button').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-            });
-        });
-    </script>
+</div>
+
+<!-- Dashboard Logic -->
+<script src="/assets/dashboard.js"></script>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
 </body>
 </html>
