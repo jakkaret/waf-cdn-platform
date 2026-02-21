@@ -97,7 +97,7 @@ function renderLogs(logs) {
         const method = log.transaction?.request?.method || "-";
         const uri = log.transaction?.request?.uri || "-";
         const ip = log.transaction?.client_ip || "-";
-        const time = log.transaction?.time_stamp || log.timestamp || "-";
+        const time = log.transaction?.time_local || log.time_local || "-";
 
         const row = document.createElement("tr");
 
