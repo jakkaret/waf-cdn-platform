@@ -79,7 +79,7 @@ async def alert_worker():
 
             for log in logs:
                 ip = log.get("remote_addr", "unknown")
-                url = log.get("url", "unknown")
+                url = log.get("request", "unknown")
                 timestamp = log.get("timestamp")
                 time_local = log.get("time_local", "unknown")
                 user_id = log.get("user_id", "default-user")
