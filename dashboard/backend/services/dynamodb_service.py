@@ -54,17 +54,17 @@ class DynamoDBService:
             event["timestamp"] = event.get("timestamp", int(time.time()))
             event["alert"] = event.get("alert", False)
             self.logs_table.put_item(Item=event)
-            print("✅ Saved log")
+            print("Saved log")
 
         except Exception as e:
-            print("❌ Failed to save log:", e)
+            print("Failed to save log:", e)
 
     def get_logs(self, limit: int = 10) -> List[Dict]:
         try:
             response = self.logs_table.scan(Limit=limit)
             return response.get("Items", [])
         except Exception as e:
-            print("❌ Failed to fetch logs:", e)
+            print("Failed to fetch logs:", e)
             return []
 
     # -----------------------------
@@ -94,10 +94,10 @@ class DynamoDBService:
                     "timestamp": datetime.now().isoformat() + "Z",  # String ISO
                 }
             )
-            print("✅ Saved alert")
+            print("Saved alert")
             return True
         except Exception as e:
-            print("❌ Failed to save alert:", e)
+            print("Failed to save alert:", e)
             return False
 
 
@@ -108,7 +108,7 @@ class DynamoDBService:
             )
             return response.get("Items", [])
         except Exception as e:
-            print("❌ Failed to fetch 403 logs:", e)
+            print("Failed to fetch 403 logs:", e)
             return []
 
     def mark_log_alerted(self, user_id, timestamp):
@@ -123,9 +123,9 @@ class DynamoDBService:
                     ":val": True
                 }
             )
-            print("✅ Marked as alerted:", timestamp)
+            print("Marked as alerted:", timestamp)
         except Exception as e:
-            print("❌ Failed to update alert flag:", e)
+            print("Failed to update alert flag:", e)
 
 
     # -----------------------------

@@ -15,7 +15,7 @@ async def tail_file(path):
     print("Opening log file:", path)
 
     if not os.path.exists(path):
-        print("❌ File not found:", path)
+        print("File not found:", path)
 
     with open(path, "r", encoding="utf-8") as f:
         f.seek(0, os.SEEK_END)
@@ -44,7 +44,7 @@ async def process_audit_log():
             print("audit error:", e)
 
 async def log_forward_worker():
-    print("📡 Starting realtime log forwarder...")
+    print(" Starting realtime log forwarder...")
     await asyncio.gather(
         process_access_log(),
         process_audit_log()

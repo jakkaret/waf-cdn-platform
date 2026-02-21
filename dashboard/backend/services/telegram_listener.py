@@ -75,12 +75,13 @@ async def alert_worker():
             logs = db.get_unalerted_403_logs()
             # Logs ที่ได้จะเป็นแค่ 403 ที่ยังไม่เคยถูก alert มาก่อน (alert=False)
             if logs:
-                print(f"🔍 Found {len(logs)} new 403 logs")
+                print(f"Found {len(logs)} new 403 logs")
 
             for log in logs:
-                ip = log.get("ip", "unknown")
+                ip = log.get("remote_addr", "unknown")
                 url = log.get("url", "unknown")
                 timestamp = log.get("timestamp")
+                time_local = log.get("time_local", "unknown")
                 user_id = log.get("user_id", "default-user")
 
 
@@ -92,6 +93,7 @@ async def alert_worker():
                     IP: {ip}
                     URL: {url}
                     Status: 403
+                    Time: {time_local}
                     """
 
                 await client.send_message(CHAT_ID, msg)
