@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WAF Logs</title>
+</head>
+<body>
+
+<h2>Recent WAF Logs</h2>
+
+<table border="1" width="100%">
+    <thead>
+        <tr>
+            <th>User</th>
+            <th>IP</th>
+            <th>Action</th>
+            <th>Time</th>
+            <a href="/index.html">Back to Dashboard</a>
+            <a href="/rules.html">View Rules</a>
+        </tr>
+    </thead>
+    <tbody id="logs-table-body"></tbody>
+</table>
+
+<script>
+async function loadLogs() {
+    const response = await fetch("/api/logs/recent");
+    const result = await response.json();
+
+    const logs = result.logs;
+    const tableBody = document.getElementById("logs-table-body");
+    tableBody.innerHTML = "";
+
+    logs.forEach(log => {
+        const row = `
+            <tr>
+                <td>${log.user_id || "-"}</td>
+                <td>${log.ip || "-"}</td>
+                <td>${log.action || "-"}</td>
+                <td>${log.timestamp || "-"}</td>
+            </tr>
+        `;
+        tableBody.innerHTML += row;
+    });
+}   
+window.onload = loadLogs;
+</script>
+
+</body>
+</html>

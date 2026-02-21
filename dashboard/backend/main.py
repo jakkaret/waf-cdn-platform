@@ -1,7 +1,7 @@
 #WAF Dashboard 
 import os
 import asyncio
-
+from services.fetch_logs import get_recent_logs
 from fastapi.responses import FileResponse
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,6 +54,10 @@ async def system_info():
 #Include API Routers 
 app.include_router(rules.router)
 
+@app.get("/api/logs/recent")
+async def fetch_recent_logs(limit: int = 10):
+    logs = get_recent_logs(limit)
+    return {"logs": logs}
 #HTML Routes
 @app.get("/index.html")
 async def serve_index():

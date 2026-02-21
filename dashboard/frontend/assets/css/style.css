@@ -699,3 +699,54 @@ tr:hover {
         padding: 15px;
     }
 }
+/* ===== Bootstrap Enhancements ===== */
+
+.card {
+    border: none;
+    border-radius: 14px;
+}
+
+.table thead {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.table tbody tr {
+    transition: all 0.2s;
+}
+
+.table tbody tr:hover {
+    background: #f1f3ff;
+}
+
+.badge-status {
+    padding: 6px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-allow {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.badge-block {
+    background: #fee2e2;
+    color: #991b1b;
+}
+/* จุดสี */
+.status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+/* สีตามสถานะ */
+.dot-200 { background-color: #0f9d58; }   /* เขียว */
+.dot-403 { background-color: #f57c00; }   /* ส้ม */
+.dot-500 { background-color: #d93025; }   /* แดง */
