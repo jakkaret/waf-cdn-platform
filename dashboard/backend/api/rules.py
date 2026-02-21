@@ -55,24 +55,24 @@ async def delete_rule(rule_id: str):
 async def update_rule(rule_id: str, rule: RuleSchema):
     """อัพเดต rule ที่มีอยู่"""
     try:
-        print(f"📝 Updating rule: {rule_id}")
+        print(f"Updating rule: {rule_id}")
         print(f"   Data: {rule.dict()}")
         
         rule_manager.update_rule(rule_id, rule.dict())
         
-        print(f"✅ Rule {rule_id} updated successfully")
+        print(f"Rule {rule_id} updated successfully")
         return {"status": "updated", "rule_id": rule_id}
 
     except FileNotFoundError as e:
-        print(f"❌ Rule not found: {e}")
+        print(f"Rule not found: {e}")
         raise HTTPException(status_code=404, detail=str(e))
 
     except ValueError as e:
-        print(f"❌ Validation error: {e}")
+        print(f"Validation error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"Unexpected error: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
