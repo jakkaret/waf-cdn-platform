@@ -67,7 +67,7 @@ class DynamoDBService:
             print("Failed to fetch logs:", e)
             return []
 
-    # -----------------------------
+     # -----------------------------
     # ALERTS
     # -----------------------------
     def save_alert(
