@@ -73,6 +73,7 @@ async def alert_worker():
 
         while True:
             logs = db.get_unalerted_403_logs()
+            print("DEBUG logs:", logs)
             # Logs ที่ได้จะเป็นแค่ 403 ที่ยังไม่เคยถูก alert มาก่อน (alert=False)
             if logs:
                 print(f"Found {len(logs)} new 403 logs")
@@ -111,5 +112,5 @@ async def alert_worker():
                 # บันทึก alert flag ว่า log นี้ถูก alert แล้ว
                 db.mark_log_alerted(user_id, timestamp)
 
-
-            await asyncio.sleep(5)
+            
+            await asyncio.sleep(5)  # เช็คทุก 5 วินาที
