@@ -48,6 +48,13 @@ docker-compose ps
 
 ```bash
 cd dashboard/backend
+เข้า environment 
+windows
+.venv\Scripts\activate
+
+linux
+source .venv/bin/activate
+
 python3 main.py
 หรือ
 uvicorn main:app -​-reload 
