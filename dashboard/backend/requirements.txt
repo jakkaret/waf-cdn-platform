@@ -10,3 +10,9 @@ python-multipart==0.0.6
 
 # Additional utilities
 python-dotenv==1.0.0
+
+# AWS SDK for Python (ใช้ DynamoDB, S3, ฯลฯ)
+boto3==1.34.34
+
+# Telegram API Client
+telethon==1.34.0
