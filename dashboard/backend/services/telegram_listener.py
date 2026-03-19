@@ -73,7 +73,6 @@ async def alert_worker():
 
         while True:
             logs = db.get_unalerted_403_logs()
-            print("DEBUG logs:", logs)
             # Logs ที่ได้จะเป็นแค่ 403 ที่ยังไม่เคยถูก alert มาก่อน (alert=False)
             if logs:
                 print(f"Found {len(logs)} new 403 logs")
