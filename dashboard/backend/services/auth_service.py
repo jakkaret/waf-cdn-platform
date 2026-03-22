@@ -3,6 +3,7 @@ import time
 import uuid
 import hmac
 import hashlib
+import json
 from typing import Optional, Dict
 from datetime import datetime, timedelta
 
@@ -10,9 +11,8 @@ import boto3
 import requests
 from dotenv import load_dotenv
 from jose import jwt, JWTError
-from boto3.dynamodb.conditions import Attr
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
+from passlib.context import CryptContext
+from boto3.dynamodb.conditions import Key, Attr
 
 load_dotenv()
 
@@ -22,15 +22,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "https://unjeopardized-nonfatal-josie.ngrok-free.dev/api/auth/google/callback")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-ph = PasswordHasher(
-    time_cost=3,
-    memory_cost=65536,
-    parallelism=2,
-)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class AuthService:
@@ -44,14 +40,19 @@ class AuthService:
         )
         self.users_table = self.dynamodb.Table("waf_users")
 
+    # ------------------------------------------------------------------
+    # Password helpers
+    # ------------------------------------------------------------------
+
     def hash_password(self, password: str) -> str:
-        return ph.hash(password)
+        return pwd_context.hash(password)
 
     def verify_password(self, plain: str, hashed: str) -> bool:
-        try:
-            return ph.verify(hashed, plain)
-        except (VerifyMismatchError, VerificationError, InvalidHashError):
-            return False
+        return pwd_context.verify(plain, hashed)
+
+    # ------------------------------------------------------------------
+    # JWT helpers
+    # ------------------------------------------------------------------
 
     def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
         to_encode = data.copy()
@@ -65,6 +66,13 @@ class AuthService:
             return payload
         except JWTError:
             return None
+
+    # ------------------------------------------------------------------
+    # User CRUD (DynamoDB waf_users)
+    # Schema: user_id (PK), email, username, password_hash,
+    #         role (admin|viewer), auth_provider (local|google|telegram),
+    #         provider_id, created_at, last_login
+    # ------------------------------------------------------------------
 
     def get_user_by_id(self, user_id: str) -> Optional[Dict]:
         try:
@@ -158,6 +166,10 @@ class AuthService:
             ExpressionAttributeValues={":r": role},
         )
 
+    # ------------------------------------------------------------------
+    # Local auth
+    # ------------------------------------------------------------------
+
     def register_local(self, email: str, username: str, password: str, role: str = "viewer") -> Dict:
         existing = self.get_user_by_email(email)
         if existing:
@@ -174,6 +186,10 @@ class AuthService:
             return None
         self.update_last_login(user["user_id"])
         return user
+
+    # ------------------------------------------------------------------
+    # Google OAuth
+    # ------------------------------------------------------------------
 
     def get_google_auth_url(self) -> str:
         params = {
@@ -242,6 +258,11 @@ class AuthService:
             avatar_url=avatar,
         )
 
+    # ------------------------------------------------------------------
+    # Telegram Login Widget verification
+    # Telegram sends a hash based on bot token. We verify it server-side.
+    # ------------------------------------------------------------------
+
     def verify_telegram_login(self, data: Dict) -> bool:
         if not TELEGRAM_BOT_TOKEN:
             return False
@@ -250,13 +271,16 @@ class AuthService:
         if not check_hash:
             return False
 
+        # Build check string (sorted key=value pairs)
         data_check_string = "\n".join(
             f"{k}={v}" for k, v in sorted(data.items())
         )
 
+        # HMAC-SHA256 with SHA256 of bot token as key
         secret_key = hashlib.sha256(TELEGRAM_BOT_TOKEN.encode()).digest()
         computed = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
+        # Check auth_date not older than 1 day
         auth_date = int(data.get("auth_date", 0))
         if time.time() - auth_date > 86400:
             return False

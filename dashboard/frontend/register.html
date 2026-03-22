@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - WAF Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after {
+            margin: 0; padding: 0; box-sizing: border-box;
+        }
+
+        :root {
+            --bg:          #0d1117;
+            --surface:     #161b27;
+            --surface-2:   #1e2438;
+            --border:      rgba(255,255,255,0.07);
+            --accent:      #667eea;
+            --accent-2:    #764ba2;
+            --text:        #e4e8f0;
+            --text-muted:  rgba(255,255,255,0.4);
+            --danger:      #fc8181;
+            --success:     #68d391;
+            --radius:      10px;
+        }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 40px;
+            width: 100%;
+            max-width: 440px;
+            position: relative;
+        }
+
+        .card-glow {
+            position: absolute;
+            top: -60px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 200px;
+            background: radial-gradient(circle, rgba(118,75,162,0.15) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 28px;
+        }
+
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            color: var(--accent);
+        }
+
+        .brand-name {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .brand-tag {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 10px;
+            color: var(--text-muted);
+            display: block;
+        }
+
+        h1 {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .subtitle {
+            font-size: 13.5px;
+            color: var(--text-muted);
+            margin-bottom: 28px;
+        }
+
+        .notice {
+            background: rgba(102,126,234,0.08);
+            border: 1px solid rgba(102,126,234,0.2);
+            border-radius: var(--radius);
+            padding: 12px 14px;
+            font-size: 12.5px;
+            color: rgba(165,180,252,0.85);
+            margin-bottom: 22px;
+            line-height: 1.6;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            font-size: 12.5px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.6);
+            margin-bottom: 7px;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 11px 14px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text);
+            font-size: 14px;
+            font-family: 'DM Sans', sans-serif;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            outline: none;
+            appearance: none;
+        }
+
+        input:focus, select:focus {
+            border-color: rgba(102,126,234,0.5);
+            box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+        }
+
+        input::placeholder {
+            color: rgba(255,255,255,0.2);
+        }
+
+        select option {
+            background: var(--surface-2);
+        }
+
+        .password-hint {
+            font-size: 11.5px;
+            color: var(--text-muted);
+            margin-top: 5px;
+        }
+
+        .strength-bar {
+            height: 3px;
+            background: var(--surface-2);
+            border-radius: 99px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+
+        .strength-fill {
+            height: 100%;
+            border-radius: 99px;
+            transition: width 0.3s, background 0.3s;
+            width: 0%;
+        }
+
+        .error-msg {
+            background: rgba(252,129,129,0.1);
+            border: 1px solid rgba(252,129,129,0.3);
+            border-radius: var(--radius);
+            padding: 10px 14px;
+            font-size: 13px;
+            color: var(--danger);
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .error-msg.visible { display: block; }
+
+        .success-msg {
+            background: rgba(104,211,145,0.1);
+            border: 1px solid rgba(104,211,145,0.3);
+            border-radius: var(--radius);
+            padding: 10px 14px;
+            font-size: 13px;
+            color: var(--success);
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .success-msg.visible { display: block; }
+
+        .submit-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            border: none;
+            border-radius: var(--radius);
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 6px;
+            font-family: 'DM Sans', sans-serif;
+            transition: opacity 0.2s, transform 0.1s;
+            letter-spacing: 0.2px;
+        }
+
+        .submit-btn:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .footer-link {
+            text-align: center;
+            margin-top: 24px;
+            font-size: 13.5px;
+            color: var(--text-muted);
+        }
+
+        .footer-link a {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .footer-link a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <div class="card-glow"></div>
+
+    <div class="brand">
+        <svg class="brand-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <div>
+            <span class="brand-name">WAF Dashboard</span>
+            <span class="brand-tag">Security Control Panel</span>
+        </div>
+    </div>
+
+    <h1>Create account</h1>
+    <p class="subtitle">Register to access the WAF control panel</p>
+
+    <div class="notice">
+        The first account registered automatically receives admin privileges. Subsequent accounts are assigned the viewer role and can be promoted by an admin.
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+    <div class="success-msg" id="success-msg"></div>
+
+    <form id="register-form" novalidate>
+        <div class="form-group">
+            <label for="username">Display Name</label>
+            <input type="text" id="username" name="username" placeholder="Your name" required autocomplete="name">
+        </div>
+
+        <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" placeholder="you@example.com" required autocomplete="email">
+        </div>
+
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" placeholder="Minimum 8 characters" required autocomplete="new-password">
+            <div class="strength-bar">
+                <div class="strength-fill" id="strength-fill"></div>
+            </div>
+            <div class="password-hint" id="strength-label">Enter a password</div>
+        </div>
+
+        <div class="form-group">
+            <label for="confirm">Confirm Password</label>
+            <input type="password" id="confirm" name="confirm" placeholder="Repeat your password" required autocomplete="new-password">
+        </div>
+
+        <button type="submit" class="submit-btn" id="submit-btn">Create Account</button>
+    </form>
+
+    <div class="footer-link">
+        Already have an account? <a href="/login.html">Sign in</a>
+    </div>
+</div>
+
+<script src="/assets/auth.js"></script>
+<script>
+    // Redirect if already logged in
+    if (Auth.getToken()) {
+        window.location.href = "/";
+    }
+
+    const form       = document.getElementById("register-form");
+    const submitBtn  = document.getElementById("submit-btn");
+    const errorMsg   = document.getElementById("error-msg");
+    const successMsg = document.getElementById("success-msg");
+    const pwdInput   = document.getElementById("password");
+    const fill       = document.getElementById("strength-fill");
+    const label      = document.getElementById("strength-label");
+
+    function showError(msg) {
+        errorMsg.textContent = msg;
+        errorMsg.classList.add("visible");
+        successMsg.classList.remove("visible");
+    }
+
+    function showSuccess(msg) {
+        successMsg.textContent = msg;
+        successMsg.classList.add("visible");
+        errorMsg.classList.remove("visible");
+    }
+
+    function hideMessages() {
+        errorMsg.classList.remove("visible");
+        successMsg.classList.remove("visible");
+    }
+
+    // Password strength indicator
+    pwdInput.addEventListener("input", () => {
+        const val = pwdInput.value;
+        let score = 0;
+        if (val.length >= 8)  score++;
+        if (/[A-Z]/.test(val)) score++;
+        if (/[0-9]/.test(val)) score++;
+        if (/[^A-Za-z0-9]/.test(val)) score++;
+
+        const pct    = (score / 4) * 100;
+        const colors = ["#fc8181", "#f6ad55", "#68d391", "#48bb78"];
+        const labels = ["Weak", "Fair", "Good", "Strong"];
+
+        fill.style.width = pct + "%";
+        fill.style.background = colors[score - 1] || "#fc8181";
+        label.textContent = val.length === 0 ? "Enter a password" : (labels[score - 1] || "Weak");
+    });
+
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        hideMessages();
+
+        const username = document.getElementById("username").value.trim();
+        const email    = document.getElementById("email").value.trim();
+        const password = document.getElementById("password").value;
+        const confirm  = document.getElementById("confirm").value;
+
+        if (!username || !email || !password) {
+            showError("All fields are required.");
+            return;
+        }
+
+        if (password.length < 8) {
+            showError("Password must be at least 8 characters.");
+            return;
+        }
+
+        if (password !== confirm) {
+            showError("Passwords do not match.");
+            return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Creating account...";
+
+        try {
+            const res = await fetch("/api/auth/register", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email, username, password }),
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                showError(data.detail || "Registration failed.");
+                return;
+            }
+
+            Auth.saveSession(data.access_token, data.user);
+            showSuccess("Account created. Redirecting...");
+            setTimeout(() => { window.location.href = "/"; }, 1200);
+
+        } catch (err) {
+            showError("Network error. Please try again.");
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Create Account";
+        }
+    });
+</script>
+</body>
+</html>
