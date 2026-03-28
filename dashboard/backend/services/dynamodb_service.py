@@ -67,9 +67,9 @@ class DynamoDBService:
             print("Failed to fetch logs:", e)
             return []
 
-     # -----------------------------
+     
     # ALERTS
-    # -----------------------------
+    
     def save_alert(
         self,
         user_id: str,
@@ -128,9 +128,9 @@ class DynamoDBService:
             print("Failed to update alert flag:", e)
 
 
-    # -----------------------------
+    
     # TEST CONNECTION
-    # -----------------------------
+    
     # def test_connection(self) -> bool:
     #     try:
     #         self.alerts_table.put_item(
@@ -150,9 +150,9 @@ class DynamoDBService:
     #         return False
 
 
-# -----------------------------
+
 # ตัวอย่างการใช้งาน
-# -----------------------------
+
 if __name__ == "__main__":
     db = DynamoDBService()
 
