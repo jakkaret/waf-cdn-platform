@@ -1,72 +1,91 @@
 <!DOCTYPE html>
-<html lang="th">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Custom Rules - WAF Dashboard</title>
-    <link rel="stylesheet" href="assets/css/rules.css">    
+    <title>WAF - Custom Rules</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/css/style.css">
+    <style>
+        body { font-family: 'DM Sans', sans-serif; }
+
+        .content {
+            padding: 30px;
+        }
+
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 28px;
+        }
+
+        .page-header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            color: #2d3748;
+        }
+
+        .rules-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 14px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+        th { background: #f7fafc; color: #4a5568; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px; }
+        tr:hover td { background: #f7fafc; }
+
+        .severity { padding: 3px 10px; border-radius: 12px; font-size: 11.5px; font-weight: 600; }
+        .severity.critical { background: #fee; color: #c53030; }
+        .severity.high     { background: #fef5e7; color: #dd6b20; }
+        .severity.medium   { background: #fefce8; color: #d69e2e; }
+        .severity.low      { background: #e6fffa; color: #38b2ac; }
+
+        .btn { padding: 9px 18px; border: none; border-radius: 8px; cursor: pointer; font-size: 13.5px; font-weight: 500; font-family: 'DM Sans', sans-serif; transition: all 0.2s; }
+        .btn-primary { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102,126,234,0.4); }
+
+        .btn-edit   { background: #ebf4ff; color: #2b6cb0; padding: 5px 12px; border-radius: 6px; font-size: 12px; border: none; cursor: pointer; font-family: 'DM Sans', sans-serif; }
+        .btn-delete { background: #fff5f5; color: #c53030; padding: 5px 12px; border-radius: 6px; font-size: 12px; border: none; cursor: pointer; font-family: 'DM Sans', sans-serif; }
+        .btn-edit:hover   { background: #bee3f8; }
+        .btn-delete:hover { background: #fed7d7; }
+
+        /* Viewer role - hide write actions */
+        .viewer-hidden { display: none !important; }
+
+        /* Modal */
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); justify-content: center; align-items: center; z-index: 1000; }
+        .modal.active { display: flex; }
+        .modal-box { background: white; padding: 32px; border-radius: 14px; width: 480px; max-width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+        .modal-box h2 { font-size: 18px; font-weight: 700; margin-bottom: 22px; color: #2d3748; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: #718096; margin-bottom: 6px; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: 'DM Sans', sans-serif; outline: none; transition: border-color 0.2s;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
+        .modal-actions { display: flex; gap: 10px; margin-top: 4px; }
+        .btn-cancel { background: #f7fafc; color: #4a5568; border: 1px solid #e2e8f0; }
+        .btn-cancel:hover { background: #edf2f7; }
+    </style>
 </head>
 <body>
-     <div class="container">
-        <!-- ========== SIDEBAR ========== -->
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <h2>
-                    <span>🛡️</span>
-                    <span>Automated WAF</span>
-                </h2>
+<div class="container" style="display:flex;">
+
+    <!-- Sidebar injected by Auth.renderShell -->
+
+    <div class="main" style="flex:1;">
+        <div class="content">
+            <div class="page-header">
+                <h1>Custom Rules</h1>
+                <button class="btn btn-primary admin-only" onclick="openCreateModal()">+ Add Rule</button>
             </div>
-            <nav>
-                <a href="/" class="icon">
-                    <span class="icon">📊</span>
-                    <span>แดชบอร์ด</span>
-                </a>
-                <a href="logs.html">
-                    <span class="icon">📝</span>
-                    <span>รายงานการโจมตี</span>
-                </a>
-                <a href="rules.html">
-                    <span class="active">⚙️</span>
-                    <span>ปรับแต่งกฎ</span>
-                </a>
-                <!-- <a href="alerts.html">
-                    <span class="icon">🔔</span>
-                    <span>การแจ้งเตือน</span>
-                </a>
-                <a href="#" class="separator">
-                    <span class="icon">🤖</span>
-                    <span>กฎอัจฉริยะจาก AI/ML</span>
-                </a>
-                <a href="#">
-                    <span class="icon">🔧</span>
-                    <span>ตั้งค่าระบบ</span>
-                </a>
-                <a href="#">
-                    <span class="icon">📄</span>
-                    <span>รายงาน</span>
-                </a>
-                <a href="#">
-                    <span class="icon">🎨</span>
-                    <span>ธีม/แสดงผล</span>
-                </a>
-                <a href="#">
-                    <span class="icon">👥</span>
-                    <span>ผู้ใช้และสิทธิ์</span>
-                </a> -->
-            </nav>
-        </div>
-        
-        <!-- Main Content -->
-        <div class="main">
-            <div class="header">
-                <h1>⚙️ จัดการกฎ (Custom Rules)</h1>
-                <button class="btn btn-primary" onclick="openCreateModal()">
-                    ➕ เพิ่มกฎใหม่
-                </button>
-            </div>
-            
-            <div class="rules-table">
-                <table id="rulesTable">
+
+            <div class="rules-card">
+                <table id="rules-table">
                     <thead>
                         <tr>
                             <th>Rule ID</th>
@@ -74,231 +93,183 @@
                             <th>Operator</th>
                             <th>Severity</th>
                             <th>Message</th>
-                            <th>Actions</th>
+                            <th class="admin-only">Actions</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        <!-- ข้อมูลจะโหลดจาก API -->
-                        
-                    </tbody>
+                    <tbody></tbody>
                 </table>
             </div>
         </div>
     </div>
-    
-    <!-- Modal สำหรับเพิ่ม Rule -->
-    <div class="modal" id="ruleModal">
-        <div class="modal-content">
-            <h2 style="margin-bottom: 20px;">เพิ่มกฎใหม่</h2>
-            <form id="ruleForm">
-                <input type="hidden" name="mode" value="create">
-                <div class="form-group">
-                    <label>Rule ID</label>
-                    <input type="text" name="id" required placeholder="เช่น 999001">
-                </div>
-                
-                <div class="form-group">
-                    <label>Variable</label>
-                    <select name="variable">
-                        <option value="REQUEST_URI">REQUEST_URI</option>
-                        <option value="ARGS">ARGS</option>
-                        <option value="REQUEST_HEADERS">REQUEST_HEADERS</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label>Operator (Pattern)</label>
-                    <input type="text" name="operator" required placeholder="เช่น @rx .*admin.*">
-                </div>
-                
-                <div class="form-group">
-                    <label>Severity</label>
-                    <select name="severity">
-                        <option value="CRITICAL">Critical</option>
-                        <option value="HIGH">High</option>
-                        <option value="MEDIUM">Medium</option>
-                        <option value="LOW">Low</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label>Message</label>
-                    <textarea name="message" required placeholder="คำอธิบายกฎนี้"></textarea>
-                </div>
-                
-                <div style="display: flex; gap: 10px;">
-                    <button type="submit" class="btn btn-primary">บันทึก</button>
-                    <button type="button" class="btn" onclick="closeModal()">ยกเลิก</button>
-                </div>
-            </form>
-        </div>
+</div>
+
+<!-- Rule Modal -->
+<div class="modal" id="rule-modal">
+    <div class="modal-box">
+        <h2 id="modal-title">Add Rule</h2>
+        <form id="rule-form" novalidate>
+            <input type="hidden" name="mode" value="create">
+            <div class="form-group">
+                <label>Rule ID</label>
+                <input type="text" name="id" required placeholder="e.g. 999001">
+            </div>
+            <div class="form-group">
+                <label>Variable</label>
+                <select name="variable">
+                    <option value="REQUEST_URI">REQUEST_URI</option>
+                    <option value="ARGS">ARGS</option>
+                    <option value="REQUEST_HEADERS">REQUEST_HEADERS</option>
+                    <option value="REQUEST_BODY">REQUEST_BODY</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Operator / Pattern</label>
+                <input type="text" name="operator" required placeholder="e.g. @rx .*admin.*">
+            </div>
+            <div class="form-group">
+                <label>Severity</label>
+                <select name="severity">
+                    <option value="CRITICAL">Critical</option>
+                    <option value="HIGH">High</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="LOW">Low</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Message</label>
+                <textarea name="message" required placeholder="Describe this rule" rows="2"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="submit" class="btn btn-primary">Save</button>
+                <button type="button" class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+            </div>
+        </form>
     </div>
-    
-    <script>
-        // โหลดข้อมูล Rules
-        async function loadRules() {
-            try {
-                console.log('กำลังโหลดข้อมูล...');
-                
-                const res = await fetch('/api/rules/');
+</div>
 
-                console.log('Response status:', res.status);
-                
-                if (!res.ok) {
-                    throw new Error(`HTTP error! status: ${res.status}`);
-                }
-                
-                const data = await res.json();
-                console.log('ข้อมูลที่ได้:', data);
-                console.log('จำนวน rules:', data.rules.length);
-                
-                const tbody = document.querySelector('#rulesTable tbody');
-                tbody.innerHTML = '';
-                
-                if (!data.rules || data.rules.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">ยังไม่มี Rules</td></tr>';
-                    return;
-                }
-                
-                data.rules.forEach((rule, index) => {
-                    console.log(`Rule ${index}:`, rule);
-                    
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td>${rule.id || 'N/A'}</td>
-                        <td>${rule.variable || 'N/A'}</td>
-                        <td>${rule.operator || 'N/A'}</td>
-                        <td><span class="severity ${(rule.severity || 'medium').toLowerCase()}">${severityBadge(rule.severity || 'N/A')}</span></td>
-                        <td>${rule.message || 'N/A'}</td>
-                        <td class="actions">
-                            <button class="btn-edit" data-rule='${JSON.stringify(rule)}'>แก้ไข</button>
-                            <button class="btn-delete" data-id="${rule.id}">ลบ</button>
-                        </td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-                
-                // เพิ่ม Event Listeners หลังจากสร้าง DOM
-                document.querySelectorAll('.btn-edit').forEach(btn => {
-                    btn.addEventListener('click', function() {
-                        const ruleData = JSON.parse(this.getAttribute('data-rule'));
-                        editRule(ruleData);
-                    });
-                });
-                
-                document.querySelectorAll('.btn-delete').forEach(btn => {
-                    btn.addEventListener('click', function() {
-                        const ruleId = this.getAttribute('data-id');
-                        deleteRule(ruleId);
-                    });
-                });
-                
-                console.log('โหลดเสร็จสิ้น');
-                
-            } catch (error) {
-                console.error('Error:', error);
-                alert('เกิดข้อผิดพลาด: ' + error.message);
-                
-                const tbody = document.querySelector('#rulesTable tbody');
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:red;">เกิดข้อผิดพลาดในการโหลดข้อมูล</td></tr>';
-            }
+<script src="/assets/auth.js"></script>
+<script>
+    let editingRuleId = null;
+
+    document.addEventListener("DOMContentLoaded", () => {
+        Auth.renderShell("rules");
+
+        const user = Auth.getUser();
+        if (user && user.role !== "admin") {
+            // Hide admin-only elements for viewers
+            document.querySelectorAll(".admin-only").forEach(el => el.style.display = "none");
         }
-        
-        // เพิ่ม Rule
-        document.getElementById('ruleForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
 
-            const formData = new FormData(e.target);
-            const data = Object.fromEntries(formData);
+        loadRules();
+    });
 
-            let url = '/api/rules/';
-            let method = 'POST';
+    async function loadRules() {
+        const res = await Auth.apiFetch("/api/rules/");
+        if (!res) return;
 
-            if (data.mode === 'edit') {
-                url = `/api/rules/${editingRuleId}`;
-                method = 'PUT';
-                delete data.id; // PUT ไม่ควรส่ง id
-            }
+        const data  = await res.json();
+        const tbody = document.querySelector("#rules-table tbody");
+        tbody.innerHTML = "";
 
-            await fetch(url, {
-                method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
+        if (!data.rules || data.rules.length === 0) {
+            tbody.innerHTML = "<tr><td colspan='6' style='text-align:center;padding:30px;color:#a0aec0;'>No rules configured</td></tr>";
+            return;
+        }
 
-            closeModal();
-            loadRules();
+        const user    = Auth.getUser();
+        const isAdmin = user && user.role === "admin";
+
+        data.rules.forEach(rule => {
+            const sev = (rule.severity || "medium").toLowerCase();
+            const tr  = document.createElement("tr");
+            tr.innerHTML = `
+                <td style="font-family:monospace;font-size:13px;">${rule.id || "-"}</td>
+                <td>${rule.variable || "-"}</td>
+                <td style="font-family:monospace;font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${rule.operator || "-"}</td>
+                <td><span class="severity ${sev}">${rule.severity || "-"}</span></td>
+                <td>${rule.message || "-"}</td>
+                <td class="admin-only">
+                    ${isAdmin ? `
+                    <button class="btn-edit" data-rule='${JSON.stringify(rule)}'>Edit</button>
+                    <button class="btn-delete" data-id="${rule.id}" style="margin-left:6px;">Delete</button>
+                    ` : ""}
+                </td>
+            `;
+            tbody.appendChild(tr);
         });
 
-        
-        // ลบ Rule
-        async function deleteRule(id) {
-            if (confirm('ต้องการลบกฎนี้?')) {
-                await fetch(`/api/rules/${id}`, { method: 'DELETE' });
-                loadRules();
-            }
+        document.querySelectorAll(".btn-edit").forEach(btn => {
+            btn.addEventListener("click", () => editRule(JSON.parse(btn.getAttribute("data-rule"))));
+        });
+
+        document.querySelectorAll(".btn-delete").forEach(btn => {
+            btn.addEventListener("click", () => deleteRule(btn.getAttribute("data-id")));
+        });
+    }
+
+    document.getElementById("rule-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fd   = new FormData(e.target);
+        const data = Object.fromEntries(fd);
+
+        let url    = "/api/rules/";
+        let method = "POST";
+
+        if (data.mode === "edit") {
+            url    = `/api/rules/${editingRuleId}`;
+            method = "PUT";
+            delete data.id;
         }
 
-        
-        function openModal() {
-            document.getElementById('ruleModal').classList.add('active');
+        delete data.mode;
+
+        const res = await Auth.apiFetch(url, {
+            method,
+            body: JSON.stringify(data),
+        });
+
+        if (res && res.ok) {
+            closeModal();
+            loadRules();
+        } else if (res) {
+            const err = await res.json();
+            alert(err.detail || "Failed to save rule.");
         }
+    });
 
+    async function deleteRule(id) {
+        if (!confirm("Delete this rule?")) return;
+        const res = await Auth.apiFetch(`/api/rules/${id}`, { method: "DELETE" });
+        if (res && res.ok) loadRules();
+    }
 
-        
-        function closeModal() {
-            document.getElementById('ruleModal').classList.remove('active');
-        }
-        
-        function openCreateModal() {
-            const form = document.getElementById('ruleForm');
-            form.reset();
-            form.mode.value = 'create';
-            form.id.disabled = false; // เปิดการแก้ไข ID
-            editingRuleId = null;
+    function openCreateModal() {
+        editingRuleId = null;
+        document.getElementById("rule-form").reset();
+        document.querySelector("[name='mode']").value = "create";
+        document.querySelector("[name='id']").disabled = false;
+        document.getElementById("modal-title").textContent = "Add Rule";
+        document.getElementById("rule-modal").classList.add("active");
+    }
 
-            document.querySelector('#ruleModal h2').innerText = 'เพิ่มกฎใหม่';
-            openModal();
-        }
+    function editRule(rule) {
+        editingRuleId = rule.id;
+        const form = document.getElementById("rule-form");
+        form.reset();
+        form.querySelector("[name='mode']").value      = "edit";
+        form.querySelector("[name='id']").value        = rule.id;
+        form.querySelector("[name='id']").disabled     = true;
+        form.querySelector("[name='variable']").value  = rule.variable;
+        form.querySelector("[name='operator']").value  = rule.operator;
+        form.querySelector("[name='severity']").value  = rule.severity;
+        form.querySelector("[name='message']").value   = rule.message;
+        document.getElementById("modal-title").textContent = "Edit Rule";
+        document.getElementById("rule-modal").classList.add("active");
+    }
 
-
-        function severityBadge(sev) {
-            // เปลี่ยน severity เป็น badge
-            const map = {
-                CRITICAL: "badge-danger",
-                HIGH: "badge-warning",
-                MEDIUM: "badge-info",
-                LOW: "badge-secondary"
-            };
-            return `<span class="badge ${map[sev] || 'badge-light'}">${sev}</span>`;
-        }
-
-        // เปิดแก้ไข Rule
-        
-        let editingRuleId = null;
-
-        function editRule(ruleData) {
-            console.log('Edit Rule:', ruleData);
-            
-            editingRuleId = ruleData.id;
-
-            const form = document.getElementById('ruleForm');
-
-            form.mode.value = 'edit';
-            form.id.value = ruleData.id;
-            form.id.disabled = true;  // ปิดการแก้ไข ID
-            form.variable.value = ruleData.variable;   
-            form.operator.value = ruleData.operator;
-            form.severity.value = ruleData.severity;
-            form.message.value = ruleData.message;
-
-            document.querySelector('#ruleModal h2').innerText = 'แก้ไขกฎ';
-            openModal(); 
-        }
-
-
-        // โหลดข้อมูลตอน page load
-        loadRules();
-    </script>
+    function closeModal() {
+        document.getElementById("rule-modal").classList.remove("active");
+    }
+</script>
 </body>
 </html>
