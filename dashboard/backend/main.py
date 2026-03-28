@@ -102,6 +102,16 @@ async def internal_error_handler(request: Request, exc):
         content={"error": str(exc)}
     )
 
+@app.get("/api/health")
+async def health_check():
+    try:
+        from services.dynamodb_service import DynamoDBService
+        db = DynamoDBService()
+        db.alerts_table.load()  # ping table
+        return {"status": "ok", "dynamodb": "connected"}
+    except Exception as e:
+        return {"status": "error", "dynamodb": str(e)}
+
 # Startup & Shutdown
 @app.on_event("startup")
 async def startup_event():
@@ -117,6 +127,7 @@ async def startup_event():
         app.state.alert_task = asyncio.create_task(alert_worker())
     if not hasattr(app.state, "log_forward_task"):
         app.state.log_forward_task = asyncio.create_task(log_forward_worker())
+
 
 @app.on_event("shutdown")
 async def shutdown_event():

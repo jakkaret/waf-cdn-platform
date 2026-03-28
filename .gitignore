@@ -18,3 +18,7 @@ AWSCLIV2.pkg
 
 # OS
 .DS_Store
+
+# Telethon session files
+*.session
+*.session-journal

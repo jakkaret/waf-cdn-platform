@@ -68,13 +68,14 @@ ALERT_TTL = 600  # 10 นาที
 async def alert_worker():
     print("📡 Telegram Alert Worker started")
 
-    async with TelegramClient("waf_alert_bot", API_ID, API_HASH) as client:
-        await client.start(bot_token=BOT_TOKEN)
+    client = TelegramClient("waf_alert_bot", API_ID, API_HASH)
+    await client.start(bot_token=BOT_TOKEN)  # ← start ด้วย bot token ตรงๆ
 
+    try:
         while True:
             logs = db.get_unalerted_403_logs()
             print("DEBUG logs:", logs)
-            # Logs ที่ได้จะเป็นแค่ 403 ที่ยังไม่เคยถูก alert มาก่อน (alert=False)
+
             if logs:
                 print(f"Found {len(logs)} new 403 logs")
 
@@ -85,32 +86,25 @@ async def alert_worker():
                 time_local = log.get("time_local", "unknown")
                 user_id = log.get("user_id", "default-user")
 
-
                 if not timestamp:
                     continue
 
-                msg = f"""
-                    🚨 WAF ALERT (403)
-                    IP: {ip}
-                    URL: {url}
-                    Status: 403
-                    Time: {time_local}
-                    """
+                msg = f"🚨 WAF ALERT (403)\nIP: {ip}\nURL: {url}\nStatus: 403\nTime: {time_local}"
 
                 await client.send_message(CHAT_ID, msg)
 
-                # บันทึกลงdb waf_alerts
                 db.save_alert(
                     user_id=user_id,
-                    alert_id=str(timestamp),  # ใช้ log_id เป็น timestamp 
+                    alert_id=str(timestamp),
                     ip=ip,
                     url=url,
                     status="403",
                     message="WAF 403 detected"
                 )
 
-                # บันทึก alert flag ว่า log นี้ถูก alert แล้ว
                 db.mark_log_alerted(user_id, timestamp)
 
-            
-            await asyncio.sleep(5)  # เช็คทุก 5 วินาที
+            await asyncio.sleep(5)
+
+    finally:
+        await client.disconnect()
