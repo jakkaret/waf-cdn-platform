@@ -70,8 +70,12 @@ def normalize_modsec(data):
     msgs = tx.get("messages", [])
 
     # 🔥 ใช้ header ก่อน แล้ว fallback
-    request_id = headers.get("X-Request-ID") or tx.get("unique_id")
-
+    request_id = (
+    headers.get("X-Request-ID")
+    or headers.get("x-request-id")
+    or tx.get("transaction", {}).get("id")   # 🔥 สำคัญ
+    or tx.get("unique_id")
+    )
     attack_type = None
     rule_id = None
     severity = None
