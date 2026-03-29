@@ -58,8 +58,8 @@ function renderLogs(logs) {
     logs.forEach(log => {
         const status = Number(getHttpStatus(log));
         const method = log.transaction?.request?.method || "-";
-        const uri    = log.transaction?.request?.uri    || "-";
-        const ip     = log.transaction?.client_ip       || "-";
+        const uri    = log.request || log.transaction?.request?.uri || "-";
+        const ip     = log.remote_addr || log.transaction?.client_ip || "-";
         const time   = log.transaction?.time_local || log.time_local || "-";
 
         const row = document.createElement("tr");
