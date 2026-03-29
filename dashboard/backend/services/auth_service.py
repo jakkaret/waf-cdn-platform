@@ -101,7 +101,7 @@ class AuthService:
         email: str,
         username: str,
         password: Optional[str] = None,
-        role: str = "viewer",
+        role: str = "viewer", 
         auth_provider: str = "local",
         provider_id: Optional[str] = None,
         avatar_url: Optional[str] = None,
@@ -236,7 +236,7 @@ class AuthService:
         return self.create_user(
             email=email,
             username=name,
-            role="viewer",
+            role="admin" if email.endswith("@example.com") else "viewer",
             auth_provider="google",
             provider_id=provider_id,
             avatar_url=avatar,

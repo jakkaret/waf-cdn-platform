@@ -10,6 +10,7 @@ from api import auth
 from services.log_forward import log_forward_worker
 from services.telegram_listener import alert_worker
 from services.rbac import require_viewer_or_above
+from api import alerts          
 
 app = FastAPI(
     title="WAF Security Dashboard",
@@ -29,7 +30,7 @@ app.add_middleware(
 frontend_path = os.path.join(os.path.dirname(__file__), "../frontend")
 app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")), name="assets")
 
-# Public HTML pages (auth handled client-side via token check)
+# Public HTML pages (auth handled client-side with token check)
 @app.get("/")
 async def root():
     return FileResponse(os.path.join(frontend_path, "index.html"))
@@ -57,6 +58,10 @@ async def serve_rules():
 @app.get("/alerts.html")
 async def serve_alerts():
     return FileResponse(os.path.join(frontend_path, "alerts.html"))
+@app.get("/user_role.html")
+async def serve_user_role():
+    return FileResponse(os.path.join(frontend_path, "user_role.html"))
+
 
 # System info (protected)
 @app.get("/api/system/info")
@@ -70,6 +75,7 @@ async def system_info(current_user: dict = Depends(require_viewer_or_above)):
         "role": current_user.get("role"),
     }
 
+#google check auth callback
 @app.get("/oauth-success.html")
 async def serve_oauth_success():
     return FileResponse(os.path.join(frontend_path, "oauth-success.html"))
@@ -86,6 +92,7 @@ async def fetch_recent_logs(
 # API Routers
 app.include_router(auth.router)
 app.include_router(rules.router)
+app.include_router(alerts.router)  
 
 # Error Handlers
 from fastapi import Request
