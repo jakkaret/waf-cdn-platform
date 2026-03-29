@@ -12,10 +12,11 @@ BASE_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "../../../")
 )
 
+
 ACCESS_LOG = os.path.join(BASE_DIR, "logs/nginx/access.json")
 AUDIT_LOG = os.path.join(BASE_DIR, "logs/modsecurity/audit.json")
 
-MERGE_TIMEOUT = 2  # วินาที
+MERGE_TIMEOUT = 5  # วินาที
 
 
 # -----------------------------
@@ -105,7 +106,7 @@ def normalize_modsec(data):
         "attack_type": attack_type,
         "rule_id": rule_id,
         "severity": severity,
-        "alert": bool(attack_type),
+        "alert": False,
 
         "request_length": len(url),
         "has_query": "?" in url,
@@ -135,7 +136,7 @@ def try_merge(key):
             **modsec,  # modsec override
 
             "source": "merged",
-            "alert": bool(modsec.get("attack_type"))
+            "alert": False
         }
 
         print("🔥 MERGED:", key)
@@ -187,6 +188,10 @@ async def tail_file(path):
 # -----------------------------
 # PROCESS ACCESS
 # -----------------------------
+
+# -----------------------------
+# PROCESS ACCESS
+# -----------------------------
 async def process_access_log():
     async for line in tail_file(ACCESS_LOG):
         try:
@@ -211,6 +216,10 @@ async def process_access_log():
 # -----------------------------
 # PROCESS MODSEC
 # -----------------------------
+
+# -----------------------------
+# PROCESS MODSEC
+# -----------------------------
 async def process_audit_log():
     async for line in tail_file(AUDIT_LOG):
         try:
@@ -231,6 +240,10 @@ async def process_audit_log():
         except Exception as e:
             print("audit error:", e)
 
+
+# -----------------------------
+# WORKER
+# -----------------------------
 
 # -----------------------------
 # WORKER

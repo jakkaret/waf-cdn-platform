@@ -89,10 +89,10 @@ async def alert_worker():
             ).get("Items", [])
 
             for log in logs:
-                ip = log.get("remote_addr", "unknown")
-                url = log.get("request", "unknown")
+                ip = log.get("ip", "unknown")
+                url = log.get("url", "unknown")
                 timestamp = log.get("timestamp")
-                time_local = log.get("time_local", "unknown")
+                time_local = log.get("datetime", "unknown")
                 user_id = log.get("user_id", "default-user")
 
                 if not timestamp:
