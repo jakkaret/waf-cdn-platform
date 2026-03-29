@@ -15,7 +15,11 @@ db = DynamoDBService()
 API_ID = int(os.getenv("TELEGRAM_API_ID"))
 API_HASH = os.getenv("TELEGRAM_API_HASH")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID"))
+users = db.dynamodb.Table("waf_users").scan(
+    FilterExpression=Attr("telegram_chat_id").exists()
+).get("Items", [])
+
+
 
 
 alerted_events = {} # key -> timestamp
@@ -69,7 +73,7 @@ async def alert_worker():
     print("📡 Telegram Alert Worker started")
 
     client = TelegramClient("waf_alert_bot", API_ID, API_HASH)
-    await client.start(bot_token=BOT_TOKEN)  # ← start ด้วย bot token ตรงๆ
+    await client.start(bot_token=BOT_TOKEN)
 
     try:
         while True:
@@ -78,6 +82,11 @@ async def alert_worker():
 
             if logs:
                 print(f"Found {len(logs)} new 403 logs")
+
+            #ดึง user ทุกครั้ง (รองรับ dynamic user)
+            users = db.dynamodb.Table("waf_users").scan(
+                FilterExpression=Attr("telegram_chat_id").exists()
+            ).get("Items", [])
 
             for log in logs:
                 ip = log.get("remote_addr", "unknown")
@@ -89,10 +98,23 @@ async def alert_worker():
                 if not timestamp:
                     continue
 
-                msg = f"🚨 WAF ALERT (403)\nIP: {ip}\nURL: {url}\nStatus: 403\nTime: {time_local}"
+                msg = f"""🚨 WAF ALERT (403)
+                    IP: {ip}
+                    URL: {url}
+                    Status: 403
+                    Time: {time_local}
+                    """
 
-                await client.send_message(CHAT_ID, msg)
+                # 🔥 ส่งให้ทุก user ที่มี telegram_chat_id
+                for user in users:
+                    chat_id = user.get("telegram_chat_id")
+                    if chat_id:
+                        try:
+                            await client.send_message(int(chat_id), msg)
+                        except Exception as e:
+                            print("Send telegram error:", e)
 
+                # save alert
                 db.save_alert(
                     user_id=user_id,
                     alert_id=str(timestamp),
@@ -102,6 +124,7 @@ async def alert_worker():
                     message="WAF 403 detected"
                 )
 
+                # mark alerted
                 db.mark_log_alerted(user_id, timestamp)
 
             await asyncio.sleep(5)

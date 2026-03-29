@@ -4,6 +4,7 @@ uvicorn[standard]==0.24.0
 
 # HTTP Requests (สำหรับ Telegram API)
 requests==2.31.0
+httpx==0.27.0
 
 # Python ASGI Server
 python-multipart==0.0.6
@@ -15,6 +16,7 @@ python-dotenv==1.0.0
 boto3==1.34.34
 
 # Telegram API Client
+
 telethon==1.34.0
 
 # JWT Authentication
@@ -25,3 +27,4 @@ argon2-cffi==25.1.0
 
 # Email Validation
 email-validator==2.1.0
+

@@ -15,7 +15,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     username: str
     password: str
-    role: Optional[str] = "viewer"
+    role: Optional[str] = "admin"
 
 
 class LoginRequest(BaseModel):

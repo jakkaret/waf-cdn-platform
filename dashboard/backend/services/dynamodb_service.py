@@ -18,7 +18,7 @@ class DynamoDBService:
         self.alerts_table_name = "waf_alerts"
         self.logs_table_name = "waf_logs"
         self.rules_table_name = "waf_rules"
-
+        self.users_table_name = "waf_users"
         self.dynamodb = boto3.resource(
             "dynamodb",
             region_name=self.region,
@@ -30,6 +30,7 @@ class DynamoDBService:
         self.alerts_table = self.dynamodb.Table(self.alerts_table_name)
         self.logs_table = self.dynamodb.Table(self.logs_table_name)
         self.rules_table = self.dynamodb.Table(self.rules_table_name)
+        self.waf_users = self.dynamodb.Table(self.users_table_name)
     
     def convert_floats(self, obj):
         if isinstance(obj, float):
@@ -40,14 +41,12 @@ class DynamoDBService:
             return [self.convert_floats(i) for i in obj]
         else:
             return obj
-    # -----------------------------
     # LOGS
-    # -----------------------------
     def save_log(self, event):
         try:
             event = self.convert_floats(event)
 
-            # ✅ เติม primary key ถ้าไม่มี
+            #เติม primary key ถ้าไม่มี
             event["user_id"] = event.get("user_id", "default-user")
             event["log_id"] = event.get("log_id", str(uuid.uuid4()))
 
@@ -67,9 +66,8 @@ class DynamoDBService:
             print("Failed to fetch logs:", e)
             return []
 
-     # -----------------------------
+
     # ALERTS
-    # -----------------------------
     def save_alert(
         self,
         user_id: str,
@@ -79,9 +77,9 @@ class DynamoDBService:
         status: str,
         message: str,
     ) -> bool:
-        """
-        บันทึก alert ที่จำเป็นลง DynamoDB (waf_alerts)
-        """
+        
+        #บันทึก alert ที่จำเป็นลง DynamoDB (waf_alerts)
+        
         try:
             self.alerts_table.put_item(
                 Item={
@@ -128,9 +126,7 @@ class DynamoDBService:
             print("Failed to update alert flag:", e)
 
 
-    # -----------------------------
     # TEST CONNECTION
-    # -----------------------------
     # def test_connection(self) -> bool:
     #     try:
     #         self.alerts_table.put_item(
@@ -149,10 +145,7 @@ class DynamoDBService:
     #         print("❌ DynamoDB connection failed:", e)
     #         return False
 
-
-# -----------------------------
 # ตัวอย่างการใช้งาน
-# -----------------------------
 if __name__ == "__main__":
     db = DynamoDBService()
 
