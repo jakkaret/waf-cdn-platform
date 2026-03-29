@@ -18,6 +18,11 @@ server {
     access_log /var/log/nginx/access.log json_combined;
     modsecurity on;
     modsecurity_transaction_id "$request_id";
+    modsecurity_rules '
+    SecRuleEngine On
+    SecRequestHeaderAccess On
+    SecRule REQUEST_HEADERS:X-Request-ID "@rx .*" \
+        "id:900001,phase:1,pass,setvar:tx.request_id=%{REQUEST_HEADERS.X-Request-ID}"';
     access_log /var/log/nginx/access.log json_combined;
     location = /healthz {
     access_log off;
