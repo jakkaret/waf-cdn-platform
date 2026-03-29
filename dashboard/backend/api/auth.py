@@ -9,9 +9,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 auth_service = AuthService()
 
 
-# ------------------------------------------------------------------
 # Schemas
-# ------------------------------------------------------------------
 
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -39,9 +37,7 @@ class UpdateRoleRequest(BaseModel):
     role: str
 
 
-# ------------------------------------------------------------------
 # Local register / login
-# ------------------------------------------------------------------
 
 @router.post("/register")
 async def register(req: RegisterRequest, response: Response):
@@ -126,9 +122,7 @@ async def logout(response: Response):
     return {"message": "Logged out"}
 
 
-# ------------------------------------------------------------------
 # Google OAuth
-# ------------------------------------------------------------------
 
 @router.get("/google")
 async def google_login():
@@ -150,20 +144,16 @@ async def google_callback(code: str, response: Response):
         "email": user["email"],
     })
 
-    resp = RedirectResponse(url="/", status_code=302)
-    resp.set_cookie(
-        key="access_token",
-        value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=3600,
+    #redirect ไป oauth-success.html พร้อม token
+    resp = RedirectResponse(
+        url=f"/oauth-success.html?token={token}",
+        status_code=302
     )
+    resp.set_cookie(key="access_token", value=token, httponly=True, samesite="lax", max_age=3600)
     return resp
 
 
-# ------------------------------------------------------------------
 # Telegram Login Widget
-# ------------------------------------------------------------------
 
 @router.post("/telegram")
 async def telegram_login(req: TelegramLoginRequest, response: Response):
@@ -195,18 +185,14 @@ async def telegram_login(req: TelegramLoginRequest, response: Response):
     }
 
 
-# ------------------------------------------------------------------
 # Current user info
-# ------------------------------------------------------------------
 
 @router.get("/me")
 async def me(current_user: dict = Depends(get_current_user)):
     return _safe_user(current_user)
 
 
-# ------------------------------------------------------------------
 # User management (admin only)
-# ------------------------------------------------------------------
 
 @router.get("/users")
 async def list_users(admin: dict = Depends(require_admin)):
@@ -227,9 +213,7 @@ async def update_user_role(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# ------------------------------------------------------------------
 # Helpers
-# ------------------------------------------------------------------
 
 def _safe_user(user: dict) -> dict:
     return {

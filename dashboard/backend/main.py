@@ -70,6 +70,10 @@ async def system_info(current_user: dict = Depends(require_viewer_or_above)):
         "role": current_user.get("role"),
     }
 
+@app.get("/oauth-success.html")
+async def serve_oauth_success():
+    return FileResponse(os.path.join(frontend_path, "oauth-success.html"))
+
 # Logs (protected - viewer+)
 @app.get("/api/logs/recent")
 async def fetch_recent_logs(
