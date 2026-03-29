@@ -5,111 +5,630 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WAF - Attack Logs</title>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/assets/css/style.css">
     <style>
-        body { font-family: 'DM Sans', sans-serif; }
+        body { font-family: 'DM Sans', sans-serif; background: #f5f7fa; }
 
-        .content { padding: 30px; }
+        /* ── Page header ── */
+        .page-hd {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .page-hd h1 { font-size: 22px; font-weight: 700; color: #2d3748; margin: 0; }
+        .page-hd p  { font-size: 13px; color: #a0aec0; margin: 4px 0 0; }
 
-        .page-header { margin-bottom: 28px; }
-        .page-header h1 { font-size: 24px; font-weight: 700; color: #2d3748; }
-        .page-header p  { color: #718096; font-size: 14px; margin-top: 4px; }
+        /* ── Summary bar ── */
+        .summary-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+        .sum-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 14px 16px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.05);
+        }
+        .sum-label { font-size: 11.5px; color: #a0aec0; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+        .sum-value { font-size: 24px; font-weight: 700; color: #2d3748; margin-top: 2px; line-height: 1.2; }
+        .sum-value.red    { color: #e53e3e; }
+        .sum-value.orange { color: #dd6b20; }
+        .sum-value.green  { color: #38a169; }
+        .sum-value.blue   { color: #3182ce; }
 
-        .logs-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        /* ── Filter panel ── */
+        .filter-panel {
+            background: #fff;
+            border-radius: 14px;
+            padding: 16px 20px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.05);
+            margin-bottom: 16px;
+        }
+        .filter-panel .filter-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .filter-group label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #718096;
+        }
+        .filter-group input,
+        .filter-group select {
+            height: 34px;
+            padding: 0 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: 'DM Sans', sans-serif;
+            background: #fff;
+            color: #2d3748;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .filter-group input:focus,
+        .filter-group select:focus { border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
+        .filter-group input[type="text"]  { min-width: 180px; }
+        .filter-group input[type="search"]{ min-width: 220px; }
+        .search-wrap { position: relative; }
+        .search-wrap input { padding-left: 32px; }
+        .search-wrap .si {
+            position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+            width: 14px; height: 14px; color: #a0aec0; pointer-events: none;
+        }
+        .filter-group select { min-width: 130px; cursor: pointer; }
 
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 13.5px; }
-        th { background: #f7fafc; color: #4a5568; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
-        tr:hover td { background: #f7fafc; }
+        .filter-divider { width: 1px; height: 34px; background: #e2e8f0; margin: 0 4px; align-self: flex-end; }
 
-        .badge { padding: 3px 10px; border-radius: 12px; font-size: 11.5px; font-weight: 600; }
-        .badge-200 { background: #e6f9f0; color: #0f9d58; }
-        .badge-403 { background: #fff4e5; color: #f57c00; }
-        .badge-500 { background: #fdecea; color: #d93025; }
-        .badge-default { background: #edf2f7; color: #4a5568; }
+        .btn-apply {
+            height: 34px; padding: 0 16px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff; border: none; border-radius: 8px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            font-family: 'DM Sans', sans-serif;
+            transition: opacity 0.15s, transform 0.1s;
+        }
+        .btn-apply:hover { opacity: 0.9; transform: translateY(-1px); }
 
-        .mono { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+        .btn-reset {
+            height: 34px; padding: 0 14px;
+            background: #f7fafc; color: #4a5568;
+            border: 1px solid #e2e8f0; border-radius: 8px;
+            font-size: 13px; cursor: pointer;
+            font-family: 'DM Sans', sans-serif;
+            transition: background 0.15s;
+        }
+        .btn-reset:hover { background: #edf2f7; }
+
+        /* Active filter tags */
+        .active-filters {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .filter-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px 3px 10px;
+            background: #eef0ff;
+            color: #4c51bf;
+            border-radius: 20px;
+            font-size: 11.5px;
+            font-weight: 600;
+        }
+        .filter-tag button {
+            background: none; border: none; cursor: pointer;
+            color: #7f9cf5; font-size: 12px; padding: 0; line-height: 1;
+        }
+
+        /* ── Table toolbar ── */
+        .table-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid #e2e8f0;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .table-toolbar .tt-left { display: flex; align-items: center; gap: 8px; }
+        .result-count { font-size: 13px; color: #718096; }
+        .result-count strong { color: #2d3748; }
+
+        .btn-export {
+            display: flex; align-items: center; gap: 6px;
+            padding: 6px 14px; background: #f7fafc; border: 1px solid #e2e8f0;
+            border-radius: 8px; font-size: 12.5px; color: #4a5568; cursor: pointer;
+            font-family: 'DM Sans', sans-serif; transition: background 0.15s;
+        }
+        .btn-export:hover { background: #edf2f7; }
+        .btn-export svg { width: 13px; height: 13px; }
+
+        .btn-refresh {
+            display: flex; align-items: center; gap: 6px;
+            padding: 6px 14px; background: #f7fafc; border: 1px solid #e2e8f0;
+            border-radius: 8px; font-size: 12.5px; color: #4a5568; cursor: pointer;
+            font-family: 'DM Sans', sans-serif; transition: background 0.15s;
+        }
+        .btn-refresh:hover { background: #edf2f7; }
+        .btn-refresh svg { width: 13px; height: 13px; }
+
+        /* ── Table ── */
+        .logs-card {
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+
+        .logs-table { width: 100%; border-collapse: collapse; }
+        .logs-table th {
+            padding: 10px 14px;
+            background: #f7fafc;
+            color: #4a5568;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #e2e8f0;
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+        }
+        .logs-table th:hover { background: #edf2f7; }
+        .logs-table th .sort-icon { margin-left: 4px; opacity: 0.4; font-size: 10px; }
+        .logs-table th.sorted .sort-icon { opacity: 1; color: #667eea; }
+
+        .logs-table td {
+            padding: 10px 14px;
+            font-size: 13px;
+            border-bottom: 1px solid #f0f4f8;
+            vertical-align: middle;
+        }
+        .logs-table tr:last-child td { border-bottom: none; }
+        .logs-table tr:hover td { background: #f7f9ff; cursor: pointer; }
+        .logs-table tr.row-403 td { background: #fff9f0; }
+        .logs-table tr.row-403:hover td { background: #fff3e0; }
+        .logs-table tr.row-5xx td { background: #fff5f5; }
+        .logs-table tr.row-5xx:hover td { background: #fed7d7; }
+
+        /* ── Cell styles ── */
+        .mono { font-family: 'Courier New', monospace; font-size: 12px; }
+        .cell-time { white-space: nowrap; color: #718096; font-size: 12px; }
+        .cell-ip   { font-family: monospace; font-size: 12px; color: #4a5568; }
+        .cell-url  {
+            max-width: 240px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            font-family: monospace; font-size: 12px;
+        }
+
+        .badge-method {
+            display: inline-block;
+            padding: 2px 8px; border-radius: 5px;
+            font-size: 11px; font-weight: 700; font-family: monospace;
+        }
+        .m-get    { background: #e6f9f0; color: #276749; }
+        .m-post   { background: #ebf4ff; color: #2c5282; }
+        .m-put    { background: #fefce8; color: #744210; }
+        .m-patch  { background: #fef5e7; color: #7b341e; }
+        .m-delete { background: #fff5f5; color: #742a2a; }
+        .m-other  { background: #edf2f7; color: #4a5568; }
+
+        .badge-status {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 3px 10px; border-radius: 20px;
+            font-size: 11.5px; font-weight: 600;
+        }
+        .s-200 { background: #e6f9f0; color: #276749; }
+        .s-403 { background: #fff4e5; color: #c05621; }
+        .s-5xx { background: #fff5f5; color: #c53030; }
+        .s-def { background: #edf2f7; color: #4a5568; }
+
+        .badge-sev {
+            display: inline-block;
+            padding: 2px 9px; border-radius: 20px;
+            font-size: 11px; font-weight: 600;
+        }
+        .sev-critical { background: #fff5f5; color: #c53030; }
+        .sev-high     { background: #fff4e5; color: #c05621; }
+        .sev-medium   { background: #fefce8; color: #b7791f; }
+        .sev-low      { background: #e6fffa; color: #276749; }
+        .sev-null     { background: #edf2f7; color: #718096; }
+
+        .badge-source {
+            display: inline-block;
+            padding: 2px 8px; border-radius: 5px;
+            font-size: 11px; font-weight: 600;
+        }
+        .src-nginx  { background: #ebf4ff; color: #2b6cb0; }
+        .src-modsec { background: #faf5ff; color: #6b46c1; }
+        .src-other  { background: #edf2f7; color: #4a5568; }
+
+        .icon-flag { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+        .flag-susp { background: #f6ad55; }
+        .flag-ok   { background: #68d391; }
+
+        /* ── Pagination ── */
+        .pagination-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-top: 1px solid #e2e8f0;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .page-info { font-size: 13px; color: #718096; }
+        .page-btns { display: flex; gap: 4px; }
+        .page-btn {
+            width: 32px; height: 32px; border-radius: 8px;
+            border: 1px solid #e2e8f0; background: #fff;
+            cursor: pointer; font-size: 13px; display: flex;
+            align-items: center; justify-content: center;
+            transition: all 0.15s; color: #4a5568;
+        }
+        .page-btn:hover { background: #f7fafc; border-color: #cbd5e0; }
+        .page-btn.active { background: #667eea; color: #fff; border-color: #667eea; }
+        .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* ── Detail Drawer ── */
+        .drawer-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.35);
+            z-index: 500;
+        }
+        .drawer-overlay.open { display: block; }
+
+        .drawer {
+            position: fixed;
+            top: 0; right: -520px;
+            width: 480px; max-width: 95vw;
+            height: 100vh;
+            background: #fff;
+            box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+            z-index: 501;
+            display: flex;
+            flex-direction: column;
+            transition: right 0.28s cubic-bezier(0.4,0,0.2,1);
+            overflow: hidden;
+        }
+        .drawer.open { right: 0; }
+
+        .drawer-header {
+            padding: 18px 20px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .drawer-header h3 { font-size: 15px; font-weight: 700; margin: 0; color: #2d3748; }
+        .drawer-close {
+            width: 28px; height: 28px; border-radius: 7px;
+            background: none; border: 1px solid #e2e8f0;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            color: #718096; transition: background 0.15s;
+        }
+        .drawer-close:hover { background: #f7fafc; }
+
+        .drawer-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .detail-section { margin-bottom: 20px; }
+        .detail-section-title {
+            font-size: 10.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: #a0aec0;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #f0f4f8;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding: 7px 0;
+            border-bottom: 1px solid #f7fafc;
+            gap: 12px;
+        }
+        .detail-row:last-child { border-bottom: none; }
+        .detail-key {
+            font-size: 12.5px;
+            color: #718096;
+            font-weight: 500;
+            flex-shrink: 0;
+            min-width: 110px;
+        }
+        .detail-val {
+            font-size: 12.5px;
+            color: #2d3748;
+            text-align: right;
+            word-break: break-all;
+        }
+        .detail-val.mono { font-size: 12px; }
+        .detail-val.ua {
+            font-size: 11px; color: #718096;
+            text-align: right; word-break: break-all;
+        }
+
+        .raw-block {
+            background: #1a1e2e;
+            border-radius: 8px;
+            padding: 14px;
+            font-family: 'Courier New', monospace;
+            font-size: 11.5px;
+            color: #a8d5ff;
+            overflow-x: auto;
+            white-space: pre;
+            line-height: 1.6;
+        }
+
+        /* ── Empty / Loading ── */
+        .empty-state {
+            padding: 60px; text-align: center; color: #a0aec0;
+        }
+        .empty-state svg { width: 40px; height: 40px; margin: 0 auto 12px; display: block; opacity: 0.3; }
+        .empty-state p { font-size: 14px; margin: 0; }
+        .empty-state small { font-size: 12px; color: #cbd5e0; display: block; margin-top: 4px; }
+
+        .loading-row td { text-align: center; padding: 40px; color: #a0aec0; font-size: 13px; }
     </style>
 </head>
 <body>
 <div style="display:flex;">
-
-    <!-- Sidebar injected by Auth.renderShell -->
-
     <div class="main" style="flex:1;">
         <div class="content">
-            <div class="page-header">
-                <h1>Attack Logs</h1>
-                <p>Recent WAF log events from DynamoDB</p>
+
+            <!-- Page header -->
+            <div class="page-hd">
+                <div>
+                    <h1>Attack Logs</h1>
+                    <p>Real-time WAF event viewer — click any row for full details</p>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <span id="auto-refresh-badge" style="font-size:11.5px;color:#38a169;background:#e6f9f0;padding:4px 10px;border-radius:20px;font-weight:600;">
+                        ● Live
+                    </span>
+                    <label style="font-size:12px;color:#718096;cursor:pointer;display:flex;align-items:center;gap:5px;">
+                        <input type="checkbox" id="auto-refresh-toggle" checked style="cursor:pointer;">
+                        Auto-refresh
+                    </label>
+                </div>
             </div>
 
-            <div class="logs-card">
-                <table id="logs-table">
-                    <thead>
-                        <tr>
-                            <th>User</th>
-                            <th>IP</th>
-                            <th>Method</th>
-                            <th>URL / Request</th>
-                            <th>Status</th>
-                            <th>Timestamp</th>
-                        </tr>
-                    </thead>
-                    <tbody id="logs-body">
-                        <tr><td colspan="6" style="text-align:center;padding:40px;color:#a0aec0;">Loading...</td></tr>
-                    </tbody>
-                </table>
+            <!-- Summary bar -->
+            <div class="summary-bar">
+                <div class="sum-card">
+                    <div class="sum-label">Total</div>
+                    <div class="sum-value blue" id="s-total">—</div>
+                </div>
+                <div class="sum-card">
+                    <div class="sum-label">Blocked 403</div>
+                    <div class="sum-value red" id="s-403">—</div>
+                </div>
+                <div class="sum-card">
+                    <div class="sum-label">Allowed 2xx</div>
+                    <div class="sum-value green" id="s-200">—</div>
+                </div>
+                <div class="sum-card">
+                    <div class="sum-label">5xx Errors</div>
+                    <div class="sum-value orange" id="s-5xx">—</div>
+                </div>
+                <div class="sum-card">
+                    <div class="sum-label">Suspicious</div>
+                    <div class="sum-value orange" id="s-susp">—</div>
+                </div>
+                <div class="sum-card">
+                    <div class="sum-label">Unique IPs</div>
+                    <div class="sum-value blue" id="s-ips">—</div>
+                </div>
             </div>
+
+            <!-- Filter panel -->
+            <div class="filter-panel">
+                <div class="filter-row">
+
+                    <!-- Search -->
+                    <div class="filter-group">
+                        <label>Search</label>
+                        <div class="search-wrap">
+                            <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                            </svg>
+                            <input type="search" id="f-search" placeholder="IP, URL, user agent…">
+                        </div>
+                    </div>
+
+                    <!-- Status -->
+                    <div class="filter-group">
+                        <label>Status</label>
+                        <select id="f-status">
+                            <option value="">All Status</option>
+                            <option value="200">200 Allow</option>
+                            <option value="403">403 Block</option>
+                            <option value="5xx">5xx Error</option>
+                        </select>
+                    </div>
+
+                    <!-- Method -->
+                    <div class="filter-group">
+                        <label>Method</label>
+                        <select id="f-method">
+                            <option value="">All Methods</option>
+                            <option>GET</option>
+                            <option>POST</option>
+                            <option>PUT</option>
+                            <option>PATCH</option>
+                            <option>DELETE</option>
+                        </select>
+                    </div>
+
+                    <!-- Severity -->
+                    <div class="filter-group">
+                        <label>Severity</label>
+                        <select id="f-severity">
+                            <option value="">All Severity</option>
+                            <option value="CRITICAL">Critical</option>
+                            <option value="HIGH">High</option>
+                            <option value="MEDIUM">Medium</option>
+                            <option value="LOW">Low</option>
+                            <option value="null">None</option>
+                        </select>
+                    </div>
+
+                    <!-- Source -->
+                    <div class="filter-group">
+                        <label>Source</label>
+                        <select id="f-source">
+                            <option value="">All Sources</option>
+                            <option value="nginx">nginx</option>
+                            <option value="modsecurity">modsecurity</option>
+                        </select>
+                    </div>
+
+                    <!-- Suspicious -->
+                    <div class="filter-group">
+                        <label>Suspicious</label>
+                        <select id="f-susp">
+                            <option value="">All</option>
+                            <option value="true">Suspicious only</option>
+                            <option value="false">Normal only</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-divider"></div>
+
+                    <!-- Limit -->
+                    <div class="filter-group">
+                        <label>Fetch</label>
+                        <select id="f-limit" style="min-width:90px;">
+                            <option value="25">25 rows</option>
+                            <option value="50">50 rows</option>
+                            <option value="100" selected>100 rows</option>
+                        </select>
+                    </div>
+
+                    <button class="btn-apply" onclick="applyFilters()">Apply</button>
+                    <button class="btn-reset" onclick="resetFilters()">Reset</button>
+                </div>
+
+                <!-- Active filter tags -->
+                <div class="active-filters" id="active-filters"></div>
+            </div>
+
+            <!-- Log table card -->
+            <div class="logs-card">
+                <div class="table-toolbar">
+                    <div class="tt-left">
+                        <span class="result-count" id="result-count">Loading…</span>
+                        <span id="last-upd" style="font-size:11.5px;color:#cbd5e0;margin-left:4px;"></span>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn-export" onclick="exportCSV()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            Export CSV
+                        </button>
+                        <button class="btn-refresh" onclick="loadLogs()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 4 23 10 17 10"/>
+                                <path d="M20.49 15a9 9 0 1 1-.08-7.94"/>
+                            </svg>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <div style="overflow-x:auto;">
+                    <table class="logs-table">
+                        <thead>
+                            <tr>
+                                <th onclick="sortBy('datetime')" id="th-datetime">
+                                    Time <span class="sort-icon">↕</span>
+                                </th>
+                                <th onclick="sortBy('ip')" id="th-ip">
+                                    Source IP <span class="sort-icon">↕</span>
+                                </th>
+                                <th onclick="sortBy('method')" id="th-method">
+                                    Method <span class="sort-icon">↕</span>
+                                </th>
+                                <th onclick="sortBy('url')" id="th-url">
+                                    URL <span class="sort-icon">↕</span>
+                                </th>
+                                <th onclick="sortBy('status')" id="th-status">
+                                    Status <span class="sort-icon">↕</span>
+                                </th>
+                                <th onclick="sortBy('rule_id')" id="th-rule_id">
+                                    Rule ID <span class="sort-icon">↕</span>
+                                </th>
+                                <th onclick="sortBy('severity')" id="th-severity">
+                                    Severity <span class="sort-icon">↕</span>
+                                </th>
+                                <th onclick="sortBy('source')" id="th-source">
+                                    Source <span class="sort-icon">↕</span>
+                                </th>
+                                <th>Flags</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logs-body">
+                            <tr class="loading-row"><td colspan="9">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="pagination-bar">
+                    <span class="page-info" id="page-info"></span>
+                    <div class="page-btns" id="page-btns"></div>
+                </div>
+            </div>
+
         </div>
     </div>
 </div>
 
+<!-- Detail drawer -->
+<div class="drawer-overlay" id="overlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+    <div class="drawer-header">
+        <h3>Log Detail</h3>
+        <button class="drawer-close" onclick="closeDrawer()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+        </button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+</div>
+
 <script src="/assets/auth.js"></script>
-<script>
-    document.addEventListener("DOMContentLoaded", () => {
-        Auth.renderShell("logs");
-        loadLogs();
-    });
-
-    async function loadLogs() {
-        const res = await Auth.apiFetch("/api/logs/recent?limit=25");
-        if (!res) return;
-
-        const data  = await res.json();
-        const tbody = document.getElementById("logs-body");
-        tbody.innerHTML = "";
-
-        const logs = data.logs || [];
-        if (logs.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='6' style='text-align:center;padding:40px;color:#a0aec0;'>No logs found</td></tr>";
-            return;
-        }
-
-        logs.forEach(log => {
-            const status = log.status || log.transaction?.response?.http_code || "-";
-            const ip     = log.ip || log.remote_addr || log.transaction?.client_ip || "-";
-            const method = log.method || log.transaction?.request?.method || "-";
-            const url    = log.request || log.transaction?.request?.uri || "-";
-            const ts     = log.time_local || log.timestamp || "-";
-            const userId = log.user_id || "-";
-
-            let badgeClass = "badge-default";
-            if (String(status) === "200") badgeClass = "badge-200";
-            if (String(status) === "403") badgeClass = "badge-403";
-            if (String(status).startsWith("5")) badgeClass = "badge-500";
-
-            const tr = document.createElement("tr");
-            tr.innerHTML = `
-                <td class="mono">${userId}</td>
-                <td class="mono">${ip}</td>
-                <td>${method}</td>
-                <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${url}">${url}</td>
-                <td><span class="badge ${badgeClass}">${status}</span></td>
-                <td class="mono" style="font-size:11px;">${ts}</td>
-            `;
-            tbody.appendChild(tr);
-        });
-    }
-</script>
+<script src="/assets/js/log.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
