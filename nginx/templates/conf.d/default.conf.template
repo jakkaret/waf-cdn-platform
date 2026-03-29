@@ -18,12 +18,16 @@ server {
     modsecurity on;
     modsecurity_transaction_id "$request_id";
     modsecurity_rules '
+    SecAuditEngine On
+    SecAuditLogParts ABCIJDEFHZ
+    SecAuditLogRelevantStatus ".*"
     SecRuleEngine On
     SecRule REQUEST_HEADERS:X-Request-ID "@rx .*" "id:900001,phase:1,pass,setvar:tx.request_id=%{REQUEST_HEADERS.X-Request-ID}"';
     location = /healthz {
     access_log off;
 }
     location / {
+        
 	    proxy_pass http://dvwa_backend;
         proxy_set_header Host $host;
 	    proxy_set_header X-Request-ID $request_id;

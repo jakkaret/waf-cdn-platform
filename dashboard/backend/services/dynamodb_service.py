@@ -102,7 +102,7 @@ class DynamoDBService:
     def get_unalerted_403_logs(self):
         try:
             response = self.logs_table.scan(
-                FilterExpression=Attr("status").eq("403") & Attr("alert").eq(False)
+                FilterExpression=Attr("status").eq(403) & Attr("alert").eq(False)
             )
             return response.get("Items", [])
         except Exception as e:
