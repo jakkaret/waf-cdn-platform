@@ -1,0 +1,12 @@
+SecRuleEngine On
+SecRequestBodyAccess On
+SecResponseBodyAccess Off
+SecAuditEngine RelevantOnly
+SecAuditLogRelevantStatus "^(?:5|4(?!04))"
+SecAuditLogParts ABIJDEFHZ
+SecAuditLogType Serial
+SecAuditLog /var/log/modsecurity/audit.json
+SecAuditLogFormat JSON
+SecTmpDir /tmp/modsecurity/tmp
+SecDataDir /tmp/modsecurity/data
+SecStatusEngine Off

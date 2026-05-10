@@ -1,20 +1,19 @@
-from asyncio import log
 from telethon import TelegramClient
 from dotenv import load_dotenv
 from services.dynamodb_service import DynamoDBService
 from boto3.dynamodb.conditions import Attr
 import asyncio
 import os
-import time
 
 
 
 
 load_dotenv()
 db = DynamoDBService()
-API_ID = int(os.getenv("TELEGRAM_API_ID"))
+_api_id_raw = os.getenv("TELEGRAM_API_ID")
+API_ID = int(_api_id_raw) if _api_id_raw and _api_id_raw.isdigit() else None
 API_HASH = os.getenv("TELEGRAM_API_HASH")
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOTTOKEN")
 users = db.dynamodb.Table("waf_users").scan(
     FilterExpression=Attr("telegram_chat_id").exists()
 ).get("Items", [])
@@ -71,6 +70,9 @@ ALERT_TTL = 600  # 10 นาที
 # 🔁 background worker
 async def alert_worker():
     print("📡 Telegram Alert Worker started")
+    if not API_ID or not API_HASH or not BOT_TOKEN:
+        print("⚠️ Telegram worker disabled: missing TELEGRAM_API_ID/TELEGRAM_API_HASH/TELEGRAM_BOT_TOKEN")
+        return
 
     client = TelegramClient("waf_alert_bot", API_ID, API_HASH)
     await client.start(bot_token=BOT_TOKEN)

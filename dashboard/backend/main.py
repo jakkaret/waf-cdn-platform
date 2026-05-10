@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from api import rules
 from api import auth
+from api import cdn
 from services.log_forward import log_forward_worker
 from services.telegram_listener import alert_worker
 from services.rbac import require_viewer_or_above
@@ -61,6 +62,9 @@ async def serve_alerts():
 @app.get("/user_role.html")
 async def serve_user_role():
     return FileResponse(os.path.join(frontend_path, "user_role.html"))
+@app.get("/cdn.html")
+async def serve_cdn():
+    return FileResponse(os.path.join(frontend_path, "cdn.html"))
 
 
 # System info (protected)
@@ -93,6 +97,7 @@ async def fetch_recent_logs(
 app.include_router(auth.router)
 app.include_router(rules.router)
 app.include_router(alerts.router)  
+app.include_router(cdn.router)
 
 # Error Handlers
 from fastapi import Request
