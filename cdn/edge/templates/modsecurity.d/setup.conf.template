@@ -1,0 +1,9 @@
+# CDN edge ModSecurity setup
+Include /etc/modsecurity.d/modsecurity.conf
+Include /etc/modsecurity.d/modsecurity-override.conf
+
+Include /etc/modsecurity.d/owasp-crs/crs-setup.conf
+Include /etc/modsecurity.d/owasp-crs/rules/*.conf
+
+# Project custom rules
+Include /opt/custom-rules/*.conf

@@ -6,7 +6,7 @@ import os, secrets, time, httpx
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 db = DynamoDBService()
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOTTOKEN", "")
 
 # In-memory: code → {user_id, expires_at}
 _pending: dict = {}
