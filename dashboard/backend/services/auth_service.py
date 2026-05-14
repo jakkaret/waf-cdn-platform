@@ -8,13 +8,13 @@ from datetime import datetime, timedelta
 
 import boto3
 import requests
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from jose import jwt, JWTError
 from boto3.dynamodb.conditions import Attr
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
 
-load_dotenv()
+load_dotenv(find_dotenv())
 
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-secret-in-production")
 ALGORITHM = "HS256"

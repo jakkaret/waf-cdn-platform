@@ -17,6 +17,12 @@ def normalize_cdn_access(data, region):
     method = data.get("method", "")
     url = data.get("uri", "")
     
+    req_time = data.get("request_time", "0")
+    try:
+        latency_ms = int(float(req_time) * 1000)
+    except (ValueError, TypeError):
+        latency_ms = 0
+
     return {
         "request_id": data.get("request_id", ""),
         "ip": data.get("remote_addr"),
@@ -30,7 +36,7 @@ def normalize_cdn_access(data, region):
         "region": region.upper(),
         "edge_node": f"edge-{region.lower()}",
         "cache_status": data.get("cache_status", "MISS"),
-        "latency": data.get("request_time", "0"),
+        "latency_ms": latency_ms,
         "alert": False,
         "raw": data
     }

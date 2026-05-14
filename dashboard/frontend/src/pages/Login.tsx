@@ -35,7 +35,7 @@ export const Login: React.FC = () => {
   }
 
   const handleGoogleLogin = () => {
-    window.location.href = '/api/auth/google/login'
+    window.location.href = '/api/auth/google'
   }
 
   return (

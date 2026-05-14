@@ -1,5 +1,10 @@
 import os
 import asyncio
+from pathlib import Path
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv())
+
 from services.fetch_logs import get_recent_logs
 from fastapi.responses import FileResponse
 from fastapi import FastAPI, Depends

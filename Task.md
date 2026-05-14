@@ -13,10 +13,10 @@
 10. เมื่อทำ Task เสร็จ ให้รายงานผล แล้วถามฉันก่อนไปต่อ Task ถัดไป และบันทึกสถานะ
 
 ## สถานะปัจจุบัน
-- Phase 1 ✅
-- Phase 2:✅
-- Phase 3:Health Check Endpoint ✅,Failover Logic ใน GeoDNS ✅
-- Phase 4: Central Log Collection ✅, Metrics Dashboard 🔄 
+- Phase 1 ✅ 
+- Phase 2: ✅ Rate Limiting per Edge ✅, TLS / HTTPS (Edge SSL) ✅, Static vs Dynamic Routing ✅, Test Scripts ✅ 
+- Phase 3: Health Check Endpoint ✅,Failover Logic ใน GeoDNS ✅
+- Phase 4: Central Log Collection ✅, Metrics Dashboard ✅, Latency Tracking ✅ 
 
 ## Task ที่เสร็จแล้ว
 
@@ -115,7 +115,6 @@ Task: Phase 3A — Health Check Endpoint
 
 ทำให้เสร็จสมบูรณ์พร้อมบอก path ทุกไฟล์ที่แก้ไข
 
-## Task ที่ต้องทำ (ทำตามลำดับ)
 
 ### PHASE 3
 
@@ -137,6 +136,7 @@ Task: Phase 3B — Failover Logic ใน GeoDNS ✅
 ทำให้เสร็จสมบูรณ์พร้อมบอก path ทุกไฟล์ที่แก้ไข
 
 ### PHASE 4
+
 Task: Phase 4A — Central Log Collection ✅
 
 สิ่งที่ต้องทำ:
@@ -180,7 +180,11 @@ Task: Phase 4B — Metrics Dashboard
 
 ทำให้เสร็จสมบูรณ์พร้อมบอก path ทุกไฟล์ที่แก้ไข
 
-Task: Phase 4C — Latency Tracking
+## Task ที่ต้องทำ (ทำตามลำดับ)
+
+### PHASE 4
+
+Task: Phase 4C — Latency Tracking ✅
 
 สิ่งที่ต้องทำ:
 1. ตรวจสอบว่า Nginx log format มี $request_time หรือยัง (อ่าน cdn/edge/templates/ ก่อน)
@@ -256,4 +260,4 @@ Task: Phase 5C — Global Block (IP/CIDR) across All Edges
 ทำให้เสร็จสมบูรณ์พร้อมบอก path ทุกไฟล์ที่แก้ไข
 
 ## คำสั่ง
-เริ่มทำ Task 3B เมื่อเสร็จรายงานผล แล้วถามฉันก่อนไปต่อ Task ถัดไป และบันทึกสถานะการทำงานลงในไฟล์ Task.md ด้วย 
+เริ่มทำ Task 4C เมื่อเสร็จรายงานผล แล้วถามฉันก่อนไปต่อ Task ถัดไป และบันทึกสถานะการทำงานลงในไฟล์ Task.md ด้วย 
