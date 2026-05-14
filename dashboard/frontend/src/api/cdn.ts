@@ -31,5 +31,15 @@ export const cdnApi = {
       }
     })
     return res.data
+  },
+
+  getLatency: async (region: string = 'ALL', period: string = '1h') => {
+    const res = await api.get<{
+      summary: { region: string; avg_ms: number; p95_ms: number; p99_ms: number }[];
+      timeseries: { time: string; SG: number; JP: number; TH: number }[];
+    }>('/cdn/latency', {
+      params: { region, period }
+    })
+    return res.data
   }
 }

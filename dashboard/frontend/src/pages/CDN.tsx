@@ -8,8 +8,8 @@ import { StatCard } from '../components/ui/StatCard'
 import { HealthDot } from '../components/ui/HealthDot'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
-import { BarChart, Bar, PieChart, Pie, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend } from 'recharts'
-import { Activity, Globe, Ban, HardDrive, Trash2 } from 'lucide-react'
+import { BarChart, Bar, PieChart, Pie, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend, LineChart, Line } from 'recharts'
+import { Activity, Globe, Ban, HardDrive, Trash2, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export const CDN: React.FC = () => {
@@ -34,6 +34,12 @@ export const CDN: React.FC = () => {
     mutationFn: (pattern: string) => cdnApi.purgeCache('cdn-secret-token', pattern),
     onSuccess: () => toast.success('Purge command sent successfully'),
     onError: () => toast.error('Failed to purge cache')
+  })
+
+  const { data: latencyData, isLoading: isLoadingLatency } = useQuery({
+    queryKey: ['cdn-latency'],
+    queryFn: () => cdnApi.getLatency('ALL', '1h'),
+    refetchInterval: 10000,
   })
 
   // Aggregation
@@ -169,6 +175,66 @@ export const CDN: React.FC = () => {
             </div>
           </div>
         </Card>
+      </div>
+
+      {/* Latency Section */}
+      <div className="mb-8">
+        <h3 className="text-[16px] font-bold text-text-primary mb-4 flex items-center gap-2">
+          <Clock size={18} className="text-accent" />
+          Response Time (Latency)
+        </h3>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <Card className="lg:col-span-3">
+            <CardHeader title="Latency Trend (ms)" subtitle="Real-time request processing time across regions" />
+            <div className="h-[250px]">
+              {isLoadingLatency ? (
+                <div className="w-full h-full flex items-center justify-center text-text-muted">Loading latency data...</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={latencyData?.timeseries || []} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
+                    <XAxis dataKey="time" stroke="rgba(255,255,255,0.2)" fontSize={12} />
+                    <YAxis stroke="rgba(255,255,255,0.2)" fontSize={12} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#1a1f36', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                      itemStyle={{ color: '#e4e8f0' }}
+                    />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+                    <Line type="monotone" dataKey="SG" name="Singapore (SG)" stroke="#fc8181" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="JP" name="Japan (JP)" stroke="#667eea" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="TH" name="Thailand (TH)" stroke="#68d391" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </Card>
+
+          <div className="flex flex-col gap-4">
+            {latencyData?.summary?.map(sum => (
+              <Card key={sum.region} noPadding className="flex-1 flex flex-col justify-center p-4">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-bold text-[14px]">{sum.region} Node</span>
+                  <Badge color={sum.p95_ms > 200 ? 'danger' : sum.p95_ms > 100 ? 'warning' : 'success'}>
+                    {sum.avg_ms} ms avg
+                  </Badge>
+                </div>
+                <div className="flex justify-between text-[12px] text-text-muted mt-2">
+                  <span>95th Percentile:</span>
+                  <span className="font-mono text-white">{sum.p95_ms} ms</span>
+                </div>
+                <div className="flex justify-between text-[12px] text-text-muted mt-1">
+                  <span>99th Percentile:</span>
+                  <span className="font-mono text-white">{sum.p99_ms} ms</span>
+                </div>
+              </Card>
+            ))}
+            {!latencyData?.summary?.length && !isLoadingLatency && (
+              <Card className="flex-1 flex items-center justify-center text-text-muted text-sm">
+                No latency data available
+              </Card>
+            )}
+          </div>
+        </div>
       </div>
 
       {isAdmin && (
