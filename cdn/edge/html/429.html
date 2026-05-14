@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>429 - Too Many Requests</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #f59e0b 0%, #dc2626 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            color: white;
+        }
+        .container {
+            text-align: center;
+            padding: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+        }
+        h1 {
+            font-size: 72px;
+            margin: 0;
+        }
+        p {
+            font-size: 24px;
+            margin: 20px 0;
+        }
+        .warning {
+            font-size: 16px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚡ 429</h1>
+        <p>Too Many Requests</p>
+        <div class="warning">
+            You have exceeded the rate limit for this edge node.<br>
+            Please wait a moment and try again.
+        </div>
+    </div>
+</body>
+</html>

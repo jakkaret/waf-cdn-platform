@@ -5,6 +5,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from services.rbac import require_admin, require_viewer_or_above
+from services.dynamodb_service import DynamoDBService
 
 router = APIRouter(prefix="/api/cdn", tags=["cdn"])
 
@@ -138,7 +139,7 @@ async def cdn_nodes(current_user: dict = Depends(require_viewer_or_above)):
             try:
                 r = await client.get(f"http://localhost:{port}/healthz")
                 online = r.status_code == 200
-                health_data = {"health": r.text.strip()} if online else {}
+                health_data = r.json() if online else {}
             except Exception:
                 online = False
                 health_data = {}
@@ -187,3 +188,25 @@ async def cdn_purge(
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
     return resp.json()
+
+@router.get("/logs")
+async def cdn_logs(
+    region: Optional[str] = Query("ALL", description="Filter by region (SG, JP, TH, or ALL)"),
+    limit: int = Query(50, description="Max logs to return"),
+    current_user: dict = Depends(require_viewer_or_above)
+):
+    db = DynamoDBService()
+    # Fetch logs from DynamoDB
+    all_logs = db.get_logs(limit=2000)
+    
+    # Filter for CDN logs only
+    cdn_logs_list = [log for log in all_logs if log.get("source") == "cdn"]
+    
+    # Filter by region if specified
+    if region and region.upper() != "ALL":
+        cdn_logs_list = [log for log in cdn_logs_list if log.get("region") == region.upper()]
+        
+    # Sort by timestamp descending
+    cdn_logs_list.sort(key=lambda x: int(x.get("timestamp", 0)), reverse=True)
+    
+    return {"logs": cdn_logs_list[:limit]}

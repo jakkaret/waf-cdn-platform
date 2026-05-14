@@ -22,3 +22,5 @@ AWSCLIV2.pkg
 # Telethon session files
 *.session
 *.session-journal
+
+.node_modules/ 
