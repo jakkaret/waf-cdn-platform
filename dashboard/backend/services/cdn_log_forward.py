@@ -1,0 +1,67 @@
+import asyncio
+import json
+import os
+import time
+from datetime import datetime
+from services.dynamodb_service import DynamoDBService
+
+db = DynamoDBService()
+
+BASE_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../")
+)
+
+REGIONS = ["sg", "jp", "th"]
+
+def normalize_cdn_access(data, region):
+    method = data.get("method", "")
+    url = data.get("uri", "")
+    
+    return {
+        "request_id": data.get("request_id", ""),
+        "ip": data.get("remote_addr"),
+        "method": method,
+        "url": url,
+        "status": int(data.get("status", 0)),
+        "user_agent": data.get("http_user_agent", ""),
+        "timestamp": int(time.time()),
+        "datetime": data.get("time", datetime.utcnow().isoformat() + "Z"),
+        "source": "cdn",
+        "region": region.upper(),
+        "edge_node": f"edge-{region.lower()}",
+        "cache_status": data.get("cache_status", "MISS"),
+        "latency": data.get("request_time", "0"),
+        "alert": False,
+        "raw": data
+    }
+
+async def tail_file(path):
+    print("CDN Log Forward Opening:", path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if not os.path.exists(path):
+        with open(path, 'w') as f:
+            pass
+
+    with open(path, "r", encoding="utf-8") as f:
+        f.seek(0, os.SEEK_END)
+        while True:
+            line = f.readline()
+            if not line:
+                await asyncio.sleep(0.5)
+                continue
+            yield line.strip()
+
+async def process_cdn_log(region):
+    log_path = os.path.join(BASE_DIR, f"logs/cdn/{region}/access.json")
+    async for line in tail_file(log_path):
+        try:
+            raw = json.loads(line)
+            data = normalize_cdn_access(raw, region)
+            db.save_log(data)
+        except Exception as e:
+            print(f"cdn log error ({region}):", e)
+
+async def cdn_log_forward_worker():
+    print("🚀 Starting CDN log forwarder...")
+    tasks = [process_cdn_log(region) for region in REGIONS]
+    await asyncio.gather(*tasks)

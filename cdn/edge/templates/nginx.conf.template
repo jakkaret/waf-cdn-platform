@@ -16,6 +16,7 @@ http {
 
     log_format cdn_json escape=json
         '{"time":"$time_iso8601",'
+        '"request_id":"$request_id",'
         '"region":"${EDGE_REGION}",'
         '"remote_addr":"$remote_addr",'
         '"method":"$request_method",'
@@ -24,7 +25,17 @@ http {
         '"cache_status":"$upstream_cache_status",'
         '"upstream":"$upstream_addr",'
         '"request_time":"$request_time",'
-        '"upstream_response_time":"$upstream_response_time"}';
+        '"upstream_response_time":"$upstream_response_time",'
+        '"http_user_agent":"$http_user_agent"}';
+
+    # --- Rate Limiting Zone (per-IP) ---
+    limit_req_zone $binary_remote_addr zone=edge_ratelimit:20m rate=${RATE_LIMIT_RPS}r/s;
+    limit_req_status 429;
+
+    # --- SSL Session Settings (shared across server blocks) ---
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:EdgeSSL:10m;
+    ssl_session_tickets off;
 
     proxy_cache_path /var/cache/nginx/edge
         levels=1:2

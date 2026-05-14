@@ -4,6 +4,7 @@ services:
     container_name: cdn-edge-sg
     ports:
       - "8081:80"
+      - "8441:443"
     environment:
       EDGE_REGION: SG
       ORIGIN_HOST: ${CDN_ORIGIN_HOST:-dvwa}
@@ -11,6 +12,10 @@ services:
       PARANOIA: ${CDN_PARANOIA:-1}
       ANOMALY_INBOUND: ${CDN_ANOMALY_INBOUND:-10}
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS_SG:-30}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST_SG:-60}
+      RATE_LIMIT_BURST_STATIC: ${RATE_LIMIT_BURST_STATIC_SG:-120}
+      FORCE_HTTPS: ${FORCE_HTTPS:-false}
       TZ: ${TZ:-Asia/Bangkok}
     volumes:
       - ./edge/templates/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
@@ -19,7 +24,10 @@ services:
       - ./edge/templates/modsecurity.d/modsecurity.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity.conf.template:ro
       - ./edge/templates/modsecurity.d/modsecurity-override.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity-override.conf.template:ro
       - ../modsecurity/custom-rules:/opt/custom-rules:ro
+      - ./edge/html/429.html:/usr/share/nginx/html/429.html:ro
+      - ./edge/ssl:/etc/nginx/ssl:ro
       - edge_sg_cache:/var/cache/nginx
+      - ../logs/cdn/sg:/var/log/nginx/cdn
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/healthz >/dev/null || exit 1"]
       interval: 10s
@@ -37,6 +45,7 @@ services:
     container_name: cdn-edge-jp
     ports:
       - "8082:80"
+      - "8442:443"
     environment:
       EDGE_REGION: JP
       ORIGIN_HOST: ${CDN_ORIGIN_HOST:-dvwa}
@@ -44,6 +53,10 @@ services:
       PARANOIA: ${CDN_PARANOIA:-1}
       ANOMALY_INBOUND: ${CDN_ANOMALY_INBOUND:-10}
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS_JP:-30}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST_JP:-60}
+      RATE_LIMIT_BURST_STATIC: ${RATE_LIMIT_BURST_STATIC_JP:-120}
+      FORCE_HTTPS: ${FORCE_HTTPS:-false}
       TZ: ${TZ:-Asia/Bangkok}
     volumes:
       - ./edge/templates/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
@@ -52,7 +65,10 @@ services:
       - ./edge/templates/modsecurity.d/modsecurity.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity.conf.template:ro
       - ./edge/templates/modsecurity.d/modsecurity-override.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity-override.conf.template:ro
       - ../modsecurity/custom-rules:/opt/custom-rules:ro
+      - ./edge/html/429.html:/usr/share/nginx/html/429.html:ro
+      - ./edge/ssl:/etc/nginx/ssl:ro
       - edge_jp_cache:/var/cache/nginx
+      - ../logs/cdn/jp:/var/log/nginx/cdn
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/healthz >/dev/null || exit 1"]
       interval: 10s
@@ -70,6 +86,7 @@ services:
     container_name: cdn-edge-th
     ports:
       - "8086:80"
+      - "8446:443"
     environment:
       EDGE_REGION: TH
       ORIGIN_HOST: ${CDN_ORIGIN_HOST:-dvwa}
@@ -77,6 +94,10 @@ services:
       PARANOIA: ${CDN_PARANOIA:-1}
       ANOMALY_INBOUND: ${CDN_ANOMALY_INBOUND:-10}
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS_TH:-50}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST_TH:-100}
+      RATE_LIMIT_BURST_STATIC: ${RATE_LIMIT_BURST_STATIC_TH:-200}
+      FORCE_HTTPS: ${FORCE_HTTPS:-false}
       TZ: ${TZ:-Asia/Bangkok}
     volumes:
       - ./edge/templates/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
@@ -85,7 +106,10 @@ services:
       - ./edge/templates/modsecurity.d/modsecurity.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity.conf.template:ro
       - ./edge/templates/modsecurity.d/modsecurity-override.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity-override.conf.template:ro
       - ../modsecurity/custom-rules:/opt/custom-rules:ro
+      - ./edge/html/429.html:/usr/share/nginx/html/429.html:ro
+      - ./edge/ssl:/etc/nginx/ssl:ro
       - edge_th_cache:/var/cache/nginx
+      - ../logs/cdn/th:/var/log/nginx/cdn
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/healthz >/dev/null || exit 1"]
       interval: 10s
@@ -112,6 +136,7 @@ services:
     ports:
       - "5533:53/udp"
       - "5533:53/tcp"
+      - "8053:8053"
     depends_on:
       - edge-sg
       - edge-jp

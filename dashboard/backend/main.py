@@ -9,6 +9,7 @@ from api import rules
 from api import auth
 from api import cdn
 from services.log_forward import log_forward_worker
+from services.cdn_log_forward import cdn_log_forward_worker
 from services.telegram_listener import alert_worker
 from services.rbac import require_viewer_or_above
 from api import alerts          
@@ -143,6 +144,8 @@ async def startup_event():
         app.state.alert_task = asyncio.create_task(alert_worker())
     if not hasattr(app.state, "log_forward_task"):
         app.state.log_forward_task = asyncio.create_task(log_forward_worker())
+    if not hasattr(app.state, "cdn_log_forward_task"):
+        app.state.cdn_log_forward_task = asyncio.create_task(cdn_log_forward_worker())
 
 
 @app.on_event("shutdown")
