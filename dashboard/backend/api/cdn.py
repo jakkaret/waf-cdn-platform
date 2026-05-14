@@ -1,6 +1,7 @@
 import os
 from typing import Optional
 
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -43,12 +44,12 @@ def _mock_stats() -> dict:
     base_bypass = {"SG": 8, "JP": 6, "TH": 11}
 
     total_all = {
-        "hit": 0,
-        "miss": 0,
-        "bypass": 0,
-        "total_requests": 0,
+        "cache_hit": 0,
+        "cache_miss": 0,
+        "cache_bypass": 0,
+        "request_count": 0,
         "status_2xx": 0,
-        "status_4xx": 0,
+        "blocked_count": 0,
         "status_5xx": 0,
     }
 
@@ -59,30 +60,22 @@ def _mock_stats() -> dict:
         total = h + m + b
         mock[region] = {
             "region": region,
-            "hit": h,
-            "miss": m,
-            "bypass": b,
-            "expired": int(m * 0.1),
-            "stale": int(m * 0.05),
-            "total_requests": total,
-            "hit_rate_pct": round((h / total) * 100, 2),
-            "miss_rate_pct": round((m / total) * 100, 2),
+            "cache_hit": h,
+            "cache_miss": m,
+            "cache_bypass": b,
+            "request_count": total,
             "status_2xx": int(total * 0.93),
-            "status_4xx": int(total * 0.05),
+            "blocked_count": int(total * 0.05),
             "status_5xx": int(total * 0.02),
-            "avg_response_time_ms": {"SG": 13.1, "JP": 17.3, "TH": 10.4}[region],
-            "last_updated": None,
+            "avg_latency": {"SG": 13.1, "JP": 17.3, "TH": 10.4}[region],
         }
         for key in total_all:
             total_all[key] += mock[region].get(key, 0)
 
-    gt = total_all["total_requests"] or 1
     mock["GLOBAL"] = {
         "region": "GLOBAL",
         **total_all,
-        "hit_rate_pct": round((total_all["hit"] / gt) * 100, 2),
-        "miss_rate_pct": round((total_all["miss"] / gt) * 100, 2),
-        "last_updated": None,
+        "avg_latency": 13.6, # approximate average
     }
     return mock
 
@@ -101,17 +94,7 @@ def _enrich(stats: dict) -> list:
 async def cdn_stats(current_user: dict = Depends(require_viewer_or_above)):
     raw = await _fetch_stats()
     nodes = _enrich(raw)
-    g = raw.get("GLOBAL", {})
-    return {
-        "nodes": nodes,
-        "global": g,
-        "summary": {
-            "total_edge_nodes": len(EDGE_PORTS),
-            "global_hit_rate_pct": g.get("hit_rate_pct", 0),
-            "global_miss_rate_pct": g.get("miss_rate_pct", 0),
-            "total_requests": g.get("total_requests", 0),
-        },
-    }
+    return nodes
 
 
 @router.get("/stats/{region}")
@@ -157,12 +140,7 @@ async def cdn_nodes(current_user: dict = Depends(require_viewer_or_above)):
                 }
             )
 
-    online_count = sum(1 for n in results if n["status"] == "online")
-    return {
-        "nodes": results,
-        "online_count": online_count,
-        "total_count": len(results),
-    }
+    return results
 
 
 @router.post("/purge")

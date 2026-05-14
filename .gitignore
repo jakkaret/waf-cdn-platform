@@ -23,4 +23,7 @@ AWSCLIV2.pkg
 *.session
 *.session-journal
 
+# React files
 .node_modules/ 
+node_modules/ 
+dist/ 
