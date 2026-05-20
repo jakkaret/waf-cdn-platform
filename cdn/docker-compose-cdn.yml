@@ -1,7 +1,24 @@
 services:
+  control-api:
+    build:
+      context: ./control-api
+    container_name: cdn-control-api
+    ports:
+      - "8070:8070"
+    environment:
+      CONTROL_TOKEN: ${CDN_CONTROL_TOKEN:***REDACTED***}
+      CUSTOM_RULES_DIR: /src/custom-rules
+    volumes:
+      - ../modsecurity/custom-rules:/src/custom-rules:ro
+      - cdn_control_data:/data
+    restart: unless-stopped
+    networks:
+      - cdn-net
+
   edge-sg:
     image: owasp/modsecurity-crs:nginx
     container_name: cdn-edge-sg
+    user: root
     ports:
       - "8081:80"
     environment:
@@ -11,6 +28,8 @@ services:
       PARANOIA: ${CDN_PARANOIA:-1}
       ANOMALY_INBOUND: ${CDN_ANOMALY_INBOUND:-10}
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
+      CONTROL_API_URL: http://cdn-control-api:8070
+      SYNC_INTERVAL_SEC: ${CDN_SYNC_INTERVAL_SEC:-5}
       TZ: ${TZ:-Asia/Bangkok}
     volumes:
       - ./edge/templates/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
@@ -18,7 +37,8 @@ services:
       - ./edge/templates/modsecurity.d/setup.conf.template:/etc/nginx/templates/modsecurity.d/setup.conf.template:ro
       - ./edge/templates/modsecurity.d/modsecurity.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity.conf.template:ro
       - ./edge/templates/modsecurity.d/modsecurity-override.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity-override.conf.template:ro
-      - ../modsecurity/custom-rules:/opt/custom-rules:ro
+      - ./edge/entrypoint.d/99-rulesync.sh:/docker-entrypoint.d/99-rulesync.sh:ro
+      - edge_sg_rules:/opt/custom-rules
       - edge_sg_cache:/var/cache/nginx
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/healthz >/dev/null || exit 1"]
@@ -35,6 +55,7 @@ services:
   edge-jp:
     image: owasp/modsecurity-crs:nginx
     container_name: cdn-edge-jp
+    user: root
     ports:
       - "8082:80"
     environment:
@@ -44,6 +65,8 @@ services:
       PARANOIA: ${CDN_PARANOIA:-1}
       ANOMALY_INBOUND: ${CDN_ANOMALY_INBOUND:-10}
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
+      CONTROL_API_URL: http://cdn-control-api:8070
+      SYNC_INTERVAL_SEC: ${CDN_SYNC_INTERVAL_SEC:-5}
       TZ: ${TZ:-Asia/Bangkok}
     volumes:
       - ./edge/templates/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
@@ -51,7 +74,8 @@ services:
       - ./edge/templates/modsecurity.d/setup.conf.template:/etc/nginx/templates/modsecurity.d/setup.conf.template:ro
       - ./edge/templates/modsecurity.d/modsecurity.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity.conf.template:ro
       - ./edge/templates/modsecurity.d/modsecurity-override.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity-override.conf.template:ro
-      - ../modsecurity/custom-rules:/opt/custom-rules:ro
+      - ./edge/entrypoint.d/99-rulesync.sh:/docker-entrypoint.d/99-rulesync.sh:ro
+      - edge_jp_rules:/opt/custom-rules
       - edge_jp_cache:/var/cache/nginx
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/healthz >/dev/null || exit 1"]
@@ -68,6 +92,7 @@ services:
   edge-th:
     image: owasp/modsecurity-crs:nginx
     container_name: cdn-edge-th
+    user: root
     ports:
       - "8086:80"
     environment:
@@ -77,6 +102,8 @@ services:
       PARANOIA: ${CDN_PARANOIA:-1}
       ANOMALY_INBOUND: ${CDN_ANOMALY_INBOUND:-10}
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
+      CONTROL_API_URL: http://cdn-control-api:8070
+      SYNC_INTERVAL_SEC: ${CDN_SYNC_INTERVAL_SEC:-5}
       TZ: ${TZ:-Asia/Bangkok}
     volumes:
       - ./edge/templates/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
@@ -84,7 +111,8 @@ services:
       - ./edge/templates/modsecurity.d/setup.conf.template:/etc/nginx/templates/modsecurity.d/setup.conf.template:ro
       - ./edge/templates/modsecurity.d/modsecurity.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity.conf.template:ro
       - ./edge/templates/modsecurity.d/modsecurity-override.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity-override.conf.template:ro
-      - ../modsecurity/custom-rules:/opt/custom-rules:ro
+      - ./edge/entrypoint.d/99-rulesync.sh:/docker-entrypoint.d/99-rulesync.sh:ro
+      - edge_th_rules:/opt/custom-rules
       - edge_th_cache:/var/cache/nginx
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/healthz >/dev/null || exit 1"]
@@ -113,6 +141,7 @@ services:
       - "5533:53/udp"
       - "5533:53/tcp"
     depends_on:
+      - control-api
       - edge-sg
       - edge-jp
       - edge-th
@@ -130,6 +159,7 @@ services:
     environment:
       PURGE_TOKEN: ${CDN_PURGE_TOKEN:***REDACTED***}
     depends_on:
+      - control-api
       - edge-sg
       - edge-jp
       - edge-th
@@ -142,6 +172,10 @@ services:
       - cdn-net
 
 volumes:
+  cdn_control_data:
+  edge_sg_rules:
+  edge_jp_rules:
+  edge_th_rules:
   edge_sg_cache:
   edge_jp_cache:
   edge_th_cache:
