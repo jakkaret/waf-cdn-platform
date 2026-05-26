@@ -1,0 +1,49 @@
+load_module modules/ngx_http_modsecurity_module.so;
+load_module modules/ngx_http_headers_more_filter_module.so;
+
+worker_processes auto;
+pid /tmp/nginx.pid;
+
+events {
+    worker_connections 2048;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    keepalive_timeout 60s;
+    sendfile on;
+
+    log_format cdn_json escape=json
+        '{"time":"$time_iso8601",'
+        '"request_id":"$request_id",'
+        '"region":"${EDGE_REGION}",'
+        '"remote_addr":"$remote_addr",'
+        '"method":"$request_method",'
+        '"uri":"$uri",'
+        '"status":"$status",'
+        '"cache_status":"$upstream_cache_status",'
+        '"upstream":"$upstream_addr",'
+        '"request_time":"$request_time",'
+        '"upstream_response_time":"$upstream_response_time",'
+        '"http_user_agent":"$http_user_agent"}';
+
+    # --- Rate Limiting Zone (per-IP) ---
+    limit_req_zone $binary_remote_addr zone=edge_ratelimit:20m rate=${RATE_LIMIT_RPS}r/s;
+    limit_req_status 429;
+
+    # --- SSL Session Settings (shared across server blocks) ---
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:EdgeSSL:10m;
+    ssl_session_tickets off;
+
+    proxy_cache_path /var/cache/nginx/edge
+        levels=1:2
+        keys_zone=edge_cache:80m
+        max_size=2g
+        inactive=24h
+        use_temp_path=off;
+
+    resolver 127.0.0.11 valid=5s;
+    include /etc/nginx/conf.d/*.conf;
+}
