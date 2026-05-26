@@ -31,6 +31,7 @@ services:
   dvwa:
     image: sagikazarmark/dvwa
     container_name: dvwa
+    entrypoint: ["/bin/sh", "-c", "rm -f /var/run/apache2/apache2.pid && exec /run.sh"]
     environment:
       - MYSQL_HOSTNAME=dvwa-db
       - MYSQL_DATABASE=dvwa
