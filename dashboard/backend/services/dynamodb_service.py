@@ -66,6 +66,26 @@ class DynamoDBService:
             print("Failed to fetch logs:", e)
             return []
 
+    def get_cdn_logs(self, limit: int = 500, region: str = "ALL") -> List[Dict]:
+        """
+        [Q2 FIX] ดึง CDN logs โดย filter source='cdn' ที่ DynamoDB level
+        แทนการดึง 2000 rows มา filter ใน Python application memory
+        """
+        try:
+            filter_expr = Attr("source").eq("cdn")
+            if region and region.upper() != "ALL":
+                filter_expr = filter_expr & Attr("region").eq(region.upper())
+
+            response = self.logs_table.scan(
+                FilterExpression=filter_expr,
+                Limit=limit,
+            )
+            items = response.get("Items", [])
+            items.sort(key=lambda x: int(x.get("timestamp", 0)), reverse=True)
+            return items
+        except Exception as e:
+            print("Failed to fetch CDN logs:", e)
+            return []
 
     # ALERTS
     def save_alert(
@@ -145,34 +165,15 @@ class DynamoDBService:
     #         print("❌ DynamoDB connection failed:", e)
     #         return False
 
-# ตัวอย่างการใช้งาน
+# ตัวอย่างการใช้งาน / Quick test (python3 -m services.dynamodb_service)
 if __name__ == "__main__":
     db = DynamoDBService()
 
-    db.save_alert(
-        user_id="user123",
-        alert_id="alert001",
-        ip="192.168.1.1",
-        url="/login",
-        status="403",
-        message="SQL Injection detected"
-    )
+    # [Q8 FIX] เดิมเรียก db.get_alerts() ซึ่งไม่มีใน class → crash
+    # แก้เป็น get_logs() และ get_unalerted_403_logs() ที่มีอยู่จริง
+    print("=== Recent Logs ===")
+    print(db.get_logs(limit=5))
 
-    # db.save_log(
-    # {
-    #     "ip": logforward,
-    #     "method": "POST",
-    #     "url": "/login.php",
-    #     "status": 403,
-    #     "attack_type": "SQL_INJECTION",
-    #     "rule_triggered": "SQLI-001",
-    #     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-    #     "country": "TH"
-    #     # ไม่ต้องใส่ user_id → จะถูกเติมเป็น "default-user"
-    #     # ไม่ต้องใส่ log_id → จะถูกเติมเป็น "mew"
-    #     # ไม่ต้องใส่ timestamp → จะถูกเติมเป็น str(int(time.time()))
-    # }
-#)
+    print("=== Unalerted 403 Logs ===")
+    print(db.get_unalerted_403_logs())
 
-    print(db.get_logs())
-    print(db.get_alerts())

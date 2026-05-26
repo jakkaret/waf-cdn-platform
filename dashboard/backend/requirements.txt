@@ -28,6 +28,6 @@ argon2-cffi==25.1.0
 # Email Validation
 email-validator==2.1.0
 
-# Machine Learning for Anomaly Detection
-scikit-learn==1.3.2
+# Rate Limiting
+slowapi==0.1.9
 
