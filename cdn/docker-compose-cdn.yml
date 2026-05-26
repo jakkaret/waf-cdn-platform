@@ -24,8 +24,8 @@ services:
       - "8441:443"
     environment:
       EDGE_REGION: SG
-      ORIGIN_HOST: ${CDN_ORIGIN_HOST:-dvwa}
-      ORIGIN_PORT: ${CDN_ORIGIN_PORT:-80}
+      ORIGIN_HOST: ${CDN_ORIGIN_HOST:-waf-nginx}
+      ORIGIN_PORT: ${CDN_ORIGIN_PORT:-8080}
       PARANOIA: ${CDN_PARANOIA:-1}
       ANOMALY_INBOUND: ${CDN_ANOMALY_INBOUND:-10}
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
@@ -69,8 +69,8 @@ services:
       - "8442:443"
     environment:
       EDGE_REGION: JP
-      ORIGIN_HOST: ${CDN_ORIGIN_HOST:-dvwa}
-      ORIGIN_PORT: ${CDN_ORIGIN_PORT:-80}
+      ORIGIN_HOST: ${CDN_ORIGIN_HOST:-waf-nginx}
+      ORIGIN_PORT: ${CDN_ORIGIN_PORT:-8080}
       PARANOIA: ${CDN_PARANOIA:-1}
       ANOMALY_INBOUND: ${CDN_ANOMALY_INBOUND:-10}
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
@@ -114,8 +114,8 @@ services:
       - "8446:443"
     environment:
       EDGE_REGION: TH
-      ORIGIN_HOST: ${CDN_ORIGIN_HOST:-dvwa}
-      ORIGIN_PORT: ${CDN_ORIGIN_PORT:-80}
+      ORIGIN_HOST: ${CDN_ORIGIN_HOST:-waf-nginx}
+      ORIGIN_PORT: ${CDN_ORIGIN_PORT:-8080}
       PARANOIA: ${CDN_PARANOIA:-1}
       ANOMALY_INBOUND: ${CDN_ANOMALY_INBOUND:-10}
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
@@ -192,6 +192,18 @@ services:
       - edge_sg_cache:/cache/sg
       - edge_jp_cache:/cache/jp
       - edge_th_cache:/cache/th
+    restart: unless-stopped
+    networks:
+      - cdn-net
+
+  stats:
+    build:
+      context: ./stats
+    container_name: cdn-stats
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../logs:/logs:ro
     restart: unless-stopped
     networks:
       - cdn-net
