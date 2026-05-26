@@ -28,6 +28,14 @@
 - `cdn/scripts/purge-cache.sh`
 - `cdn/scripts/smoke-test-cdn.sh`
 - `cdn/scripts/test-geodns-routing.sh`
+- `cdn/control-api/main.py`
+- `cdn/control-api/requirements.txt`
+- `cdn/control-api/Dockerfile`
+- `cdn/edge/entrypoint.d/99-rulesync.sh`
+- `cdn/scripts/phase5-test-all.sh`
+- `cdn/scripts/block-ip.sh`
+- `cdn/scripts/unblock-ip.sh`
+- `Phase 5.md`
 
 ### แก้ให้เชื่อมกับระบบเดิม
 - `dashboard/backend/main.py`
@@ -47,6 +55,7 @@
 - `edge-jp` -> host port `8082`
 - `edge-th` -> host port `8086`
 - `geodns` -> host DNS port `5533` (UDP/TCP)
+- `control-api` -> host API port `8070`
 
 ทุก node มี:
 - Nginx reverse proxy
@@ -84,6 +93,11 @@
   - `172.28.33.0/24` -> `TH`
 - fallback เป็น `TH` ถ้าไม่เข้าเงื่อนไข
 
+### Global Block + Rule Sync
+- Edge node sync rules จาก `cdn-control-api` ผ่าน `GET /api/sync/bundle`
+- Blocklist sync ผ่านไฟล์ `global_blocklist.txt` และ rule `custom-000000-global-blocklist.conf`
+- Sync ทำใน entrypoint script `/docker-entrypoint.d/99-rulesync.sh` และ reload อัตโนมัติหลัง `nginx -t`
+
 ---
 
 ## 4) คำสั่งที่ใช้หลัก ๆ
@@ -118,6 +132,11 @@ curl http://localhost:8090/healthz
 ### ทดสอบ GeoDNS auto routing
 ```bash
 ./scripts/test-geodns-routing.sh
+```
+
+### ทดสอบ Phase 5 (ครบทุกฟังก์ชัน)
+```bash
+./scripts/phase5-test-all.sh
 ```
 
 ---
