@@ -1,42 +1,43 @@
 import React, { useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { authApi } from '../api/auth'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
+import { api } from '../api/axios'
+import { User } from '../types'
 
+/**
+ * [S2 FIX] หน้านี้ไม่อ่าน ?token= จาก URL อีกต่อไป
+ * เพราะ token ใน URL ถูกบันทึกใน browser history / server logs
+ *
+ * แทนที่ด้วย: backend set HttpOnly cookie ตอน redirect มาหน้านี้
+ * แล้ว frontend เรียก GET /api/auth/me ผ่าน cookie (withCredentials: true)
+ * เพื่อ hydrate session เอง
+ */
 export const OAuthSuccess: React.FC = () => {
-  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const setAuth = useAuthStore(state => state.setAuth)
 
   useEffect(() => {
-    const token = searchParams.get('token')
-    
-    if (token) {
-      useAuthStore.setState({ token })
-      
-      authApi.getMe()
-        .then(user => {
-          setAuth(token, user)
-          toast.success('Logged in with Google successfully!')
-          navigate('/')
-        })
-        .catch(() => {
-          toast.error('Failed to get user profile')
-          useAuthStore.setState({ token: null })
-          navigate('/login')
-        })
-    } else {
-      toast.error('Authentication failed')
-      navigate('/login')
-    }
-  }, [searchParams, navigate, setAuth])
+    // เรียก /api/auth/me ด้วย withCredentials เพื่อให้ axios ส่ง HttpOnly cookie
+    api.get<User>('/auth/me', { withCredentials: true })
+      .then(res => {
+        // สำหรับ cookie-based auth: token ใน store เป็น empty string
+        // axios จะแนบ cookie อัตโนมัติทุก request
+        setAuth('', res.data)
+        toast.success('Logged in with Google successfully!')
+        navigate('/')
+      })
+      .catch(() => {
+        toast.error('Authentication failed — please try again')
+        navigate('/login')
+      })
+  }, [navigate, setAuth])
 
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="text-center">
         <div className="animate-spin w-8 h-8 border-4 border-white/10 border-t-accent rounded-full mx-auto mb-4"></div>
-        <p className="text-text-muted">Authenticating...</p>
+        <p className="text-text-muted">Completing sign in...</p>
       </div>
     </div>
   )

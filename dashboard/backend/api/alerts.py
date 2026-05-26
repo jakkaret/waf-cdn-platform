@@ -1,7 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends
 from services.dynamodb_service import DynamoDBService
 from services.rbac import get_current_user
-import os, secrets, time, httpx
+from services.telegram_listener import invalidate_user_cache
+import os, secrets, time, httpx, asyncio, logging
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 db = DynamoDBService()
@@ -9,8 +13,19 @@ db = DynamoDBService()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOTTOKEN", "")
 
 # In-memory: code → {user_id, expires_at}
+# [S4 FIX] ใช้ dict ธรรมดา แต่ cleanup อย่างถูกต้อง
 _pending: dict = {}
 _update_offset: int = 0
+
+
+async def _cleanup_expired_codes():
+    """Background task สำหรับลบ pairing codes ที่หมดอายุออกจาก _pending"""
+    global _pending
+    while True:
+        now = time.time()
+        # [S4 FIX] reassign _pending dict แทนการ .update() เพื่อลบ keys จริงๆ
+        _pending = {k: v for k, v in _pending.items() if v.get("expires_at", 0) > now}
+        await asyncio.sleep(60)  # cleanup ทุก 1 นาที
 
 
 # GET /api/alerts/recent
@@ -45,6 +60,7 @@ async def connect_status(current_user: dict = Depends(get_current_user)):
 # สร้าง one-time code ผูกกับ user_id
 @router.post("/connect/start")
 async def connect_start(current_user: dict = Depends(get_current_user)):
+    global _pending
     if not BOT_TOKEN:
         raise HTTPException(
             status_code=500,
@@ -54,11 +70,9 @@ async def connect_start(current_user: dict = Depends(get_current_user)):
     code = secrets.token_hex(3).upper()   # 6-char เช่น "A3F2C1"
     user_id = current_user["user_id"]
 
-    # ลบ code เก่าของ user นี้ออกก่อน (ถ้ามี)
-    _pending.update({
-        k: v for k, v in _pending.items()
-        if v.get("user_id") != user_id
-    })
+    # [S4 FIX] ลบ code เก่าของ user นี้ออกจริงๆ ด้วยการ reassign dict ใหม่
+    # .update() เดิมไม่ได้ reassign _pending จึงไม่ได้ลบ key เก่าออก
+    _pending = {k: v for k, v in _pending.items() if v.get("user_id") != user_id}
     _pending[code] = {
         "user_id": user_id,
         "expires_at": time.time() + 300,  # 5 นาที
@@ -93,22 +107,28 @@ async def connect_poll(code: str, current_user: dict = Depends(get_current_user)
 
     # Poll Telegram
     chat_id = await _check_telegram_for_code(code)
-    print(f"Polling for code {code}: chat_id={chat_id}")
-    
+    logger.debug("Polling for code %s: chat_id=%s", code, chat_id)
+
     if chat_id:
         _pending.pop(code, None)
         # บันทึก chat_id ลง DynamoDB waf_users
         await _save_chat_id_to_user(current_user["user_id"], str(chat_id))
+        # [R3 FIX] invalidate cache เพื่อให้ Telegram worker เห็น user ใหม่ทันที
+        invalidate_user_cache()
         return {"status": "connected", "chat_id": str(chat_id)}
 
     return {"status": "waiting"}
+
 
 
 # DELETE /api/alerts/connect  (disconnect)
 @router.delete("/connect")
 async def connect_disconnect(current_user: dict = Depends(get_current_user)):
     await _save_chat_id_to_user(current_user["user_id"], "")
+    # [R3 FIX] invalidate cache เพื่อให้ Telegram worker ไม่ส่ง alert ไปยัง user ที่ disconnect แล้ว
+    invalidate_user_cache()
     return {"status": "disconnected"}
+
 
 
 # Helpers
