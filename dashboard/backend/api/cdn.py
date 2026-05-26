@@ -1,151 +1,104 @@
-"""
-dashboard/backend/api/cdn.py
-Phase 1 – CDN Stats API endpoint
+import os
+from typing import Optional
 
-เพิ่ม router นี้เข้า main.py:
-    from api import cdn
-    app.include_router(cdn.router)
-
-Endpoints:
-    GET /api/cdn/stats        → cache hit/miss ทุก region
-    GET /api/cdn/stats/{region} → เฉพาะ region
-    GET /api/cdn/nodes        → สถานะ node ทุกตัว
-"""
 
 import httpx
-from fastapi import APIRouter, HTTPException, Depends
-from services.rbac import require_viewer_or_above
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from services.rbac import require_admin, require_viewer_or_above
+from services.dynamodb_service import DynamoDBService
 
 router = APIRouter(prefix="/api/cdn", tags=["cdn"])
 
-# ── Config ─────────────────────────────────────────────────
-CDN_STATS_URL = "http://cdn-stats:9090/metrics"
+CDN_STATS_URL = os.getenv("CDN_STATS_URL", "http://cdn-stats:9090/metrics")
+CDN_PURGE_API_URL = os.getenv("CDN_PURGE_API_URL", "http://localhost:8090")
+CDN_PURGE_TOKEN = os.getenv("CDN_PURGE_TOKEN", "cdn-secret-token")
 
-# Region metadata (สำหรับ dashboard display)
 REGIONS_META = {
-    "SG": {"name": "Singapore",   "flag": "🇸🇬", "lat": 1.3521,  "lng": 103.8198},
-    "JP": {"name": "Japan",        "flag": "🇯🇵", "lat": 35.6762, "lng": 139.6503},
-    "US": {"name": "United States","flag": "🇺🇸", "lat": 37.0902, "lng": -95.7129},
-    "DE": {"name": "Germany",      "flag": "🇩🇪", "lat": 51.1657, "lng": 10.4515},
-    "CH": {"name": "Switzerland",  "flag": "🇨🇭", "lat": 46.8182, "lng": 8.2275},
+    "SG": {"name": "Singapore", "flag": "🇸🇬", "lat": 1.3521, "lng": 103.8198},
+    "JP": {"name": "Japan", "flag": "🇯🇵", "lat": 35.6762, "lng": 139.6503},
+    "TH": {"name": "Thailand", "flag": "🇹🇭", "lat": 13.7563, "lng": 100.5018},
 }
 
-# Port mapping ของแต่ละ edge (สำหรับ health check)
 EDGE_PORTS = {
     "SG": 8081,
     "JP": 8082,
-    "US": 8083,
-    "DE": 8084,
-    "CH": 8085,
+    "TH": 8086,
 }
 
 
 async def _fetch_stats() -> dict:
-    """ดึง stats จาก cdn-stats collector"""
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(CDN_STATS_URL)
             r.raise_for_status()
             return r.json()
-    except Exception as e:
-        # fallback: คืน mock data ถ้า collector ยังไม่ได้รัน
+    except Exception:
         return _mock_stats()
 
 
 def _mock_stats() -> dict:
-    """Mock data ใช้ระหว่าง dev / ถ้า collector offline"""
     mock = {}
-    base_hits  = {"SG": 420, "JP": 318, "US": 512, "DE": 275, "CH": 189}
-    base_miss  = {"SG": 82,  "JP": 64,  "US": 98,  "DE": 55,  "CH": 41}
-    base_bypass= {"SG": 38,  "JP": 29,  "US": 45,  "DE": 22,  "CH": 16}
+    base_hits = {"SG": 120, "JP": 105, "TH": 160}
+    base_miss = {"SG": 20, "JP": 22, "TH": 25}
+    base_bypass = {"SG": 8, "JP": 6, "TH": 11}
 
-    total_all = {"hit": 0, "miss": 0, "bypass": 0, "total_requests": 0,
-                 "status_2xx": 0, "status_4xx": 0, "status_5xx": 0}
+    total_all = {
+        "cache_hit": 0,
+        "cache_miss": 0,
+        "cache_bypass": 0,
+        "request_count": 0,
+        "status_2xx": 0,
+        "blocked_count": 0,
+        "status_5xx": 0,
+    }
 
-    for region in ["SG", "JP", "US", "DE", "CH"]:
+    for region in EDGE_PORTS:
         h = base_hits[region]
         m = base_miss[region]
         b = base_bypass[region]
         total = h + m + b
-
         mock[region] = {
             "region": region,
-            "hit": h, "miss": m, "bypass": b,
-            "expired": int(m * 0.1), "stale": int(m * 0.05),
-            "total_requests": total,
-            "hit_rate_pct": round(h / total * 100, 2),
-            "miss_rate_pct": round(m / total * 100, 2),
-            "status_2xx": int(total * 0.92),
-            "status_4xx": int(total * 0.06),
+            "cache_hit": h,
+            "cache_miss": m,
+            "cache_bypass": b,
+            "request_count": total,
+            "status_2xx": int(total * 0.93),
+            "blocked_count": int(total * 0.05),
             "status_5xx": int(total * 0.02),
-            "avg_response_time_ms": {"SG": 12.4, "JP": 18.7, "US": 9.2,
-                                     "DE": 22.1, "CH": 20.5}[region],
-            "last_updated": None,
+            "avg_latency": {"SG": 13.1, "JP": 17.3, "TH": 10.4}[region],
         }
+        for key in total_all:
+            total_all[key] += mock[region].get(key, 0)
 
-        for k in total_all:
-            total_all[k] += mock[region].get(k, 0)
-
-    gt = total_all["total_requests"] or 1
     mock["GLOBAL"] = {
         "region": "GLOBAL",
         **total_all,
-        "hit_rate_pct": round(total_all["hit"] / gt * 100, 2),
-        "miss_rate_pct": round(total_all["miss"] / gt * 100, 2),
-        "last_updated": None,
+        "avg_latency": 13.6, # approximate average
     }
     return mock
 
 
 def _enrich(stats: dict) -> list:
-    """แนบ metadata (flag, name, lat/lng) เข้าไปกับ stats"""
     result = []
     for region, data in stats.items():
         if region == "GLOBAL":
             continue
         meta = REGIONS_META.get(region, {})
-        result.append({
-            **data,
-            **meta,
-            "port": EDGE_PORTS.get(region),
-        })
+        result.append({**data, **meta, "port": EDGE_PORTS.get(region)})
     return result
 
 
-# ── Endpoints ────────────────────────────────────────────────
-
 @router.get("/stats")
 async def cdn_stats(current_user: dict = Depends(require_viewer_or_above)):
-    """
-    ดึง cache hit/miss stats ของทุก edge node
-    
-    Response:
-        nodes   → list ของ stats แต่ละ region
-        global  → รวมทุก region
-        summary → hit_rate เฉลี่ยทั่วโลก
-    """
     raw = await _fetch_stats()
     nodes = _enrich(raw)
-    g = raw.get("GLOBAL", {})
-
-    return {
-        "nodes": nodes,
-        "global": g,
-        "summary": {
-            "total_edge_nodes": len(EDGE_PORTS),
-            "global_hit_rate_pct": g.get("hit_rate_pct", 0),
-            "global_miss_rate_pct": g.get("miss_rate_pct", 0),
-            "total_requests": g.get("total_requests", 0),
-        }
-    }
+    return nodes
 
 
 @router.get("/stats/{region}")
-async def cdn_stats_region(
-    region: str,
-    current_user: dict = Depends(require_viewer_or_above),
-):
-    """ดึง stats ของ region ที่ระบุ (SG/JP/US/DE/CH)"""
+async def cdn_stats_region(region: str, current_user: dict = Depends(require_viewer_or_above)):
     region = region.upper()
     if region not in EDGE_PORTS:
         raise HTTPException(status_code=404, detail=f"Region {region} not found")
@@ -161,10 +114,6 @@ async def cdn_stats_region(
 
 @router.get("/nodes")
 async def cdn_nodes(current_user: dict = Depends(require_viewer_or_above)):
-    """
-    ตรวจสอบสถานะ (online/offline) ของทุก edge node
-    เรียก /healthz endpoint ของแต่ละ node
-    """
     results = []
 
     async with httpx.AsyncClient(timeout=3.0) as client:
@@ -178,20 +127,134 @@ async def cdn_nodes(current_user: dict = Depends(require_viewer_or_above)):
                 online = False
                 health_data = {}
 
-            results.append({
-                "region": region,
-                "name":   meta.get("name", region),
-                "flag":   meta.get("flag", "🌐"),
-                "lat":    meta.get("lat"),
-                "lng":    meta.get("lng"),
-                "port":   port,
-                "status": "online" if online else "offline",
-                **health_data,
-            })
+            results.append(
+                {
+                    "region": region,
+                    "name": meta.get("name", region),
+                    "flag": meta.get("flag", "🌐"),
+                    "lat": meta.get("lat"),
+                    "lng": meta.get("lng"),
+                    "port": port,
+                    "status": "online" if online else "offline",
+                    **health_data,
+                }
+            )
 
-    online_count = sum(1 for n in results if n["status"] == "online")
+    return results
+
+
+@router.post("/purge")
+async def cdn_purge(
+    url: str = Query(..., description="URL or URI to purge"),
+    region: Optional[str] = Query("ALL", description="SG/JP/TH/ALL"),
+    current_user: dict = Depends(require_admin),
+):
+    if not CDN_PURGE_TOKEN:
+        raise HTTPException(status_code=500, detail="CDN_PURGE_TOKEN not configured")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{CDN_PURGE_API_URL}/purge",
+                params={"url": url, "region": (region or "ALL")},
+                headers={"X-Purge-Token": CDN_PURGE_TOKEN},
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Purge API unreachable: {exc}") from exc
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+    return resp.json()
+
+@router.get("/logs")
+async def cdn_logs(
+    region: Optional[str] = Query("ALL", description="Filter by region (SG, JP, TH, or ALL)"),
+    limit: int = Query(50, description="Max logs to return"),
+    current_user: dict = Depends(require_viewer_or_above)
+):
+    db = DynamoDBService()
+    # Fetch logs from DynamoDB
+    all_logs = db.get_logs(limit=2000)
+    
+    # Filter for CDN logs only
+    cdn_logs_list = [log for log in all_logs if log.get("source") == "cdn"]
+    
+    # Filter by region if specified
+    if region and region.upper() != "ALL":
+        cdn_logs_list = [log for log in cdn_logs_list if log.get("region") == region.upper()]
+        
+    # Sort by timestamp descending
+    cdn_logs_list.sort(key=lambda x: int(x.get("timestamp", 0)), reverse=True)
+    
+    return {"logs": cdn_logs_list[:limit]}
+
+
+@router.get("/latency")
+async def cdn_latency(
+    region: Optional[str] = Query("ALL", description="Filter by region (SG, JP, TH, or ALL)"),
+    period: str = Query("1h", description="Time period (currently unused, fetches recent logs)"),
+    current_user: dict = Depends(require_viewer_or_above)
+):
+    db = DynamoDBService()
+    # Fetch recent logs (simulate last 1h with max limit)
+    all_logs = db.get_logs(limit=2000)
+    
+    cdn_logs = [log for log in all_logs if log.get("source") == "cdn"]
+    
+    if region and region.upper() != "ALL":
+        cdn_logs = [log for log in cdn_logs if log.get("region") == region.upper()]
+        
+    # Group by region
+    from collections import defaultdict
+    from datetime import datetime
+    
+    region_latencies = defaultdict(list)
+    timeseries_data = defaultdict(lambda: {"SG": 0, "JP": 0, "TH": 0, "_count": {"SG": 0, "JP": 0, "TH": 0}})
+    
+    for log in cdn_logs:
+        r = log.get("region", "UNKNOWN")
+        lat = log.get("latency_ms", 0)
+        region_latencies[r].append(lat)
+        
+        # Simple grouping by minute for timeseries (using timestamp)
+        ts = int(log.get("timestamp", 0))
+        if ts > 0:
+            dt = datetime.fromtimestamp(ts)
+            time_bucket = dt.strftime("%H:%M") # group by minute
+            timeseries_data[time_bucket][r] += lat
+            timeseries_data[time_bucket]["_count"][r] += 1
+            
+    summary = []
+    for r, latencies in region_latencies.items():
+        if not latencies:
+            continue
+        latencies.sort()
+        n = len(latencies)
+        avg_ms = int(sum(latencies) / n)
+        p95_ms = latencies[int(n * 0.95)] if n > 0 else 0
+        p99_ms = latencies[int(n * 0.99)] if n > 0 else 0
+        summary.append({
+            "region": r,
+            "avg_ms": avg_ms,
+            "p95_ms": p95_ms,
+            "p99_ms": p99_ms
+        })
+        
+    # Format timeseries
+    timeseries = []
+    for time_bucket, data in sorted(timeseries_data.items()):
+        point = {"time": time_bucket}
+        for r in ["SG", "JP", "TH"]:
+            count = data["_count"][r]
+            point[r] = int(data[r] / count) if count > 0 else 0
+        timeseries.append(point)
+        
+    # Limit timeseries points to last 60 minutes if there are many
+    timeseries = timeseries[-60:]
+        
     return {
-        "nodes": results,
-        "online_count": online_count,
-        "total_count": len(results),
+        "summary": summary,
+        "timeseries": timeseries
     }
+

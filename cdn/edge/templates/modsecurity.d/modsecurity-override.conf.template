@@ -1,0 +1,2 @@
+# CDN specific override
+SecRuleRemoveByTag "attack-protocol"
