@@ -22,3 +22,8 @@ AWSCLIV2.pkg
 # Telethon session files
 *.session
 *.session-journal
+
+# React files
+.node_modules/ 
+node_modules/ 
+dist/ 

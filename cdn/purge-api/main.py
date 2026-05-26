@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import os
 from pathlib import Path
@@ -62,7 +63,12 @@ def remove_cache_files(cache_root: Path, uri: str) -> Tuple[int, List[str]]:
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "regions": list(CACHE_ROOTS.keys())}
+    return {
+        "status": "ok",
+        "service": "purge-api",
+        "regions": list(CACHE_ROOTS.keys()),
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }
 
 
 @app.post("/purge")

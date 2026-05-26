@@ -21,6 +21,7 @@ services:
     user: root
     ports:
       - "8081:80"
+      - "8441:443"
     environment:
       EDGE_REGION: SG
       ORIGIN_HOST: ${CDN_ORIGIN_HOST:-dvwa}
@@ -30,6 +31,10 @@ services:
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
       CONTROL_API_URL: http://cdn-control-api:8070
       SYNC_INTERVAL_SEC: ${CDN_SYNC_INTERVAL_SEC:-5}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS_SG:-30}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST_SG:-60}
+      RATE_LIMIT_BURST_STATIC: ${RATE_LIMIT_BURST_STATIC_SG:-120}
+      FORCE_HTTPS: ${FORCE_HTTPS:-false}
       TZ: ${TZ:-Asia/Bangkok}
     volumes:
       - ./edge/templates/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
@@ -39,7 +44,10 @@ services:
       - ./edge/templates/modsecurity.d/modsecurity-override.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity-override.conf.template:ro
       - ./edge/entrypoint.d/99-rulesync.sh:/docker-entrypoint.d/99-rulesync.sh:ro
       - edge_sg_rules:/opt/custom-rules
+      - ./edge/html/429.html:/usr/share/nginx/html/429.html:ro
+      - ./edge/ssl:/etc/nginx/ssl:ro
       - edge_sg_cache:/var/cache/nginx
+      - ../logs/cdn/sg:/var/log/nginx/cdn
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/healthz >/dev/null || exit 1"]
       interval: 10s
@@ -58,6 +66,7 @@ services:
     user: root
     ports:
       - "8082:80"
+      - "8442:443"
     environment:
       EDGE_REGION: JP
       ORIGIN_HOST: ${CDN_ORIGIN_HOST:-dvwa}
@@ -67,6 +76,10 @@ services:
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
       CONTROL_API_URL: http://cdn-control-api:8070
       SYNC_INTERVAL_SEC: ${CDN_SYNC_INTERVAL_SEC:-5}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS_JP:-30}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST_JP:-60}
+      RATE_LIMIT_BURST_STATIC: ${RATE_LIMIT_BURST_STATIC_JP:-120}
+      FORCE_HTTPS: ${FORCE_HTTPS:-false}
       TZ: ${TZ:-Asia/Bangkok}
     volumes:
       - ./edge/templates/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
@@ -76,7 +89,10 @@ services:
       - ./edge/templates/modsecurity.d/modsecurity-override.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity-override.conf.template:ro
       - ./edge/entrypoint.d/99-rulesync.sh:/docker-entrypoint.d/99-rulesync.sh:ro
       - edge_jp_rules:/opt/custom-rules
+      - ./edge/html/429.html:/usr/share/nginx/html/429.html:ro
+      - ./edge/ssl:/etc/nginx/ssl:ro
       - edge_jp_cache:/var/cache/nginx
+      - ../logs/cdn/jp:/var/log/nginx/cdn
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/healthz >/dev/null || exit 1"]
       interval: 10s
@@ -95,6 +111,7 @@ services:
     user: root
     ports:
       - "8086:80"
+      - "8446:443"
     environment:
       EDGE_REGION: TH
       ORIGIN_HOST: ${CDN_ORIGIN_HOST:-dvwa}
@@ -104,6 +121,10 @@ services:
       ANOMALY_OUTBOUND: ${CDN_ANOMALY_OUTBOUND:-10}
       CONTROL_API_URL: http://cdn-control-api:8070
       SYNC_INTERVAL_SEC: ${CDN_SYNC_INTERVAL_SEC:-5}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS_TH:-50}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST_TH:-100}
+      RATE_LIMIT_BURST_STATIC: ${RATE_LIMIT_BURST_STATIC_TH:-200}
+      FORCE_HTTPS: ${FORCE_HTTPS:-false}
       TZ: ${TZ:-Asia/Bangkok}
     volumes:
       - ./edge/templates/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
@@ -113,7 +134,10 @@ services:
       - ./edge/templates/modsecurity.d/modsecurity-override.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity-override.conf.template:ro
       - ./edge/entrypoint.d/99-rulesync.sh:/docker-entrypoint.d/99-rulesync.sh:ro
       - edge_th_rules:/opt/custom-rules
+      - ./edge/html/429.html:/usr/share/nginx/html/429.html:ro
+      - ./edge/ssl:/etc/nginx/ssl:ro
       - edge_th_cache:/var/cache/nginx
+      - ../logs/cdn/th:/var/log/nginx/cdn
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/healthz >/dev/null || exit 1"]
       interval: 10s
@@ -140,6 +164,7 @@ services:
     ports:
       - "5533:53/udp"
       - "5533:53/tcp"
+      - "8053:8053"
     depends_on:
       - control-api
       - edge-sg
