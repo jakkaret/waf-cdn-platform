@@ -144,9 +144,9 @@ async def google_callback(code: str, response: Response):
         "email": user["email"],
     })
 
-    #redirect ไป oauth-success.html พร้อม token
+    #redirect ไป oauth-success พร้อม token เพื่อให้ React Router จับ path /oauth-success
     resp = RedirectResponse(
-        url=f"/oauth-success.html?token={token}",
+        url=f"/oauth-success?token={token}",
         status_code=302
     )
     resp.set_cookie(key="access_token", value=token, httponly=True, samesite="lax", max_age=3600)
