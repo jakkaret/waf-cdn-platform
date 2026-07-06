@@ -1,7 +1,27 @@
 import os
 import re
+import logging
 from typing import List, Dict
 import subprocess
+
+logger = logging.getLogger(__name__)
+
+# [S4] Whitelist ของ command ที่อนุญาตให้ส่งไป docker exec ได้เท่านั้น
+# ป้องกันกรณีที่ argument ในอนาคตอาจมาจาก input ภายนอก
+_ALLOWED_NGINX_COMMANDS: set[tuple] = {
+    ("nginx", "-s", "reload"),
+    ("nginx", "-t"),
+}
+
+# [S4] NOTE — Security Consideration:
+# RuleManager ต้องการสิทธิ์รัน "docker exec waf-nginx ..." ซึ่งหมายความว่า
+# backend process ต้องอยู่ใน docker group หรือมี sudo privilege
+# แนะนำ: ในสภาพแวดล้อม production ควรใช้ dedicated reload script
+# ที่ติดตั้งด้วย setuid แทนการให้ backend access docker socket โดยตรง
+# เช่น: /usr/local/bin/waf-reload-nginx ที่ถูก whitelist ใน sudoers
+
+CONTAINER_NAME = os.getenv("WAF_CONTAINER_NAME", "waf-nginx")
+
 
 class RuleManager:
     def __init__(self):
@@ -14,31 +34,36 @@ class RuleManager:
 
         if not os.path.exists(self.rules_dir):
             raise FileNotFoundError(f"Rules dir not found: {self.rules_dir}")
-        
+
+    def _run_docker_exec(self, nginx_args: tuple) -> None:
+        """
+        รัน nginx command ใน WAF container โดยตรวจสอบ whitelist ก่อนเสมอ
+        [S4] ป้องกัน command injection ด้วย explicit whitelist
+        """
+        if nginx_args not in _ALLOWED_NGINX_COMMANDS:
+            raise ValueError(f"Command {nginx_args!r} is not in allowed whitelist")
+
+        cmd = ["docker", "exec", CONTAINER_NAME, *nginx_args]
+        subprocess.run(cmd, check=True, capture_output=True)
 
     def reload_nginx(self):
         try:
-            subprocess.run(
-                ["docker", "exec", "waf-nginx", "nginx", "-s", "reload"],
-                check=True
-            )
-            print("✅ Nginx reloaded successfully")
+            self._run_docker_exec(("nginx", "-s", "reload"))
+            logger.info("Nginx reloaded successfully")
         except subprocess.CalledProcessError as e:
-            print("❌ Failed to reload nginx:", e)
+            logger.error("Failed to reload nginx: %s", e)
             raise RuntimeError("Reload nginx failed")
-        
+
     def test_nginx(self):
         try:
-            subprocess.run(
-                ["docker", "exec", "waf-nginx", "nginx", "-t"],
-                check=True
-            )
-            print("✅ Nginx test passed")
+            self._run_docker_exec(("nginx", "-t"))
+            logger.info("Nginx config test passed")
         except subprocess.CalledProcessError as e:
-            print("❌ Nginx test failed:", e)
+            logger.error("Nginx config test failed: %s", e)
             raise RuntimeError("Nginx test failed")
-    
+
     def list_rules(self):
+
         rules = []
 
         for filename in os.listdir(self.rules_dir):

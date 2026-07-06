@@ -5,7 +5,7 @@ export const authApi = {
   login: async (email: string, password: string) => {
     // FastAPI OAuth2PasswordRequestForm needs x-www-form-urlencoded
     const formData = new URLSearchParams()
-    formData.append('username', email)
+    formData.append('email', email)
     formData.append('password', password)
 
     const res = await api.post<{ access_token: string; token_type: string }>('/auth/login', formData, {

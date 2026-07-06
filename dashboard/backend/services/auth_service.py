@@ -3,6 +3,7 @@ import time
 import uuid
 import hmac
 import hashlib
+import logging
 from typing import Optional, Dict
 from datetime import datetime, timedelta
 
@@ -10,7 +11,10 @@ import boto3
 import requests
 from dotenv import load_dotenv, find_dotenv
 from jose import jwt, JWTError
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
+
+logger = logging.getLogger(__name__)
+
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
 
@@ -26,6 +30,11 @@ GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/ap
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
+# [S3 FIX] Domain ที่ได้รับ role admin อัตโนมัติเมื่อ login ผ่าน Google
+# ตั้งค่าใน .env: ADMIN_EMAIL_DOMAIN=yourdomain.com
+# ถ้าไม่กำหนด: ไม่มี domain ใดที่ auto-promote เป็น admin
+ADMIN_EMAIL_DOMAIN = os.getenv("ADMIN_EMAIL_DOMAIN", "")
+
 ph = PasswordHasher(
     time_cost=3,
     memory_cost=65536,
@@ -36,11 +45,13 @@ ph = PasswordHasher(
 class AuthService:
     def __init__(self):
         self.region = os.getenv("AWS_REGION", "ap-southeast-1")
+        endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
         self.dynamodb = boto3.resource(
             "dynamodb",
             region_name=self.region,
             aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+            endpoint_url=endpoint_url,
         )
         self.users_table = self.dynamodb.Table("waf_users")
 
@@ -76,17 +87,44 @@ class AuthService:
 
     def get_user_by_email(self, email: str) -> Optional[Dict]:
         try:
+            # [Q1 FIX] ลองใช้ GSI query ก่อน (ประสิทธิภาพดีกว่า)
+            try:
+                resp = self.users_table.query(
+                    IndexName="EmailIndex",
+                    KeyConditionExpression=Key("email").eq(email)
+                )
+                items = resp.get("Items", [])
+                if items:
+                    return items[0]
+            except Exception as e:
+                # ถ้ายังไม่มี Index จะเกิด ClientError: ValidationException
+                logger.debug("EmailIndex not found, falling back to scan. Error: %s", e)
+
+            # Fallback ไปใช้ scan ถ้า GSI ยังไม่ได้สร้าง
             resp = self.users_table.scan(
                 FilterExpression=Attr("email").eq(email)
             )
             items = resp.get("Items", [])
             return items[0] if items else None
         except Exception as e:
-            print("get_user_by_email error:", e)
+            logger.error("get_user_by_email error: %s", e)
             return None
 
     def get_user_by_provider(self, provider: str, provider_id: str) -> Optional[Dict]:
         try:
+            # [Q1 FIX] ลองใช้ GSI query ก่อน
+            try:
+                resp = self.users_table.query(
+                    IndexName="ProviderIndex",
+                    KeyConditionExpression=Key("auth_provider").eq(provider) & Key("provider_id").eq(provider_id)
+                )
+                items = resp.get("Items", [])
+                if items:
+                    return items[0]
+            except Exception as e:
+                logger.debug("ProviderIndex not found, falling back to scan. Error: %s", e)
+
+            # Fallback scan
             resp = self.users_table.scan(
                 FilterExpression=Attr("auth_provider").eq(provider) & Attr("provider_id").eq(provider_id)
             )
@@ -114,12 +152,15 @@ class AuthService:
             "email": email,
             "username": username,
             "role": role,
-            "auth_provider": auth_provider,
-            "provider_id": provider_id or "",
-            "avatar_url": avatar_url or "",
             "created_at": now,
             "last_login": now,
         }
+        if auth_provider:
+            item["auth_provider"] = auth_provider
+        if provider_id:
+            item["provider_id"] = provider_id
+        if avatar_url:
+            item["avatar_url"] = avatar_url
 
         if password:
             item["password_hash"] = self.hash_password(password)
@@ -236,7 +277,9 @@ class AuthService:
         return self.create_user(
             email=email,
             username=name,
-            role="admin" if email.endswith("@example.com") else "viewer",
+            # [S3 FIX] ใช้ ADMIN_EMAIL_DOMAIN จาก env แทน hardcode
+            # ถ้าไม่กำหนด env หรือ domain ไม่ตรง → role เป็น viewer เสมอ
+            role="admin" if (ADMIN_EMAIL_DOMAIN and email.endswith(f"@{ADMIN_EMAIL_DOMAIN}")) else "viewer",
             auth_provider="google",
             provider_id=provider_id,
             avatar_url=avatar,

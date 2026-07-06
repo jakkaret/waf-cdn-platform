@@ -5,6 +5,11 @@ from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
+# อ่าน allowed origins จาก env (คั่นด้วย comma)
+# ตัวอย่าง ALLOWED_ORIGINS=http://localhost:5173,https://yourdomain.com
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000,http://localhost:8000")
+ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 from services.fetch_logs import get_recent_logs
 from fastapi.responses import FileResponse
 from fastapi import FastAPI, Depends
@@ -17,7 +22,10 @@ from services.log_forward import log_forward_worker
 from services.cdn_log_forward import cdn_log_forward_worker
 from services.telegram_listener import alert_worker
 from services.rbac import require_viewer_or_above
-from api import alerts          
+from api import alerts
+from services.rate_limiter import limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 
 app = FastAPI(
     title="WAF Security Dashboard",
@@ -25,12 +33,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# [R1 FIX] เพิ่ม Rate Limiter เพื่อป้องกัน brute force
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# [S1 FIX] ห้ามใช้ allow_origins=["*"] ร่วมกับ allow_credentials=True
+# เพราะขัด CORS spec และเปิดช่องโหว่ CSRF — ใช้ explicit origins แทน
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 # ==========================================
@@ -122,6 +136,10 @@ async def startup_event():
         app.state.log_forward_task = asyncio.create_task(log_forward_worker())
     if not hasattr(app.state, "cdn_log_forward_task"):
         app.state.cdn_log_forward_task = asyncio.create_task(cdn_log_forward_worker())
+    # [S4 FIX] cleanup expired Telegram pairing codes จาก _pending ทุก 60 วินาที
+    if not hasattr(app.state, "cleanup_pending_task"):
+        from api.alerts import _cleanup_expired_codes
+        app.state.cleanup_pending_task = asyncio.create_task(_cleanup_expired_codes())
 
 
 @app.on_event("shutdown")

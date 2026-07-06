@@ -1,9 +1,11 @@
+import os
 from fastapi import APIRouter, HTTPException, Depends, Response, Request, status
 from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from services.auth_service import AuthService
 from services.rbac import get_current_user, require_admin
+from services.rate_limiter import limiter
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 auth_service = AuthService()
@@ -40,7 +42,8 @@ class UpdateRoleRequest(BaseModel):
 # Local register / login
 
 @router.post("/register")
-async def register(req: RegisterRequest, response: Response):
+@limiter.limit("10/minute")
+async def register(request: Request, req: RegisterRequest, response: Response):
     # Only admin can create admin accounts
     # For the very first user, allow admin registration
     existing_users = auth_service.list_users()
@@ -86,7 +89,8 @@ async def register(req: RegisterRequest, response: Response):
 
 
 @router.post("/login")
-async def login(req: LoginRequest, response: Response):
+@limiter.limit("5/minute")
+async def login(request: Request, req: LoginRequest, response: Response):
     try:
         user = auth_service.login_local(req.email, req.password)
     except ValueError as e:
@@ -144,12 +148,22 @@ async def google_callback(code: str, response: Response):
         "email": user["email"],
     })
 
-    #redirect ไป oauth-success พร้อม token เพื่อให้ React Router จับ path /oauth-success
+    # [S2 FIX] ห้ามแนบ JWT token ใน URL query param
+    # เพราะถูกบันทึกใน browser history, server access logs, และ Referrer header
+    # ใช้ HttpOnly cookie เป็น auth mechanism เพียงอย่างเดียว
+    # Frontend จะเรียก GET /api/auth/me ผ่าน cookie เพื่อ hydrate session เอง
     resp = RedirectResponse(
-        url=f"/oauth-success?token={token}",
+        url="/oauth-success",
         status_code=302
     )
-    resp.set_cookie(key="access_token", value=token, httponly=True, samesite="lax", max_age=3600)
+    resp.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=3600,
+        secure=os.getenv("FORCE_HTTPS", "false").lower() == "true",
+    )
     return resp
 
 

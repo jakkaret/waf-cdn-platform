@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/authStore'
 
 export const api = axios.create({
   baseURL: '/api',
+  withCredentials: true, // ส่ง HttpOnly cookie ทุก request (ใช้สำหรับ OAuth cookie-based session)
   headers: {
     'Content-Type': 'application/json',
   },
