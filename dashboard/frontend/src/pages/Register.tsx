@@ -18,7 +18,13 @@ export const Register: React.FC = () => {
       toast.success('Registration successful! Please login.')
       navigate('/login')
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Registration failed')
+      const detail = err.response?.data?.detail
+      const message = typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ')
+          : 'Registration failed'
+      toast.error(message)
     } finally {
       setLoading(false)
     }
