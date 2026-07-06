@@ -1,9 +1,13 @@
 import asyncio
 import json
+import logging
 import os
 import time
 from datetime import datetime
 from services.dynamodb_service import DynamoDBService
+
+logger = logging.getLogger(__name__)
+
 
 db = DynamoDBService()
 log_buffer = {}
@@ -12,8 +16,8 @@ BASE_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "../../../")
 )
 
-
 ACCESS_LOG = os.path.join(BASE_DIR, "logs/nginx/access.json")
+
 AUDIT_LOG = os.path.join(BASE_DIR, "logs/modsecurity/audit.json")
 
 MERGE_TIMEOUT = 5  # วินาที
@@ -171,23 +175,16 @@ async def flush_old_logs():
 # FILE TAIL
 # -----------------------------
 async def tail_file(path):
-    print("Opening:", path)
-
+    logger.info("Opening log file: %s", path)
     with open(path, "r", encoding="utf-8") as f:
         f.seek(0, os.SEEK_END)
-
         while True:
             line = f.readline()
             if not line:
                 await asyncio.sleep(0.5)
                 continue
-
             yield line.strip()
 
-
-# -----------------------------
-# PROCESS ACCESS
-# -----------------------------
 
 # -----------------------------
 # PROCESS ACCESS
@@ -197,25 +194,16 @@ async def process_access_log():
         try:
             raw = json.loads(line)
             data = normalize_access(raw)
-
             key = data.get("request_id")
             if not key:
                 continue
-
-            print("ACCESS:", key)
-
+            logger.debug("ACCESS: %s", key)
             log_buffer.setdefault(key, {"ts": time.time()})
             log_buffer[key]["access"] = data
-
             try_merge(key)
-
         except Exception as e:
-            print("access error:", e)
+            logger.error("access log parse error: %s", e)
 
-
-# -----------------------------
-# PROCESS MODSEC
-# -----------------------------
 
 # -----------------------------
 # PROCESS MODSEC
@@ -225,32 +213,22 @@ async def process_audit_log():
         try:
             raw = json.loads(line)
             data = normalize_modsec(raw)
-
             key = data.get("request_id")
             if not key:
                 continue
-
-            print("MODSEC:", key)
-
+            logger.debug("MODSEC: %s", key)
             log_buffer.setdefault(key, {"ts": time.time()})
             log_buffer[key]["modsec"] = data
-
             try_merge(key)
-
         except Exception as e:
-            print("audit error:", e)
+            logger.error("audit log parse error: %s", e)
 
-
-# -----------------------------
-# WORKER
-# -----------------------------
 
 # -----------------------------
 # WORKER
 # -----------------------------
 async def log_forward_worker():
-    print("🚀 Starting log forwarder...")
-
+    logger.info("🚀 Starting log forwarder...")
     await asyncio.gather(
         process_access_log(),
         process_audit_log(),

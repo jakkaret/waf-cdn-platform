@@ -10,6 +10,10 @@ from services.dynamodb_service import DynamoDBService
 
 router = APIRouter(prefix="/api/cdn", tags=["cdn"])
 
+# [Q3 FIX] สร้าง DynamoDB instance ระดับ module แทนการสร้างใหม่ทุก request
+_db = DynamoDBService()
+
+
 CDN_STATS_URL = os.getenv("CDN_STATS_URL", "http://cdn-stats:9090/metrics")
 CDN_PURGE_API_URL = os.getenv("CDN_PURGE_API_URL", "http://localhost:8090")
 CDN_PURGE_TOKEN = os.getenv("CDN_PURGE_TOKEN", "cdn-secret-token")
@@ -173,21 +177,12 @@ async def cdn_logs(
     limit: int = Query(50, description="Max logs to return"),
     current_user: dict = Depends(require_viewer_or_above)
 ):
-    db = DynamoDBService()
-    # Fetch logs from DynamoDB
-    all_logs = db.get_logs(limit=2000)
-    
-    # Filter for CDN logs only
-    cdn_logs_list = [log for log in all_logs if log.get("source") == "cdn"]
-    
-    # Filter by region if specified
-    if region and region.upper() != "ALL":
-        cdn_logs_list = [log for log in cdn_logs_list if log.get("region") == region.upper()]
-        
-    # Sort by timestamp descending
-    cdn_logs_list.sort(key=lambda x: int(x.get("timestamp", 0)), reverse=True)
-    
-    return {"logs": cdn_logs_list[:limit]}
+    # [Q2 FIX] ใช้ get_cdn_logs() ที่ filter source='cdn' และ region ที่ DynamoDB level
+    # แทนการดึง 2000 rows มา filter ใน Python (ประหยัด memory และลด latency)
+    # [Q3 FIX] ใช้ module-level _db แทนการสร้าง DynamoDBService() ใหม่ทุก request
+    logs = _db.get_cdn_logs(limit=limit, region=region or "ALL")
+    return {"logs": logs}
+
 
 
 @router.get("/latency")
@@ -196,35 +191,29 @@ async def cdn_latency(
     period: str = Query("1h", description="Time period (currently unused, fetches recent logs)"),
     current_user: dict = Depends(require_viewer_or_above)
 ):
-    db = DynamoDBService()
-    # Fetch recent logs (simulate last 1h with max limit)
-    all_logs = db.get_logs(limit=2000)
-    
-    cdn_logs = [log for log in all_logs if log.get("source") == "cdn"]
-    
-    if region and region.upper() != "ALL":
-        cdn_logs = [log for log in cdn_logs if log.get("region") == region.upper()]
-        
-    # Group by region
     from collections import defaultdict
     from datetime import datetime
-    
+
+    # [Q2 FIX] ใช้ get_cdn_logs() filter ที่ DynamoDB แทนการดึง 2000 rows มา filter ใน Python
+    # [Q3 FIX] ใช้ module-level _db
+    cdn_logs = _db.get_cdn_logs(limit=500, region=region or "ALL")
+
+    # Group by region for latency stats
     region_latencies = defaultdict(list)
     timeseries_data = defaultdict(lambda: {"SG": 0, "JP": 0, "TH": 0, "_count": {"SG": 0, "JP": 0, "TH": 0}})
-    
+
     for log in cdn_logs:
         r = log.get("region", "UNKNOWN")
         lat = log.get("latency_ms", 0)
         region_latencies[r].append(lat)
-        
-        # Simple grouping by minute for timeseries (using timestamp)
+
         ts = int(log.get("timestamp", 0))
         if ts > 0:
             dt = datetime.fromtimestamp(ts)
-            time_bucket = dt.strftime("%H:%M") # group by minute
+            time_bucket = dt.strftime("%H:%M")
             timeseries_data[time_bucket][r] += lat
             timeseries_data[time_bucket]["_count"][r] += 1
-            
+
     summary = []
     for r, latencies in region_latencies.items():
         if not latencies:
@@ -234,14 +223,8 @@ async def cdn_latency(
         avg_ms = int(sum(latencies) / n)
         p95_ms = latencies[int(n * 0.95)] if n > 0 else 0
         p99_ms = latencies[int(n * 0.99)] if n > 0 else 0
-        summary.append({
-            "region": r,
-            "avg_ms": avg_ms,
-            "p95_ms": p95_ms,
-            "p99_ms": p99_ms
-        })
-        
-    # Format timeseries
+        summary.append({"region": r, "avg_ms": avg_ms, "p95_ms": p95_ms, "p99_ms": p99_ms})
+
     timeseries = []
     for time_bucket, data in sorted(timeseries_data.items()):
         point = {"time": time_bucket}
@@ -249,12 +232,6 @@ async def cdn_latency(
             count = data["_count"][r]
             point[r] = int(data[r] / count) if count > 0 else 0
         timeseries.append(point)
-        
-    # Limit timeseries points to last 60 minutes if there are many
-    timeseries = timeseries[-60:]
-        
-    return {
-        "summary": summary,
-        "timeseries": timeseries
-    }
 
+    timeseries = timeseries[-60:]
+    return {"summary": summary, "timeseries": timeseries}
