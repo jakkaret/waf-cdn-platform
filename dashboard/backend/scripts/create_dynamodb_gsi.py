@@ -5,7 +5,12 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '../.env'))
 
-dynamodb = boto3.client('dynamodb', region_name=os.getenv("AWS_REGION", "ap-southeast-1"))
+endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
+dynamodb = boto3.client(
+    'dynamodb',
+    region_name=os.getenv("AWS_REGION", "ap-southeast-1"),
+    endpoint_url=endpoint_url,
+)
 
 table_name = "waf_users"
 
