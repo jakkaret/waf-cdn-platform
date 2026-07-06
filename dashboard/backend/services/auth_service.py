@@ -45,11 +45,13 @@ ph = PasswordHasher(
 class AuthService:
     def __init__(self):
         self.region = os.getenv("AWS_REGION", "ap-southeast-1")
+        endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
         self.dynamodb = boto3.resource(
             "dynamodb",
             region_name=self.region,
             aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+            endpoint_url=endpoint_url,
         )
         self.users_table = self.dynamodb.Table("waf_users")
 
@@ -150,12 +152,15 @@ class AuthService:
             "email": email,
             "username": username,
             "role": role,
-            "auth_provider": auth_provider,
-            "provider_id": provider_id or "",
-            "avatar_url": avatar_url or "",
             "created_at": now,
             "last_login": now,
         }
+        if auth_provider:
+            item["auth_provider"] = auth_provider
+        if provider_id:
+            item["provider_id"] = provider_id
+        if avatar_url:
+            item["avatar_url"] = avatar_url
 
         if password:
             item["password_hash"] = self.hash_password(password)

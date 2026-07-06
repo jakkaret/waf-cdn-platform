@@ -19,11 +19,13 @@ class DynamoDBService:
         self.logs_table_name = "waf_logs"
         self.rules_table_name = "waf_rules"
         self.users_table_name = "waf_users"
+        endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
         self.dynamodb = boto3.resource(
             "dynamodb",
             region_name=self.region,
             aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+            endpoint_url=endpoint_url,
         )
 
         # Initialize tables
