@@ -32,7 +32,7 @@ cd waf_project
 docker-compose up -d
 
 # หรือในกรณีที่มี CDN stack แยก
-docker-compose -f cdn/docker-compose.yml up -d
+docker-compose -f cdn/docker-compose-cdn.yml up -d
 ```
 
 ตรวจสอบสถานะว่า container รันสำเร็จ:
