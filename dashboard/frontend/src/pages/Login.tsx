@@ -27,7 +27,13 @@ export const Login: React.FC = () => {
       toast.success('Logged in successfully')
       navigate('/')
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Login failed')
+      const detail = err.response?.data?.detail
+      const message = typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ')
+          : 'Login failed'
+      toast.error(message)
       useAuthStore.setState({ token: null })
     } finally {
       setLoading(false)
