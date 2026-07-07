@@ -10,7 +10,8 @@ import toast from 'react-hot-toast'
 export const Alerts: React.FC = () => {
   const queryClient = useQueryClient()
   const [code, setCode] = useState<string | null>(null)
-  
+  const [botUsername, setBotUsername] = useState<string>('automatedwafbot')
+
   const { data: status, isLoading: isStatusLoading } = useQuery({
     queryKey: ['telegram-status'],
     queryFn: alertsApi.getConnectionStatus,
@@ -27,6 +28,9 @@ export const Alerts: React.FC = () => {
     mutationFn: alertsApi.startConnection,
     onSuccess: (data) => {
       setCode(data.code)
+      if (data.bot_username) {
+        setBotUsername(data.bot_username)
+      }
       toast.success('Connection started! Send code to the bot.')
     },
     onError: () => toast.error('Failed to start connection')
@@ -71,10 +75,10 @@ export const Alerts: React.FC = () => {
         <div className="flex items-center gap-5 flex-wrap relative z-10">
           <div className="w-14 h-14 rounded-xl bg-[#229ed9]/10 border border-[#229ed9]/30 flex items-center justify-center text-[#229ed9]">
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7">
-              <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z"/>
+              <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z" />
             </svg>
           </div>
-          
+
           <div className="flex-1">
             <h3 className="text-[16px] font-bold text-white m-0">Telegram Alert Bot</h3>
             <p className="text-[13.5px] text-white/50 m-0 mt-1">Receive notifications when WAF detects attacks</p>
@@ -116,7 +120,7 @@ export const Alerts: React.FC = () => {
               </div>
             </div>
             <h4 className="text-sm font-bold text-white mb-2">Step 2: Send code to bot</h4>
-            <a href={`https://t.me/WAF_Project_Bot?start=${code}`} target="_blank" rel="noreferrer" className="text-[#229ed9] text-sm hover:underline">
+            <a href={`https://t.me/automatedwafbot?start=${code}`} target="_blank" rel="noreferrer" className="text-[#229ed9] text-sm hover:underline">
               Open Telegram Bot →
             </a>
             <div className="mt-4 text-sm text-text-muted flex items-center gap-2">
