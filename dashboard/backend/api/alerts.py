@@ -142,7 +142,7 @@ async def _get_bot_username() -> str:
                 return r.json()["result"]["username"]
     except Exception:
         pass
-    return "automatedwaf"
+    return "automatedwafbot"
 
 
 async def _check_telegram_for_code(target_code: str):
