@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 from fastapi import APIRouter, HTTPException, Depends
 from services.dynamodb_service import DynamoDBService
 from services.rbac import get_current_user
@@ -142,7 +143,7 @@ async def _get_bot_username() -> str:
                 return r.json()["result"]["username"]
     except Exception:
         pass
-    return "automatedwaf"
+    return "automatedwafbot"
 
 
 async def _check_telegram_for_code(target_code: str):
