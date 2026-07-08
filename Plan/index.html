@@ -34,6 +34,9 @@
       <a href="#functions" class="nav-link" data-section="functions">Functions</a>
       <a href="#flow" class="nav-link" data-section="flow">Flow</a>
       <a href="#api" class="nav-link" data-section="api">API</a>
+      <a href="#gaps" class="nav-link" data-section="gaps">🔍 Gaps</a>
+      <a href="#fullflow" class="nav-link" data-section="fullflow">⚙️ Full Flow</a>
+      <a href="#workdiv" class="nav-link" data-section="workdiv">👥 Work Division</a>
     </div>
     <div class="nav-toggle" id="nav-toggle">
       <span></span><span></span><span></span>
@@ -1515,6 +1518,928 @@ Value: waf-verify=abc123</code>
     </div>
   </section>
 
+  <!-- ================================================================
+       GAPS SECTION — สิ่งที่ระบบยังขาด
+       ================================================================ -->
+  <section class="section section-alt" id="gaps">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-badge">Gap Analysis</div>
+        <h2 class="section-title">สิ่งที่ระบบยังขาด — ต้องทำอะไรเพิ่ม?</h2>
+        <p class="section-subtitle">วิเคราะห์จาก codebase จริง เทียบกับ Target Architecture ที่วางไว้</p>
+      </div>
+
+      <!-- Status Legend -->
+      <div class="gap-legend">
+        <div class="legend-item"><span class="legend-dot done"></span>มีแล้ว / ใช้งานได้</div>
+        <div class="legend-item"><span class="legend-dot partial"></span>มีบางส่วน / ต้องขยาย</div>
+        <div class="legend-item"><span class="legend-dot missing"></span>ยังไม่มี / ต้องสร้างใหม่</div>
+      </div>
+
+      <!-- Gap Grid -->
+      <div class="gap-grid">
+
+        <!-- Auth & User -->
+        <div class="gap-card">
+          <div class="gap-card-header">
+            <span class="gap-icon">🔐</span>
+            <div>
+              <div class="gap-title">Auth & User Management</div>
+              <div class="gap-module-tag">Module 01</div>
+            </div>
+            <span class="gap-status partial">บางส่วน</span>
+          </div>
+          <div class="gap-items">
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">Local Email/Password login</div>
+                <div class="gap-item-desc">register + login + JWT via HttpOnly cookie</div>
+              </div>
+            </div>
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">Google OAuth2</div>
+                <div class="gap-item-desc">login via Google + auto role assign</div>
+              </div>
+            </div>
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">Telegram Login Widget</div>
+                <div class="gap-item-desc">verify HMAC + register/login</div>
+              </div>
+            </div>
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">RBAC (Admin / Viewer)</div>
+                <div class="gap-item-desc">require_admin, require_viewer_or_above middleware</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Multi-tenant Ownership Model</div>
+                <div class="gap-item-desc">ปัจจุบัน role เป็น global (admin/viewer) ยังไม่มี ownership ต่อ Origin — ต้องเพิ่ม origins[] field ในตาราง User และ verify_ownership middleware</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Role: origin_admin</div>
+                <div class="gap-item-desc">RBAC ปัจจุบันมีแค่ admin/viewer ยังไม่มี concept "เจ้าของ origin นี้"</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Origin Management -->
+        <div class="gap-card">
+          <div class="gap-card-header">
+            <span class="gap-icon">🌐</span>
+            <div>
+              <div class="gap-title">Origin Management</div>
+              <div class="gap-module-tag">Module 02</div>
+            </div>
+            <span class="gap-status missing">ยังไม่มี</span>
+          </div>
+          <div class="gap-items">
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Web Origin CRUD API</div>
+                <div class="gap-item-desc">ไม่มี /api/origins endpoint — ยังไม่มีระบบให้ user กรอก IP เว็บมา</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Origin ใน DynamoDB</div>
+                <div class="gap-item-desc">ยังไม่มีตาราง waf_origins ใน DynamoDB</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Origin Health Check</div>
+                <div class="gap-item-desc">ยังไม่มี background worker ที่ ping origin IP ทุก 1 นาที</div>
+              </div>
+            </div>
+            <div class="gap-item partial">
+              <span class="gap-dot partial"></span>
+              <div>
+                <div class="gap-item-title">Nginx Config Generator (มีบางส่วน)</div>
+                <div class="gap-item-desc">RuleManager reload nginx ได้ แต่ยังไม่มี Jinja2 template generate server block อัตโนมัติ per origin</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Domain & DNS -->
+        <div class="gap-card">
+          <div class="gap-card-header">
+            <span class="gap-icon">🏷️</span>
+            <div>
+              <div class="gap-title">Domain & DNS Verification</div>
+              <div class="gap-module-tag">Module 03</div>
+            </div>
+            <span class="gap-status missing">ยังไม่มี</span>
+          </div>
+          <div class="gap-items">
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Domain CRUD API</div>
+                <div class="gap-item-desc">ไม่มี /api/origins/:id/domains endpoint เลย</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">DNS Verification Worker</div>
+                <div class="gap-item-desc">ยังไม่มี service ที่ query CNAME/TXT record เพื่อ verify ว่า domain ชี้มาเราแล้ว</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">DNS Instructions Generator</div>
+                <div class="gap-item-desc">ยังไม่มี function ที่บอก user ว่าต้อง set CNAME / TXT record อะไรบ้าง</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SSL / HTTPS -->
+        <div class="gap-card">
+          <div class="gap-card-header">
+            <span class="gap-icon">🔒</span>
+            <div>
+              <div class="gap-title">SSL / Auto-HTTPS</div>
+              <div class="gap-module-tag">Module 04</div>
+            </div>
+            <span class="gap-status missing">ยังไม่มี</span>
+          </div>
+          <div class="gap-items">
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Certbot / ACME Integration</div>
+                <div class="gap-item-desc">ยังไม่มี service ที่รัน certbot เพื่อออก SSL cert จาก Let's Encrypt อัตโนมัติ</div>
+              </div>
+            </div>
+            <div class="gap-item partial">
+              <span class="gap-dot partial"></span>
+              <div>
+                <div class="gap-item-title">SSL Certificates (มีบางส่วน)</div>
+                <div class="gap-item-desc">มี server.key + server.crt สำหรับ WAF เดิม แต่เป็น self-signed และผูกกับ domain เดียว — ยังไม่ auto-provision per domain</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">SSL Auto-Renew Cron</div>
+                <div class="gap-item-desc">ยังไม่มี background job ที่ renew cert ก่อนหมดอายุ 30 วัน</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">SSL Status API</div>
+                <div class="gap-item-desc">ยังไม่มี endpoint บอกสถานะ cert (issuer, expires_at, auto_renew)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- WAF Config -->
+        <div class="gap-card">
+          <div class="gap-card-header">
+            <span class="gap-icon">🛡️</span>
+            <div>
+              <div class="gap-title">WAF Configuration</div>
+              <div class="gap-module-tag">Module 05</div>
+            </div>
+            <span class="gap-status partial">บางส่วน</span>
+          </div>
+          <div class="gap-items">
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">WAF Rules CRUD</div>
+                <div class="gap-item-desc">GET/POST/PUT/DELETE /api/rules/ มีครบ + reload nginx</div>
+              </div>
+            </div>
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">ModSecurity custom-rules dir</div>
+                <div class="gap-item-desc">RuleManager เขียน/ลบ .conf file ได้ + nginx -t ก่อน reload</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Per-Origin WAF Config</div>
+                <div class="gap-item-desc">ปัจจุบัน WAF config เป็น global ทุก domain ใช้ rules เดียวกัน — ต้องแยก per origin</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">IP Blocklist API per Origin</div>
+                <div class="gap-item-desc">ยังไม่มี endpoint block IP เฉพาะ origin ใด origin หนึ่ง</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CDN & Cache -->
+        <div class="gap-card">
+          <div class="gap-card-header">
+            <span class="gap-icon">⚡</span>
+            <div>
+              <div class="gap-title">CDN & Cache</div>
+              <div class="gap-module-tag">Module 06</div>
+            </div>
+            <span class="gap-status partial">บางส่วน</span>
+          </div>
+          <div class="gap-items">
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">CDN Nodes (SG/JP/TH)</div>
+                <div class="gap-item-desc">มี edge nodes 3 ตัว + purge API ที่ port 8090</div>
+              </div>
+            </div>
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">CDN Purge API</div>
+                <div class="gap-item-desc">POST /api/cdn/purge มีและทำงานได้</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Cache Config Per Origin</div>
+                <div class="gap-item-desc">TTL, bypass rules ยังเป็น hardcode ใน nginx.conf — ยังไม่ผูกกับ origin แต่ละตัว</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Monitoring -->
+        <div class="gap-card">
+          <div class="gap-card-header">
+            <span class="gap-icon">📊</span>
+            <div>
+              <div class="gap-title">Monitoring & Alerting</div>
+              <div class="gap-module-tag">Module 08</div>
+            </div>
+            <span class="gap-status partial">บางส่วน</span>
+          </div>
+          <div class="gap-items">
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">WAF Logs + DynamoDB</div>
+                <div class="gap-item-desc">log_forward_worker ส่ง access log → DynamoDB ต่อเนื่อง</div>
+              </div>
+            </div>
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">Telegram Alerts</div>
+                <div class="gap-item-desc">alert_worker + Telethon ส่งแจ้งเตือน critical events</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Origin Down Alert</div>
+                <div class="gap-item-desc">ยังไม่มี health check worker ที่ detect origin down แล้วแจ้ง Telegram</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Per-Origin Dashboard Stats</div>
+                <div class="gap-item-desc">Dashboard ปัจจุบัน global stats — ยังไม่กรองตาม origin ที่ user เป็นเจ้าของ</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Frontend -->
+        <div class="gap-card">
+          <div class="gap-card-header">
+            <span class="gap-icon">💻</span>
+            <div>
+              <div class="gap-title">Frontend (React + Vite)</div>
+              <div class="gap-module-tag">Frontend</div>
+            </div>
+            <span class="gap-status partial">บางส่วน</span>
+          </div>
+          <div class="gap-items">
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">Auth Pages (Login/Register)</div>
+                <div class="gap-item-desc">Login.tsx, Register.tsx, OAuthSuccess.tsx มีครบ</div>
+              </div>
+            </div>
+            <div class="gap-item done">
+              <span class="gap-dot done"></span>
+              <div>
+                <div class="gap-item-title">Dashboard, Logs, Rules, Alerts, CDN Pages</div>
+                <div class="gap-item-desc">หน้าหลักมีครบ 6 หน้า</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Origin Management Page</div>
+                <div class="gap-item-desc">ยังไม่มี UI ให้ user เพิ่ม/แก้/ลบ Web Origin และกรอก IP</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">Domain & DNS Setup Wizard</div>
+                <div class="gap-item-desc">ยังไม่มี step-by-step UI สำหรับ เพิ่ม domain → ดู DNS instructions → verify → รอ SSL</div>
+              </div>
+            </div>
+            <div class="gap-item missing">
+              <span class="gap-dot missing"></span>
+              <div>
+                <div class="gap-item-title">SSL Status Widget</div>
+                <div class="gap-item-desc">ยังไม่มีหน้าแสดง cert status, expiry date ต่อ domain</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /gap-grid -->
+
+      <!-- Gap Summary Bar -->
+      <div class="gap-summary">
+        <div class="gap-sum-item">
+          <div class="gap-sum-num done">11</div>
+          <div class="gap-sum-label">✅ มีแล้ว</div>
+        </div>
+        <div class="gap-sum-item">
+          <div class="gap-sum-num partial">8</div>
+          <div class="gap-sum-label">🟡 บางส่วน</div>
+        </div>
+        <div class="gap-sum-item">
+          <div class="gap-sum-num missing">17</div>
+          <div class="gap-sum-label">🔴 ต้องสร้าง</div>
+        </div>
+        <div class="gap-sum-item">
+          <div class="gap-sum-num total">36</div>
+          <div class="gap-sum-label">รวมทั้งหมด</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================
+       FULL FLOW SECTION — Flow การทำงานระบบครบ
+       ================================================================ -->
+  <section class="section" id="fullflow">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-badge">Full System Flow</div>
+        <h2 class="section-title">Flow การทำงานระบบ (End-to-End)</h2>
+        <p class="section-subtitle">ตั้งแต่ User สมัครสมาชิก จนถึง Request วิ่งผ่านระบบได้จริง</p>
+      </div>
+
+      <!-- Flow Toggle -->
+      <div class="flow-toggle-group">
+        <button class="flow-toggle-btn active" id="btn-setup-flow" onclick="showFlow('setup')">🚀 Setup Flow (ตั้งค่าครั้งแรก)</button>
+        <button class="flow-toggle-btn" id="btn-request-flow" onclick="showFlow('request')">⚡ Request Flow (traffic จริง)</button>
+        <button class="flow-toggle-btn" id="btn-ssl-flow" onclick="showFlow('ssl')">🔒 Auto-HTTPS Flow</button>
+      </div>
+
+      <!-- Setup Flow -->
+      <div class="full-flow-diagram" id="flow-setup">
+        <div class="fflow-title">🚀 Setup Flow — ตั้งค่าระบบครั้งแรก</div>
+        <div class="fflow-steps">
+          <div class="fflow-step">
+            <div class="fflow-num">1</div>
+            <div class="fflow-body">
+              <div class="fflow-actor user">👤 User</div>
+              <div class="fflow-action">POST /api/auth/register<br><small>{ email, password, username }</small></div>
+              <div class="fflow-result">→ JWT token + DynamoDB waf_users record</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">2</div>
+            <div class="fflow-body">
+              <div class="fflow-actor user">👤 User</div>
+              <div class="fflow-action">POST /api/origins<br><small>{ origin_ip: "1.2.3.4", port: 80, label: "My Site" }</small></div>
+              <div class="fflow-result">→ สร้าง record ใน waf_origins + สร้าง Nginx upstream block</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">3</div>
+            <div class="fflow-body">
+              <div class="fflow-actor backend">⚙️ Backend</div>
+              <div class="fflow-action">Health Check Origin IP<br><small>HTTP GET → 1.2.3.4:80, timeout 5s</small></div>
+              <div class="fflow-result">→ status: "online" หรือ "unreachable"</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">4</div>
+            <div class="fflow-body">
+              <div class="fflow-actor user">👤 User</div>
+              <div class="fflow-action">POST /api/origins/:id/domains<br><small>{ domain_name: "example.com" }</small></div>
+              <div class="fflow-result">→ สร้าง record + generate verification_token + return DNS instructions</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">5</div>
+            <div class="fflow-body">
+              <div class="fflow-actor user">👤 User</div>
+              <div class="fflow-action">ไปที่ Domain Registrar<br><small>Set CNAME: example.com → proxy.waf-cdn.com<br>Set TXT: _verify → waf-verify=&lt;token&gt;</small></div>
+              <div class="fflow-result">→ DNS propagate (ใช้เวลา 5 min - 24 hr)</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">6</div>
+            <div class="fflow-body">
+              <div class="fflow-actor user">👤 User</div>
+              <div class="fflow-action">POST /api/domains/:id/verify<br><small>Trigger DNS check</small></div>
+              <div class="fflow-result">→ Backend query DNS: CNAME ✓ + TXT ✓ → dns_verified = true</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">7</div>
+            <div class="fflow-body">
+              <div class="fflow-actor backend">⚙️ Backend (Auto)</div>
+              <div class="fflow-action">SSL Provisioning Trigger<br><small>certbot certonly --webroot -d example.com</small></div>
+              <div class="fflow-result">→ Let's Encrypt ออก cert → บันทึก paths ใน DB</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">8</div>
+            <div class="fflow-body">
+              <div class="fflow-actor backend">⚙️ Backend (Auto)</div>
+              <div class="fflow-action">Generate Nginx Config<br><small>Jinja2 render server block → write to /conf.d/example.com.conf</small></div>
+              <div class="fflow-result">→ nginx -t ✓ → nginx -s reload ✓</div>
+            </div>
+          </div>
+          <div class="fflow-step success">
+            <div class="fflow-num">✓</div>
+            <div class="fflow-body">
+              <div class="fflow-actor done">🎉 เสร็จ!</div>
+              <div class="fflow-action">example.com พร้อมใช้งาน<br><small>HTTPS active • WAF enabled • CDN cache on</small></div>
+              <div class="fflow-result">→ Traffic วิ่งผ่าน DNS → CDN → WAF → origin ได้แล้ว</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Request Flow -->
+      <div class="full-flow-diagram hidden" id="flow-request">
+        <div class="fflow-title">⚡ Request Flow — Traffic จริงเมื่อ User เข้าเว็บ</div>
+        <div class="fflow-steps">
+          <div class="fflow-step">
+            <div class="fflow-num">1</div>
+            <div class="fflow-body">
+              <div class="fflow-actor user">🖥️ Browser</div>
+              <div class="fflow-action">ผู้ใช้พิมพ์ https://example.com</div>
+              <div class="fflow-result">→ Browser query DNS resolver</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">2</div>
+            <div class="fflow-body">
+              <div class="fflow-actor dns">🌐 DNS</div>
+              <div class="fflow-action">CNAME lookup: example.com<br><small>→ proxy.waf-cdn.com → CDN edge IP (ใกล้ที่สุด)</small></div>
+              <div class="fflow-result">→ Return IP address ของ CDN edge node</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">3</div>
+            <div class="fflow-body">
+              <div class="fflow-actor cdn">⚡ CDN Edge</div>
+              <div class="fflow-action">รับ HTTPS request → SSL termination<br><small>ตรวจ cache: มี? → ตอบกลับทันที (CACHE HIT)</small></div>
+              <div class="fflow-result">→ ถ้า HIT: ตอบเลย (ไม่ผ่าน WAF) ถ้า MISS: ส่งต่อ WAF</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">4</div>
+            <div class="fflow-body">
+              <div class="fflow-actor waf">🛡️ WAF</div>
+              <div class="fflow-action">ModSecurity + OWASP CRS analysis<br><small>ตรวจ SQLi, XSS, RCE, path traversal, ...</small></div>
+              <div class="fflow-result">→ ถ้าอันตราย: block 403 ถ้าปกติ: proxy_pass → origin</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">5</div>
+            <div class="fflow-body">
+              <div class="fflow-actor origin">🖥️ Web Origin</div>
+              <div class="fflow-action">รับ request → process → ตอบ response<br><small>origin_ip:origin_port</small></div>
+              <div class="fflow-result">→ Response ส่งกลับผ่าน WAF → CDN (store cache) → Browser</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">6</div>
+            <div class="fflow-body">
+              <div class="fflow-actor backend">📝 Log Pipeline</div>
+              <div class="fflow-action">log_forward_worker<br><small>อ่าน /var/log/nginx/access.json ทุก 5s</small></div>
+              <div class="fflow-result">→ ส่งข้อมูลใน DynamoDB → Dashboard อัปเดต</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SSL Flow -->
+      <div class="full-flow-diagram hidden" id="flow-ssl">
+        <div class="fflow-title">🔒 Auto-HTTPS Flow — SSL ออกอัตโนมัติ</div>
+        <div class="fflow-steps">
+          <div class="fflow-step">
+            <div class="fflow-num">1</div>
+            <div class="fflow-body">
+              <div class="fflow-actor backend">⚙️ Backend</div>
+              <div class="fflow-action">detect: dns_verified = true<br><small>Triggered จาก POST /api/domains/:id/verify</small></div>
+              <div class="fflow-result">→ เรียก provision_ssl(domain_id)</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">2</div>
+            <div class="fflow-body">
+              <div class="fflow-actor backend">⚙️ Certbot</div>
+              <div class="fflow-action">certbot certonly --webroot<br><small>-d example.com --webroot-path /var/www/acme</small></div>
+              <div class="fflow-result">→ Certbot ร้องขอ challenge จาก Let's Encrypt</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">3</div>
+            <div class="fflow-body">
+              <div class="fflow-actor cdn">🌐 Let's Encrypt</div>
+              <div class="fflow-action">HTTP-01 Challenge<br><small>GET example.com/.well-known/acme-challenge/&lt;token&gt;</small></div>
+              <div class="fflow-result">→ Nginx serve challenge file → LE verify ✓</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">4</div>
+            <div class="fflow-body">
+              <div class="fflow-actor backend">⚙️ Backend</div>
+              <div class="fflow-action">บันทึก cert paths<br><small>/etc/letsencrypt/live/example.com/fullchain.pem</small></div>
+              <div class="fflow-result">→ อัปเดต DB: ssl_status = "active", expires_at = 90 วัน</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">5</div>
+            <div class="fflow-body">
+              <div class="fflow-actor backend">⚙️ Nginx Config Gen</div>
+              <div class="fflow-action">Render Jinja2 template → เพิ่ม SSL block<br><small>ssl_certificate fullchain.pem; ssl_certificate_key privkey.pem;</small></div>
+              <div class="fflow-result">→ nginx -t ✓ → nginx -s reload → HTTPS active!</div>
+            </div>
+          </div>
+          <div class="fflow-step">
+            <div class="fflow-num">6</div>
+            <div class="fflow-body">
+              <div class="fflow-actor backend">🔄 Cron Job (daily)</div>
+              <div class="fflow-action">ตรวจ certs ทุกวัน<br><small>ถ้า expires_at &lt; 30 วัน → certbot renew</small></div>
+              <div class="fflow-result">→ Renew อัตโนมัติ ไม่ต้องทำเอง</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================================================================
+       WORK DIVISION SECTION — แบ่งงาน 2 คน
+       ================================================================ -->
+  <section class="section section-alt" id="workdiv">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-badge">Work Division</div>
+        <h2 class="section-title">แบ่งงานสำหรับ 2 คน</h2>
+        <p class="section-subtitle">แบ่งตาม Backend / Frontend + Infrastructure — สามารถทำควบคู่กันได้เลย</p>
+      </div>
+
+      <!-- Person Cards Header -->
+      <div class="person-header">
+        <div class="person-a">
+          <div class="person-avatar a">A</div>
+          <div>
+            <div class="person-name">คนที่ A</div>
+            <div class="person-role">Backend + Infrastructure</div>
+          </div>
+        </div>
+        <div class="vs-divider">VS</div>
+        <div class="person-b">
+          <div class="person-avatar b">B</div>
+          <div>
+            <div class="person-name">คนที่ B</div>
+            <div class="person-role">Frontend + Integration</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Work Division Grid -->
+      <div class="workdiv-grid">
+
+        <!-- Person A Column -->
+        <div class="workdiv-col col-a">
+          <div class="col-header a">⚙️ คนที่ A — Backend & Infra</div>
+
+          <div class="task-group">
+            <div class="task-group-title">Phase 1: Data Model & API Foundation</div>
+            <div class="task-card a">
+              <div class="task-title">🗃️ สร้าง DynamoDB Tables</div>
+              <div class="task-desc">สร้างตาราง waf_origins, waf_domains, waf_ssl_certs พร้อม GSI indexes</div>
+              <div class="task-files">
+                <span class="task-file">services/dynamodb_service.py</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+            <div class="task-card a">
+              <div class="task-title">🌐 Origin CRUD API</div>
+              <div class="task-desc">POST/GET/PUT/DELETE /api/origins — รับ IP, port, label, เช็ค ownership</div>
+              <div class="task-files">
+                <span class="task-file new">api/origins.py</span>
+                <span class="task-file">services/origin_service.py</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+            <div class="task-card a">
+              <div class="task-title">🔐 Multi-tenant Ownership</div>
+              <div class="task-desc">เพิ่ม verify_origin_ownership() middleware — ตรวจ admin_user_id ก่อน operation ทุก request</div>
+              <div class="task-files">
+                <span class="task-file">services/rbac.py</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+          </div>
+
+          <div class="task-group">
+            <div class="task-group-title">Phase 2: Domain & DNS</div>
+            <div class="task-card a">
+              <div class="task-title">🏷️ Domain CRUD API</div>
+              <div class="task-desc">POST/GET/DELETE /api/origins/:id/domains — generate DNS instructions + verification token</div>
+              <div class="task-files">
+                <span class="task-file new">api/domains.py</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+            <div class="task-card a">
+              <div class="task-title">🔍 DNS Verification Service</div>
+              <div class="task-desc">POST /api/domains/:id/verify — query CNAME + TXT ผ่าน dnspython library</div>
+              <div class="task-files">
+                <span class="task-file new">services/dns_service.py</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+          </div>
+
+          <div class="task-group">
+            <div class="task-group-title">Phase 3: SSL / Auto-HTTPS</div>
+            <div class="task-card a">
+              <div class="task-title">🔒 SSL Provisioning Service</div>
+              <div class="task-desc">เรียก certbot certonly เมื่อ DNS verified — บันทึก cert paths ลง DB</div>
+              <div class="task-files">
+                <span class="task-file new">services/ssl_service.py</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+            <div class="task-card a">
+              <div class="task-title">⚙️ Nginx Config Generator</div>
+              <div class="task-desc">Jinja2 template render → per-origin server block → nginx -t → reload</div>
+              <div class="task-files">
+                <span class="task-file new">services/nginx_config_service.py</span>
+                <span class="task-file new">templates/nginx/origin.conf.j2</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+            <div class="task-card a">
+              <div class="task-title">🔄 SSL Renew Cron Job</div>
+              <div class="task-desc">Background task ตรวจ cert expiry ทุกวัน + certbot renew อัตโนมัติ</div>
+              <div class="task-files">
+                <span class="task-file new">services/ssl_renew_worker.py</span>
+              </div>
+              <span class="task-priority medium">Priority: MEDIUM</span>
+            </div>
+          </div>
+
+          <div class="task-group">
+            <div class="task-group-title">Phase 4: Health & Per-Origin WAF</div>
+            <div class="task-card a">
+              <div class="task-title">🏥 Origin Health Check Worker</div>
+              <div class="task-desc">Background worker ping origin IP ทุก 60s — update status + Telegram alert ถ้า down</div>
+              <div class="task-files">
+                <span class="task-file new">services/health_check_worker.py</span>
+              </div>
+              <span class="task-priority medium">Priority: MEDIUM</span>
+            </div>
+            <div class="task-card a">
+              <div class="task-title">🛡️ Per-Origin WAF Config API</div>
+              <div class="task-desc">GET/PUT /api/origins/:id/waf — paranoia level, custom rules แยกต่อ origin</div>
+              <div class="task-files">
+                <span class="task-file">api/rules.py</span>
+                <span class="task-file">services/rule_manager.py</span>
+              </div>
+              <span class="task-priority medium">Priority: MEDIUM</span>
+            </div>
+          </div>
+
+        </div><!-- /col-a -->
+
+        <!-- Divider -->
+        <div class="col-divider">
+          <div class="divider-line"></div>
+          <div class="divider-label">ทำควบคู่กัน</div>
+          <div class="divider-line"></div>
+        </div>
+
+        <!-- Person B Column -->
+        <div class="workdiv-col col-b">
+          <div class="col-header b">💻 คนที่ B — Frontend & Integration</div>
+
+          <div class="task-group">
+            <div class="task-group-title">Phase 1: Origin Management UI</div>
+            <div class="task-card b">
+              <div class="task-title">🌐 Origins List Page</div>
+              <div class="task-desc">หน้าแสดง origins ทั้งหมดของ user — card layout, status badge, health indicator</div>
+              <div class="task-files">
+                <span class="task-file new">pages/Origins.tsx</span>
+                <span class="task-file new">api/origins.ts</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+            <div class="task-card b">
+              <div class="task-title">➕ Add Origin Form</div>
+              <div class="task-desc">Modal/Page สำหรับกรอก IP, port, label + validate IP format + ส่ง POST /api/origins</div>
+              <div class="task-files">
+                <span class="task-file new">components/AddOriginModal.tsx</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+            <div class="task-card b">
+              <div class="task-title">📡 Origin Detail Page</div>
+              <div class="task-desc">หน้า detail ของแต่ละ origin — แสดง domains, WAF config, SSL status, stats</div>
+              <div class="task-files">
+                <span class="task-file new">pages/OriginDetail.tsx</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+          </div>
+
+          <div class="task-group">
+            <div class="task-group-title">Phase 2: Domain Setup Wizard</div>
+            <div class="task-card b">
+              <div class="task-title">🏷️ Domain Setup Wizard (4 Steps)</div>
+              <div class="task-desc">Step 1: กรอก domain → Step 2: แสดง DNS instructions → Step 3: Verify button → Step 4: รอ SSL</div>
+              <div class="task-files">
+                <span class="task-file new">components/DomainSetupWizard.tsx</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+            <div class="task-card b">
+              <div class="task-title">📋 DNS Instructions UI</div>
+              <div class="task-desc">แสดง DNS record ที่ต้อง set — copy button, แยก CNAME vs TXT, สี status ชัดเจน</div>
+              <div class="task-files">
+                <span class="task-file new">components/DnsInstructions.tsx</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+          </div>
+
+          <div class="task-group">
+            <div class="task-group-title">Phase 3: SSL & Status UI</div>
+            <div class="task-card b">
+              <div class="task-title">🔒 SSL Status Component</div>
+              <div class="task-desc">Widget แสดง cert issuer, expires_at, auto_renew toggle — polling ทุก 10s ถ้า pending</div>
+              <div class="task-files">
+                <span class="task-file new">components/SslStatusCard.tsx</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+            <div class="task-card b">
+              <div class="task-title">🔄 Provisioning Progress UI</div>
+              <div class="task-desc">แสดง real-time progress ระหว่าง DNS verify → SSL provision → Nginx reload</div>
+              <div class="task-files">
+                <span class="task-file new">components/ProvisioningStatus.tsx</span>
+              </div>
+              <span class="task-priority high">Priority: HIGH</span>
+            </div>
+          </div>
+
+          <div class="task-group">
+            <div class="task-group-title">Phase 4: Dashboard & Integration</div>
+            <div class="task-card b">
+              <div class="task-title">📊 Per-Origin Dashboard Stats</div>
+              <div class="task-desc">กรอง stats ตาม origin ที่ user เลือก — request count, block rate, cache hit rate</div>
+              <div class="task-files">
+                <span class="task-file">pages/Dashboard.tsx</span>
+              </div>
+              <span class="task-priority medium">Priority: MEDIUM</span>
+            </div>
+            <div class="task-card b">
+              <div class="task-title">🔗 React Router Integration</div>
+              <div class="task-desc">เพิ่ม routes ใหม่: /origins, /origins/:id, /origins/:id/domains ใน App.tsx</div>
+              <div class="task-files">
+                <span class="task-file">App.tsx</span>
+              </div>
+              <span class="task-priority medium">Priority: MEDIUM</span>
+            </div>
+            <div class="task-card b">
+              <div class="task-title">🔔 Origin Health Alert UI</div>
+              <div class="task-desc">Badge แสดง origin down ใน sidebar + notification toast เมื่อ origin กลับมา online</div>
+              <div class="task-files">
+                <span class="task-file">components/layout/Sidebar.tsx</span>
+                <span class="task-file new">components/HealthBadge.tsx</span>
+              </div>
+              <span class="task-priority medium">Priority: MEDIUM</span>
+            </div>
+          </div>
+
+        </div><!-- /col-b -->
+      </div><!-- /workdiv-grid -->
+
+      <!-- Shared Tasks -->
+      <div class="shared-tasks">
+        <div class="shared-header">🤝 งานที่ทำร่วมกัน (ทั้ง 2 คน)</div>
+        <div class="shared-grid">
+          <div class="shared-card">
+            <div class="shared-icon">🧪</div>
+            <div class="shared-title">Integration Testing</div>
+            <div class="shared-desc">ทดสอบ flow ครบ: สมัคร → เพิ่ม origin → add domain → verify → HTTPS → traffic</div>
+          </div>
+          <div class="shared-card">
+            <div class="shared-icon">📋</div>
+            <div class="shared-title">API Contract</div>
+            <div class="shared-desc">ตกลง request/response schema ก่อน — A เขียน backend แล้ว B เขียน frontend พร้อมกันได้</div>
+          </div>
+          <div class="shared-card">
+            <div class="shared-icon">🐳</div>
+            <div class="shared-title">Docker Compose Update</div>
+            <div class="shared-desc">เพิ่ม certbot container + volumes สำหรับ /etc/letsencrypt ใน docker-compose.yml</div>
+          </div>
+          <div class="shared-card">
+            <div class="shared-icon">📦</div>
+            <div class="shared-title">DynamoDB Schema Review</div>
+            <div class="shared-desc">ออกแบบ partition key + GSI ร่วมกันก่อน สร้าง — แก้ทีหลังยาก</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Timeline -->
+      <div class="timeline-section">
+        <div class="timeline-header">📅 Estimated Timeline (ทำทั้ง 2 คนพร้อมกัน)</div>
+        <div class="timeline-bars">
+          <div class="tl-row">
+            <div class="tl-label">Phase 1<br><small>DB + Origin API + Origin UI</small></div>
+            <div class="tl-bar-wrap">
+              <div class="tl-bar" style="width:25%">
+                <div class="tl-fill a" style="width:100%"></div>
+              </div>
+              <div class="tl-duration">~3-4 วัน</div>
+            </div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-label">Phase 2<br><small>Domain API + DNS Wizard UI</small></div>
+            <div class="tl-bar-wrap">
+              <div class="tl-bar" style="width:25%; margin-left:25%">
+                <div class="tl-fill b" style="width:100%"></div>
+              </div>
+              <div class="tl-duration">~3-4 วัน</div>
+            </div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-label">Phase 3<br><small>SSL Service + SSL UI</small></div>
+            <div class="tl-bar-wrap">
+              <div class="tl-bar" style="width:25%; margin-left:50%">
+                <div class="tl-fill c" style="width:100%"></div>
+              </div>
+              <div class="tl-duration">~2-3 วัน</div>
+            </div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-label">Phase 4<br><small>Health + Per-origin stats</small></div>
+            <div class="tl-bar-wrap">
+              <div class="tl-bar" style="width:25%; margin-left:75%">
+                <div class="tl-fill d" style="width:100%"></div>
+              </div>
+              <div class="tl-duration">~2-3 วัน</div>
+            </div>
+          </div>
+        </div>
+        <div class="tl-total">⏱️ รวม: ~10-14 วัน ถ้าทำพร้อมกัน 2 คน</div>
+      </div>
+
+    </div>
+  </section>
+
   <!-- Footer -->
   <footer class="footer">
     <div class="container">
@@ -1524,9 +2449,9 @@ Value: waf-verify=abc123</code>
           <span>WAF CDN Platform — Architecture Plan</span>
         </div>
         <div class="footer-meta">
-          <span>Generated: July 2026</span>
+          <span>Updated: July 2026</span>
           <span>•</span>
-          <span>8 Modules • 24 APIs • 4 DB Tables</span>
+          <span>8 Modules • 36 Tasks • Gap Analysis + Work Division</span>
         </div>
       </div>
     </div>
