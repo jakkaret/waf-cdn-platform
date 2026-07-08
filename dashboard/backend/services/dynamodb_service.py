@@ -8,8 +8,11 @@ from datetime import datetime
 from decimal import Decimal
 from boto3.dynamodb.conditions import Attr
 
+from dotenv import load_dotenv, find_dotenv
 
-load_dotenv()
+load_dotenv(find_dotenv())
+# Also try project root explicitly just in case
+load_dotenv(os.path.join(os.path.dirname(__file__), '../../../.env'))
 
 class DynamoDBService:
     def __init__(self):
@@ -33,6 +36,9 @@ class DynamoDBService:
         self.logs_table = self.dynamodb.Table(self.logs_table_name)
         self.rules_table = self.dynamodb.Table(self.rules_table_name)
         self.waf_users = self.dynamodb.Table(self.users_table_name)
+        self.origins_table = self.dynamodb.Table("waf_origins")
+        self.domains_table = self.dynamodb.Table("waf_domains")
+        self.ssl_certs_table = self.dynamodb.Table("waf_ssl_certs")
     
     def convert_floats(self, obj):
         if isinstance(obj, float):
@@ -166,6 +172,65 @@ class DynamoDBService:
     #     except Exception as e:
     #         print("❌ DynamoDB connection failed:", e)
     #         return False
+
+    # ORIGINS
+    def create_origin(self, origin_data: Dict) -> bool:
+        try:
+            self.origins_table.put_item(Item=origin_data)
+            return True
+        except Exception as e:
+            print("Failed to create origin:", e)
+            raise e
+
+    def get_origins_by_user(self, admin_user_id: str) -> List[Dict]:
+        try:
+            response = self.origins_table.query(
+                IndexName="admin_user_id-index",
+                KeyConditionExpression=boto3.dynamodb.conditions.Key("admin_user_id").eq(admin_user_id)
+            )
+            return response.get("Items", [])
+        except Exception as e:
+            print("Failed to get origins by user:", e)
+            return []
+
+    def get_origin_by_id(self, origin_id: str) -> Dict:
+        try:
+            response = self.origins_table.get_item(Key={"id": origin_id})
+            return response.get("Item", {})
+        except Exception as e:
+            print("Failed to get origin by id:", e)
+            return {}
+
+    def update_origin(self, origin_id: str, update_data: Dict) -> bool:
+        try:
+            update_expr = "SET "
+            expr_attr_values = {}
+            expr_attr_names = {}
+            for k, v in update_data.items():
+                update_expr += f"#{k} = :{k}, "
+                expr_attr_values[f":{k}"] = v
+                expr_attr_names[f"#{k}"] = k
+            
+            update_expr = update_expr.rstrip(", ")
+            
+            self.origins_table.update_item(
+                Key={"id": origin_id},
+                UpdateExpression=update_expr,
+                ExpressionAttributeValues=expr_attr_values,
+                ExpressionAttributeNames=expr_attr_names
+            )
+            return True
+        except Exception as e:
+            print("Failed to update origin:", e)
+            return False
+
+    def delete_origin(self, origin_id: str) -> bool:
+        try:
+            self.origins_table.delete_item(Key={"id": origin_id})
+            return True
+        except Exception as e:
+            print("Failed to delete origin:", e)
+            return False
 
 # ตัวอย่างการใช้งาน / Quick test (python3 -m services.dynamodb_service)
 if __name__ == "__main__":

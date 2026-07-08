@@ -75,3 +75,15 @@ def require_viewer_or_above(current_user: dict = Depends(get_current_user)):
             detail="Access denied",
         )
     return current_user
+
+def verify_origin_ownership(origin_id: str, current_user: dict = Depends(get_current_user)):
+    from services.dynamodb_service import DynamoDBService
+    db = DynamoDBService()
+    origin = db.get_origin_by_id(origin_id)
+    if not origin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Origin not found")
+    
+    if origin.get("admin_user_id") != current_user.get("user_id"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. You do not own this origin.")
+    
+    return origin
