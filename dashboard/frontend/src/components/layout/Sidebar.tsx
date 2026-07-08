@@ -8,7 +8,8 @@ import {
   Bell,
   Globe,
   Users,
-  LogOut
+  LogOut,
+  Server
 } from 'lucide-react'
 
 export const Sidebar: React.FC = () => {
@@ -22,6 +23,7 @@ export const Sidebar: React.FC = () => {
 
   const menu = [
     { label: 'Overview', path: '/', icon: <LayoutDashboard size={20} />, roles: ['admin', 'viewer'] },
+    { label: 'Origin Servers', path: '/origins', icon: <Server size={20} />, roles: ['admin', 'viewer'] },
     { label: 'Attack Logs', path: '/logs', icon: <ListFilter size={20} />, roles: ['admin', 'viewer'] },
     { label: 'Custom Rules', path: '/rules', icon: <ShieldAlert size={20} />, roles: ['admin', 'viewer'] },
     { label: 'Alerts', path: '/alerts', icon: <Bell size={20} />, roles: ['admin', 'viewer'] },

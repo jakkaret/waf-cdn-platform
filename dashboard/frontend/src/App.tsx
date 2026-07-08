@@ -14,6 +14,8 @@ import Rules from './pages/Rules'
 import Alerts from './pages/Alerts'
 import Users from './pages/Users'
 import CDN from './pages/CDN'
+import Origins from './pages/Origins'
+import OriginDetail from './pages/OriginDetail'
 
 const queryClient = new QueryClient()
 
@@ -42,6 +44,8 @@ export const App: React.FC = () => {
           <Route path="/rules" element={<ProtectedRoute><Rules /></ProtectedRoute>} />
           <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
           <Route path="/cdn" element={<ProtectedRoute><CDN /></ProtectedRoute>} />
+          <Route path="/origins" element={<ProtectedRoute><Origins /></ProtectedRoute>} />
+          <Route path="/origins/:id" element={<ProtectedRoute><OriginDetail /></ProtectedRoute>} />
           
           {/* Admin Routes */}
           <Route path="/users" element={<ProtectedRoute requireAdmin><Users /></ProtectedRoute>} />

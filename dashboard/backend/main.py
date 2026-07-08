@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from api import rules
 from api import auth
 from api import cdn
+from api import origins
 from services.log_forward import log_forward_worker
 from services.cdn_log_forward import cdn_log_forward_worker
 from services.telegram_listener import alert_worker
@@ -89,6 +90,7 @@ app.include_router(auth.router)
 app.include_router(rules.router)
 app.include_router(alerts.router)  
 app.include_router(cdn.router)
+app.include_router(origins.router)
 
 # Error Handlers
 from fastapi import Request
