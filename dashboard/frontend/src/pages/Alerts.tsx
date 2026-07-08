@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 export const Alerts: React.FC = () => {
   const queryClient = useQueryClient()
   const [code, setCode] = useState<string | null>(null)
-  const [botUsername, setBotUsername] = useState<string>('automatedwafbot')
+  const [botUsername, setBotUsername] = useState<string>('WAF_Project_Bot')
 
   const { data: status, isLoading: isStatusLoading } = useQuery({
     queryKey: ['telegram-status'],
@@ -120,7 +120,7 @@ export const Alerts: React.FC = () => {
               </div>
             </div>
             <h4 className="text-sm font-bold text-white mb-2">Step 2: Send code to bot</h4>
-            <a href={`https://t.me/automatedwafbot?start=${code}`} target="_blank" rel="noreferrer" className="text-[#229ed9] text-sm hover:underline">
+            <a href={`https://t.me/${botUsername}?start=${code}`} target="_blank" rel="noreferrer" className="text-[#229ed9] text-sm hover:underline">
               Open Telegram Bot →
             </a>
             <div className="mt-4 text-sm text-text-muted flex items-center gap-2">
@@ -131,42 +131,42 @@ export const Alerts: React.FC = () => {
         )}
       </div>
 
-      <Card noPadding>
-        <CardHeader title="Recent Alerts" className="p-6 border-b border-white/5 mb-0" />
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-white/5 text-text-muted text-[11px] uppercase tracking-wider">
-              <tr>
-                <th className="p-4 font-semibold">Alert ID</th>
-                <th className="p-4 font-semibold">Source IP</th>
-                <th className="p-4 font-semibold">URL</th>
-                <th className="p-4 font-semibold">Status</th>
-                <th className="p-4 font-semibold">Message</th>
-                <th className="p-4 font-semibold">Time</th>
+  <Card noPadding>
+    <CardHeader title="Recent Alerts" className="p-6 border-b border-white/5 mb-0" />
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-white/5 text-text-muted text-[11px] uppercase tracking-wider">
+          <tr>
+            <th className="p-4 font-semibold">Alert ID</th>
+            <th className="p-4 font-semibold">Source IP</th>
+            <th className="p-4 font-semibold">URL</th>
+            <th className="p-4 font-semibold">Status</th>
+            <th className="p-4 font-semibold">Message</th>
+            <th className="p-4 font-semibold">Time</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/5">
+          {isAlertsLoading ? (
+            <tr><td colSpan={6} className="p-8 text-center text-text-muted">Loading alerts...</td></tr>
+          ) : alerts.length === 0 ? (
+            <tr><td colSpan={6} className="p-8 text-center text-text-muted">No alerts yet</td></tr>
+          ) : (
+            alerts.map((a, i) => (
+              <tr key={a.alert_id || i} className="hover:bg-white/5 transition-colors">
+                <td className="p-4 font-mono text-[11px] text-text-muted">{a.alert_id}</td>
+                <td className="p-4 font-mono">{a.ip}</td>
+                <td className="p-4 max-w-[200px] truncate" title={a.url}>{a.url}</td>
+                <td className="p-4"><Badge color="danger">{a.status}</Badge></td>
+                <td className="p-4 text-text-muted">{a.message}</td>
+                <td className="p-4 text-[12px] text-text-muted whitespace-nowrap">{new Date(a.timestamp).toLocaleString()}</td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {isAlertsLoading ? (
-                <tr><td colSpan={6} className="p-8 text-center text-text-muted">Loading alerts...</td></tr>
-              ) : alerts.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center text-text-muted">No alerts yet</td></tr>
-              ) : (
-                alerts.map((a, i) => (
-                  <tr key={a.alert_id || i} className="hover:bg-white/5 transition-colors">
-                    <td className="p-4 font-mono text-[11px] text-text-muted">{a.alert_id}</td>
-                    <td className="p-4 font-mono">{a.ip}</td>
-                    <td className="p-4 max-w-[200px] truncate" title={a.url}>{a.url}</td>
-                    <td className="p-4"><Badge color="danger">{a.status}</Badge></td>
-                    <td className="p-4 text-text-muted">{a.message}</td>
-                    <td className="p-4 text-[12px] text-text-muted whitespace-nowrap">{new Date(a.timestamp).toLocaleString()}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+            ))
+          )}
+        </tbody>
+      </table>
     </div>
+  </Card>
+    </div >
   )
 }
 
