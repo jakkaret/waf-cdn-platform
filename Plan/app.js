@@ -269,3 +269,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   console.log('🛡️ WAF CDN Platform — Architecture Plan loaded');
 });
+
+// ── Flow Tab Switcher (global function called from onclick) ──
+function showFlow(type) {
+  const flows = ['setup', 'request', 'ssl'];
+  const btnMap = { setup: 'btn-setup-flow', request: 'btn-request-flow', ssl: 'btn-ssl-flow' };
+
+  flows.forEach(f => {
+    const el = document.getElementById(`flow-${f}`);
+    const btn = document.getElementById(btnMap[f]);
+    if (el) el.classList.toggle('hidden', f !== type);
+    if (btn) btn.classList.toggle('active', f === type);
+  });
+}
+
