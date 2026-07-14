@@ -109,3 +109,48 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type CacheStatus = 'HIT' | 'MISS' | 'BYPASS'
 export type NodeRegion = 'SG' | 'JP' | 'TH'
 export type UserRole = 'admin' | 'viewer'
+
+export interface Origin {
+  origin_id: string
+  admin_user_id: string
+  label: string
+  ip: string
+  port: number
+  status: 'active' | 'inactive' | 'error' | 'pending'
+  health: 'up' | 'down' | 'unknown'
+  created_at: string
+  updated_at: string
+}
+
+export interface Domain {
+  domain_id: string
+  origin_id: string
+  domain_name: string
+  verification_status: 'pending' | 'verified' | 'failed'
+  dns_verification_token: string
+  cname_target: string
+  ssl_status: 'none' | 'pending' | 'active' | 'error'
+  ssl_expires_at?: string
+  created_at: string
+}
+
+export interface SslCert {
+  cert_id: string
+  domain_id: string
+  issuer: string
+  expires_at: string
+  auto_renew: boolean
+  status: 'active' | 'expired' | 'pending'
+}
+
+export interface DnsInstructions {
+  cname_record: { type: 'CNAME'; name: string; value: string }
+  txt_record: { type: 'TXT'; name: string; value: string }
+}
+
+export type ProvisioningStep =
+  | 'dns_verify'
+  | 'ssl_provision'
+  | 'nginx_reload'
+  | 'done'
+  | 'failed'
