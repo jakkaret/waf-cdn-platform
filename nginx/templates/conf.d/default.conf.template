@@ -27,6 +27,8 @@ server {
     access_log off;
 }
     location / {
+        auth_request /internal-rate-limit;
+        auth_request_set $retry_after $upstream_http_retry_after;
         
 	    proxy_pass http://dvwa_backend;
         proxy_set_header Host $host;
@@ -38,6 +40,23 @@ server {
         proxy_set_header Connection "";
 	    proxy_redirect off;
 	    proxy_buffering off;
+    }
+
+    location = /internal-rate-limit {
+        internal;
+        proxy_pass http://host.docker.internal:8000/api/limiter/check;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    error_page 401 =429 @rate_limit_exceeded;
+    location @rate_limit_exceeded {
+        add_header Retry-After $retry_after always;
+        add_header Content-Type text/plain always;
+        return 429 "Too Many Requests. Rate limit exceeded. Please try again later.";
     }
 
     error_page 403 /403.html; 
@@ -73,6 +92,9 @@ server {
     ssl_verify_depth 1;
 
     location / {
+        auth_request /internal-rate-limit;
+        auth_request_set $retry_after $upstream_http_retry_after;
+
         proxy_pass http://dvwa_backend;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

@@ -5,12 +5,19 @@ import os
 import time
 from datetime import datetime
 from services.dynamodb_service import DynamoDBService
+from services.clickhouse_service import ClickHouseService
 
 logger = logging.getLogger(__name__)
 
 
 db = DynamoDBService()
+ch = ClickHouseService()
 log_buffer = {}
+
+def save_hybrid_log(data: dict):
+    if ch.connected:
+        ch.save_log("access_logs", data)
+    db.save_log(data)
 
 BASE_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "../../../")
@@ -144,7 +151,7 @@ def try_merge(key):
         }
 
         print("🔥 MERGED:", key)
-        db.save_log(merged)
+        save_hybrid_log(merged)
         del log_buffer[key]
 
 
@@ -164,7 +171,7 @@ async def flush_old_logs():
 
                 if data:
                     print("⚠️ FALLBACK SAVE:", key)
-                    db.save_log(data)
+                    save_hybrid_log(data)
 
                 del log_buffer[key]
 

@@ -240,3 +240,33 @@ def _safe_user(user: dict) -> dict:
         "created_at": user.get("created_at"),
         "last_login": user.get("last_login"),
     }
+
+
+# Tunnel Verification Endpoint for Zero-Trust agents
+class TunnelVerifyRequest(BaseModel):
+    waf_token: str
+
+@router.post("/tunnel/verify")
+async def verify_tunnel(req: TunnelVerifyRequest):
+    from services.dynamodb_service import DynamoDBService
+    db = DynamoDBService()
+    
+    origin = db.get_origin_by_id(req.waf_token)
+    if not origin:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid WAF_TOKEN. Origin not found or unauthorized."
+        )
+    
+    # Return tunnel configuration parameters
+    # In production, tunnel_server_host should resolve to our public WAF IP
+    return {
+        "status": "authorized",
+        "origin_id": origin.get("id"),
+        "label": origin.get("label"),
+        "tunnel_server_host": "localhost",
+        "tunnel_server_port": 8050,
+        "remote_bind_port": 10000 + int(origin.get("port", 80)),
+        "local_target_host": "localhost",
+        "local_target_port": int(origin.get("port", 80))
+    }

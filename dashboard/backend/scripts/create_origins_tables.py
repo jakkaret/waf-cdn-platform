@@ -49,13 +49,22 @@ tables_to_create = [
         ],
         "AttributeDefinitions": [
             {"AttributeName": "id", "AttributeType": "S"},
-            {"AttributeName": "origin_id", "AttributeType": "S"}
+            {"AttributeName": "origin_id", "AttributeType": "S"},
+            {"AttributeName": "domain_name", "AttributeType": "S"}
         ],
         "GlobalSecondaryIndexes": [
             {
                 "IndexName": "origin_id-index",
                 "KeySchema": [
                     {"AttributeName": "origin_id", "KeyType": "HASH"}
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+                "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}
+            },
+            {
+                "IndexName": "domain_name-index",
+                "KeySchema": [
+                    {"AttributeName": "domain_name", "KeyType": "HASH"}
                 ],
                 "Projection": {"ProjectionType": "ALL"},
                 "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}

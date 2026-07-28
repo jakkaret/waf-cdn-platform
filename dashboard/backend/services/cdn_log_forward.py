@@ -2,10 +2,19 @@ import asyncio
 import json
 import os
 import time
+import logging
 from datetime import datetime
 from services.dynamodb_service import DynamoDBService
+from services.clickhouse_service import ClickHouseService
 
+logger = logging.getLogger(__name__)
 db = DynamoDBService()
+ch = ClickHouseService()
+
+def save_hybrid_log(data: dict):
+    if ch.connected:
+        ch.save_log("access_logs", data)
+    db.save_log(data)
 
 BASE_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "../../../")
@@ -63,7 +72,7 @@ async def process_cdn_log(region):
         try:
             raw = json.loads(line)
             data = normalize_cdn_access(raw, region)
-            db.save_log(data)
+            save_hybrid_log(data)
         except Exception as e:
             print(f"cdn log error ({region}):", e)
 
