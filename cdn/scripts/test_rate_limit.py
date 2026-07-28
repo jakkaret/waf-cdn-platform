@@ -18,7 +18,7 @@ def hit_edge(url):
     except Exception as e:
         return 0, str(e)
 
-def test_rate_limit(region, base_url):
+def test_rate_limit(region, base_url) -> bool:
     print(f"\n--- Testing Rate Limit for {region} ({base_url}) ---")
     url = f"{base_url}/"
     success_count = 0
@@ -47,10 +47,22 @@ def test_rate_limit(region, base_url):
     
     if too_many_req_count > 0:
         print("✅ SUCCESS: Rate Limiting is active and successfully blocked requests.")
+        return True
     else:
         print("❌ FAILED: Did not encounter any 429 Too Many Requests responses. Rate limit might be inactive or burst is too high.")
+        return False
 
 if __name__ == "__main__":
+    import sys
+    overall_success = True
     for region, url in EDGES.items():
-        test_rate_limit(region, url)
+        if not test_rate_limit(region, url):
+            overall_success = False
         time.sleep(1) # cool down before next region
+        
+    if not overall_success:
+        print("\n❌ FAILED: One or more rate limit checks failed.")
+        sys.exit(1)
+    else:
+        print("\n✅ SUCCESS: All rate limit checks passed.")
+        sys.exit(0)

@@ -2,9 +2,10 @@ import requests
 import time
 
 # Central Log
-def generate_logs():
+def generate_logs() -> bool:
     print("=== Generating test requests to CDN edge nodes ===")
     edges = {"SG": 8081, "JP": 8082, "TH": 8086}
+    success = False
     
     for region, port in edges.items():
         print(f"Sending requests to {region} edge (Port {port})...")
@@ -16,11 +17,20 @@ def generate_logs():
             # Static request
             r2 = requests.get(f"http://localhost:{port}/test-static.css", timeout=2)
             print(f"  -> Static GET /test-static.css : {r2.status_code} | Cache: {r2.headers.get('X-Cache-Status', 'MISS')}")
+            success = True
         except Exception as e:
             print(f"  -> Error connecting to {region} edge: {e}")
+            
+    return success
 
 if __name__ == "__main__":
-    generate_logs()
+    import sys
+    ok = generate_logs()
     print("\nLogs should now be written to logs/cdn/<region>/access.json.")
     print("The backend cdn_log_forward_worker should pick them up automatically and save to DynamoDB.")
     print("To verify, log in to the Dashboard and use the API: GET /api/cdn/logs?region=ALL")
+    if not ok:
+        print("\n❌ FAILED: All CDN edge nodes were unreachable.")
+        sys.exit(1)
+    else:
+        sys.exit(0)

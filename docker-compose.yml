@@ -24,6 +24,8 @@ services:
       TZ: Asia/Bangkok
     depends_on:
       - dvwa
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     networks:
       - waf-net
@@ -31,7 +33,7 @@ services:
   dvwa:
     image: sagikazarmark/dvwa
     container_name: dvwa
-    entrypoint: ["/bin/sh", "-c", "rm -f /var/run/apache2/apache2.pid && exec /run.sh"]
+    entrypoint: [ "/bin/sh", "-c", "rm -f /var/run/apache2/apache2.pid && exec /run.sh" ]
     environment:
       - MYSQL_HOSTNAME=dvwa-db
       - MYSQL_DATABASE=dvwa
@@ -39,6 +41,54 @@ services:
       - MYSQL_PASSWORD=dvwa
     networks:
       - waf-net
+
+  caddy:
+    image: caddy:alpine
+    container_name: caddy-ssl-termination
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    depends_on:
+      - waf
+    networks:
+      - waf-net
+
+  redis:
+    image: redis:alpine
+    container_name: waf-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - waf-net
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: waf-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=***REDACTED***
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    restart: unless-stopped
+    networks:
+      - waf-net
+
+volumes:
+  caddy_data:
+  caddy_config:
+  clickhouse_data:
 
 networks:
   waf-net:

@@ -10,7 +10,7 @@ HTTPS_EDGES = {
     "TH": "https://localhost:8446",
 }
 
-def test_tls(region, base_url):
+def test_tls(region, base_url) -> bool:
     print(f"\n--- Testing TLS/HTTPS for {region} ({base_url}) ---")
     url = f"{base_url}/healthz"
     try:
@@ -21,16 +21,31 @@ def test_tls(region, base_url):
         
         if resp.status_code == 200:
             print("✅ SUCCESS: HTTPS endpoint is reachable and returning data.")
+            return True
         else:
             print(f"❌ WARNING: Reached HTTPS endpoint but got unexpected status {resp.status_code}.")
+            return False
             
     except requests.exceptions.SSLError as e:
         print(f"❌ FAILED: SSL Error occurred. This means the TLS connection failed. Details: {e}")
+        return False
     except requests.exceptions.ConnectionError:
         print("❌ FAILED: Connection Error. Is the container running and port exposed?")
+        return False
     except Exception as e:
         print(f"❌ FAILED: Unexpected error: {e}")
+        return False
 
 if __name__ == "__main__":
+    import sys
+    overall_success = True
     for region, url in HTTPS_EDGES.items():
-        test_tls(region, url)
+        if not test_tls(region, url):
+            overall_success = False
+            
+    if not overall_success:
+        print("\n❌ FAILED: One or more TLS/HTTPS checks failed.")
+        sys.exit(1)
+    else:
+        print("\n✅ SUCCESS: All TLS/HTTPS checks passed.")
+        sys.exit(0)

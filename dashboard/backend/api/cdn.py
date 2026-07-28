@@ -90,7 +90,18 @@ def _enrich(stats: dict) -> list:
         if region == "GLOBAL":
             continue
         meta = REGIONS_META.get(region, {})
-        result.append({**data, **meta, "port": EDGE_PORTS.get(region)})
+        
+        # Ensure we have the keys that the frontend expects
+        mapped_data = {
+            "cache_hit": data.get("hit", data.get("cache_hit", 0)),
+            "cache_miss": data.get("miss", data.get("cache_miss", 0)),
+            "cache_bypass": data.get("bypass", data.get("cache_bypass", 0)),
+            "request_count": data.get("total_requests", data.get("request_count", 0)),
+            "blocked_count": data.get("blocked_count", 0),
+            "avg_latency": data.get("avg_response_time_ms", data.get("avg_latency", 0)),
+        }
+        
+        result.append({**data, **mapped_data, **meta, "port": EDGE_PORTS.get(region)})
     return result
 
 
@@ -139,8 +150,8 @@ async def cdn_nodes(current_user: dict = Depends(require_viewer_or_above)):
                     "lat": meta.get("lat"),
                     "lng": meta.get("lng"),
                     "port": port,
-                    "status": "online" if online else "offline",
                     **health_data,
+                    "status": "online" if online else "offline",
                 }
             )
 

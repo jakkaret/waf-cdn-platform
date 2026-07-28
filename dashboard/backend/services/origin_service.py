@@ -16,6 +16,11 @@ def create_origin(admin_user_id: str, label: str, ip: str, port: int) -> dict:
     if not (1 <= port <= 65535):
         raise ValueError("Invalid port number")
         
+    # Check quota limit (max 5 origins per user)
+    existing_origins = get_origins_for_user(admin_user_id)
+    if len(existing_origins) >= 5:
+        raise ValueError("Origin quota exceeded. Maximum allowed: 5 origins per user.")
+        
     origin_id = str(uuid.uuid4())
     now = datetime.now().isoformat() + "Z"
     
