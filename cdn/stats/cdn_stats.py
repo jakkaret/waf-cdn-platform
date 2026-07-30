@@ -18,7 +18,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ── Config ─────────────────────────────────
 REGIONS = ["sg", "jp", "th"]
-LOG_DIR = "/logs"          # mount point ใน container
+LOG_DIR = "/logs/cdn"          # mount point ใน container
 POLL_INTERVAL = 5          # วินาที
 PORT = 9090
 

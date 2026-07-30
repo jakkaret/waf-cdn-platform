@@ -78,20 +78,51 @@ class ClickHouseService:
         try:
             # Map dictionary to column order for insertion
             if table_name == 'access_logs':
+                import uuid
+                from datetime import datetime
+                
+                raw_id = data.get('request_id') or data.get('id')
+                if raw_id:
+                    try:
+                        log_uuid = uuid.UUID(raw_id)
+                    except Exception:
+                        log_uuid = uuid.uuid4()
+                else:
+                    log_uuid = uuid.uuid4()
+                    
+                raw_time = data.get('datetime') or data.get('timestamp')
+                if raw_time:
+                    try:
+                        if isinstance(raw_time, str):
+                            clean_time = raw_time.replace('Z', '')
+                            if 'T' in clean_time:
+                                dt = datetime.fromisoformat(clean_time)
+                            else:
+                                dt = datetime.strptime(clean_time, '%Y-%m-%d %H:%M:%S')
+                        else:
+                            dt = datetime.utcfromtimestamp(raw_time)
+                    except Exception:
+                        dt = datetime.utcnow()
+                else:
+                    dt = datetime.utcnow()
+                    
+                status_val = int(data.get('status') or data.get('status_code') or 0)
+                is_alert = 1 if (data.get('alert') or status_val in [403, 429]) else 0
+                
                 row = [
-                    data.get('id', ''),
-                    data.get('timestamp', ''),
-                    data.get('client_ip', ''),
-                    data.get('method', ''),
-                    data.get('url', ''),
-                    int(data.get('status_code', 0)),
-                    float(data.get('request_time_ms', 0.0)),
-                    data.get('user_agent', ''),
-                    data.get('country', 'TH'),
-                    data.get('edge_node', 'sg'),
-                    int(data.get('alert', 0)),
-                    data.get('attack_type', ''),
-                    data.get('rule_id', '')
+                    log_uuid,
+                    dt,
+                    data.get('ip') or data.get('client_ip') or '',
+                    data.get('method') or 'GET',
+                    data.get('url') or '/',
+                    status_val,
+                    float(data.get('latency_ms') or data.get('request_time_ms') or 0.0),
+                    data.get('user_agent') or '',
+                    data.get('country') or 'TH',
+                    data.get('edge_node') or 'sg',
+                    is_alert,
+                    data.get('attack_type') or '',
+                    data.get('rule_id') or ''
                 ]
                 self.client.insert(table_name, [row], column_names=[
                     'id', 'timestamp', 'client_ip', 'method', 'url', 'status_code',
