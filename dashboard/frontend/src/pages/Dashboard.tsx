@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { logsApi } from '../api/logs'
 import { systemApi } from '../api/system'
+import { analyticsApi } from '../api/analytics'
 import { TopBar } from '../components/layout/TopBar'
 import { StatCard } from '../components/ui/StatCard'
 import { Card, CardHeader } from '../components/ui/Card'
@@ -18,7 +19,9 @@ import {
   CheckCircle, 
   XCircle, 
   RefreshCw,
-  Server
+  Server,
+  Sparkles,
+  ShieldCheck
 } from 'lucide-react'
 
 export const Dashboard: React.FC = () => {
@@ -26,14 +29,22 @@ export const Dashboard: React.FC = () => {
   const [showRawJson, setShowRawJson] = useState(false)
 
   // 1. Fetch Security Logs for Security Tab
-  const { data: logs = [], isLoading: isLogsLoading, refetch: refetchLogs } = useQuery({
+  const { data: logs = [], isLoading: isLogsLoading } = useQuery({
     queryKey: ['logs-dashboard'],
     queryFn: () => logsApi.getRecentLogs(200),
     refetchInterval: 10000,
     enabled: activeTab === 'security',
   })
 
-  // 2. Fetch System Health Status for System Status Tab
+  // 2. Fetch ClickHouse Real-time Analytics & AI Summary
+  const { data: analytics, isLoading: isAnalyticsLoading } = useQuery({
+    queryKey: ['analytics-summary'],
+    queryFn: () => analyticsApi.getSummary(),
+    refetchInterval: 10000,
+    enabled: activeTab === 'security',
+  })
+
+  // 3. Fetch System Health Status for System Status Tab
   const { data: systemStatus, isLoading: isSystemLoading, refetch: refetchSystem, isRefetching: isSystemRefetching } = useQuery({
     queryKey: ['system-status-dashboard'],
     queryFn: () => systemApi.getSystemStatus(),
@@ -42,7 +53,7 @@ export const Dashboard: React.FC = () => {
   })
 
   // Basic stats calc (Security Tab)
-  const blockedCount = logs.filter(l => l.status === 403).length
+  const blockedCount = logs.filter(l => l.status === 403 || l.status === 429).length
   const totalRequests = logs.length
   const uniqueIPs = new Set(logs.map(l => l.ip)).size
   
@@ -51,10 +62,10 @@ export const Dashboard: React.FC = () => {
     const time = new Date(log.datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     const existing = acc.find((d: any) => d.time === time)
     if (existing) {
-      if (log.status === 403) existing.blocked++
+      if (log.status === 403 || log.status === 429) existing.blocked++
       else existing.allowed++
     } else {
-      acc.push({ time, blocked: log.status === 403 ? 1 : 0, allowed: log.status !== 403 ? 1 : 0 })
+      acc.push({ time, blocked: (log.status === 403 || log.status === 429) ? 1 : 0, allowed: (log.status !== 403 && log.status !== 429) ? 1 : 0 })
     }
     return acc
   }, [] as any[]).slice(-20) // last 20 data points
@@ -93,16 +104,42 @@ export const Dashboard: React.FC = () => {
       {activeTab === 'security' ? (
         /* ================== SECURITY TAB ================== */
         <>
+          {/* AI Security Threat Summary Card */}
+          {analytics && (
+            <div className="mb-6 p-5 rounded-xl border border-accent/20 bg-gradient-to-r from-accent/10 to-brand/5 backdrop-blur-md shadow-lg flex gap-4 items-start relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-8 opacity-5 text-accent">
+                <Sparkles size={120} />
+              </div>
+              <div className="p-2.5 rounded-lg bg-accent/20 text-accent-light shrink-0">
+                <Sparkles size={22} className="animate-pulse" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-[14px] font-bold text-accent-light uppercase tracking-wider">WAF AI Security Threat Summary</h4>
+                  <Badge color="success">Real-time AI Auditor</Badge>
+                </div>
+                <p className="text-[13.5px] text-text-primary mt-2 leading-relaxed font-medium">
+                  {analytics.ai_summary}
+                </p>
+                <div className="flex gap-4 mt-3 text-[11px] text-text-muted">
+                  <span>Data Source: <b className="text-accent-light capitalize">{analytics.source}</b></span>
+                  <span>Average Latency: <b className="text-white">{analytics.average_latency_ms} ms</b></span>
+                  <span>WAF Block Rate: <b className="text-danger">{((analytics.blocked_requests / (analytics.total_requests || 1)) * 100).toFixed(1)}%</b></span>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <StatCard 
               label="Total Requests" 
-              value={isLogsLoading ? '-' : totalRequests} 
+              value={isAnalyticsLoading ? '-' : (analytics?.total_requests ?? totalRequests)} 
               color="brand"
               icon={<Activity size={20} />}
             />
             <StatCard 
               label="Blocked Requests" 
-              value={isLogsLoading ? '-' : blockedCount} 
+              value={isAnalyticsLoading ? '-' : (analytics?.blocked_requests ?? blockedCount)} 
               color="danger"
               icon={<ShieldAlert size={20} />}
             />
@@ -113,10 +150,10 @@ export const Dashboard: React.FC = () => {
               icon={<Globe size={20} />}
             />
             <StatCard 
-              label="System Health" 
-              value="Optimal" 
-              color="success"
-              icon={<CheckCircle size={20} />}
+              label="WAF AI Health Check" 
+              value={(analytics?.blocked_requests ?? 0) > 0 ? "Threat Blocked" : "Optimal"} 
+              color={(analytics?.blocked_requests ?? 0) > 0 ? "warning" : "success"}
+              icon={<ShieldCheck size={20} />}
             />
           </div>
 
@@ -140,18 +177,78 @@ export const Dashboard: React.FC = () => {
             </Card>
 
             <Card>
-              <CardHeader title="Recent Blocks" />
+              <CardHeader title="AI Attack Type Breakdown" subtitle="Identified ModSecurity blocks in ClickHouse" />
               <div className="space-y-4">
-                {logs.filter(l => l.status === 403).slice(0, 5).map((log, i) => (
-                  <div key={i} className="flex justify-between items-center pb-3 border-b border-white/5 last:border-0">
+                {analytics && Object.entries(analytics.attack_types).map(([attack, count], i) => (
+                  <div key={i} className="flex justify-between items-center pb-3 border-b border-white/5 last:border-0 last:pb-0">
                     <div className="overflow-hidden mr-2">
-                      <p className="text-[13px] font-mono text-danger truncate">{log.ip}</p>
-                      <p className="text-[11.5px] text-text-muted truncate">{log.url}</p>
+                      <p className="text-[13.5px] font-bold text-white truncate">{attack}</p>
+                      <p className="text-[11.5px] text-text-muted mt-0.5">Matched Rules & Ingress Logs</p>
                     </div>
-                    <Badge color="danger">WAF</Badge>
+                    <Badge color="danger">{count} blocks</Badge>
                   </div>
                 ))}
-                {logs.filter(l => l.status === 403).length === 0 && (
+                {(!analytics || Object.keys(analytics.attack_types).length === 0) && (
+                  <div className="text-center text-text-muted text-sm py-8">No attacks detected</div>
+                )}
+              </div>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <Card className="lg:col-span-2">
+              <CardHeader title="Top Suspicious Host IPs" subtitle="Ranked by volume of security violations" />
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-white/10 text-[11px] font-bold text-text-muted uppercase tracking-[0.5px]">
+                      <th className="pb-3">Client IP Address</th>
+                      <th className="pb-3">Blocked Requests</th>
+                      <th className="pb-3">Total Requests</th>
+                      <th className="pb-3 text-right">Violation Ratio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analytics?.suspicious_ips.map((ip, i) => (
+                      <tr key={i} className="border-b border-white/5 last:border-0 text-[13.5px]">
+                        <td className="py-3 font-mono font-bold text-white flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-danger" />
+                          {ip.ip}
+                        </td>
+                        <td className="py-3 font-mono text-danger font-bold">{ip.blocked}</td>
+                        <td className="py-3 font-mono text-text-muted">{ip.total}</td>
+                        <td className="py-3 text-right font-mono text-accent-light font-bold">
+                          {((ip.blocked / (ip.total || 1)) * 100).toFixed(1)}%
+                        </td>
+                      </tr>
+                    ))}
+                    {(!analytics?.suspicious_ips.length) && (
+                      <tr>
+                        <td colSpan={4} className="text-center py-8 text-text-muted text-sm">
+                          No suspicious traffic records found
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader title="Recent Block Logs" subtitle="Latest firewall activity" />
+              <div className="space-y-4">
+                {logs.filter(l => l.status === 403 || l.status === 429).slice(0, 5).map((log, i) => (
+                  <div key={i} className="flex justify-between items-start pb-3 border-b border-white/5 last:border-0 last:pb-0">
+                    <div className="overflow-hidden mr-2">
+                      <p className="text-[13px] font-mono text-danger truncate">{log.ip}</p>
+                      <p className="text-[11.5px] text-text-muted truncate mt-0.5">{log.url}</p>
+                    </div>
+                    <Badge color={log.status === 429 ? 'warning' : 'danger'}>
+                      {log.status === 429 ? 'LIMIT' : 'WAF'}
+                    </Badge>
+                  </div>
+                ))}
+                {logs.filter(l => l.status === 403 || l.status === 429).length === 0 && (
                   <div className="text-center text-text-muted text-sm py-8">No recent blocks</div>
                 )}
               </div>
