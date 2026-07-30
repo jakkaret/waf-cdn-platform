@@ -235,6 +235,29 @@ export const Dashboard: React.FC = () => {
             </Card>
 
             <Card>
+              <CardHeader title="Top Traffic Countries" subtitle="Geographic origin breakdown" />
+              <div className="space-y-4">
+                {analytics?.top_countries?.map((c, i) => (
+                  <div key={i} className="flex justify-between items-center pb-3 border-b border-white/5 last:border-0 last:pb-0">
+                    <div className="flex items-center gap-2 overflow-hidden mr-2">
+                      <span className="text-lg">{c.flag || '🌐'}</span>
+                      <div>
+                        <p className="text-[13.5px] font-bold text-white">{c.name || c.country}</p>
+                        <p className="text-[11.5px] text-text-muted mt-0.5">{c.total} requests</p>
+                      </div>
+                    </div>
+                    <Badge color={c.blocked > 0 ? "warning" : "success"}>
+                      {c.blocked} blocked
+                    </Badge>
+                  </div>
+                ))}
+                {(!analytics?.top_countries || analytics.top_countries.length === 0) && (
+                  <div className="text-center text-text-muted text-sm py-8">No geographic traffic data</div>
+                )}
+              </div>
+            </Card>
+
+            <Card>
               <CardHeader title="Recent Block Logs" subtitle="Latest firewall activity" />
               <div className="space-y-4">
                 {logs.filter(l => l.status === 403 || l.status === 429).slice(0, 5).map((log, i) => (

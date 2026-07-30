@@ -4,6 +4,7 @@ import { logsApi } from '../api/logs'
 import { TopBar } from '../components/layout/TopBar'
 import { Card } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
+import { Download, Search } from 'lucide-react'
 import { WafLog } from '../types'
 
 export const Logs: React.FC = () => {
@@ -19,6 +20,31 @@ export const Logs: React.FC = () => {
     (l.url && l.url.includes(filter)) || 
     (l.rule_id && l.rule_id.includes(filter))
   )
+
+  const exportToCSV = () => {
+    if (filteredLogs.length === 0) return
+    const headers = ['datetime', 'ip', 'method', 'url', 'status', 'rule_id', 'severity']
+    const csvRows = [
+      headers.join(','),
+      ...filteredLogs.map(log => 
+        [
+          `"${log.datetime}"`,
+          `"${log.ip}"`,
+          `"${log.method}"`,
+          `"${(log.url || '').replace(/"/g, '""')}"`,
+          log.status,
+          `"${log.rule_id || ''}"`,
+          `"${log.severity || ''}"`
+        ].join(',')
+      )
+    ]
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.setAttribute('href', url)
+    a.setAttribute('download', `waf_security_logs_${new Date().toISOString().slice(0,10)}.csv`)
+    a.click()
+  }
 
   const getStatusBadge = (status: number) => {
     if (status === 403) return <Badge color="danger">403</Badge>
@@ -41,15 +67,30 @@ export const Logs: React.FC = () => {
       <TopBar title="Attack Logs" subtitle="Real-time WAF event viewer" />
 
       <Card className="mb-6" noPadding>
-        <div className="p-4 border-b border-white/5 flex items-center justify-between">
-          <input
-            type="text"
-            placeholder="Search IP, URL, Rule ID..."
-            className="bg-bg-surface border border-white/10 rounded-lg px-4 py-2 text-sm text-white w-72 focus:border-accent focus:outline-none"
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-          />
-          <span className="text-text-muted text-sm">{filteredLogs.length} events found</span>
+        <div className="p-4 border-b border-white/5 flex items-center justify-between gap-4 flex-wrap">
+          <div className="relative flex-1 min-w-[240px] max-w-md">
+            <Search className="absolute left-3 top-2.5 text-text-muted" size={16} />
+            <input
+              type="text"
+              placeholder="Search IP, URL, Rule ID..."
+              className="bg-bg-surface border border-white/10 rounded-lg pl-9 pr-4 py-2 text-sm text-white w-full focus:border-accent focus:outline-none"
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+            />
+          </div>
+          
+          <div className="flex items-center gap-3">
+            <span className="text-text-muted text-sm">{filteredLogs.length} events found</span>
+            <button
+              onClick={exportToCSV}
+              disabled={filteredLogs.length === 0}
+              className="flex items-center gap-2 bg-accent/20 hover:bg-accent/30 text-accent border border-accent/30 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Export filtered logs to CSV file"
+            >
+              <Download size={14} />
+              Export CSV
+            </button>
+          </div>
         </div>
         
         <div className="overflow-x-auto">

@@ -31,12 +31,22 @@ EDGE_PORTS = {
 }
 
 
+_client_limits = httpx.Limits(max_keepalive_connections=20, max_connections=50)
+_http_client: Optional[httpx.AsyncClient] = None
+
+def get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(limits=_client_limits, timeout=5.0)
+    return _http_client
+
+
 async def _fetch_stats() -> dict:
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(CDN_STATS_URL)
-            r.raise_for_status()
-            return r.json()
+        client = get_http_client()
+        r = await client.get(CDN_STATS_URL)
+        r.raise_for_status()
+        return r.json()
     except Exception:
         return _mock_stats()
 
@@ -130,30 +140,30 @@ async def cdn_stats_region(region: str, current_user: dict = Depends(require_vie
 @router.get("/nodes")
 async def cdn_nodes(current_user: dict = Depends(require_viewer_or_above)):
     results = []
+    client = get_http_client()
 
-    async with httpx.AsyncClient(timeout=3.0) as client:
-        for region, port in EDGE_PORTS.items():
-            meta = REGIONS_META.get(region, {})
-            try:
-                r = await client.get(f"http://localhost:{port}/healthz")
-                online = r.status_code == 200
-                health_data = r.json() if online else {}
-            except Exception:
-                online = False
-                health_data = {}
+    for region, port in EDGE_PORTS.items():
+        meta = REGIONS_META.get(region, {})
+        try:
+            r = await client.get(f"http://localhost:{port}/healthz", timeout=3.0)
+            online = r.status_code == 200
+            health_data = r.json() if online else {}
+        except Exception:
+            online = False
+            health_data = {}
 
-            results.append(
-                {
-                    "region": region,
-                    "name": meta.get("name", region),
-                    "flag": meta.get("flag", "🌐"),
-                    "lat": meta.get("lat"),
-                    "lng": meta.get("lng"),
-                    "port": port,
-                    **health_data,
-                    "status": "online" if online else "offline",
-                }
-            )
+        results.append(
+            {
+                "region": region,
+                "name": meta.get("name", region),
+                "flag": meta.get("flag", "🌐"),
+                "lat": meta.get("lat"),
+                "lng": meta.get("lng"),
+                "port": port,
+                **health_data,
+                "status": "online" if online else "offline",
+            }
+        )
 
     return results
 
@@ -168,12 +178,13 @@ async def cdn_purge(
         raise HTTPException(status_code=500, detail="CDN_PURGE_TOKEN not configured")
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{CDN_PURGE_API_URL}/purge",
-                params={"url": url, "region": (region or "ALL")},
-                headers={"X-Purge-Token": CDN_PURGE_TOKEN},
-            )
+        client = get_http_client()
+        resp = await client.post(
+            f"{CDN_PURGE_API_URL}/purge",
+            params={"url": url, "region": (region or "ALL")},
+            headers={"X-Purge-Token": CDN_PURGE_TOKEN},
+            timeout=15.0,
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Purge API unreachable: {exc}") from exc
 
