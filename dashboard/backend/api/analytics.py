@@ -30,6 +30,12 @@ async def get_analytics_summary(current_user: dict = Depends(require_viewer_or_a
                 {"ip": "192.168.5.11", "total": 120, "blocked": 120},
                 {"ip": "10.0.4.52", "total": 95, "blocked": 30}
             ],
+            "top_countries": [
+                {"country": "TH", "name": "Thailand", "flag": "🇹🇭", "total": 850, "blocked": 20},
+                {"country": "SG", "name": "Singapore", "flag": "🇸🇬", "total": 230, "blocked": 10},
+                {"country": "US", "name": "United States", "flag": "🇺🇸", "total": 120, "blocked": 110},
+                {"country": "CN", "name": "China", "flag": "🇨🇳", "total": 50, "blocked": 10}
+            ],
             "ai_summary": "⚠️ ตรวจพบความผิดปกติ: ในช่วง 10 นาทีที่ผ่านมา มีการยิงข้ามโดเมนในลักษณะ SQL Injection ไปยังทางเดินเว็บบอร์ดหลัก (URL: /forum) จากไอพี 192.168.5.11 รวม 120 ครั้ง ระบบ WAF ทำการบล็อกและสกัดกั้นการทำงานได้สำเร็จ 100% แนะนำให้ตรวจสอบระบบจำกัดความเร็วพรีเมียม (Rate Limiter) สำหรับพาร์ทดังกล่าวเพิ่มเติม"
         }
 
@@ -59,8 +65,28 @@ async def get_analytics_summary(current_user: dict = Depends(require_viewer_or_a
             LIMIT 5
         """)
         suspicious_ips = [{"ip": row[0], "total": row[1], "blocked": int(row[2])} for row in ip_rows] if ip_rows else []
+
+        # 5. Top Countries Breakdown
+        country_rows = ch.query_stats("""
+            SELECT country, count() as total, sum(status_code = 403 OR status_code = 429 OR alert = 1) as blocked
+            FROM access_logs
+            WHERE country != ''
+            GROUP BY country
+            ORDER BY total DESC
+            LIMIT 5
+        """)
+        country_flags = {"TH": "🇹🇭", "SG": "🇸🇬", "JP": "🇯🇵", "US": "🇺🇸", "CN": "🇨🇳", "GB": "🇬🇧", "DE": "🇩🇪"}
+        top_countries = [
+            {
+                "country": row[0],
+                "flag": country_flags.get(row[0].upper(), "🌐"),
+                "total": row[1],
+                "blocked": int(row[2])
+            }
+            for row in country_rows
+        ] if country_rows else []
         
-        # 5. Dynamic AI Summary template generation based on actual query data
+        # 6. Dynamic AI Summary template generation based on actual query data
         ai_summary = "🟢 ระบบทำงานปกติ: ไม่พบร่องรอยการโจมตีร้ายแรงในระบบทราฟฟิกรวม"
         if blocked > 0:
             top_attack = list(attack_types.keys())[0] if attack_types else "Suspicious Activity"
@@ -75,6 +101,7 @@ async def get_analytics_summary(current_user: dict = Depends(require_viewer_or_a
             "average_latency_ms": avg_latency,
             "attack_types": attack_types,
             "suspicious_ips": suspicious_ips,
+            "top_countries": top_countries,
             "ai_summary": ai_summary
         }
     except Exception as e:

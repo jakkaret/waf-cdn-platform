@@ -6,6 +6,14 @@ export interface SuspiciousIp {
   blocked: number
 }
 
+export interface TopCountry {
+  country: string
+  name?: string
+  flag?: string
+  total: number
+  blocked: number
+}
+
 export interface AnalyticsSummary {
   source: string
   total_requests: number
@@ -14,6 +22,7 @@ export interface AnalyticsSummary {
   average_latency_ms: number
   attack_types: Record<string, number>
   suspicious_ips: SuspiciousIp[]
+  top_countries?: TopCountry[]
   ai_summary: string
 }
 
