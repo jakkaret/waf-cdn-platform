@@ -1,9 +1,14 @@
 import uuid
 import re
+import os
 from datetime import datetime
 from services.dynamodb_service import DynamoDBService
 
 db = DynamoDBService()
+
+# Configurable quota — set ORIGINS_QUOTA_DEFAULT in .env to override
+ORIGINS_QUOTA_DEFAULT = int(os.getenv("ORIGINS_QUOTA_DEFAULT", "5"))
+DOMAINS_QUOTA_PER_ORIGIN = int(os.getenv("DOMAINS_QUOTA_PER_ORIGIN", "10"))
 
 def validate_ip(ip: str) -> bool:
     ipv4_pattern = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
@@ -16,10 +21,10 @@ def create_origin(admin_user_id: str, label: str, ip: str, port: int) -> dict:
     if not (1 <= port <= 65535):
         raise ValueError("Invalid port number")
         
-    # Check quota limit (max 5 origins per user)
-    existing_origins = get_origins_for_user(admin_user_id)
-    if len(existing_origins) >= 5:
-        raise ValueError("Origin quota exceeded. Maximum allowed: 5 origins per user.")
+    # Check quota limit
+    existing_origins = [o for o in get_origins_for_user(admin_user_id) if o.get("status") != "archived"]
+    if len(existing_origins) >= ORIGINS_QUOTA_DEFAULT:
+        raise ValueError(f"Origin quota exceeded. Maximum allowed: {ORIGINS_QUOTA_DEFAULT} active origins per account.")
         
     origin_id = str(uuid.uuid4())
     now = datetime.now().isoformat() + "Z"
@@ -64,3 +69,23 @@ def update_origin(origin_id: str, label: str = None, ip: str = None, port: int =
 
 def delete_origin(origin_id: str) -> bool:
     return db.delete_origin(origin_id)
+
+def restore_origin(origin_id: str) -> bool:
+    return db.restore_origin(origin_id)
+
+
+def get_quota_info(admin_user_id: str) -> dict:
+    """Return current usage vs quota limits for this user."""
+    origins = get_origins_for_user(admin_user_id)
+    used_origins = len([o for o in origins if o.get("status") != "archived"])
+    return {
+        "origins": {
+            "used": used_origins,
+            "max": ORIGINS_QUOTA_DEFAULT,
+            "available": max(0, ORIGINS_QUOTA_DEFAULT - used_origins),
+            "at_limit": used_origins >= ORIGINS_QUOTA_DEFAULT,
+        },
+        "domains_per_origin": {
+            "max": DOMAINS_QUOTA_PER_ORIGIN,
+        },
+    }

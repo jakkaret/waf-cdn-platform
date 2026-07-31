@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { getOrigin, deleteOrigin } from '../api/origins';
-import { getDomains, deleteDomain } from '../api/domains';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { getOrigin, deleteOrigin, restoreOrigin } from '../api/origins';
+import { getDomains, deleteDomain, verifyDomain } from '../api/domains';
+import { rulesApi } from '../api/rules';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { HealthDot } from '../components/ui/HealthDot';
@@ -11,15 +12,20 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { EmptyState } from '../components/ui/EmptyState';
 import { DomainSetupWizard } from '../components/DomainSetupWizard';
 import { toast } from 'react-hot-toast';
-import { Domain } from '../types';
+import { WafRule, Domain } from '../types';
 
 const OriginDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'overview' | 'domains' | 'waf' | 'ssl'>('overview');
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
   const [isDomainWizardOpen, setIsDomainWizardOpen] = useState(false);
   const [domainToDelete, setDomainToDelete] = useState<string | null>(null);
+  const [verifyingDomainId, setVerifyingDomainId] = useState<string | null>(null);
+  const [showAddRule, setShowAddRule] = useState(false);
+  const [newRule, setNewRule] = useState<{ id: string; variable: WafRule['variable']; operator: string; severity: WafRule['severity']; message: string }>({ id: '', variable: 'REQUEST_URI', operator: '', severity: 'HIGH', message: '' });
+  const queryClient = useQueryClient();
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['origin', id],
@@ -33,16 +39,54 @@ const OriginDetail: React.FC = () => {
     enabled: !!id,
   });
 
+  const { data: rulesData, isLoading: rulesLoading } = useQuery({
+    queryKey: ['waf-rules'],
+    queryFn: () => rulesApi.getRules(),
+  });
+
+  const deleteRuleMutation = useMutation({
+    mutationFn: (ruleId: string) => rulesApi.deleteRule(ruleId),
+    onSuccess: () => {
+      toast.success('Rule deleted');
+      queryClient.invalidateQueries({ queryKey: ['waf-rules'] });
+    },
+    onError: () => toast.error('Failed to delete rule'),
+  });
+
+  const createRuleMutation = useMutation({
+    mutationFn: (rule: typeof newRule) => rulesApi.createRule(rule),
+    onSuccess: () => {
+      toast.success('Rule created successfully');
+      queryClient.invalidateQueries({ queryKey: ['waf-rules'] });
+      setShowAddRule(false);
+      setNewRule({ id: '', variable: 'REQUEST_URI', operator: '', severity: 'HIGH', message: '' });
+    },
+    onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to create rule'),
+  });
+
   const origin = data?.data || null;
   const domains = domainsData?.data?.domains || [];
 
   const handleDelete = async () => {
+    const isPending = origin?.status === 'pending';
     try {
       await deleteOrigin(id!);
-      toast.success('Origin deleted successfully');
+      toast.success(isPending ? 'Origin setup cancelled successfully' : 'Origin archived successfully');
       navigate('/origins');
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Failed to delete origin');
+      toast.error(error.response?.data?.detail || (isPending ? 'Failed to cancel setup' : 'Failed to archive origin'));
+    }
+  };
+
+  const handleRestore = async () => {
+    try {
+      await restoreOrigin(id!);
+      toast.success('Origin restored successfully');
+      queryClient.invalidateQueries({ queryKey: ['origin', id] });
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Failed to restore origin');
+    } finally {
+      setIsRestoreModalOpen(false);
     }
   };
 
@@ -56,6 +100,23 @@ const OriginDetail: React.FC = () => {
       toast.error(error.response?.data?.detail || 'Failed to delete domain');
     } finally {
       setDomainToDelete(null);
+    }
+  };
+
+  const handleVerifyDomain = async (domainId: string) => {
+    setVerifyingDomainId(domainId);
+    try {
+      const res = await verifyDomain(id!, domainId);
+      if (res.data?.status === 'success') {
+        toast.success('✅ Domain verified successfully!');
+        refetchDomains();
+      } else {
+        toast.error(res.data?.message || '❌ DNS records not found yet. Please try again.');
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || '❌ Verification failed. Check DNS settings.');
+    } finally {
+      setVerifyingDomainId(null);
     }
   };
 
@@ -110,13 +171,32 @@ const OriginDetail: React.FC = () => {
         </div>
         
         <div className="flex gap-3">
-          <Button variant="danger" onClick={() => setIsDeleteModalOpen(true)}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-            Delete Origin
-          </Button>
+          {origin.status === 'archived' ? (
+            <Button variant="primary" className="!bg-success hover:!bg-success-dark border-none" onClick={() => setIsRestoreModalOpen(true)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <polyline points="3 3 3 8 8 8" />
+              </svg>
+              Restore Origin
+            </Button>
+          ) : origin.status === 'pending' ? (
+            <Button variant="outline" className="text-danger hover:bg-danger/10 border-danger hover:border-danger transition-colors" onClick={() => setIsDeleteModalOpen(true)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+              Cancel Setup
+            </Button>
+          ) : (
+            <Button variant="danger" onClick={() => setIsDeleteModalOpen(true)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                <polyline points="21 8 21 21 3 21 3 8" />
+                <rect x="1" y="3" width="22" height="5" />
+                <line x1="10" y1="12" x2="14" y2="12" />
+              </svg>
+              Archive Origin
+            </Button>
+          )}
         </div>
       </div>
 
@@ -209,9 +289,19 @@ const OriginDetail: React.FC = () => {
                     
                     <div className="flex gap-2">
                       {domain.verification_status !== 'verified' && (
-                         <Button variant="outline" size="sm" onClick={() => setIsDomainWizardOpen(true)}>
-                           Verify DNS
-                         </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleVerifyDomain(domain.domain_id)}
+                          disabled={verifyingDomainId === domain.domain_id}
+                        >
+                          {verifyingDomainId === domain.domain_id ? (
+                            <span className="flex items-center gap-1.5">
+                              <LoadingSpinner size="sm" />
+                              Checking...
+                            </span>
+                          ) : 'Verify DNS'}
+                        </Button>
                       )}
                       <Button variant="danger" size="sm" onClick={() => setDomainToDelete(domain.domain_id)}>
                         Remove
@@ -245,19 +335,204 @@ const OriginDetail: React.FC = () => {
         )}
 
         {activeTab === 'waf' && (
-          <Card className="p-12 text-center border-dashed">
-            <h3 className="text-lg font-medium text-text-primary mb-2">WAF Rules</h3>
-            <p className="text-text-muted max-w-md mx-auto mb-6">Customize ModSecurity paranoia level and custom rules for this specific origin.</p>
-            <Button variant="secondary" disabled>Available in Phase 4</Button>
-          </Card>
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-lg font-semibold text-text-primary">WAF Custom Rules</h2>
+                <p className="text-sm text-text-muted mt-0.5">ModSecurity rules applied globally across all origins</p>
+              </div>
+              <Button variant="primary" onClick={() => setShowAddRule(!showAddRule)}>
+                {showAddRule ? 'Cancel' : '+ Add Rule'}
+              </Button>
+            </div>
+
+            {/* Add Rule Form */}
+            {showAddRule && (
+              <Card className="p-5 border border-accent/30 bg-accent/5">
+                <h3 className="text-sm font-semibold text-accent mb-4">New Rule</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">Rule ID</label>
+                    <input
+                      className="w-full bg-bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-accent focus:outline-none font-mono"
+                      placeholder="e.g. CUSTOM-001"
+                      value={newRule.id}
+                      onChange={e => setNewRule(r => ({ ...r, id: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">Variable</label>
+                    <select
+                      className="w-full bg-bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-accent focus:outline-none"
+                      value={newRule.variable}
+                      onChange={e => setNewRule(r => ({ ...r, variable: e.target.value as WafRule['variable'] }))}
+                    >
+                      <option value="REQUEST_URI">REQUEST_URI</option>
+                      <option value="ARGS">ARGS</option>
+                      <option value="REQUEST_HEADERS">REQUEST_HEADERS</option>
+                      <option value="REQUEST_BODY">REQUEST_BODY</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">Operator / Pattern</label>
+                    <input
+                      className="w-full bg-bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-accent focus:outline-none font-mono"
+                      placeholder="e.g. @rx (select|union|drop)"
+                      value={newRule.operator}
+                      onChange={e => setNewRule(r => ({ ...r, operator: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">Severity</label>
+                    <select
+                      className="w-full bg-bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-accent focus:outline-none"
+                      value={newRule.severity}
+                      onChange={e => setNewRule(r => ({ ...r, severity: e.target.value as WafRule['severity'] }))}
+                    >
+                      <option value="CRITICAL">CRITICAL</option>
+                      <option value="HIGH">HIGH</option>
+                      <option value="MEDIUM">MEDIUM</option>
+                      <option value="LOW">LOW</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs text-text-muted mb-1 block">Message / Description</label>
+                    <input
+                      className="w-full bg-bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-accent focus:outline-none"
+                      placeholder="e.g. Block SQL injection attempt"
+                      value={newRule.message}
+                      onChange={e => setNewRule(r => ({ ...r, message: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end mt-4">
+                  <Button
+                    variant="primary"
+                    onClick={() => createRuleMutation.mutate(newRule)}
+                    disabled={!newRule.id || !newRule.operator || !newRule.message || createRuleMutation.isPending}
+                  >
+                    {createRuleMutation.isPending ? 'Saving...' : 'Save Rule'}
+                  </Button>
+                </div>
+              </Card>
+            )}
+
+            {/* Rules Table */}
+            <Card noPadding>
+              {rulesLoading ? (
+                <div className="flex justify-center py-12"><LoadingSpinner size="lg" /></div>
+              ) : !rulesData || rulesData.length === 0 ? (
+                <div className="p-12 text-center">
+                  <EmptyState title="No custom rules" subtitle='Click "+ Add Rule" to create a ModSecurity custom rule.' />
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/5 text-left">
+                        {['Rule ID', 'Variable', 'Operator', 'Severity', 'Message', ''].map(h => (
+                          <th key={h} className="px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rulesData.map((rule: WafRule) => (
+                        <tr key={rule.id} className="border-b border-white/5 hover:bg-white/2 transition-colors">
+                          <td className="px-4 py-3 font-mono text-xs text-accent">{rule.id}</td>
+                          <td className="px-4 py-3 text-text-muted text-xs">{rule.variable}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-text-primary max-w-[180px] truncate">{rule.operator}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                              rule.severity === 'CRITICAL' ? 'bg-red-500/15 text-red-400' :
+                              rule.severity === 'HIGH' ? 'bg-orange-500/15 text-orange-400' :
+                              rule.severity === 'MEDIUM' ? 'bg-yellow-500/15 text-yellow-400' :
+                              'bg-blue-500/15 text-blue-400'
+                            }`}>{rule.severity}</span>
+                          </td>
+                          <td className="px-4 py-3 text-text-muted text-xs max-w-[200px] truncate">{rule.message}</td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              onClick={() => deleteRuleMutation.mutate(rule.id)}
+                              disabled={deleteRuleMutation.isPending}
+                              className="text-danger/60 hover:text-danger text-xs font-medium transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          </div>
         )}
 
         {activeTab === 'ssl' && (
-          <Card className="p-12 text-center border-dashed">
-            <h3 className="text-lg font-medium text-text-primary mb-2">SSL Certificates</h3>
-            <p className="text-text-muted max-w-md mx-auto mb-6">Manage Let's Encrypt certificates and auto-renewal settings.</p>
-            <Button variant="secondary" disabled>Available in Phase 3</Button>
-          </Card>
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold text-text-primary">SSL Certificates</h2>
+              <p className="text-sm text-text-muted mt-0.5">Managed automatically by Caddy via Let's Encrypt / ZeroSSL</p>
+            </div>
+
+            {domains.length === 0 ? (
+              <Card className="p-12 text-center border-dashed">
+                <EmptyState
+                  title="No domains configured"
+                  subtitle="Add and verify a custom domain first to enable SSL certificate management."
+                />
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {domains.map((domain: Domain) => (
+                  <Card key={domain.domain_id} className="p-5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg ${
+                          domain.ssl_status === 'active' ? 'bg-success/10' :
+                          domain.ssl_status === 'pending' ? 'bg-yellow-500/10' :
+                          domain.ssl_status === 'error' ? 'bg-danger/10' : 'bg-white/5'
+                        }`}>
+                          {domain.ssl_status === 'active' ? '🔒' : domain.ssl_status === 'pending' ? '⏳' : domain.ssl_status === 'error' ? '⚠️' : '🔓'}
+                        </div>
+                        <div>
+                          <p className="font-bold text-text-primary font-mono">{domain.domain_name}</p>
+                          <p className="text-xs text-text-muted mt-0.5">
+                            {domain.ssl_status === 'active' && domain.ssl_expires_at
+                              ? `Expires ${new Date(domain.ssl_expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                              : domain.ssl_status === 'pending' ? 'Certificate provisioning in progress...'
+                              : domain.ssl_status === 'error' ? 'Certificate error — check DNS settings'
+                              : 'Domain not verified — verify DNS first to enable SSL'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                          domain.ssl_status === 'active' ? 'bg-success/10 text-success' :
+                          domain.ssl_status === 'pending' ? 'bg-yellow-500/10 text-yellow-400' :
+                          domain.ssl_status === 'error' ? 'bg-danger/10 text-danger' :
+                          'bg-white/5 text-text-muted'
+                        }`}>
+                          {domain.ssl_status || 'none'}
+                        </span>
+                        {!domain.dns_verification_token && (
+                          <span className="text-xs text-text-muted italic">Verify DNS first</span>
+                        )}
+                      </div>
+                    </div>
+                    {domain.ssl_status === 'active' && (
+                      <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-2 text-xs text-text-muted">
+                        <span>🔐 Issuer: Let's Encrypt / ZeroSSL</span>
+                        <span className="mx-1">·</span>
+                        <span>Auto-renew: Enabled (Caddy)</span>
+                      </div>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -265,10 +540,20 @@ const OriginDetail: React.FC = () => {
         open={isDeleteModalOpen}
         onCancel={() => setIsDeleteModalOpen(false)}
         onConfirm={handleDelete}
-        title="Delete Origin"
-        message={`Are you sure you want to delete the origin "${origin.label}"? This action cannot be undone and will stop traffic routing to this server.`}
-        confirmText="Delete Origin"
+        title={origin?.status === 'pending' ? "Cancel Setup" : "Archive Origin"}
+        message={origin ? (origin.status === 'pending' ? `Are you sure you want to cancel the setup of the origin "${origin.label}"?` : `Are you sure you want to archive the origin "${origin.label}"? This will hide it from the active dashboard and put it into cold storage.`) : ''}
+        confirmText={origin?.status === 'pending' ? "Cancel Setup" : "Archive Origin"}
         isDanger={true}
+      />
+
+      <ConfirmDialog
+        open={isRestoreModalOpen}
+        onCancel={() => setIsRestoreModalOpen(false)}
+        onConfirm={handleRestore}
+        title="Restore Origin"
+        message={`Are you sure you want to restore the origin "${origin.label}"? This will return it to active service.`}
+        confirmText="Restore Origin"
+        isDanger={false}
       />
     </div>
   );

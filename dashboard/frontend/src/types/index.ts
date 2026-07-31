@@ -116,7 +116,7 @@ export interface Origin {
   label: string
   ip: string
   port: number
-  status: 'active' | 'inactive' | 'error' | 'pending'
+  status: 'active' | 'inactive' | 'error' | 'pending' | 'archived'
   health: 'up' | 'down' | 'unknown'
   created_at: string
   updated_at: string

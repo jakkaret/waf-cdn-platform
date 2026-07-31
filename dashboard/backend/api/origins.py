@@ -25,19 +25,40 @@ async def create_origin(origin: OriginCreate, current_user: dict = Depends(get_c
             ip=origin.ip,
             port=origin.port
         )
-        return data
+        o = dict(data)
+        o["origin_id"] = o.get("id")
+        o["health"] = o.get("health", "unknown")
+        return o
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/quota")
+async def get_quota(current_user: dict = Depends(get_current_user)):
+    """Return quota usage for the current user (origins used / max)."""
+    info = origin_service.get_quota_info(current_user.get("user_id"))
+    return info
+
 @router.get("")
 async def list_origins(current_user: dict = Depends(get_current_user)):
-    return origin_service.get_origins_for_user(current_user.get("user_id"))
+    origins_list = origin_service.get_origins_for_user(current_user.get("user_id"))
+    formatted_origins = []
+    for origin in origins_list:
+        o = dict(origin)
+        o["origin_id"] = o.get("id")
+        o["health"] = o.get("health", "unknown")
+        formatted_origins.append(o)
+    # Sort by created_at descending (newest first)
+    formatted_origins.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return {"origins": formatted_origins}
 
 @router.get("/{origin_id}")
 async def get_origin(origin: dict = Depends(verify_origin_ownership)):
-    return origin
+    o = dict(origin)
+    o["origin_id"] = o.get("id")
+    o["health"] = o.get("health", "unknown")
+    return o
 
 @router.put("/{origin_id}")
 async def update_origin(origin_id: str, payload: OriginUpdate, origin: dict = Depends(verify_origin_ownership)):
@@ -60,3 +81,14 @@ async def delete_origin(origin_id: str, origin: dict = Depends(verify_origin_own
     if success:
         return {"status": "success", "message": "Origin deleted successfully"}
     raise HTTPException(status_code=500, detail="Failed to delete origin")
+
+@router.post("/{origin_id}/restore")
+async def restore_origin(origin_id: str, current_user: dict = Depends(get_current_user)):
+    verify_origin_ownership(origin_id, current_user)
+    quota = origin_service.get_quota_info(current_user.get("user_id"))
+    if quota["origins"]["at_limit"]:
+        raise HTTPException(status_code=400, detail="Cannot restore. Active origin quota exceeded.")
+    success = origin_service.restore_origin(origin_id)
+    if success:
+        return {"status": "success", "message": "Origin restored successfully"}
+    raise HTTPException(status_code=500, detail="Failed to restore origin")

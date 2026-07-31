@@ -20,6 +20,7 @@ from api import auth
 from api import cdn
 from api import origins
 from api import domains
+from api.domains import origins_domains_router
 from api import limiter as rate_limit_api
 from api import analytics
 from services.log_forward import log_forward_worker
@@ -225,6 +226,7 @@ app.include_router(alerts.router)
 app.include_router(cdn.router)
 app.include_router(origins.router)
 app.include_router(domains.router)
+app.include_router(origins_domains_router)
 app.include_router(rate_limit_api.router)
 app.include_router(analytics.router)
 

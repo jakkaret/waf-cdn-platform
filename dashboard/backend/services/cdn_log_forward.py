@@ -32,6 +32,12 @@ def normalize_cdn_access(data, region):
     except (ValueError, TypeError):
         latency_ms = 0
 
+    # Map edge region to ISO country code for GeoIP analytics
+    # Uses the edge node's region as a reliable approximation —
+    # requests are routed to the closest regional edge by GeoDNS
+    _REGION_TO_COUNTRY = {"sg": "SG", "jp": "JP", "th": "TH"}
+    country = _REGION_TO_COUNTRY.get(region.lower(), region.upper())
+
     return {
         "request_id": data.get("request_id", ""),
         "ip": data.get("remote_addr"),
@@ -43,6 +49,7 @@ def normalize_cdn_access(data, region):
         "datetime": data.get("time", datetime.utcnow().isoformat() + "Z"),
         "source": "cdn",
         "region": region.upper(),
+        "country": country,
         "edge_node": f"edge-{region.lower()}",
         "cache_status": data.get("cache_status", "MISS"),
         "latency_ms": latency_ms,

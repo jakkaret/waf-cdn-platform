@@ -1,0 +1,115 @@
+# 🛠️ WAF Machine Learning Deployment Guide
+**คู่มือการเก็บข้อมูล Log, การ Export โมเดล และการเชื่อมต่อเข้าระบบ WAF + CDN แบบรันแยกโปรเซส (Decoupled & Fault-Tolerant)**
+
+คู่มือฉบับนี้อธิบายแนวทางตามที่อาจารย์แนะนำ เพื่อรันระบบตรวจจับความผิดปกติด้วย ML แยกต่างหาก เพื่อป้องกันไม่ให้ความเสียหายลุกลามหากระบบใดระบบหนึ่งล่ม (Domino Effect)
+
+---
+
+## 1. แหล่งรวบรวมข้อมูล Log สำหรับใช้เทรนโมเดล
+
+การเทรน Isolation Forest (Anomaly Detection) ต้องการข้อมูล **ทราฟฟิกปกติ (Benign)** จำนวนมากเพื่อให้เรียนรู้ข้อมูลรูปแบบปกติ และข้อมูล **การโจมตี (Malicious)** เพื่อทดสอบความแม่นยำ
+
+### 📂 แหล่งข้อมูลสาธารณะ (แนะนำสำหรับการเริ่มต้น)
+1. **CSIC 2010 HTTP Dataset:** มีชื่อเสียงมากสำหรับการวิเคราะห์เว็บแอปพลิเคชัน ประกอบไปด้วยคำขอ HTTP ปกติและคำขอโจมตี (SQLi, XSS, Buffer Overflow) นับพันรายการ
+2. **HTTP Params Dataset:** ชุดข้อมูลพารามิเตอร์ของ HTTP Requests ทั้งแบบปกติและโจมตี สามารถนำมาคำนวณหาค่า Entropy ได้ง่าย
+3. **CIC-IDS2017 / 2018 (Web Attacks subset):** ข้อมูลทราฟฟิกจำลองการโจมตีจริงในระบบเครือข่าย
+
+### 🗄️ การดึงข้อมูลจากตารางของโปรเจคคุณเอง
+เมื่อระบบเปิดรัน คุณสามารถสั่งดึงข้อมูล Log ใน ClickHouse ออกมาเป็นไฟล์ `.csv` เพื่อนำไปเทรนได้โดยใช้คำสั่ง SQL:
+
+```sql
+/* คำสั่งดึง Log จาก ClickHouse ไปเซฟเป็น CSV */
+SELECT 
+    client_ip, 
+    request_uri, 
+    request_length, 
+    body_bytes_sent, 
+    request_time_ms, 
+    status_code
+FROM access_logs
+INTO OUTFILE 'waf_traffic_data.csv' FORMAT CSVWithNames;
+```
+
+---
+
+## 2. วิธีการ Export โมเดล ML นำไปใช้งาน
+
+เมื่อเขียนสคริปต์ Python เทรนโมเดล Isolation Forest ด้วยข้อมูลทราฟฟิกสำเร็จแล้ว ให้ทำการบันทึกโมเดล (Export) ออกมาเป็นไฟล์โดยใช้ **`joblib`**:
+
+```python
+# train_model.py
+from sklearn.ensemble import IsolationForest
+import joblib
+
+# 1. เทรนโมเดล
+model = IsolationForest(contamination=0.01)
+model.fit(X_train)
+
+# 2. บันทึกโมเดลออกมาเป็นไฟล์ .joblib
+joblib.dump(model, 'isolation_forest_waf.joblib')
+print("Model exported successfully as 'isolation_forest_waf.joblib'!")
+```
+
+---
+
+## 3. สถาปัตยกรรมแบบแยกโปรเซส (Decoupled Architecture)
+
+เพื่อป้องกันการพังแบบ Domino Effect ตามคำแนะนำของอาจารย์ เราจะไม่นำโมเดลไปเขียนไว้ในตัว Nginx WAF หรือ CDN Node ตรงๆ แต่จะรันในลักษณะ **Microservice** แยกต่างหาก โดยสามารถเชื่อมต่อได้ 2 รูปแบบดังนี้:
+
+### รูปแบบ A: การวิเคราะห์แบบไม่ต่อเนื่อง (Asynchronous Log Analysis) - ⭐ [แนะนำที่สุด]
+ระบบ WAF/CDN ประมวลผลและตอบกลับผู้ใช้ตามปกติ จากนั้นส่ง Log มาวิเคราะห์เบื้องหลัง
+
+```
+[ User Request ] ──> [ WAF / CDN Node ] ──(ส่งเว็บปกติรวดเร็ว)──> [ Origin Server ]
+                            │
+                  (เขียน Log อะซิงโครนัส)
+                            ▼
+                    [ ClickHouse DB ]
+                            ▲
+                            │ (คิวรี Log มาตรวจเป็นรอบๆ)
+                            ▼
+              [ ML Anomaly Service (รันแยก) ]
+                            │
+               (ตรวจเจอ Anomaly / IP โจมตี)
+                            ▼
+            [ สั่งอัปเดตกฎบล็อกในฐานข้อมูล ]
+```
+
+* **ทำไมจึงแนะนำ:**
+  * **ไม่มีความหน่วง (Zero Latency Overhead):** ผู้ใช้งานเว็บไม่ต้องรอให้โมเดลประมวลผลเสร็จก่อนโหลดหน้าเว็บ
+  * **ไม่มี Domino Effect:** หากบริการ ML ดับไป ตัว CDN และ WAF หลักของเว็บไซต์ยังทำงานได้อย่างสมบูรณ์ 100%
+
+---
+
+### รูปแบบ B: การประมวลผลแบบเรียลไทม์ (Synchronous Fail-Open API)
+หากต้องการให้ WAF ส่งข้อมูลมาถามโมเดลทันทีก่อนส่งให้เครื่องปลายทาง (Origin Server)
+
+```
+[ Request ] ──> [ WAF Node (Nginx/OpenResty) ]
+                      │
+           (HTTP POST ตรวจสอบความปลอดภัย) 
+           (Timeout 50ms / Fail-Open)
+                      ▼
+        [ ML API Service (Port 5000) ]
+        • รัน FastAPI + โหลดไฟล์ .joblib 
+        • ประมวลผลและตอบกลับ {"blocked": true/false}
+```
+
+* **วิธีการเขียนโปรแกรมรับส่งข้อมูล:**
+  1. สร้าง API ฝั่ง ML แยกต่างหาก (เช่นใช้ FastAPI รันบนเครื่องพอร์ต `5000`):
+     ```python
+     # ml_api.py (รันแยกที่พอร์ต 5000)
+     from fastapi import FastAPI
+     import joblib
+     
+     app = FastAPI()
+     model = joblib.load('isolation_forest_waf.joblib')
+     
+     @app.post("/predict")
+     def predict(features: list):
+         # ประมวลผลคำนวณและทำนายผลลัพธ์
+         pred = model.predict([features])
+         return {"is_anomaly": bool(pred[0] == -1)}
+     ```
+  2. ที่ตัว **WAF (Nginx/OpenResty)** ให้เขียน Lua Script ไปเรียก API ตัวนี้
+  3. **⚠️ ระบบป้องกัน Domino (Fail-Open Policy):** ในการเขียน Lua เพื่อยิงหา API พอร์ต 5000 ต้องตั้งค่า **Timeout ไว้น้อยมาก (เช่น 30-50ms)** และครอบคำสั่งด้วย `pcall` (try-catch) หากฝั่ง ML ล่มหรือตอบกลับช้า ระบบ WAF จะปล่อยผ่านคำขอนั้นไปเลยทันทีเพื่อรักษาสถานะเว็บไม่ให้ล่มตามไปด้วย

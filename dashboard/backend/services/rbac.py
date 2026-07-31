@@ -80,7 +80,7 @@ def verify_origin_ownership(origin_id: str, current_user: dict = Depends(get_cur
     from services.dynamodb_service import DynamoDBService
     db = DynamoDBService()
     origin = db.get_origin_by_id(origin_id)
-    if not origin:
+    if not origin or origin.get("status") == "deleted":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Origin not found")
     
     if origin.get("admin_user_id") != current_user.get("user_id"):

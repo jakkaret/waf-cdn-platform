@@ -190,3 +190,150 @@ async def check_ssl_allowed(domain: str):
         raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+import os
+
+origins_domains_router = APIRouter(prefix="/api/origins", tags=["Domains"])
+
+def format_domain(domain_data: dict) -> dict:
+    dns_verified = domain_data.get("dns_verified", False)
+    return {
+        "domain_id": domain_data.get("id"),
+        "origin_id": domain_data.get("origin_id"),
+        "domain_name": domain_data.get("domain_name"),
+        "verification_status": "verified" if dns_verified else "pending",
+        "dns_verification_token": domain_data.get("verification_token"),
+        "cname_target": os.getenv("WAF_CNAME_TARGET", "cdn.local"),
+        "ssl_status": domain_data.get("ssl_status", "none"),
+        "created_at": domain_data.get("created_at"),
+    }
+
+@origins_domains_router.get("/{origin_id}/domains")
+async def list_domains_by_origin(origin_id: str, current_user: dict = Depends(get_current_user)):
+    verify_origin_ownership(origin_id, current_user)
+    
+    try:
+        from boto3.dynamodb.conditions import Key
+        response = db.domains_table.query(
+            IndexName="origin_id-index",
+            KeyConditionExpression=Key("origin_id").eq(origin_id)
+        )
+        items = response.get("Items", [])
+    except Exception:
+        from boto3.dynamodb.conditions import Attr
+        response = db.domains_table.scan(
+            FilterExpression=Attr("origin_id").eq(origin_id)
+        )
+        items = response.get("Items", [])
+        
+    formatted = [format_domain(item) for item in items]
+    return {"domains": formatted}
+
+class DomainCreatePayload(BaseModel):
+    domain_name: str
+
+@origins_domains_router.post("/{origin_id}/domains")
+async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayload, current_user: dict = Depends(get_current_user)):
+    verify_origin_ownership(origin_id, current_user)
+    
+    domain_name = payload.domain_name.strip().lower()
+    
+    from boto3.dynamodb.conditions import Attr
+    response = db.domains_table.scan(
+        FilterExpression=Attr("domain_name").eq(domain_name)
+    )
+    if response.get("Items"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Domain name {domain_name} is already registered."
+        )
+        
+    domain_id = str(uuid.uuid4())
+    verification_token = f"waf-token-{uuid.uuid4().hex[:16]}"
+    now = datetime.now().isoformat() + "Z"
+    
+    domain_data = {
+        "id": domain_id,
+        "origin_id": origin_id,
+        "domain_name": domain_name,
+        "verification_token": verification_token,
+        "dns_verified": False,
+        "ssl_status": "none",
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    try:
+        db.domains_table.put_item(Item=domain_data)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save domain: {e}"
+        )
+        
+    dns_instructions = {
+        "cname_record": {
+            "type": "CNAME",
+            "name": domain_name,
+            "value": os.getenv("WAF_CNAME_TARGET", "cdn.local")
+        },
+        "txt_record": {
+            "type": "TXT",
+            "name": f"_waf-challenge.{domain_name}",
+            "value": verification_token
+        }
+    }
+    
+    return {
+        "domain": format_domain(domain_data),
+        "dns_instructions": dns_instructions
+    }
+
+@origins_domains_router.post("/{origin_id}/domains/{domain_id}/verify")
+async def verify_domain_now_under_origin(origin_id: str, domain_id: str, current_user: dict = Depends(get_current_user)):
+    verify_origin_ownership(origin_id, current_user)
+    
+    res = db.domains_table.get_item(Key={"id": domain_id})
+    domain = res.get("Item")
+    if not domain or domain.get("origin_id") != origin_id:
+        raise HTTPException(status_code=404, detail="Domain not found")
+        
+    domain_name = domain.get("domain_name")
+    token = domain.get("verification_token")
+    
+    is_verified = verify_domain_dns(domain_name, token)
+    
+    if is_verified:
+        db.domains_table.update_item(
+            Key={"id": domain_id},
+            UpdateExpression="SET dns_verified = :verified, ssl_status = :ssl",
+            ExpressionAttributeValues={
+                ":verified": True,
+                ":ssl": "pending"
+            }
+        )
+        return {
+            "status": "verified",
+            "message": "Domain successfully verified!"
+        }
+    else:
+        return {
+            "status": "failed",
+            "message": "DNS records check failed. CNAME or TXT verification not found."
+        }
+
+@origins_domains_router.delete("/{origin_id}/domains/{domain_id}")
+async def delete_domain_under_origin(origin_id: str, domain_id: str, current_user: dict = Depends(get_current_user)):
+    verify_origin_ownership(origin_id, current_user)
+    
+    res = db.domains_table.get_item(Key={"id": domain_id})
+    domain = res.get("Item")
+    if not domain or domain.get("origin_id") != origin_id:
+        raise HTTPException(status_code=404, detail="Domain not found")
+        
+    try:
+        db.domains_table.delete_item(Key={"id": domain_id})
+        return {"status": "success", "message": f"Domain {domain['domain_name']} deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
