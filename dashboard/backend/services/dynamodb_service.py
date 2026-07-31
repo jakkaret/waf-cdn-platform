@@ -226,10 +226,33 @@ class DynamoDBService:
 
     def delete_origin(self, origin_id: str) -> bool:
         try:
-            self.origins_table.delete_item(Key={"id": origin_id})
+            self.origins_table.update_item(
+                Key={"id": origin_id},
+                UpdateExpression="SET #status = :archived, archived_at = :now REMOVE deleted_at",
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={
+                    ":archived": "archived",
+                    ":now": datetime.now().isoformat() + "Z"
+                }
+            )
             return True
         except Exception as e:
-            print("Failed to delete origin:", e)
+            print("Failed to archive origin:", e)
+            return False
+
+    def restore_origin(self, origin_id: str) -> bool:
+        try:
+            self.origins_table.update_item(
+                Key={"id": origin_id},
+                UpdateExpression="SET #status = :active REMOVE archived_at, deleted_at",
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={
+                    ":active": "active"
+                }
+            )
+            return True
+        except Exception as e:
+            print("Failed to restore origin:", e)
             return False
 
 # ตัวอย่างการใช้งาน / Quick test (python3 -m services.dynamodb_service)

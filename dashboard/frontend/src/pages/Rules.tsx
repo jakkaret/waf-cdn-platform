@@ -8,6 +8,7 @@ import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import toast from 'react-hot-toast'
 import { WafRule } from '../types'
+import { api } from '../api/axios'
 
 export const Rules: React.FC = () => {
   const { user } = useAuthStore()
@@ -51,6 +52,20 @@ export const Rules: React.FC = () => {
     onError: () => toast.error('Failed to delete rule')
   })
 
+  const syncMutation = useMutation({
+    mutationFn: () => api.post('/rules/sync'),
+    onSuccess: (res) => {
+      const nodes: { region: string; status: string }[] = res.data?.node_results || []
+      if (nodes.length > 0) {
+        const summary = nodes.map(n => `${n.status === 'synced' ? '✅' : '❌'} ${n.region}`).join('  ')
+        toast.success(`Sync complete: ${summary}`, { duration: 5000 })
+      } else {
+        toast.success('Rules synced to edge nodes')
+      }
+    },
+    onError: (e: any) => toast.error(e.response?.data?.detail || 'Sync failed'),
+  })
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!editingRule?.id || !editingRule?.operator || !editingRule?.message) {
@@ -77,7 +92,18 @@ export const Rules: React.FC = () => {
       <TopBar 
         title="Custom Rules" 
         subtitle="Manage WAF filtering rules"
-        action={isAdmin && <Button onClick={() => { setEditingRule({}); setIsModalOpen(true) }}>+ Add Rule</Button>}
+        action={isAdmin && (
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+            >
+              {syncMutation.isPending ? '⏳ Syncing...' : '🔄 Sync to Edge Nodes'}
+            </Button>
+            <Button onClick={() => { setEditingRule({}); setIsModalOpen(true) }}>+ Add Rule</Button>
+          </div>
+        )}
       />
 
       <Card noPadding>

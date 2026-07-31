@@ -1,7 +1,6 @@
 import os
 import sys
 import httpx
-import jwt
 from datetime import datetime, timedelta
 
 # Project root .env
