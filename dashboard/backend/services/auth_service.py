@@ -26,7 +26,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://178.104.53.123:8000/api/auth/google/callback")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
@@ -139,7 +139,7 @@ class AuthService:
         email: str,
         username: str,
         password: Optional[str] = None,
-        role: str = "viewer", 
+        role: str = "viewer",
         auth_provider: str = "local",
         provider_id: Optional[str] = None,
         avatar_url: Optional[str] = None,
