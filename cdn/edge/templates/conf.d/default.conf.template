@@ -33,6 +33,12 @@ server {
         internal;
     }
 
+    error_page 403 /403.html;
+    location = /403.html {
+        root /usr/share/nginx/html;
+        internal;
+    }
+
     location = /healthz {
         access_log off;
         add_header Content-Type application/json;
@@ -149,6 +155,12 @@ server {
     # --- Rate Limiting: custom 429 error page ---
     error_page 429 /429.html;
     location = /429.html {
+        root /usr/share/nginx/html;
+        internal;
+    }
+    
+    error_page 403 /403.html;
+    location = /403.html {
         root /usr/share/nginx/html;
         internal;
     }
