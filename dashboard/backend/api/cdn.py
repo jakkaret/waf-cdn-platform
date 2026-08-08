@@ -15,7 +15,7 @@ _db = DynamoDBService()
 
 
 CDN_STATS_URL = os.getenv("CDN_STATS_URL", "http://cdn-stats:9090/metrics")
-CDN_PURGE_API_URL = os.getenv("CDN_PURGE_API_URL", "http://localhost:8090")
+CDN_PURGE_API_URL = os.getenv("CDN_PURGE_API_URL", "http://178.104.53.123:8090")
 CDN_PURGE_TOKEN = os.getenv("CDN_PURGE_TOKEN", "cdn-secret-token")
 
 REGIONS_META = {
@@ -31,22 +31,12 @@ EDGE_PORTS = {
 }
 
 
-_client_limits = httpx.Limits(max_keepalive_connections=20, max_connections=50)
-_http_client: Optional[httpx.AsyncClient] = None
-
-def get_http_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(limits=_client_limits, timeout=5.0)
-    return _http_client
-
-
 async def _fetch_stats() -> dict:
     try:
-        client = get_http_client()
-        r = await client.get(CDN_STATS_URL)
-        r.raise_for_status()
-        return r.json()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(CDN_STATS_URL)
+            r.raise_for_status()
+            return r.json()
     except Exception:
         return _mock_stats()
 
@@ -100,18 +90,7 @@ def _enrich(stats: dict) -> list:
         if region == "GLOBAL":
             continue
         meta = REGIONS_META.get(region, {})
-        
-        # Ensure we have the keys that the frontend expects
-        mapped_data = {
-            "cache_hit": data.get("hit", data.get("cache_hit", 0)),
-            "cache_miss": data.get("miss", data.get("cache_miss", 0)),
-            "cache_bypass": data.get("bypass", data.get("cache_bypass", 0)),
-            "request_count": data.get("total_requests", data.get("request_count", 0)),
-            "blocked_count": data.get("blocked_count", 0),
-            "avg_latency": data.get("avg_response_time_ms", data.get("avg_latency", 0)),
-        }
-        
-        result.append({**data, **mapped_data, **meta, "port": EDGE_PORTS.get(region)})
+        result.append({**data, **meta, "port": EDGE_PORTS.get(region)})
     return result
 
 
@@ -140,30 +119,30 @@ async def cdn_stats_region(region: str, current_user: dict = Depends(require_vie
 @router.get("/nodes")
 async def cdn_nodes(current_user: dict = Depends(require_viewer_or_above)):
     results = []
-    client = get_http_client()
 
-    for region, port in EDGE_PORTS.items():
-        meta = REGIONS_META.get(region, {})
-        try:
-            r = await client.get(f"http://localhost:{port}/healthz", timeout=3.0)
-            online = r.status_code == 200
-            health_data = r.json() if online else {}
-        except Exception:
-            online = False
-            health_data = {}
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        for region, port in EDGE_PORTS.items():
+            meta = REGIONS_META.get(region, {})
+            try:
+                r = await client.get(f"http://localhost:{port}/healthz")
+                online = r.status_code == 200
+                health_data = r.json() if online else {}
+            except Exception:
+                online = False
+                health_data = {}
 
-        results.append(
-            {
-                "region": region,
-                "name": meta.get("name", region),
-                "flag": meta.get("flag", "🌐"),
-                "lat": meta.get("lat"),
-                "lng": meta.get("lng"),
-                "port": port,
-                **health_data,
-                "status": "online" if online else "offline",
-            }
-        )
+            results.append(
+                {
+                    "region": region,
+                    "name": meta.get("name", region),
+                    "flag": meta.get("flag", "🌐"),
+                    "lat": meta.get("lat"),
+                    "lng": meta.get("lng"),
+                    "port": port,
+                    "status": "online" if online else "offline",
+                    **health_data,
+                }
+            )
 
     return results
 
@@ -178,13 +157,12 @@ async def cdn_purge(
         raise HTTPException(status_code=500, detail="CDN_PURGE_TOKEN not configured")
 
     try:
-        client = get_http_client()
-        resp = await client.post(
-            f"{CDN_PURGE_API_URL}/purge",
-            params={"url": url, "region": (region or "ALL")},
-            headers={"X-Purge-Token": CDN_PURGE_TOKEN},
-            timeout=15.0,
-        )
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{CDN_PURGE_API_URL}/purge",
+                params={"url": url, "region": (region or "ALL")},
+                headers={"X-Purge-Token": CDN_PURGE_TOKEN},
+            )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Purge API unreachable: {exc}") from exc
 
@@ -199,12 +177,8 @@ async def cdn_logs(
     limit: int = Query(50, description="Max logs to return"),
     current_user: dict = Depends(require_viewer_or_above)
 ):
-    # [Q2 FIX] ใช้ get_cdn_logs() ที่ filter source='cdn' และ region ที่ DynamoDB level
-    # แทนการดึง 2000 rows มา filter ใน Python (ประหยัด memory และลด latency)
-    # [Q3 FIX] ใช้ module-level _db แทนการสร้าง DynamoDBService() ใหม่ทุก request
     logs = _db.get_cdn_logs(limit=limit, region=region or "ALL")
     return {"logs": logs}
-
 
 
 @router.get("/latency")
@@ -216,11 +190,8 @@ async def cdn_latency(
     from collections import defaultdict
     from datetime import datetime
 
-    # [Q2 FIX] ใช้ get_cdn_logs() filter ที่ DynamoDB แทนการดึง 2000 rows มา filter ใน Python
-    # [Q3 FIX] ใช้ module-level _db
     cdn_logs = _db.get_cdn_logs(limit=500, region=region or "ALL")
 
-    # Group by region for latency stats
     region_latencies = defaultdict(list)
     timeseries_data = defaultdict(lambda: {"SG": 0, "JP": 0, "TH": 0, "_count": {"SG": 0, "JP": 0, "TH": 0}})
 
@@ -257,3 +228,37 @@ async def cdn_latency(
 
     timeseries = timeseries[-60:]
     return {"summary": summary, "timeseries": timeseries}
+
+
+# ─── Log Ingest Endpoint ──────────────────────────────────────────
+from fastapi import Request as _Request
+import json as _json
+import pathlib as _pathlib
+import time as _time
+
+@router.post("/logs/ingest")
+async def ingest_logs(request: _Request):
+    """รับ log จาก CDN nodes (45.154.26.91) แล้วบันทึกลง file"""
+    try:
+        body = await request.json()
+        logs = body if isinstance(body, list) else [body]
+
+        region = request.headers.get("X-CDN-Region", "")
+        if not region and logs:
+            region = logs[0].get("region", "unknown")
+        region = region.lower()
+
+        log_dir = _pathlib.Path(f"/root/waf_project/logs/cdn/{region}")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "access.json"
+
+        with open(log_file, "a") as f:
+            for entry in logs:
+                if "timestamp" not in entry:
+                    entry["timestamp"] = int(_time.time())
+                f.write(_json.dumps(entry) + "\n")
+
+        return {"status": "ok", "received": len(logs), "region": region}
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

@@ -6,8 +6,8 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 # อ่าน allowed origins จาก env (คั่นด้วย comma)
-# ตัวอย่าง ALLOWED_ORIGINS=http://localhost:5173,https://yourdomain.com
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000,http://localhost:8000")
+# ตัวอย่าง ALLOWED_ORIGINS=http://178.104.53.123:5173,https://yourdomain.com
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://178.104.53.123:5173,http://178.104.53.123:3000,http://178.104.53.123:8000")
 ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 from services.fetch_logs import get_recent_logs
@@ -18,15 +18,9 @@ from fastapi.staticfiles import StaticFiles
 from api import rules
 from api import auth
 from api import cdn
-from api import origins
-from api import domains
-from api.domains import origins_domains_router
-from api import limiter as rate_limit_api
-from api import analytics
 from services.log_forward import log_forward_worker
 from services.cdn_log_forward import cdn_log_forward_worker
 from services.telegram_listener import alert_worker
-from services.dns_verification_worker import dns_verification_worker
 from services.rbac import require_viewer_or_above
 from api import alerts
 from services.rate_limiter import limiter
@@ -80,135 +74,6 @@ async def system_info(current_user: dict = Depends(require_viewer_or_above)):
     }
 
 
-# Consolidated system health status monitoring
-@app.get("/api/system/status")
-async def system_status(current_user: dict = Depends(require_viewer_or_above)):
-    import socket
-    import httpx
-    import shutil
-    import os
-    import time
-
-    # Check port helper
-    def check_port(host: str, port: int, timeout=1.0) -> bool:
-        try:
-            with socket.create_connection((host, port), timeout=timeout):
-                return True
-        except Exception:
-            return False
-
-    # 1. Database Health
-    db_status = "offline"
-    db_detail = "Disconnected"
-    try:
-        from services.dynamodb_service import DynamoDBService
-        db_srv = DynamoDBService()
-        db_srv.alerts_table.load()
-        db_status = "online"
-        db_detail = "Connected to AWS DynamoDB"
-    except Exception as e:
-        db_detail = str(e)
-
-    # 2. Service checks
-    services = {
-        "Core WAF Engine (Nginx)": {
-            "status": "online" if check_port("localhost", 8080) else "offline",
-            "port": 8080,
-            "desc": "Primary ingress Nginx proxy with ModSecurity CRS"
-        },
-        "DVWA Target App": {
-            "status": "online" if check_port("localhost", 80) else "offline",
-            "port": 80,
-            "desc": "Vulnerable test application target"
-        },
-        "CDN Control API": {
-            "status": "online" if check_port("localhost", 8070) else "offline",
-            "port": 8070,
-            "desc": "Coordinates rules sync and blocklists across nodes"
-        },
-        "CDN Purge API": {
-            "status": "online" if check_port("localhost", 8090) else "offline",
-            "port": 8090,
-            "desc": "Triggers global CDN cache purges"
-        },
-        "CDN Stats Service": {
-            "status": "online" if check_port("localhost", 9090) else "offline",
-            "port": 9090,
-            "desc": "Aggregates edge node traffic metrics"
-        },
-        "GeoDNS Server": {
-            "status": "online" if check_port("localhost", 8053) else "offline",
-            "port": 8053,
-            "desc": "DNS server routing users based on geography"
-        }
-    }
-
-    # 3. CDN Edge Nodes
-    cdn_nodes = []
-    async with httpx.AsyncClient(timeout=1.5) as client:
-        for region, port in [("SG", 8081), ("JP", 8082), ("TH", 8086)]:
-            online = check_port("localhost", port)
-            latency = 0
-            health_status = {}
-            if online:
-                try:
-                    t0 = time.time()
-                    r = await client.get(f"http://localhost:{port}/healthz")
-                    latency = int((time.time() - t0) * 1000)
-                    if r.status_code == 200:
-                        health_status = r.json()
-                except Exception:
-                    pass
-
-            cdn_nodes.append({
-                "region": region,
-                "status": "online" if online else "offline",
-                "port": port,
-                "latency_ms": latency,
-                "health": health_status
-            })
-
-    # 4. Background Workers Status
-    workers = {
-        "Alert Worker": {
-            "status": "running" if hasattr(app.state, "alert_task") and not app.state.alert_task.done() else "stopped",
-            "desc": "Forwards security alerts to Telegram channels"
-        },
-        "Log Forwarder": {
-            "status": "running" if hasattr(app.state, "log_forward_task") and not app.state.log_forward_task.done() else "stopped",
-            "desc": "Ingests ModSecurity audit logs into database"
-        },
-        "CDN Log Forwarder": {
-            "status": "running" if hasattr(app.state, "cdn_log_forward_task") and not app.state.cdn_log_forward_task.done() else "stopped",
-            "desc": "Syncs regional edge logs with control panel"
-        },
-        "DNS Verification Worker": {
-            "status": "running" if hasattr(app.state, "dns_verification_task") and not app.state.dns_verification_task.done() else "stopped",
-            "desc": "Verifies customer domain CNAME/TXT DNS records"
-        }
-    }
-
-    # 5. Disk Info
-    total, used, free = shutil.disk_usage("/")
-
-    return {
-        "db": {
-            "status": db_status,
-            "detail": db_detail
-        },
-        "services": services,
-        "cdn_nodes": cdn_nodes,
-        "workers": workers,
-        "system": {
-            "disk_total_gb": total // (2**30),
-            "disk_used_gb": used // (2**30),
-            "disk_free_gb": free // (2**30),
-            "disk_used_percent": int((used / total) * 100),
-            "load_average": os.getloadavg() if hasattr(os, "getloadavg") else [0.0, 0.0, 0.0]
-        }
-    }
-
-
 
 # Logs (protected - viewer+)
 @app.get("/api/logs/recent")
@@ -222,13 +87,8 @@ async def fetch_recent_logs(
 # API Routers
 app.include_router(auth.router)
 app.include_router(rules.router)
-app.include_router(alerts.router)  
+app.include_router(alerts.router)
 app.include_router(cdn.router)
-app.include_router(origins.router)
-app.include_router(domains.router)
-app.include_router(origins_domains_router)
-app.include_router(rate_limit_api.router)
-app.include_router(analytics.router)
 
 # Error Handlers
 from fastapi import Request
@@ -265,10 +125,10 @@ async def startup_event():
     print("=" * 50)
     print("WAF Dashboard API Starting...")
     print("=" * 50)
-    print("Dashboard: http://localhost:8000")
-    print("API Docs:  http://localhost:8000/docs")
-    print("Auth:      http://localhost:8000/api/auth/")
-    print("Rules API: http://localhost:8000/api/rules/")
+    print("Dashboard: http://178.104.53.123:8000")
+    print("API Docs:  http://178.104.53.123:8000/docs")
+    print("Auth:      http://178.104.53.123:8000/api/auth/")
+    print("Rules API: http://178.104.53.123:8000/api/rules/")
     print("=" * 50)
     if not hasattr(app.state, "alert_task"):
         app.state.alert_task = asyncio.create_task(alert_worker())
@@ -276,8 +136,6 @@ async def startup_event():
         app.state.log_forward_task = asyncio.create_task(log_forward_worker())
     if not hasattr(app.state, "cdn_log_forward_task"):
         app.state.cdn_log_forward_task = asyncio.create_task(cdn_log_forward_worker())
-    if not hasattr(app.state, "dns_verification_task"):
-        app.state.dns_verification_task = asyncio.create_task(dns_verification_worker())
     # [S4 FIX] cleanup expired Telegram pairing codes จาก _pending ทุก 60 วินาที
     if not hasattr(app.state, "cleanup_pending_task"):
         from api.alerts import _cleanup_expired_codes
@@ -294,7 +152,7 @@ async def serve_react_app(full_path: str):
     if full_path.startswith("api/"):
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="API route not found")
-    
+
     index_file = FRONTEND_DIST / "index.html"
     if index_file.exists():
         return FileResponse(str(index_file))
