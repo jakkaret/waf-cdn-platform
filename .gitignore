@@ -13,8 +13,8 @@ waf_alert_bot.session
 __pycache__/
 *.pyc
 
-# AWS Installer
-AWSCLIV2.pkg
+# ML Datasets (Auto-downloaded by ml/download_dataset.py)
+ml/dataset/*.csv
 
 # OS
 .DS_Store
