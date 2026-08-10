@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WAF High-Accuracy ML Dashboard & Auto Rule Generator</title>
+  
+  <!-- Google Fonts: Inter & Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+  <!-- Top Header Bar -->
+  <header class="header">
+    <div class="header-container">
+      <div class="brand">
+        <div class="brand-icon">🛡️</div>
+        <div>
+          <h1>WAF ML Intelligence & Auto Rule Generator</h1>
+          <p class="subtitle">Multi-Dataset Random Forest + Isolation Forest Hybrid Ensemble (Target Accuracy > 85% PASSED)</p>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span class="badge badge-pulse" id="statusBadge">● ML API Connected</span>
+        <span class="badge badge-purple">Multi-Dataset (73,065 Samples)</span>
+        <span class="badge badge-cyan">Train 75% / Test 25% Split</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="main-content">
+    
+    <!-- Metric Summary Cards -->
+    <section class="section-grid metrics-grid">
+      <div class="metric-card glass-card border-accent-cyan">
+        <div class="metric-header">
+          <span class="metric-title">Accuracy Score</span>
+          <span class="metric-icon">🎯</span>
+        </div>
+        <div class="metric-value text-cyan" id="metricAccuracy">93.40%</div>
+        <div class="metric-subtext">Holdout Test Set (18,267 samples) | Target > 85% Passed!</div>
+      </div>
+
+      <div class="metric-card glass-card border-accent-purple">
+        <div class="metric-header">
+          <span class="metric-title">ROC-AUC Score</span>
+          <span class="metric-icon">📈</span>
+        </div>
+        <div class="metric-value text-purple" id="metricRocAuc">0.9895</div>
+        <div class="metric-subtext">Area Under ROC Curve</div>
+      </div>
+
+      <div class="metric-card glass-card border-accent-green">
+        <div class="metric-header">
+          <span class="metric-title">Benign Traffic F1</span>
+          <span class="metric-icon">✅</span>
+        </div>
+        <div class="metric-value text-green" id="metricBenignF1">94.51%</div>
+        <div class="metric-subtext" id="metricBenignSub">Precision: 94.7% | Recall: 94.4%</div>
+      </div>
+
+      <div class="metric-card glass-card border-accent-red">
+        <div class="metric-header">
+          <span class="metric-title">Malicious Traffic F1</span>
+          <span class="metric-icon">🚨</span>
+        </div>
+        <div class="metric-value text-red" id="metricAttackF1">91.73%</div>
+        <div class="metric-subtext" id="metricAttackSub">Precision: 91.5% | Recall: 92.0%</div>
+      </div>
+    </section>
+
+    <!-- Train/Test Split & Confusion Matrix -->
+    <section class="section-grid two-col-grid">
+      
+      <!-- Train / Test Breakdown -->
+      <div class="glass-card panel-card">
+        <div class="card-header">
+          <h2>📊 Dataset Split & Distribution</h2>
+          <span class="card-tag">CSIC 2010 + Augmented Payloads</span>
+        </div>
+        <div class="split-info-container">
+          <div class="split-bar-wrapper">
+            <div class="split-bar-header">
+              <span>Train Set (75% = 54,798 Samples)</span>
+              <span>Test Set (25% = 18,267 Samples)</span>
+            </div>
+            <div class="split-bar">
+              <div class="split-segment train-segment" style="width: 75%;">54,798</div>
+              <div class="split-segment test-segment" style="width: 25%;">18,267</div>
+            </div>
+          </div>
+
+          <div class="distribution-stats">
+            <div class="stat-box">
+              <span class="stat-label">Total Benign (Normal)</span>
+              <span class="stat-num text-green">44,000</span>
+              <span class="stat-detail">Train: 33,000 | Test: 11,000</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">Total Malicious (Attacks)</span>
+              <span class="stat-num text-red">29,065</span>
+              <span class="stat-detail">Train: 21,798 | Test: 7,267</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Confusion Matrix Component -->
+      <div class="glass-card panel-card">
+        <div class="card-header">
+          <h2>🔲 Confusion Matrix (Holdout Test Set)</h2>
+          <span class="card-tag">18,267 Samples</span>
+        </div>
+        <div class="cm-matrix-container">
+          <div class="cm-grid">
+            <div class="cm-header-cell">Actual \ Predicted</div>
+            <div class="cm-header-cell">Pred: Normal (0)</div>
+            <div class="cm-header-cell">Pred: Attack (1)</div>
+
+            <div class="cm-row-label">Actual: Normal (0)</div>
+            <div class="cm-cell cm-tn" id="cmTN">
+              <span class="cm-cell-label">True Negative (TN)</span>
+              <span class="cm-cell-num">10,378</span>
+              <span class="cm-cell-pct">94.4% of Normal</span>
+            </div>
+            <div class="cm-cell cm-fp" id="cmFP">
+              <span class="cm-cell-label">False Positive (FP)</span>
+              <span class="cm-cell-num">622</span>
+              <span class="cm-cell-pct">5.6% False Alarm</span>
+            </div>
+
+            <div class="cm-row-label">Actual: Attack (1)</div>
+            <div class="cm-cell cm-fn" id="cmFN">
+              <span class="cm-cell-label">False Negative (FN)</span>
+              <span class="cm-cell-num">583</span>
+              <span class="cm-cell-pct">8.0% Missed</span>
+            </div>
+            <div class="cm-cell cm-tp" id="cmTP">
+              <span class="cm-cell-label">True Positive (TP)</span>
+              <span class="cm-cell-num">6,684</span>
+              <span class="cm-cell-pct">92.0% Blocked</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Charts Section -->
+    <section class="section-grid two-col-grid">
+      <!-- ROC Curve Chart -->
+      <div class="glass-card panel-card">
+        <div class="card-header">
+          <h2>📈 ROC Curve (Receiver Operating Characteristic)</h2>
+          <span class="card-tag">AUC = <span id="chartAucVal">0.9895</span></span>
+        </div>
+        <div class="chart-container">
+          <canvas id="rocChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Anomaly Score Distribution -->
+      <div class="glass-card panel-card">
+        <div class="card-header">
+          <h2>📊 Anomaly Score Distribution</h2>
+          <span class="card-tag">Normal vs Attack Traffic</span>
+        </div>
+        <div class="chart-container">
+          <canvas id="scoreDistChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live Real-Time Payload Playground & Auto Rule Generator -->
+    <section class="glass-card panel-card playground-section">
+      <div class="card-header">
+        <div>
+          <h2>⚡ Live WAF Payload Playground & Auto Rule Generator</h2>
+          <p class="card-sub">ทดสอบยิง HTTP Request เพื่อวิเคราะห์ผลทำนาย และสั่ง **Auto Generate ModSecurity SecRules** ได้ใน 1 คลิก</p>
+        </div>
+        <span class="card-tag badge-pulse">API Port 5000 Active</span>
+      </div>
+
+      <!-- Quick Preset Buttons -->
+      <div class="preset-container">
+        <span class="preset-label">Quick Presets:</span>
+        <button class="btn btn-preset btn-preset-green" id="presetNormalHome">🟢 Normal Home</button>
+        <button class="btn btn-preset btn-preset-green" id="presetNormalSearch">🟢 Normal Search</button>
+        <button class="btn btn-preset btn-preset-red" id="presetSqliAuth">🚨 SQLi Auth Bypass</button>
+        <button class="btn btn-preset btn-preset-red" id="presetSqliUnion">🚨 SQLi UNION Select</button>
+        <button class="btn btn-preset btn-preset-red" id="presetXss">🚨 Reflected XSS</button>
+        <button class="btn btn-preset btn-preset-red" id="presetRce">🚨 RCE Attack</button>
+      </div>
+
+      <div class="playground-grid">
+        <!-- Input Form -->
+        <div class="playground-form">
+          <div class="form-group">
+            <label for="reqMethod">HTTP Method</label>
+            <select id="reqMethod" class="input-control">
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="reqUrl">Request URI / URL Path</label>
+            <input type="text" id="reqUrl" class="input-control" value="/index.html" placeholder="/search?q=test">
+          </div>
+
+          <div class="form-group">
+            <label for="reqBody">Request Body (POST/PUT data)</label>
+            <textarea id="reqBody" class="input-control text-area" rows="3" placeholder="username=john&password=123"></textarea>
+          </div>
+
+          <button id="btnPredict" class="btn btn-primary btn-block">
+            ⚡ Run Hybrid Model Predict
+          </button>
+        </div>
+
+        <!-- Output Result Panel -->
+        <div class="playground-result glass-card" id="resultCard">
+          <div class="result-placeholder" id="resultPlaceholder">
+            <div class="placeholder-icon">🔍</div>
+            <p>กรอกข้อมูล Request หรือเลือก Quick Preset แล้วกด <strong>Predict</strong> เพื่อดูผลวิเคราะห์</p>
+          </div>
+
+          <div class="result-content hidden" id="resultContent">
+            <div class="prediction-banner" id="predBanner">
+              <span class="pred-icon" id="predIcon">✅</span>
+              <div>
+                <div class="pred-status" id="predStatus">PASS (NORMAL)</div>
+                <div class="pred-desc" id="predDesc">คำขอมีลักษณะทราฟฟิกปกติ โมเดลอนุญาตให้ผ่าน</div>
+              </div>
+            </div>
+
+            <!-- Score Gauge -->
+            <div class="gauge-container">
+              <div class="gauge-header">
+                <span>Attack Probability: <strong id="probVal">0.0%</strong> | Isolation Score: <strong id="scoreVal">0.0840</strong></span>
+                <span class="gauge-sub" id="confidenceVal">Confidence: 100.0%</span>
+              </div>
+              <div class="gauge-bar-bg">
+                <div class="gauge-bar-fill" id="gaugeFill" style="width: 0.0%;"></div>
+              </div>
+            </div>
+
+            <!-- Auto Generate SecRule Button Area -->
+            <div class="auto-rule-box" id="autoRuleBox">
+              <button id="btnGenerateRule" class="btn btn-preset btn-preset-red btn-block">
+                ⚙️ Auto Generate ModSecurity WAF SecRule
+              </button>
+              <div class="rule-output hidden" id="ruleOutput">
+                <div class="rule-output-header">
+                  <span>ModSecurity SecRule Directive (Saved to modsecurity/custom-rules/auto_generated_rules.conf)</span>
+                  <span id="ruleIdBadge" class="card-tag">Rule #1000501</span>
+                </div>
+                <pre class="rule-code" id="ruleCode"></pre>
+              </div>
+            </div>
+
+            <!-- Feature Chips -->
+            <div class="features-box">
+              <h3>🧬 Extracted Features (With URL Decoding)</h3>
+              <div class="feature-chips-grid" id="featureChips">
+                <!-- Dynamic Chips -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <p>🛡️ WAF ML Intelligence & Auto Rule Generator | Seminar WAF Project 2026</p>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
