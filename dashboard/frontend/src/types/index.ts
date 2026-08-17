@@ -154,3 +154,21 @@ export type ProvisioningStep =
   | 'nginx_reload'
   | 'done'
   | 'failed'
+
+export interface MLPendingRule {
+  rule_id: string
+  pattern: string
+  variable: string
+  attack_type: string
+  severity: string
+  secrule_template: string
+  source_url: string
+  source_method: string
+  status: 'pending' | 'approved' | 'rejected'
+  created_at: string
+  reviewed_by?: string
+  reviewed_at?: string
+  reject_reason?: string
+  deployed_rule_id?: number
+}
+

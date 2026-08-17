@@ -44,23 +44,28 @@ class RuleManager:
             raise ValueError(f"Command {nginx_args!r} is not in allowed whitelist")
 
         cmd = ["docker", "exec", CONTAINER_NAME, *nginx_args]
-        subprocess.run(cmd, check=True, capture_output=True)
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            # We must decode and include stderr so we know WHY it failed
+            err_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
+            raise RuntimeError(f"Docker command failed: {err_msg}")
 
     def reload_nginx(self):
         try:
             self._run_docker_exec(("nginx", "-s", "reload"))
             logger.info("Nginx reloaded successfully")
-        except subprocess.CalledProcessError as e:
-            logger.error("Failed to reload nginx: %s", e)
-            raise RuntimeError("Reload nginx failed")
+        except RuntimeError as e:
+            logger.error(str(e))
+            raise e
 
     def test_nginx(self):
         try:
             self._run_docker_exec(("nginx", "-t"))
             logger.info("Nginx config test passed")
-        except subprocess.CalledProcessError as e:
-            logger.error("Nginx config test failed: %s", e)
-            raise RuntimeError("Nginx test failed")
+        except RuntimeError as e:
+            logger.error(str(e))
+            raise e
 
     def list_rules(self):
 
@@ -153,11 +158,14 @@ class RuleManager:
         rule_id = rule_data["id"]
         filename = f"custom-{rule_id}.conf"
 
+        safe_operator = str(rule_data['operator']).replace('"', '\\"')
+        safe_message = str(rule_data['message']).replace("'", "\\'")
+
         rule_text = (
             f"# Custom Rule {rule_id}\n"
-            f"SecRule {rule_data['variable']} \"{rule_data['operator']}\" \\\n"
+            f"SecRule {rule_data['variable']} \"{safe_operator}\" \\\n"
             f"\"id:{rule_id},phase:2,deny,status:403,"
-            f"severity:{rule_data['severity']},log,msg:'{rule_data['message']}'\"\n"
+            f"severity:{rule_data['severity']},log,msg:'{safe_message}'\"\n"
         )
 
         with open(os.path.join(self.rules_dir, filename), "w", encoding="utf-8") as f:
@@ -167,6 +175,24 @@ class RuleManager:
         return True
 
     
+    def write_ml_rule(self, rule_id: int, secrule_code: str) -> bool:
+        """เขียน rule ที่มาจากการ Approve ของ ML"""
+        filename = f"ml-{rule_id}.conf"
+        
+        # เพิ่ม header กันงง
+        header = f"# ------------------------------------------------------------------------\n"
+        header += f"# ML Auto-Generated & Approved WAF Rule (ID: {rule_id})\n"
+        header += f"# ------------------------------------------------------------------------\n"
+        
+        rule_text = header + secrule_code + "\n"
+        
+        with open(os.path.join(self.rules_dir, filename), "w", encoding="utf-8") as f:
+            f.write(rule_text)
+            
+        self.test_nginx()
+        self.reload_nginx()
+        return True
+
     def delete_rule(self, rule_id: str) -> bool:
         filename = f"{rule_id}.conf"
         filepath = os.path.join(self.rules_dir, filename)
@@ -197,11 +223,15 @@ class RuleManager:
 
         # สร้าง rule text ใหม่
         rule["severity"] = rule["severity"].upper()
+        
+        safe_operator = str(rule['operator']).replace('"', '\\"')
+        safe_message = str(rule['message']).replace("'", "\\'")
+
         rule_text = (
             f"# Custom Rule {rule['id']}\n"
-            f"SecRule {rule['variable']} \"{rule['operator']}\" \\\n"
+            f"SecRule {rule['variable']} \"{safe_operator}\" \\\n"
             f"\"id:{rule['id']},phase:2,deny,status:403,"
-            f"severity:{rule['severity']},log,msg:'{rule['message']}'\"\n"
+            f"severity:{rule['severity']},log,msg:'{safe_message}'\"\n"
         )
 
         # เขียนไฟล์ใหม่

@@ -4,22 +4,42 @@ import { logsApi } from '../api/logs'
 import { TopBar } from '../components/layout/TopBar'
 import { Card } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
-import { Download, Search } from 'lucide-react'
+import { Download, Search, Filter } from 'lucide-react'
 import { WafLog } from '../types'
 
 export const Logs: React.FC = () => {
   const [filter, setFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('ALL')
+  const [severityFilter, setSeverityFilter] = useState('ALL')
   const { data: logs = [], isLoading } = useQuery({
     queryKey: ['logs'],
     queryFn: () => logsApi.getRecentLogs(100),
     refetchInterval: 8000,
   })
 
-  const filteredLogs = logs.filter(l => 
-    l.ip.includes(filter) || 
-    (l.url && l.url.includes(filter)) || 
-    (l.rule_id && l.rule_id.includes(filter))
-  )
+  const filteredLogs = logs.filter(l => {
+    // 1. Text Search
+    const ipStr = String(l.ip || '')
+    const urlStr = String(l.url || '')
+    const ruleStr = String(l.rule_id || '')
+    const searchFilter = filter.toLowerCase()
+    const matchText = ipStr.toLowerCase().includes(searchFilter) || 
+           urlStr.toLowerCase().includes(searchFilter) || 
+           ruleStr.toLowerCase().includes(searchFilter)
+
+    // 2. Status Filter
+    let matchStatus = true
+    if (statusFilter === 'BLOCKED') matchStatus = l.status === 403
+    else if (statusFilter === 'ALLOWED') matchStatus = l.status >= 200 && l.status < 300
+
+    // 3. Severity Filter
+    let matchSeverity = true
+    if (severityFilter !== 'ALL') {
+      matchSeverity = (l.severity || 'NONE').toUpperCase() === severityFilter
+    }
+
+    return matchText && matchStatus && matchSeverity
+  })
 
   const exportToCSV = () => {
     if (filteredLogs.length === 0) return
@@ -68,15 +88,41 @@ export const Logs: React.FC = () => {
 
       <Card className="mb-6" noPadding>
         <div className="p-4 border-b border-white/5 flex items-center justify-between gap-4 flex-wrap">
-          <div className="relative flex-1 min-w-[240px] max-w-md">
-            <Search className="absolute left-3 top-2.5 text-text-muted" size={16} />
-            <input
-              type="text"
-              placeholder="Search IP, URL, Rule ID..."
-              className="bg-bg-surface border border-white/10 rounded-lg pl-9 pr-4 py-2 text-sm text-white w-full focus:border-accent focus:outline-none"
-              value={filter}
-              onChange={e => setFilter(e.target.value)}
-            />
+          <div className="flex flex-wrap items-center gap-3 flex-1">
+            <div className="relative flex-1 min-w-[240px] max-w-md">
+              <Search className="absolute left-3 top-2.5 text-text-muted" size={16} />
+              <input
+                type="text"
+                placeholder="Search IP, URL, Rule ID..."
+                className="bg-bg-surface border border-white/10 rounded-lg pl-9 pr-4 py-2 text-sm text-white w-full focus:border-accent focus:outline-none"
+                value={filter}
+                onChange={e => setFilter(e.target.value)}
+              />
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Filter className="text-text-muted" size={16} />
+              <select 
+                className="bg-bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-accent focus:outline-none"
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+              >
+                <option value="ALL">All Status</option>
+                <option value="BLOCKED">Blocked (403)</option>
+                <option value="ALLOWED">Allowed (20x)</option>
+              </select>
+              <select 
+                className="bg-bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-accent focus:outline-none"
+                value={severityFilter}
+                onChange={e => setSeverityFilter(e.target.value)}
+              >
+                <option value="ALL">All Severity</option>
+                <option value="CRITICAL">Critical</option>
+                <option value="HIGH">High</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="NONE">None</option>
+              </select>
+            </div>
           </div>
           
           <div className="flex items-center gap-3">

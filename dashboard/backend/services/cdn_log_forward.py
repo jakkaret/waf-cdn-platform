@@ -78,8 +78,16 @@ async def process_cdn_log(region):
     async for line in tail_file(log_path):
         try:
             raw = json.loads(line)
-            data = normalize_cdn_access(raw, region)
-            save_hybrid_log(data)
+            
+            # Check if logs are batched under 'logs' array
+            logs_to_process = raw.get("logs", [raw]) if isinstance(raw, dict) else [raw]
+            
+            for log_entry in logs_to_process:
+                if not isinstance(log_entry, dict):
+                    continue
+                data = normalize_cdn_access(log_entry, region)
+                save_hybrid_log(data)
+                
         except Exception as e:
             print(f"cdn log error ({region}):", e)
 

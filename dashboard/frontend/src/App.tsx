@@ -14,8 +14,10 @@ import Rules from './pages/Rules'
 import Alerts from './pages/Alerts'
 import Users from './pages/Users'
 import CDN from './pages/CDN'
+import MLRules from './pages/MLRules'
 import Origins from './pages/Origins'
 import OriginDetail from './pages/OriginDetail'
+import MLAnalyst from './pages/MLAnalyst'
 
 const queryClient = new QueryClient()
 
@@ -42,10 +44,12 @@ export const App: React.FC = () => {
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/logs" element={<ProtectedRoute><Logs /></ProtectedRoute>} />
           <Route path="/rules" element={<ProtectedRoute><Rules /></ProtectedRoute>} />
+          <Route path="/ml-rules" element={<ProtectedRoute><MLRules /></ProtectedRoute>} />
           <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
           <Route path="/cdn" element={<ProtectedRoute><CDN /></ProtectedRoute>} />
           <Route path="/origins" element={<ProtectedRoute><Origins /></ProtectedRoute>} />
           <Route path="/origins/:id" element={<ProtectedRoute><OriginDetail /></ProtectedRoute>} />
+          <Route path="/ml-analyst" element={<ProtectedRoute><MLAnalyst /></ProtectedRoute>} />
           
           {/* Admin Routes */}
           <Route path="/users" element={<ProtectedRoute requireAdmin><Users /></ProtectedRoute>} />

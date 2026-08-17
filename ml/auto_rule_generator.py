@@ -2,6 +2,8 @@ import os
 import re
 import json
 import urllib.parse
+import fcntl
+import subprocess
 from datetime import datetime, timezone
 from typing import Dict, Any
 
@@ -20,25 +22,29 @@ def generate_modsec_pattern(url: str, body: str = "") -> str:
 
     # 1. SQL Injection Patterns
     if re.search(r"union\s+select", decoded_str, re.I):
-        return r"@rx union\s+select"
+        return r"@rx (?i)union\s+select"
     if re.search(r"or\s+['\"]?1['\"]?\s*=\s*['\"]?1", decoded_str, re.I):
-        return r"@rx or\s+['\"]?1['\"]?\s*=\s*['\"]?1"
+        return r"@rx (?i)or\s+['\"]?1['\"]?\s*=\s*['\"]?1"
     if re.search(r"exec\s*\(|drop\s+table", decoded_str, re.I):
-        return r"@rx (exec\s*\(|drop\s+table)"
+        return r"@rx (?i)(exec\s*\(|drop\s+table)"
 
     # 2. XSS Patterns
     if re.search(r"<script|javascript:|onerror\s*=", decoded_str, re.I):
-        return r"@rx (<script|javascript:|onerror\s*=)"
+        return r"@rx (?i)(<script|javascript:|onerror\s*=)"
 
     # 3. Path Traversal
     if "../" in decoded_str or "..\\" in decoded_str:
         return r"@rx (\.\./|\.\.\\)"
 
     # 4. Command Injection / RCE
-    if re.search(r"\||;|`", decoded_str) and re.search(r"(cat|nc|wget|curl|bash|sh)\s", decoded_str, re.I):
-        return r"@rx (cat|nc|wget|curl|bash|sh)\s"
+    if re.search(r"(\||;|`)\s*(cat|nc|wget|curl|bash|sh)\s", decoded_str, re.I):
+        return r"@rx (?i)(?:\||;|`)\s*(cat|nc|wget|curl|bash|sh)\s"
 
     # Fallback: Escaped specific query fragment
+    if body:
+        safe_body = re.escape(body[:40])
+        return f"@rx {safe_body}"
+
     parsed = urllib.parse.urlparse(url)
     if parsed.query:
         safe_query = re.escape(parsed.query[:40])
@@ -47,59 +53,38 @@ def generate_modsec_pattern(url: str, body: str = "") -> str:
     safe_uri = re.escape(parsed.path[:40])
     return f"@rx {safe_uri}"
 
-def get_next_rule_id() -> int:
-    """Read existing auto-generated rules file to find highest Rule ID."""
-    os.makedirs(CUSTOM_RULES_DIR, exist_ok=True)
-    if not os.path.exists(AUTO_RULES_FILE):
-        return START_RULE_ID
-
-    with open(AUTO_RULES_FILE, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    rule_ids = [int(m) for m in re.findall(r"id:(\d+)", content)]
-    if rule_ids:
-        return max(max(rule_ids) + 1, START_RULE_ID)
-    return START_RULE_ID
-
-def generate_and_save_secrule(url: str, method: str = "GET", body: str = "", attack_type: str = "Anomaly") -> Dict[str, Any]:
+def generate_pending_rule(url: str, method: str = "GET", body: str = "", attack_type: str = "Anomaly") -> Dict[str, Any]:
     """
-    Generate ModSecurity SecRule directive and write to modsecurity/custom-rules/auto_generated_rules.conf.
+    Generate ModSecurity SecRule directive data for pending approval.
     """
-    rule_id = get_next_rule_id()
+    # 1. Sanitize attack_type to prevent Rule Injection
+    safe_attack_type = re.sub(r"[^a-zA-Z0-9_\-\s]", "", attack_type)
+    if not safe_attack_type:
+        safe_attack_type = "Anomaly"
+
     pattern = generate_modsec_pattern(url, body)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
-    sec_directive = f"""# ------------------------------------------------------------------------
-# ML Auto-Generated WAF Rule (ID: {rule_id})
-# Created: {timestamp}
-# Source Target: {method} {url[:60]}
-# ------------------------------------------------------------------------
-SecRule REQUEST_URI|REQUEST_BODY "{pattern}" \\
-    "id:{rule_id},\\
+    secrule_template = f"""SecRule REQUEST_URI|REQUEST_BODY "{pattern}" \\
+    "id:{{RULE_ID}},\\
     phase:2,\\
     deny,\\
     status:403,\\
     severity:CRITICAL,\\
     log,\\
-    msg:'ML Auto-Generated WAF Rule: Blocked {attack_type} Pattern'"
-"""
-
-    # Append to auto_generated_rules.conf
-    os.makedirs(CUSTOM_RULES_DIR, exist_ok=True)
-    with open(AUTO_RULES_FILE, "a", encoding="utf-8") as f:
-        f.write(sec_directive + "\n")
-
-    print(f"[+] Successfully generated and saved ModSecurity Rule #{rule_id} to {AUTO_RULES_FILE}")
+    msg:'ML Auto-Generated WAF Rule: Blocked {safe_attack_type} Pattern'\""""
 
     return {
-        "success": True,
-        "rule_id": rule_id,
         "pattern": pattern,
-        "secrule_code": sec_directive.strip(),
-        "file_path": AUTO_RULES_FILE,
+        "variable": "REQUEST_URI|REQUEST_BODY",
+        "attack_type": safe_attack_type,
+        "severity": "CRITICAL",
+        "secrule_template": secrule_template,
+        "source_url": url[:100],
+        "source_method": method,
         "timestamp": timestamp
     }
 
 if __name__ == "__main__":
-    res = generate_and_save_secrule("/login?user=admin' OR '1'='1' --", "GET", attack_type="SQL Injection")
+    res = generate_pending_rule("/login?user=admin' OR '1'='1' --", "GET", attack_type="SQL Injection")
     print(json.dumps(res, indent=2))

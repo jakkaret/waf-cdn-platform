@@ -6,7 +6,7 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
     <div className="flex min-h-screen">
       <Sidebar />
       <div className="flex-1 ml-[260px] p-8">
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-6xl mx-auto page-enter">
           {children}
         </div>
       </div>
