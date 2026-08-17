@@ -9,6 +9,7 @@ import { Badge } from '../components/ui/Badge'
 import toast from 'react-hot-toast'
 import { WafRule } from '../types'
 import { api } from '../api/axios'
+import { Edit2, Trash2 } from 'lucide-react'
 
 export const Rules: React.FC = () => {
   const { user } = useAuthStore()
@@ -137,9 +138,21 @@ export const Rules: React.FC = () => {
                     </td>
                     <td className="p-4 text-text-muted">{rule.message}</td>
                     {isAdmin && (
-                      <td className="p-4 space-x-2">
-                        <Button variant="outline" size="sm" onClick={() => { setEditingRule(rule); setIsModalOpen(true) }}>Edit</Button>
-                        <Button variant="danger" size="sm" onClick={() => handleDelete(rule.id)}>Delete</Button>
+                      <td className="p-4 flex items-center gap-2 justify-end">
+                        <button 
+                          onClick={() => { setEditingRule(rule); setIsModalOpen(true) }}
+                          className="p-2 text-white/50 hover:text-accent-light hover:bg-accent/10 rounded-lg transition-colors border border-transparent hover:border-accent/20"
+                          title="Edit Rule"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                        <button 
+                          onClick={() => handleDelete(rule.id)}
+                          className="p-2 text-white/50 hover:text-danger hover:bg-danger/10 rounded-lg transition-colors border border-transparent hover:border-danger/20"
+                          title="Delete Rule"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </td>
                     )}
                   </tr>

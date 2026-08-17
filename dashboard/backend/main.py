@@ -89,6 +89,9 @@ app.include_router(auth.router)
 app.include_router(rules.router)
 app.include_router(alerts.router)
 app.include_router(cdn.router)
+from api import ml, ml_rules
+app.include_router(ml.router)
+app.include_router(ml_rules.router)
 
 # Error Handlers
 from fastapi import Request

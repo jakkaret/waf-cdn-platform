@@ -39,6 +39,7 @@ class DynamoDBService:
         self.origins_table = self.dynamodb.Table("waf_origins")
         self.domains_table = self.dynamodb.Table("waf_domains")
         self.ssl_certs_table = self.dynamodb.Table("waf_ssl_certs")
+        self.pending_rules_table = self.dynamodb.Table("waf_pending_rules")
     
     def convert_floats(self, obj):
         if isinstance(obj, float):

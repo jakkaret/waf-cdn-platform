@@ -11,7 +11,7 @@ from pydantic import BaseModel
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from ml.feature_engineering import extract_features_from_request, FEATURE_COLUMNS
-from ml.auto_rule_generator import generate_and_save_secrule
+from ml.auto_rule_generator import generate_pending_rule
 
 BASE_DIR = os.path.dirname(__file__)
 MODELS_DIR = os.path.join(BASE_DIR, "models")
@@ -108,9 +108,9 @@ def predict_anomaly(req: PredictionRequest):
 @app.post("/generate-rule")
 def generate_waf_rule(req: RuleGenerateRequest):
     """
-    Auto-generate a ModSecurity SecRule for an anomalous payload and save to custom-rules.
+    Auto-generate a ModSecurity SecRule data for an anomalous payload.
     """
-    res = generate_and_save_secrule(
+    res = generate_pending_rule(
         url=req.url,
         method=req.method,
         body=req.body,
