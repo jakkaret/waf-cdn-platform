@@ -6,13 +6,34 @@ import time
 from datetime import datetime
 from services.dynamodb_service import DynamoDBService
 from services.clickhouse_service import ClickHouseService
+from services.telegram_listener import dispatch_telegram_alert
 
 logger = logging.getLogger(__name__)
-
 
 db = DynamoDBService()
 ch = ClickHouseService()
 log_buffer = {}
+
+KNOWN_EDGE_IPS = {"45.154.26.91", "172.18.0.2"}
+
+SEVERITY_NUM_MAP = {
+    "0": "CRITICAL",
+    "1": "CRITICAL",
+    "2": "CRITICAL",
+    "3": "HIGH",
+    "4": "MEDIUM",
+    "5": "LOW",
+    "6": "INFO",
+    "7": "DEBUG",
+    0: "CRITICAL",
+    1: "CRITICAL",
+    2: "CRITICAL",
+    3: "HIGH",
+    4: "MEDIUM",
+    5: "LOW",
+    6: "INFO",
+    7: "DEBUG",
+}
 
 def save_hybrid_log(data: dict):
     if ch.connected:
@@ -24,10 +45,8 @@ BASE_DIR = os.path.abspath(
 )
 
 ACCESS_LOG = os.path.join(BASE_DIR, "logs/nginx/access.json")
-
 AUDIT_LOG = os.path.join(BASE_DIR, "logs/modsecurity/audit.json")
-
-MERGE_TIMEOUT = 5  # วินาที
+MERGE_TIMEOUT = 5
 
 
 # -----------------------------
@@ -43,12 +62,15 @@ def normalize_access(data):
             method = parts[0]
             url = parts[1]
 
+    status_code = int(data.get("status", 0))
+    is_blocked = (status_code == 403)
+
     return {
         "request_id": data.get("request_id"),
         "ip": data.get("remote_addr"),
         "method": method,
         "url": url,
-        "status": int(data.get("status", 0)),
+        "status": status_code,
         "user_agent": data.get("http_user_agent"),
 
         "body_bytes_sent": int(data.get("body_bytes_sent", 0)),
@@ -58,9 +80,9 @@ def normalize_access(data):
         "datetime": datetime.utcnow().isoformat() + "Z",
         "source": "nginx",
 
-        "attack_type": None,
-        "rule_id": None,
-        "severity": None,
+        "attack_type": data.get("attack_type") or ("WAF Block" if is_blocked else None),
+        "rule_id": data.get("rule_id") or data.get("waf_rule_id"),
+        "severity": data.get("severity") or ("CRITICAL" if is_blocked else None),
         "alert": False,
 
         "request_length": len(url or ""),
@@ -81,30 +103,47 @@ def normalize_modsec(data):
     headers = req.get("headers", {})
     msgs = tx.get("messages", [])
 
-    # 🔥 ใช้ header ก่อน แล้ว fallback
     request_id = (
-    headers.get("X-Request-ID")
-    or headers.get("x-request-id")
-    or tx.get("transaction", {}).get("id")   # 🔥 สำคัญ
-    or tx.get("unique_id")
+        headers.get("X-Request-ID")
+        or headers.get("x-request-id")
+        or tx.get("transaction", {}).get("id")
+        or tx.get("unique_id")
     )
     attack_type = None
     rule_id = None
     severity = None
 
     if msgs:
-        attack_type = msgs[0].get("message")
-        rule_id = msgs[0].get("details", {}).get("ruleId")
-        severity = msgs[0].get("details", {}).get("severity")
+        specific_rule = None
+        for m in msgs:
+            details = m.get("details", {})
+            rid = str(details.get("ruleId") or m.get("ruleId") or "")
+            if rid and rid not in ["949110", "980130"]:
+                specific_rule = m
+                break
+        if not specific_rule and msgs:
+            specific_rule = msgs[0]
+
+        if specific_rule:
+            attack_type = specific_rule.get("message")
+            details = specific_rule.get("details", {})
+            rule_id = str(details.get("ruleId") or specific_rule.get("ruleId") or "")
+            raw_sev = details.get("severity") or specific_rule.get("severity")
+            if raw_sev is not None:
+                severity = SEVERITY_NUM_MAP.get(str(raw_sev).strip(), str(raw_sev).upper())
 
     url = req.get("uri", "")
+    http_code = int(res.get("http_code", 0))
+
+    if http_code == 403 and not severity:
+        severity = "CRITICAL"
 
     return {
         "request_id": request_id,
         "ip": tx.get("client_ip"),
         "method": req.get("method"),
         "url": url,
-        "status": int(res.get("http_code", 0)),
+        "status": http_code,
         "user_agent": headers.get("User-Agent") or headers.get("user-agent"),
 
         "body_bytes_sent": len(res.get("body", "")),
@@ -144,14 +183,23 @@ def try_merge(key):
 
         merged = {
             **access,
-            **modsec,  # modsec override
-
+            **modsec,
             "source": "merged",
             "alert": False
         }
 
-        print("🔥 MERGED:", key)
+        if not merged.get("rule_id"):
+            merged["rule_id"] = access.get("rule_id") or modsec.get("rule_id")
+        if not merged.get("severity"):
+            merged["severity"] = access.get("severity") or modsec.get("severity")
+
+        print("🔥 MERGED:", key, "Rule:", merged.get("rule_id"), "Sev:", merged.get("severity"))
         save_hybrid_log(merged)
+
+        # Trigger Telegram Alert for blocked attack
+        if merged.get("status") in [403, 429] or merged.get("severity") in ["CRITICAL", "HIGH"]:
+            asyncio.create_task(dispatch_telegram_alert(merged))
+
         del log_buffer[key]
 
 
@@ -172,6 +220,8 @@ async def flush_old_logs():
                 if data:
                     print("⚠️ FALLBACK SAVE:", key)
                     save_hybrid_log(data)
+                    if data.get("status") in [403, 429] or data.get("severity") in ["CRITICAL", "HIGH"]:
+                        asyncio.create_task(dispatch_telegram_alert(data))
 
                 del log_buffer[key]
 
@@ -194,12 +244,17 @@ async def tail_file(path):
 
 
 # -----------------------------
-# PROCESS ACCESS
+# PROCESS ACCESS (Skip CDN Edge duplicates)
 # -----------------------------
 async def process_access_log():
     async for line in tail_file(ACCESS_LOG):
         try:
             raw = json.loads(line)
+            remote_ip = str(raw.get("remote_addr", "")).strip()
+            
+            if remote_ip in KNOWN_EDGE_IPS:
+                continue
+
             data = normalize_access(raw)
             key = data.get("request_id")
             if not key:

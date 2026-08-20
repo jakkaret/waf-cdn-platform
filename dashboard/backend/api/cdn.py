@@ -1,21 +1,28 @@
 import os
-from typing import Optional
-
-
+import time
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
+import asyncio
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends, Query, Request as _Request
+import json as _json
+import pathlib as _pathlib
+import time as _time
 
-from services.rbac import require_admin, require_viewer_or_above
+from services.rbac import require_viewer_or_above, require_admin
 from services.dynamodb_service import DynamoDBService
+from services.clickhouse_service import ClickHouseService
+from services.cdn_log_forward import normalize_cdn_access
+from services.telegram_listener import dispatch_telegram_alert
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/cdn", tags=["cdn"])
 
-# [Q3 FIX] สร้าง DynamoDB instance ระดับ module แทนการสร้างใหม่ทุก request
 _db = DynamoDBService()
+ch = ClickHouseService()
 
-
-CDN_STATS_URL = os.getenv("CDN_STATS_URL", "http://cdn-stats:9090/metrics")
-CDN_PURGE_API_URL = os.getenv("CDN_PURGE_API_URL", "http://178.104.53.123:8090")
+CDN_STATS_URL = os.getenv("CDN_STATS_URL", "http://localhost:8080/api/cdn/stats")
+CDN_PURGE_API_URL = os.getenv("CDN_PURGE_API_URL", "http://localhost:8080")
 CDN_PURGE_TOKEN = os.getenv("CDN_PURGE_TOKEN", "cdn-secret-token")
 
 REGIONS_META = {
@@ -79,7 +86,7 @@ def _mock_stats() -> dict:
     mock["GLOBAL"] = {
         "region": "GLOBAL",
         **total_all,
-        "avg_latency": 13.6, # approximate average
+        "avg_latency": 13.6,
     }
     return mock
 
@@ -230,23 +237,29 @@ async def cdn_latency(
     return {"summary": summary, "timeseries": timeseries}
 
 
-# ─── Log Ingest Endpoint ──────────────────────────────────────────
-from fastapi import Request as _Request
-import json as _json
-import pathlib as _pathlib
-import time as _time
-
+# ─── Log Ingest Endpoint (Real-time Ingestion to ClickHouse + Telegram Alerts) ──────────────────────────
 @router.post("/logs/ingest")
 async def ingest_logs(request: _Request):
-    """รับ log จาก CDN nodes (45.154.26.91) แล้วบันทึกลง file"""
+    """รับ log จาก CDN nodes (45.154.26.91) แล้วบันทึกลง ClickHouse และแจ้งเตือน Telegram ทันที"""
     try:
         body = await request.json()
-        logs = body if isinstance(body, list) else [body]
+        
+        # Unpack batch if nested under 'logs'
+        if isinstance(body, dict) and "logs" in body and isinstance(body["logs"], list):
+            logs = body["logs"]
+            region = str(body.get("region") or "").lower()
+        elif isinstance(body, list):
+            logs = body
+            region = ""
+        else:
+            logs = [body]
+            region = ""
 
-        region = request.headers.get("X-CDN-Region", "")
-        if not region and logs:
-            region = logs[0].get("region", "unknown")
-        region = region.lower()
+        if not region:
+            region = request.headers.get("X-CDN-Region", "")
+            if not region and logs and isinstance(logs[0], dict):
+                region = logs[0].get("region", "th")
+        region = (region or "th").lower()
 
         log_dir = _pathlib.Path(f"/root/waf_project/logs/cdn/{region}")
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -254,11 +267,22 @@ async def ingest_logs(request: _Request):
 
         with open(log_file, "a") as f:
             for entry in logs:
+                if not isinstance(entry, dict):
+                    continue
                 if "timestamp" not in entry:
                     entry["timestamp"] = int(_time.time())
                 f.write(_json.dumps(entry) + "\n")
+                
+                # Real-time Ingestion directly into ClickHouse
+                norm = normalize_cdn_access(entry, region)
+                ch.save_log("access_logs", norm)
+
+                # Trigger Real-time Telegram Alert & DynamoDB Alert for Blocked / Critical Attacks
+                if norm.get("status") in [403, 429] or norm.get("severity") in ["CRITICAL", "HIGH"]:
+                    asyncio.create_task(dispatch_telegram_alert(norm))
 
         return {"status": "ok", "received": len(logs), "region": region}
 
     except Exception as e:
+        logger.error("Error in cdn ingest_logs: %s", e)
         raise HTTPException(status_code=400, detail=str(e))

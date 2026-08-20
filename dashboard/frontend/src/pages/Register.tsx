@@ -1,27 +1,53 @@
 import React, { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { authApi } from '../api/auth'
+import { useAuthStore } from '../store/authStore'
+import { ThemeToggle } from '../components/ui/ThemeToggle'
 import toast from 'react-hot-toast'
-import { Shield, User, Mail, Lock, ArrowRight, CheckCircle, Globe, Zap } from 'lucide-react'
+import { Shield, ArrowRight, User, Mail, Key } from 'lucide-react'
 
 export const Register: React.FC = () => {
   const [formData, setFormData] = useState({ username: '', email: '', password: '' })
   const [loading, setLoading] = useState(false)
-  const [focusedField, setFocusedField] = useState<string | null>(null)
   const navigate = useNavigate()
+  const setAuth = useAuthStore((state) => state.setAuth)
+
+  const score = (() => {
+    let s = 0
+    const p = formData.password
+    if (p.length >= 8) s++
+    if (/[A-Z]/.test(p)) s++
+    if (/[0-9]/.test(p)) s++
+    if (/[^A-Za-z0-9]/.test(p)) s++
+    return s
+  })()
+
+  const strengthColor =
+    score === 0 ? '' : score <= 2 ? '#ef4444' : score === 3 ? '#f59e0b' : '#10b981'
+  const strengthLabel =
+    score === 0 ? '' : score <= 2 ? 'Weak' : score === 3 ? 'Good' : 'Strong'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     try {
-      await authApi.register(formData)
-      toast.success('Registration successful! Please login.')
-      navigate('/login')
+      await authApi.register({
+        email: formData.email,
+        password: formData.password,
+        username: formData.username,
+      })
+      const { access_token } = await authApi.login(formData.email, formData.password)
+      useAuthStore.setState({ token: access_token })
+      const user = await authApi.getMe()
+      setAuth(access_token, user)
+      toast.success('Account provisioned successfully')
+      navigate('/')
     } catch (err: any) {
       const detail = err.response?.data?.detail
-      const message = typeof detail === 'string'
-        ? detail
-        : Array.isArray(detail)
+      const message =
+        typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
           ? detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ')
           : 'Registration failed'
       toast.error(message)
@@ -30,240 +56,142 @@ export const Register: React.FC = () => {
     }
   }
 
-  const getStrengthScore = (pass: string) => {
-    let score = 0
-    if (pass.length > 5) score += 1
-    if (pass.length > 8) score += 1
-    if (/[A-Z]/.test(pass)) score += 1
-    if (/[0-9]/.test(pass)) score += 1
-    if (/[^A-Za-z0-9]/.test(pass)) score += 1
-    return score
-  }
-
-  const score = getStrengthScore(formData.password)
-  const strengthLabels = ['', 'Weak', 'Fair', 'Good', 'Strong', 'Very Strong']
-  const strengthColors = ['', '#fc8181', '#f6ad55', '#76e4f7', '#68d391', '#68d391']
-  const strengthLabel = formData.password ? strengthLabels[score] || '' : ''
-  const strengthColor = formData.password ? strengthColors[score] || '' : ''
-
-  const inputClasses = (field: string) =>
-    `relative flex items-center rounded-xl border transition-all duration-200 ${
-      focusedField === field
-        ? 'border-accent/40 bg-accent/[0.03] shadow-[0_0_0_3px_rgba(102,126,234,0.08)]'
-        : 'border-white/[0.08] bg-white/[0.02] hover:border-white/[0.12]'
-    }`
-
-  const iconClasses = (field: string) =>
-    `pl-4 transition-colors duration-200 ${focusedField === field ? 'text-accent' : 'text-white/20'}`
-
   return (
-    <div className="min-h-screen flex auth-bg">
-      {/* Left Panel — Brand Showcase */}
-      <div className="hidden lg:flex lg:w-[45%] relative overflow-hidden flex-col justify-between p-12">
-        {/* Grid pattern */}
-        <div className="absolute inset-0 auth-grid" />
+    <div className="min-h-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] relative overflow-hidden select-none">
+      {/* Subtle Background Pattern */}
+      <div
+        className="absolute inset-0 opacity-[0.03] dark:opacity-[0.07] pointer-events-none"
+        style={{
+          backgroundImage: `radial-gradient(var(--text-primary) 1px, transparent 1px)`,
+          backgroundSize: '24px 24px',
+        }}
+      />
 
-        {/* Gradient orbs */}
-        <div className="absolute top-1/3 right-1/4 w-[350px] h-[350px] bg-accent-dark/10 rounded-full blur-[120px] animate-breathe" />
-        <div className="absolute bottom-1/4 left-1/3 w-[300px] h-[300px] bg-accent/8 rounded-full blur-[100px] animate-breathe" style={{ animationDelay: '1.2s' }} />
-
-        {/* Content */}
-        <div className="relative z-10">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl gradient-brand flex items-center justify-center shadow-glow">
-              <Shield size={22} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-xl font-extrabold text-white tracking-tight font-heading leading-none">WAF</h1>
-              <span className="text-[10px] text-accent-light font-semibold tracking-[0.2em] uppercase">Security Platform</span>
-            </div>
+      {/* Top Header */}
+      <header className="flex justify-between items-center px-6 py-4 border-b border-[var(--bg-border-subtle)] relative z-10">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white shadow-sm shadow-orange-500/20">
+            <Shield size={17} className="stroke-[2.2]" />
+          </div>
+          <div>
+            <span className="font-bold text-[14px] font-mono tracking-tight text-[var(--text-primary)]">
+              CloudWAF
+            </span>
+            <span className="text-[10px] font-mono text-[var(--text-muted)] ml-1.5 uppercase">
+              Control Plane
+            </span>
           </div>
         </div>
+        <ThemeToggle />
+      </header>
 
-        <div className="relative z-10 max-w-md">
-          <h2 className="text-[38px] font-extrabold text-white leading-[1.1] tracking-tight font-heading mb-5">
-            Start securing<br/>
-            <span className="bg-gradient-to-r from-accent to-accent-dark bg-clip-text text-transparent">your infrastructure</span>
-          </h2>
-          <p className="text-[15px] text-white/40 leading-relaxed mb-10">
-            Create your account to access enterprise-grade protection with ML-powered threat intelligence.
-          </p>
-
-          {/* Feature list */}
-          <div className="flex flex-col gap-4">
-            {[
-              { icon: <Globe size={16} />, title: 'Global Edge Network', desc: 'Multi-region CDN with WAF at every edge' },
-              { icon: <Zap size={16} />, title: 'Instant Setup', desc: 'One-click deployment, no config needed' },
-              { icon: <CheckCircle size={16} />, title: 'Free Tier Available', desc: 'Start with 5 origin servers, no credit card' },
-            ].map((feat, i) => (
-              <div
-                key={i}
-                className="flex items-start gap-3 animate-fade-in-up"
-                style={{ animationDelay: `${0.3 + i * 0.12}s` }}
-              >
-                <div className="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] flex items-center justify-center text-accent-light shrink-0 mt-0.5">
-                  {feat.icon}
-                </div>
-                <div>
-                  <p className="text-[13px] font-semibold text-white/70">{feat.title}</p>
-                  <p className="text-[12px] text-white/30 mt-0.5">{feat.desc}</p>
-                </div>
-              </div>
-            ))}
+      {/* Center Form Card */}
+      <main className="flex-1 flex items-center justify-center px-4 py-8 relative z-10">
+        <div className="w-full max-w-sm dash-card p-6 sm:p-7 shadow-2xl border border-[var(--bg-border-hover)]">
+          <div className="mb-6">
+            <h1 className="text-[18px] font-bold tracking-tight font-mono mb-1">Create Admin Account</h1>
+            <p className="text-[12.5px] text-[var(--text-muted)] m-0">
+              Provision credentials for CloudWAF security access
+            </p>
           </div>
-        </div>
 
-        <div className="relative z-10 text-[12px] text-white/20 font-medium">
-          © 2026 WAF Security Platform. All rights reserved.
-        </div>
-      </div>
-
-      {/* Right Panel — Register Form */}
-      <div className="flex-1 flex items-center justify-center p-6 sm:p-10 relative">
-        {/* Subtle glow */}
-        <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-accent-dark/5 rounded-full blur-[100px] pointer-events-none" />
-
-        <div className="w-full max-w-[400px] relative z-10">
-          {/* Mobile logo */}
-          <div className="lg:hidden flex items-center gap-3 mb-10">
-            <div className="w-10 h-10 rounded-xl gradient-brand flex items-center justify-center shadow-glow">
-              <Shield size={20} className="text-white" />
-            </div>
+          <form onSubmit={handleSubmit} className="space-y-4 text-[12.5px]">
             <div>
-              <h1 className="text-lg font-extrabold text-white tracking-tight font-heading leading-none">WAF</h1>
-              <span className="text-[10px] text-accent-light font-semibold tracking-[0.2em] uppercase">Security</span>
-            </div>
-          </div>
-
-          <div className="mb-8">
-            <h2 className="text-[28px] font-extrabold text-white tracking-tight font-heading leading-tight">Create account</h2>
-            <p className="text-[14px] text-white/35 mt-2">Get started with your security dashboard</p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Username */}
-            <div>
-              <label className="block text-[11px] font-bold text-white/30 uppercase tracking-[0.08em] mb-2.5">Username</label>
-              <div className={inputClasses('username')}>
-                <div className={iconClasses('username')}>
-                  <User size={16} />
-                </div>
+              <label className="block text-[11px] font-bold uppercase font-mono text-[var(--text-secondary)] mb-1.5">
+                Username
+              </label>
+              <div className="relative">
+                <User className="absolute left-3 top-2.5 text-[var(--text-muted)]" size={14} />
                 <input
-                  id="register-username"
                   type="text"
                   required
-                  placeholder="johndoe"
-                  className="w-full bg-transparent px-3 py-3 text-[14px] text-white placeholder:text-white/15 outline-none"
+                  placeholder="admin_sec"
+                  className="w-full dash-input pl-9 font-mono"
                   value={formData.username}
-                  onChange={e => setFormData({ ...formData, username: e.target.value })}
-                  onFocus={() => setFocusedField('username')}
-                  onBlur={() => setFocusedField(null)}
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                 />
               </div>
             </div>
 
-            {/* Email */}
             <div>
-              <label className="block text-[11px] font-bold text-white/30 uppercase tracking-[0.08em] mb-2.5">Email Address</label>
-              <div className={inputClasses('email')}>
-                <div className={iconClasses('email')}>
-                  <Mail size={16} />
-                </div>
+              <label className="block text-[11px] font-bold uppercase font-mono text-[var(--text-secondary)] mb-1.5">
+                Work Email
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-2.5 text-[var(--text-muted)]" size={14} />
                 <input
-                  id="register-email"
                   type="email"
                   required
-                  placeholder="you@company.com"
-                  className="w-full bg-transparent px-3 py-3 text-[14px] text-white placeholder:text-white/15 outline-none"
+                  placeholder="secops@company.com"
+                  className="w-full dash-input pl-9 font-mono"
                   value={formData.email}
-                  onChange={e => setFormData({ ...formData, email: e.target.value })}
-                  onFocus={() => setFocusedField('email')}
-                  onBlur={() => setFocusedField(null)}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 />
               </div>
             </div>
 
-            {/* Password */}
             <div>
-              <label className="block text-[11px] font-bold text-white/30 uppercase tracking-[0.08em] mb-2.5">Password</label>
-              <div className={inputClasses('password')}>
-                <div className={iconClasses('password')}>
-                  <Lock size={16} />
-                </div>
+              <label className="block text-[11px] font-bold uppercase font-mono text-[var(--text-secondary)] mb-1.5">
+                Password
+              </label>
+              <div className="relative">
+                <Key className="absolute left-3 top-2.5 text-[var(--text-muted)]" size={14} />
                 <input
-                  id="register-password"
                   type="password"
                   required
-                  placeholder="••••••••"
-                  className="w-full bg-transparent px-3 py-3 text-[14px] text-white placeholder:text-white/15 outline-none"
+                  placeholder="••••••••••••"
+                  className="w-full dash-input pl-9 font-mono"
                   value={formData.password}
-                  onChange={e => setFormData({ ...formData, password: e.target.value })}
-                  onFocus={() => setFocusedField('password')}
-                  onBlur={() => setFocusedField(null)}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 />
               </div>
-
-              {/* Password strength meter */}
               {formData.password && (
-                <div className="mt-3 animate-slide-down">
-                  <div className="flex gap-1.5 h-[3px] mb-2">
-                    {[1, 2, 3, 4].map(i => (
+                <div className="mt-2 space-y-1">
+                  <div className="flex gap-1 h-[3px]">
+                    {[1, 2, 3, 4].map((i) => (
                       <div
                         key={i}
-                        className="flex-1 rounded-full transition-all duration-500"
+                        className="flex-1 rounded-full transition-colors"
                         style={{
-                          backgroundColor: score >= i ? strengthColor : 'rgba(255,255,255,0.06)',
-                          boxShadow: score >= i ? `0 0 6px ${strengthColor}40` : 'none',
+                          backgroundColor: score >= i ? strengthColor : 'var(--bg-border)',
                         }}
                       />
                     ))}
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span
-                      className="text-[11px] font-semibold transition-colors duration-300"
-                      style={{ color: strengthColor || 'rgba(255,255,255,0.2)' }}
-                    >
+                  <div className="flex justify-between text-[11px] font-mono">
+                    <span style={{ color: strengthColor }} className="font-semibold">
                       {strengthLabel}
                     </span>
-                    <span className="text-[11px] text-white/15">{formData.password.length} characters</span>
+                    <span className="text-[var(--text-muted)]">{formData.password.length} chars</span>
                   </div>
                 </div>
               )}
             </div>
-            
-            {/* Submit */}
+
             <button
-              id="register-submit"
               type="submit"
               disabled={loading}
-              className="w-full mt-2 gradient-brand text-white font-semibold text-[14px] py-3 rounded-xl
-                         shadow-md hover:shadow-glow transition-all duration-300
-                         shimmer-hover press-scale
-                         disabled:opacity-50 disabled:cursor-not-allowed
-                         flex items-center justify-center gap-2"
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-mono font-semibold text-[13px] py-2.5 rounded-md flex items-center justify-center gap-2 transition-all disabled:opacity-40 shadow-sm cursor-pointer"
             >
               {loading ? (
-                <svg className="animate-spin h-4 w-4 text-current" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
+                <span>Provisioning Account...</span>
               ) : (
                 <>
-                  Create Account
-                  <ArrowRight size={16} />
+                  <span>Create Account</span>
+                  <ArrowRight size={14} />
                 </>
               )}
             </button>
           </form>
 
-          <p className="mt-8 text-center text-[13px] text-white/25">
+          <p className="mt-5 text-center text-[12px] text-[var(--text-muted)] font-mono">
             Already have an account?{' '}
-            <Link to="/login" className="text-accent font-semibold hover:text-accent-light transition-colors">
+            <Link to="/login" className="text-orange-500 font-semibold hover:underline">
               Sign in
             </Link>
           </p>
         </div>
-      </div>
+      </main>
     </div>
   )
 }

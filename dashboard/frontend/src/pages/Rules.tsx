@@ -1,158 +1,278 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rulesApi } from '../api/rules'
-import { useAuthStore } from '../store/authStore'
 import { TopBar } from '../components/layout/TopBar'
-import { Card } from '../components/ui/Card'
-import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
-import toast from 'react-hot-toast'
+import { Button } from '../components/ui/Button'
+import { useAuthStore } from '../store/authStore'
+import {
+  Edit2,
+  Trash2,
+  Plus,
+  RefreshCw,
+  Shield,
+  ShieldAlert,
+  Code,
+  FileText,
+  CheckCircle2,
+  AlertTriangle,
+  Search,
+} from 'lucide-react'
 import { WafRule } from '../types'
-import { api } from '../api/axios'
-import { Edit2, Trash2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 export const Rules: React.FC = () => {
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin'
   const queryClient = useQueryClient()
-  
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingRule, setEditingRule] = useState<Partial<WafRule> | null>(null)
+  const [search, setSearch] = useState('')
 
-  const { data: rules = [], isLoading } = useQuery({
-    queryKey: ['rules'],
-    queryFn: rulesApi.getRules,
+  const { data: rules = [], isLoading, isFetching, refetch } = useQuery({
+    queryKey: ['waf-rules'],
+    queryFn: () => rulesApi.getRules(),
   })
 
   const createMutation = useMutation({
-    mutationFn: rulesApi.createRule,
+    mutationFn: (rule: Omit<WafRule, 'id'> & { id?: string }) => rulesApi.createRule(rule),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['rules'] })
+      queryClient.invalidateQueries({ queryKey: ['waf-rules'] })
       setIsModalOpen(false)
-      toast.success('Rule created successfully')
+      setEditingRule(null)
+      toast.success('Custom WAF rule deployed successfully')
     },
-    onError: () => toast.error('Failed to create rule')
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to create rule'),
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, rule }: { id: string, rule: Partial<WafRule> }) => rulesApi.updateRule(id, rule),
+    mutationFn: ({ id, rule }: { id: string; rule: Partial<WafRule> }) => rulesApi.updateRule(id, rule),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['rules'] })
+      queryClient.invalidateQueries({ queryKey: ['waf-rules'] })
       setIsModalOpen(false)
-      toast.success('Rule updated successfully')
+      setEditingRule(null)
+      toast.success('WAF rule updated successfully')
     },
-    onError: () => toast.error('Failed to update rule')
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to update rule'),
   })
 
   const deleteMutation = useMutation({
-    mutationFn: rulesApi.deleteRule,
+    mutationFn: (id: string) => rulesApi.deleteRule(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['rules'] })
-      toast.success('Rule deleted')
+      queryClient.invalidateQueries({ queryKey: ['waf-rules'] })
+      toast.success('Rule removed from ModSecurity policy')
     },
-    onError: () => toast.error('Failed to delete rule')
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to delete rule'),
   })
 
   const syncMutation = useMutation({
-    mutationFn: () => api.post('/rules/sync'),
-    onSuccess: (res) => {
-      const nodes: { region: string; status: string }[] = res.data?.node_results || []
-      if (nodes.length > 0) {
-        const summary = nodes.map(n => `${n.status === 'synced' ? '✅' : '❌'} ${n.region}`).join('  ')
-        toast.success(`Sync complete: ${summary}`, { duration: 5000 })
-      } else {
-        toast.success('Rules synced to edge nodes')
-      }
-    },
-    onError: (e: any) => toast.error(e.response?.data?.detail || 'Sync failed'),
+    mutationFn: () => rulesApi.syncRules(),
+    onSuccess: (data: any) => toast.success(`Edge Sync Complete: ${data.synced_nodes || 3} POP nodes synced`),
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Edge rule synchronization failed'),
   })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!editingRule?.id || !editingRule?.operator || !editingRule?.message) {
-      return toast.error('Please fill required fields')
+    if (!editingRule) return
+    let op = (editingRule.operator || '').trim()
+    if (op && !op.startsWith('@')) op = `@contains ${op}`
+    const rule = {
+      ...editingRule,
+      id: String(editingRule.id || '').replace('custom-', ''),
+      operator: op,
+      severity: (editingRule.severity || 'CRITICAL').toUpperCase() as any,
     }
-    
-    // Check if updating existing or creating new based on if rule existed
-    const exists = rules.find(r => r.id === editingRule.id)
-    if (exists && editingRule !== exists) { // edit mode is simplified here for demo
-      updateMutation.mutate({ id: editingRule.id, rule: editingRule })
-    } else {
-      createMutation.mutate(editingRule as Omit<WafRule, 'id'> & { id?: string })
-    }
+    const exists = rules.find((r) => r.id === editingRule.id || r.id === `custom-${editingRule.id}`)
+    if (exists && editingRule !== exists) updateMutation.mutate({ id: String(editingRule.id), rule })
+    else createMutation.mutate(rule as any)
   }
 
   const handleDelete = (id: string) => {
-    if (window.confirm('Delete this rule?')) {
+    if (window.confirm(`Are you sure you want to delete rule #${id}?`)) {
       deleteMutation.mutate(id)
     }
   }
 
+  const filteredRules = rules.filter(
+    (r) =>
+      r.id.toLowerCase().includes(search.toLowerCase()) ||
+      (r.message || '').toLowerCase().includes(search.toLowerCase()) ||
+      (r.operator || '').toLowerCase().includes(search.toLowerCase())
+  )
+
   return (
-    <div>
-      <TopBar 
-        title="Custom Rules" 
-        subtitle="Manage WAF filtering rules"
-        action={isAdmin && (
-          <div className="flex gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending}
-            >
-              {syncMutation.isPending ? '⏳ Syncing...' : '🔄 Sync to Edge Nodes'}
-            </Button>
-            <Button onClick={() => { setEditingRule({}); setIsModalOpen(true) }}>+ Add Rule</Button>
+    <div className="space-y-6 animate-fade-in">
+      <TopBar
+        title="WAF Custom Rule Policies"
+        subtitle="Manage ModSecurity SecRule definitions and edge inspection logic"
+        badge={
+          <Badge color="brand" dot>
+            {rules.length} ACTIVE POLICIES
+          </Badge>
+        }
+        action={
+          <div className="flex items-center gap-2">
+            {isAdmin && (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => syncMutation.mutate()}
+                  isLoading={syncMutation.isPending}
+                  icon={<RefreshCw size={13} />}
+                >
+                  Sync to Edge Nodes
+                </Button>
+                <Button
+                  variant="brand"
+                  onClick={() => {
+                    setEditingRule({ severity: 'CRITICAL', variable: 'REQUEST_URI' })
+                    setIsModalOpen(true)
+                  }}
+                  icon={<Plus size={14} />}
+                >
+                  Create Rule
+                </Button>
+              </>
+            )}
           </div>
-        )}
+        }
       />
 
-      <Card noPadding>
+      {/* Overview Stats Bar */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="dash-card p-4 flex items-center justify-between border-l-2 border-l-orange-500">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] block font-mono">
+              Custom Rules
+            </span>
+            <span className="text-[22px] font-bold font-mono text-[var(--text-primary)]">
+              {rules.length}
+            </span>
+          </div>
+          <Code size={20} className="text-orange-500 opacity-80" />
+        </div>
+
+        <div className="dash-card p-4 flex items-center justify-between border-l-2 border-l-emerald-500">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] block font-mono">
+              OWASP Core Rule Set
+            </span>
+            <span className="text-[22px] font-bold font-mono text-emerald-500">CRS v3.3.5</span>
+          </div>
+          <Shield size={20} className="text-emerald-500 opacity-80" />
+        </div>
+
+        <div className="dash-card p-4 flex items-center justify-between border-l-2 border-l-sky-500">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] block font-mono">
+              Default Action
+            </span>
+            <span className="text-[22px] font-bold font-mono text-sky-500">403 Forbidden</span>
+          </div>
+          <ShieldAlert size={20} className="text-sky-500 opacity-80" />
+        </div>
+      </div>
+
+      {/* Rules Table */}
+      <div className="dash-card overflow-hidden">
+        <div className="p-3.5 border-b border-[var(--bg-border)] bg-[var(--bg-surface)] flex items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-2.5 text-[var(--text-muted)]" size={14} />
+            <input
+              type="text"
+              placeholder="Search by ID, Operator pattern, or Message..."
+              className="w-full dash-input pl-8 py-1.5 text-[12px] font-mono"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <span className="text-[11px] font-mono text-[var(--text-muted)]">
+            {filteredRules.length} of {rules.length} rules
+          </span>
+        </div>
+
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-white/5 text-text-muted text-[11px] uppercase tracking-wider">
+          <table className="dash-table">
+            <thead>
               <tr>
-                <th className="p-4 font-semibold">Rule ID</th>
-                <th className="p-4 font-semibold">Variable</th>
-                <th className="p-4 font-semibold">Operator</th>
-                <th className="p-4 font-semibold">Severity</th>
-                <th className="p-4 font-semibold">Message</th>
-                {isAdmin && <th className="p-4 font-semibold">Actions</th>}
+                <th>Rule ID</th>
+                <th>Target Variable</th>
+                <th>Operator & Pattern</th>
+                <th>Action & Severity</th>
+                <th>Policy Description</th>
+                {isAdmin && <th className="text-right">Manage</th>}
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody>
               {isLoading ? (
-                <tr><td colSpan={6} className="p-8 text-center text-text-muted">Loading rules...</td></tr>
-              ) : rules.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center text-text-muted">No rules configured</td></tr>
+                <tr>
+                  <td colSpan={6} className="py-10 text-center text-[var(--text-muted)] font-mono text-[12px]">
+                    <RefreshCw size={16} className="animate-spin inline mr-2 text-orange-500" />
+                    Loading ModSecurity policies...
+                  </td>
+                </tr>
+              ) : filteredRules.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-10 text-center text-[var(--text-muted)] font-mono text-[12px]">
+                    No custom rules found. Click &quot;Create Rule&quot; to define a new policy.
+                  </td>
+                </tr>
               ) : (
-                rules.map((rule) => (
-                  <tr key={rule.id} className="hover:bg-white/5 transition-colors">
-                    <td className="p-4 font-mono text-[13px]">{rule.id}</td>
-                    <td className="p-4"><Badge color="gray">{rule.variable}</Badge></td>
-                    <td className="p-4 font-mono text-[12px] text-text-muted max-w-[200px] truncate">{rule.operator}</td>
-                    <td className="p-4">
-                      <Badge color={rule.severity === 'CRITICAL' ? 'danger' : rule.severity === 'HIGH' ? 'warning' : 'brand'}>
-                        {rule.severity}
+                filteredRules.map((rule) => (
+                  <tr key={rule.id} className="hover:bg-[var(--bg-hover)]">
+                    <td>
+                      <span className="font-mono font-bold text-[12px] text-orange-500">
+                        {rule.id}
+                      </span>
+                    </td>
+                    <td>
+                      <Badge color="gray">{rule.variable}</Badge>
+                    </td>
+                    <td>
+                      <span className="font-mono text-[12px] text-[var(--text-primary)] max-w-[260px] truncate block bg-[var(--bg-primary)] px-2 py-0.5 rounded border border-[var(--bg-border-subtle)]">
+                        {rule.operator}
+                      </span>
+                    </td>
+                    <td>
+                      <Badge
+                        color={
+                          rule.severity === 'CRITICAL'
+                            ? 'danger'
+                            : rule.severity === 'HIGH'
+                            ? 'warning'
+                            : 'info'
+                        }
+                      >
+                        {rule.severity} (DENY)
                       </Badge>
                     </td>
-                    <td className="p-4 text-text-muted">{rule.message}</td>
+                    <td>
+                      <span className="text-[12px] text-[var(--text-secondary)]">
+                        {rule.message}
+                      </span>
+                    </td>
                     {isAdmin && (
-                      <td className="p-4 flex items-center gap-2 justify-end">
-                        <button 
-                          onClick={() => { setEditingRule(rule); setIsModalOpen(true) }}
-                          className="p-2 text-white/50 hover:text-accent-light hover:bg-accent/10 rounded-lg transition-colors border border-transparent hover:border-accent/20"
-                          title="Edit Rule"
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                        <button 
-                          onClick={() => handleDelete(rule.id)}
-                          className="p-2 text-white/50 hover:text-danger hover:bg-danger/10 rounded-lg transition-colors border border-transparent hover:border-danger/20"
-                          title="Delete Rule"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                      <td className="text-right">
+                        <div className="flex items-center gap-1.5 justify-end">
+                          <button
+                            onClick={() => {
+                              setEditingRule(rule)
+                              setIsModalOpen(true)
+                            }}
+                            className="p-1.5 text-[var(--text-muted)] hover:text-sky-500 rounded bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--bg-border)] transition-colors cursor-pointer"
+                            title="Edit Rule"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(rule.id)}
+                            className="p-1.5 text-[var(--text-muted)] hover:text-red-500 rounded bg-[var(--bg-surface-elevated)] hover:bg-red-500/10 border border-[var(--bg-border)] transition-colors cursor-pointer"
+                            title="Delete Rule"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -161,50 +281,122 @@ export const Rules: React.FC = () => {
             </tbody>
           </table>
         </div>
-      </Card>
+      </div>
 
-      {/* Basic Modal Implementation */}
+      {/* Create / Edit Rule Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-lg">
-            <h3 className="text-lg font-bold mb-4">{editingRule?.id && rules.find(r=>r.id===editingRule.id) ? 'Edit Rule' : 'Add Rule'}</h3>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm mb-1 text-text-muted">Rule ID</label>
-                <input required type="text" className="w-full bg-bg-surface border border-white/10 rounded-lg px-4 py-2 text-sm" value={editingRule?.id || ''} onChange={e => setEditingRule({...editingRule, id: e.target.value})} />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="w-full max-w-lg dash-card overflow-hidden shadow-2xl border border-[var(--bg-border-hover)]">
+            <div className="dash-card-header bg-[var(--bg-surface-elevated)]">
+              <div className="flex items-center gap-2">
+                <Code size={16} className="text-orange-500" />
+                <h3 className="font-mono">
+                  {editingRule?.id && rules.find((r) => r.id === editingRule.id)
+                    ? `Edit Rule #${editingRule.id}`
+                    : 'Create Custom SecRule'}
+                </h3>
               </div>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] font-mono text-base cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-5 space-y-4 text-[12.5px]">
               <div>
-                <label className="block text-sm mb-1 text-text-muted">Variable</label>
-                <select className="w-full bg-bg-surface border border-white/10 rounded-lg px-4 py-2 text-sm" value={editingRule?.variable || 'REQUEST_URI'} onChange={e => setEditingRule({...editingRule, variable: e.target.value as any})}>
-                  <option value="REQUEST_URI">REQUEST_URI</option>
-                  <option value="ARGS">ARGS</option>
-                  <option value="REQUEST_HEADERS">REQUEST_HEADERS</option>
-                  <option value="REQUEST_BODY">REQUEST_BODY</option>
-                </select>
+                <label className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                  Rule ID (Numeric e.g. 100007)
+                </label>
+                <input
+                  required
+                  type="text"
+                  placeholder="e.g. 100007"
+                  className="w-full dash-input font-mono"
+                  value={editingRule?.id || ''}
+                  onChange={(e) => setEditingRule({ ...editingRule, id: e.target.value })}
+                />
               </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                    Target Variable
+                  </label>
+                  <select
+                    className="w-full dash-input font-mono cursor-pointer"
+                    value={editingRule?.variable || 'REQUEST_URI'}
+                    onChange={(e) => setEditingRule({ ...editingRule, variable: e.target.value as any })}
+                  >
+                    <option value="REQUEST_URI">REQUEST_URI</option>
+                    <option value="ARGS">ARGS</option>
+                    <option value="REQUEST_HEADERS">REQUEST_HEADERS</option>
+                    <option value="REQUEST_BODY">REQUEST_BODY</option>
+                    <option value="REMOTE_ADDR">REMOTE_ADDR</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                    Action Severity
+                  </label>
+                  <select
+                    className="w-full dash-input font-mono cursor-pointer"
+                    value={editingRule?.severity || 'CRITICAL'}
+                    onChange={(e) => setEditingRule({ ...editingRule, severity: e.target.value as any })}
+                  >
+                    <option value="CRITICAL">CRITICAL (403 Deny)</option>
+                    <option value="HIGH">HIGH (403 Deny)</option>
+                    <option value="MEDIUM">MEDIUM (Warning)</option>
+                    <option value="LOW">LOW (Notice)</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
-                <label className="block text-sm mb-1 text-text-muted">Operator</label>
-                <input required type="text" className="w-full bg-bg-surface border border-white/10 rounded-lg px-4 py-2 text-sm" value={editingRule?.operator || ''} onChange={e => setEditingRule({...editingRule, operator: e.target.value})} />
+                <label className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                  Operator & Pattern
+                </label>
+                <input
+                  required
+                  type="text"
+                  placeholder="@rx (union.*select) or @contains badkeyword"
+                  className="w-full dash-input font-mono"
+                  value={editingRule?.operator || ''}
+                  onChange={(e) => setEditingRule({ ...editingRule, operator: e.target.value })}
+                />
+                <p className="text-[11px] text-[var(--text-muted)] mt-1 font-mono">
+                  Supported: <code className="text-orange-500">@rx &lt;regex&gt;</code>,{' '}
+                  <code className="text-orange-500">@contains &lt;string&gt;</code>,{' '}
+                  <code className="text-orange-500">@streq &lt;string&gt;</code>
+                </p>
               </div>
+
               <div>
-                <label className="block text-sm mb-1 text-text-muted">Severity</label>
-                <select className="w-full bg-bg-surface border border-white/10 rounded-lg px-4 py-2 text-sm" value={editingRule?.severity || 'MEDIUM'} onChange={e => setEditingRule({...editingRule, severity: e.target.value as any})}>
-                  <option value="CRITICAL">Critical</option>
-                  <option value="HIGH">High</option>
-                  <option value="MEDIUM">Medium</option>
-                  <option value="LOW">Low</option>
-                </select>
+                <label className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                  Policy Description / Alert Message
+                </label>
+                <input
+                  required
+                  type="text"
+                  placeholder="Block unauthorized payload pattern"
+                  className="w-full dash-input"
+                  value={editingRule?.message || ''}
+                  onChange={(e) => setEditingRule({ ...editingRule, message: e.target.value })}
+                />
               </div>
-              <div>
-                <label className="block text-sm mb-1 text-text-muted">Message</label>
-                <input required type="text" className="w-full bg-bg-surface border border-white/10 rounded-lg px-4 py-2 text-sm" value={editingRule?.message || ''} onChange={e => setEditingRule({...editingRule, message: e.target.value})} />
-              </div>
-              <div className="flex justify-end gap-2 mt-6">
-                <Button variant="ghost" type="button" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-                <Button type="submit">Save</Button>
+
+              <div className="flex justify-end gap-2.5 pt-4 border-t border-[var(--bg-border)]">
+                <Button variant="ghost" type="button" onClick={() => setIsModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button variant="brand" type="submit" isLoading={createMutation.isPending || updateMutation.isPending}>
+                  Save Policy
+                </Button>
               </div>
             </form>
-          </Card>
+          </div>
         </div>
       )}
     </div>

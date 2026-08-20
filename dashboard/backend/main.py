@@ -6,20 +6,19 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 # อ่าน allowed origins จาก env (คั่นด้วย comma)
-# ตัวอย่าง ALLOWED_ORIGINS=http://178.104.53.123:5173,https://yourdomain.com
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://178.104.53.123:5173,http://178.104.53.123:3000,http://178.104.53.123:8000")
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://178.104.53.123:5173,http://178.104.53.123:3000,http://178.104.53.123:8000,http://178.104.53.123,http://waf-main-dashboard.duckdns.org,https://waf-main-dashboard.duckdns.org")
 ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 from services.fetch_logs import get_recent_logs
+from services.clickhouse_service import ClickHouseService
 from fastapi.responses import FileResponse
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from api import rules
 from api import auth
 from api import cdn
 from services.log_forward import log_forward_worker
-from services.cdn_log_forward import cdn_log_forward_worker
 from services.telegram_listener import alert_worker
 from services.rbac import require_viewer_or_above
 from api import alerts
@@ -33,12 +32,11 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# [R1 FIX] เพิ่ม Rate Limiter เพื่อป้องกัน brute force
+ch = ClickHouseService()
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# [S1 FIX] ห้ามใช้ allow_origins=["*"] ร่วมกับ allow_credentials=True
-# เพราะขัด CORS spec และเปิดช่องโหว่ CSRF — ใช้ explicit origins แทน
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -51,11 +49,9 @@ app.add_middleware(
 # 4. STATIC FILES & REACT APP SERVING
 # ==========================================
 
-# Base directory
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
-# Provide fallback for local dev vs prod
 assets_dir = FRONTEND_DIST / "assets" if FRONTEND_DIST.exists() else BASE_DIR / "frontend" / "assets"
 if assets_dir.exists():
     app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
@@ -74,15 +70,48 @@ async def system_info(current_user: dict = Depends(require_viewer_or_above)):
     }
 
 
+# Logs Filter Options (scanned from real ClickHouse data)
+@app.get("/api/logs/filters")
+async def fetch_log_filters(current_user: dict = Depends(require_viewer_or_above)):
+    if ch.connected:
+        return ch.get_filter_options()
+    return {
+        "status_codes": [200, 403, 404, 500],
+        "methods": ["GET", "POST"],
+        "severities": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"]
+    }
 
-# Logs (protected - viewer+)
+
+# Logs (protected - viewer+) - Routed to ClickHouse with pagination
 @app.get("/api/logs/recent")
 async def fetch_recent_logs(
-    limit: int = 10,
+    limit: int = Query(20, description="Items per page"),
+    page: int = Query(1, description="Page number (1-indexed)"),
+    search: str = Query("", description="Search IP, URL, Rule ID"),
+    status_filter: str = Query("ALL", description="ALL, BLOCKED, ALLOWED, or specific status code like 500, 404"),
+    severity_filter: str = Query("ALL", description="ALL, CRITICAL, HIGH, MEDIUM, LOW, NONE"),
+    method_filter: str = Query("ALL", description="ALL, GET, POST, etc."),
     current_user: dict = Depends(require_viewer_or_above),
 ):
-    logs = get_recent_logs(limit)
-    return {"logs": logs}
+    if ch.connected:
+        return ch.get_logs(
+            limit=limit,
+            page=page,
+            search=search,
+            status_filter=status_filter,
+            severity_filter=severity_filter,
+            method_filter=method_filter
+        )
+    else:
+        logs = get_recent_logs(limit)
+        return {
+            "logs": logs,
+            "total": len(logs),
+            "page": page,
+            "limit": limit,
+            "total_pages": 1
+        }
+
 
 # API Routers
 app.include_router(auth.router)
@@ -117,8 +146,9 @@ async def health_check():
     try:
         from services.dynamodb_service import DynamoDBService
         db = DynamoDBService()
-        db.alerts_table.load()  # ping table
-        return {"status": "ok", "dynamodb": "connected"}
+        db.alerts_table.load()
+        ch_status = "connected" if ch.connected else "disconnected"
+        return {"status": "ok", "dynamodb": "connected", "clickhouse": ch_status}
     except Exception as e:
         return {"status": "error", "dynamodb": str(e)}
 
@@ -137,9 +167,6 @@ async def startup_event():
         app.state.alert_task = asyncio.create_task(alert_worker())
     if not hasattr(app.state, "log_forward_task"):
         app.state.log_forward_task = asyncio.create_task(log_forward_worker())
-    if not hasattr(app.state, "cdn_log_forward_task"):
-        app.state.cdn_log_forward_task = asyncio.create_task(cdn_log_forward_worker())
-    # [S4 FIX] cleanup expired Telegram pairing codes จาก _pending ทุก 60 วินาที
     if not hasattr(app.state, "cleanup_pending_task"):
         from api.alerts import _cleanup_expired_codes
         app.state.cleanup_pending_task = asyncio.create_task(_cleanup_expired_codes())
@@ -149,7 +176,6 @@ async def startup_event():
 async def shutdown_event():
     print("WAF Dashboard API Shutting down...")
 
-# SPA Catch-all route for React Router (MUST be at the bottom)
 @app.get("/{full_path:path}")
 async def serve_react_app(full_path: str):
     if full_path.startswith("api/"):

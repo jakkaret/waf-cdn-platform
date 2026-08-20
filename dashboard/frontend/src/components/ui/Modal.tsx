@@ -1,30 +1,29 @@
-import React from 'react';
+import React from 'react'
 
 interface ModalProps {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  children: React.ReactNode;
+  open: boolean
+  onClose: () => void
+  title: string
+  children: React.ReactNode
 }
 
 export const Modal: React.FC<ModalProps> = ({ open, onClose, title, children }) => {
-  if (!open) return null;
+  if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="bg-bg-surface w-full max-w-lg rounded-xl shadow-2xl border border-bg-border overflow-hidden">
-        <div className="flex justify-between items-center p-5 border-b border-bg-border">
-          <h3 className="text-lg font-semibold text-text-primary">{title}</h3>
-          <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="dash-card w-full max-w-lg shadow-2xl overflow-hidden border border-[var(--bg-border-hover)]">
+        <div className="flex justify-between items-center px-5 py-4 border-b border-[var(--bg-border-subtle)] bg-[var(--bg-surface-elevated)]">
+          <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">{title}</h3>
+          <button
+            onClick={onClose}
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors p-1 cursor-pointer font-mono"
+          >
+            ✕
           </button>
         </div>
-        <div className="p-5">
-          {children}
-        </div>
+        <div className="p-5">{children}</div>
       </div>
     </div>
-  );
-};
+  )
+}

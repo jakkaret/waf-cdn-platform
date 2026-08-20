@@ -1,78 +1,88 @@
 import type { Config } from 'tailwindcss'
 
 export default {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
+      borderRadius: {
+        xs: '4px',
+        sm: '6px',
+        DEFAULT: '8px',
+        md: '10px',
+        lg: '12px',
+        xl: '16px',
+        '2xl': '20px',
+      },
       fontFamily: {
-        sans: ['DM Sans', '-apple-system', 'sans-serif'],
-        heading: ['Inter', 'DM Sans', '-apple-system', 'sans-serif'],
-        mono: ['IBM Plex Mono', 'Courier New', 'monospace'],
+        sans: [
+          'Inter',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'Segoe UI',
+          'Roboto',
+          'Helvetica Neue',
+          'Arial',
+          'sans-serif',
+        ],
+        mono: [
+          'JetBrains Mono',
+          'SFMono-Regular',
+          'Menlo',
+          'Monaco',
+          'Consolas',
+          'Liberation Mono',
+          'Courier New',
+          'monospace',
+        ],
       },
       colors: {
-        bg: {
-          primary: '#0d1117',
-          surface: '#161b27',
-          surface2: '#1e2438',
-          border: 'rgba(255,255,255,0.07)',
+        // Fortinet & Cloudflare Security Dashboard Palette
+        brand: {
+          50: '#fff7ed',
+          100: '#ffedd5',
+          200: '#fed7aa',
+          300: '#fdba74',
+          400: '#fb923c',
+          500: '#f97316',
+          600: '#ea580c',
+          700: '#c2410c',
+          800: '#9a3412',
+          900: '#7c2d12',
+          DEFAULT: '#f97316',
         },
-        accent: {
-          DEFAULT: '#667eea',
-          dark: '#764ba2',
-          light: '#a5b4fc',
-          tg: '#229ed9',
+        cf: {
+          orange: '#f38020',
+          dark: '#1e293b',
+          blue: '#2563eb',
         },
-        success: '#68d391',
-        warning: '#f6ad55',
-        danger: '#fc8181',
-        info: '#76e4f7',
-        text: {
-          primary: '#e4e8f0',
-          muted: 'rgba(255,255,255,0.4)',
-          subtle: 'rgba(255,255,255,0.2)',
+        forti: {
+          red: '#da291c',
+          dark: '#0f172a',
+          teal: '#0d9488',
         },
       },
       boxShadow: {
-        card: '0 2px 8px rgba(0,0,0,0.06)',
-        'card-hover': '0 8px 20px rgba(0,0,0,0.1)',
-        modal: '0 20px 60px rgba(0,0,0,0.3)',
-        glow: '0 0 20px rgba(102,126,234,0.15)',
-        'glow-lg': '0 0 40px rgba(102,126,234,0.2)',
-      },
-      animation: {
-        'fade-in-up': 'fadeInUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) both',
-        'scale-in': 'scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both',
-        'slide-down': 'slideDown 0.3s ease-out both',
-        'float': 'float 3s ease-in-out infinite',
-        'breathe': 'breathe 2s ease-in-out infinite',
-        'gradient': 'gradient-shift 4s ease infinite',
+        'subtle': '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+        'card': '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1)',
+        'card-hover': '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)',
+        'glow-brand': '0 0 15px -3px rgba(243, 128, 32, 0.25)',
+        'glow-danger': '0 0 15px -3px rgba(239, 68, 68, 0.25)',
+        'glow-success': '0 0 15px -3px rgba(16, 185, 129, 0.25)',
       },
       keyframes: {
-        fadeInUp: {
-          from: { opacity: '0', transform: 'translateY(16px)' },
-          to: { opacity: '1', transform: 'translateY(0)' },
+        'pulse-subtle': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.4' },
         },
-        scaleIn: {
-          from: { opacity: '0', transform: 'scale(0.95)' },
-          to: { opacity: '1', transform: 'scale(1)' },
+        'fade-in': {
+          '0%': { opacity: '0', transform: 'translateY(4px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
         },
-        slideDown: {
-          from: { opacity: '0', transform: 'translateY(-8px)' },
-          to: { opacity: '1', transform: 'translateY(0)' },
-        },
-        float: {
-          '0%, 100%': { transform: 'translateY(0px)' },
-          '50%': { transform: 'translateY(-6px)' },
-        },
-        breathe: {
-          '0%, 100%': { opacity: '0.4' },
-          '50%': { opacity: '0.8' },
-        },
-        'gradient-shift': {
-          '0%': { backgroundPosition: '0% 50%' },
-          '50%': { backgroundPosition: '100% 50%' },
-          '100%': { backgroundPosition: '0% 50%' },
-        },
+      },
+      animation: {
+        'pulse-subtle': 'pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'fade-in': 'fade-in 0.2s ease-out forwards',
       },
     },
   },

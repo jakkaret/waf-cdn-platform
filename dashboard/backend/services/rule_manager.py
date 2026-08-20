@@ -1,45 +1,40 @@
 import os
 import re
-import logging
-from typing import List, Dict
 import subprocess
+import logging
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
-# [S4] Whitelist ของ command ที่อนุญาตให้ส่งไป docker exec ได้เท่านั้น
-# ป้องกันกรณีที่ argument ในอนาคตอาจมาจาก input ภายนอก
-_ALLOWED_NGINX_COMMANDS: set[tuple] = {
+_ALLOWED_NGINX_COMMANDS = {
     ("nginx", "-s", "reload"),
     ("nginx", "-t"),
 }
 
-# [S4] NOTE — Security Consideration:
-# RuleManager ต้องการสิทธิ์รัน "docker exec waf-nginx ..." ซึ่งหมายความว่า
-# backend process ต้องอยู่ใน docker group หรือมี sudo privilege
-# แนะนำ: ในสภาพแวดล้อม production ควรใช้ dedicated reload script
-# ที่ติดตั้งด้วย setuid แทนการให้ backend access docker socket โดยตรง
-# เช่น: /usr/local/bin/waf-reload-nginx ที่ถูก whitelist ใน sudoers
-
 CONTAINER_NAME = os.getenv("WAF_CONTAINER_NAME", "waf-nginx")
+
+SEVERITY_MAP = {
+    "CRITICAL": "CRITICAL",
+    "HIGH": "ERROR",
+    "MEDIUM": "WARNING",
+    "LOW": "NOTICE",
+    "WARNING": "WARNING",
+    "NOTICE": "NOTICE",
+    "INFO": "INFO",
+    "ERROR": "ERROR",
+}
 
 
 class RuleManager:
     def __init__(self):
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-        # BASE_DIR = .../dashboard/backend/services
-
         self.rules_dir = os.path.abspath(
             os.path.join(BASE_DIR, "../../../modsecurity/custom-rules")
         )
-
         if not os.path.exists(self.rules_dir):
             raise FileNotFoundError(f"Rules dir not found: {self.rules_dir}")
 
     def _run_docker_exec(self, nginx_args: tuple) -> None:
-        """
-        รัน nginx command ใน WAF container โดยตรวจสอบ whitelist ก่อนเสมอ
-        [S4] ป้องกัน command injection ด้วย explicit whitelist
-        """
         if nginx_args not in _ALLOWED_NGINX_COMMANDS:
             raise ValueError(f"Command {nginx_args!r} is not in allowed whitelist")
 
@@ -47,7 +42,6 @@ class RuleManager:
         try:
             subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
-            # We must decode and include stderr so we know WHY it failed
             err_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
             raise RuntimeError(f"Docker command failed: {err_msg}")
 
@@ -67,11 +61,9 @@ class RuleManager:
             logger.error(str(e))
             raise e
 
-    def list_rules(self):
-
+    def list_rules(self) -> List[Dict]:
         rules = []
-
-        for filename in os.listdir(self.rules_dir):
+        for filename in sorted(os.listdir(self.rules_dir)):
             if not filename.endswith(".conf"):
                 continue
 
@@ -93,9 +85,9 @@ class RuleManager:
                 operator = sec_rule_match.group(2)
                 actions = sec_rule_match.group(3)
 
-                sev_match = re.search(r"severity:([A-Z]+)", actions)
+                sev_match = re.search(r"severity:([A-Za-z]+)", actions)
                 if sev_match:
-                    severity = sev_match.group(1)
+                    severity = sev_match.group(1).upper()
 
                 msg_match = re.search(r"msg:'([^']+)'", actions)
                 if msg_match:
@@ -112,17 +104,13 @@ class RuleManager:
         return rules
 
     def validate_rule(self, rule: Dict):
-        # 1. Rule ID ต้องเป็นตัวเลข (หรือ custom-xxx)
-        rule_id = rule.get("id", "")
-        
-        # ถ้าเป็น custom-xxx ให้ตัดคำว่า custom- ออก
-        if rule_id.startswith("custom-"):
-            rule_id = rule_id.replace("custom-", "")
-            
-        if not rule_id or not rule_id.isdigit():
+        # 1. Rule ID ต้องมีตัวเลข
+        rule_id = str(rule.get("id", ""))
+        clean_id = rule_id.replace("custom-", "")
+        if not clean_id or not clean_id.isdigit():
             return False, "Rule ID ต้องเป็นตัวเลขเท่านั้น"
 
-        # 2. Variable ต้องเป็นตัวที่ ModSecurity รู้จัก
+        # 2. Variable
         allowed_vars = [
             "REQUEST_URI",
             "ARGS",
@@ -132,69 +120,86 @@ class RuleManager:
         if rule.get("variable") not in allowed_vars:
             return False, "Variable ไม่ถูกต้อง"
 
-        # 3. Operator ห้ามว่าง
+        # 3. Operator
         if not rule.get("operator"):
             return False, "Operator ห้ามว่าง"
 
-        # 4. Severity ต้องอยู่ในระดับที่กำหนด
-        allowed_sev = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
-        if rule.get("severity") not in allowed_sev:
-            return False, "Severity ไม่ถูกต้อง"
+        # 4. Severity
+        sev = str(rule.get("severity", "")).upper()
+        if sev not in SEVERITY_MAP:
+            return False, "Severity ไม่ถูกต้อง (ต้องเป็น CRITICAL, HIGH, MEDIUM, หรือ LOW)"
+        rule["severity"] = sev
 
-        # 5. Message ห้ามว่าง
+        # 5. Message
         if not rule.get("message"):
             return False, "Message ห้ามว่าง"
 
         return True, "OK"
 
-
-    
     def add_rule(self, rule_data: Dict) -> bool:
         valid, msg = self.validate_rule(rule_data)
         if not valid:
             raise ValueError(msg)
-        
+
         rule_data["severity"] = rule_data["severity"].upper()
-        rule_id = rule_data["id"]
+        rule_id = str(rule_data["id"]).replace("custom-", "")
         filename = f"custom-{rule_id}.conf"
+        filepath = os.path.join(self.rules_dir, filename)
 
         safe_operator = str(rule_data['operator']).replace('"', '\\"')
         safe_message = str(rule_data['message']).replace("'", "\\'")
+        modsec_sev = SEVERITY_MAP.get(rule_data["severity"], "CRITICAL")
 
         rule_text = (
             f"# Custom Rule {rule_id}\n"
             f"SecRule {rule_data['variable']} \"{safe_operator}\" \\\n"
             f"\"id:{rule_id},phase:2,deny,status:403,"
-            f"severity:{rule_data['severity']},log,msg:'{safe_message}'\"\n"
+            f"severity:{modsec_sev},log,msg:'{safe_message}'\"\n"
         )
 
-        with open(os.path.join(self.rules_dir, filename), "w", encoding="utf-8") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(rule_text)
-        self.test_nginx()
-        self.reload_nginx()
+
+        try:
+            self.test_nginx()
+            self.reload_nginx()
+        except Exception as e:
+            # Clean up failed config so it does not corrupt nginx
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+            raise e
+
         return True
 
-    
     def write_ml_rule(self, rule_id: int, secrule_code: str) -> bool:
-        """เขียน rule ที่มาจากการ Approve ของ ML"""
         filename = f"ml-{rule_id}.conf"
-        
-        # เพิ่ม header กันงง
         header = f"# ------------------------------------------------------------------------\n"
         header += f"# ML Auto-Generated & Approved WAF Rule (ID: {rule_id})\n"
         header += f"# ------------------------------------------------------------------------\n"
-        
         rule_text = header + secrule_code + "\n"
-        
-        with open(os.path.join(self.rules_dir, filename), "w", encoding="utf-8") as f:
+        filepath = os.path.join(self.rules_dir, filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(rule_text)
-            
-        self.test_nginx()
-        self.reload_nginx()
+
+        try:
+            self.test_nginx()
+            self.reload_nginx()
+        except Exception as e:
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+            raise e
+
         return True
 
     def delete_rule(self, rule_id: str) -> bool:
-        filename = f"{rule_id}.conf"
+        filename = f"{rule_id}.conf" if not rule_id.endswith(".conf") else rule_id
         filepath = os.path.join(self.rules_dir, filename)
 
         if os.path.exists(filepath):
@@ -205,41 +210,32 @@ class RuleManager:
         return False
 
     def update_rule(self, rule_id: str, rule: dict) -> bool:
-        """อัพเดต rule ที่มีอยู่แล้ว"""
-        # เพิ่ม id เข้าไปใน rule dict เพื่อ validate
         rule["id"] = rule_id.replace("custom-", "")
-        
-        # Validate rule
         valid, msg = self.validate_rule(rule)
         if not valid:
             raise ValueError(msg)
 
-        # สร้าง path ของไฟล์
-        filename = f"{rule_id}.conf"
+        filename = f"custom-{rule['id']}.conf"
         filepath = os.path.join(self.rules_dir, filename)
 
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Rule {rule_id} ไม่พบในระบบ")
 
-        # สร้าง rule text ใหม่
         rule["severity"] = rule["severity"].upper()
-        
         safe_operator = str(rule['operator']).replace('"', '\\"')
         safe_message = str(rule['message']).replace("'", "\\'")
+        modsec_sev = SEVERITY_MAP.get(rule["severity"], "CRITICAL")
 
         rule_text = (
             f"# Custom Rule {rule['id']}\n"
             f"SecRule {rule['variable']} \"{safe_operator}\" \\\n"
             f"\"id:{rule['id']},phase:2,deny,status:403,"
-            f"severity:{rule['severity']},log,msg:'{safe_message}'\"\n"
+            f"severity:{modsec_sev},log,msg:'{safe_message}'\"\n"
         )
 
-        # เขียนไฟล์ใหม่
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(rule_text)
-            
-        # Test และ Reload Nginx
+
         self.test_nginx()
         self.reload_nginx()
-
         return True
