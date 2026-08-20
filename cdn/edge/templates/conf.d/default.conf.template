@@ -32,13 +32,11 @@ server {
         root /usr/share/nginx/html;
         internal;
     }
-
-    error_page 403 /403.html;
-    location = /403.html {
-        root /usr/share/nginx/html;
+   error_page 403 /403.html;
+   location = /403.html {
+        root /root/waf_project/cdn/edge/html;
         internal;
-    }
-
+   }
     location = /healthz {
         access_log off;
         add_header Content-Type application/json;
@@ -161,7 +159,7 @@ server {
     
     error_page 403 /403.html;
     location = /403.html {
-        root /usr/share/nginx/html;
+        root /root/waf_project/cdn/edge/html;
         internal;
     }
 

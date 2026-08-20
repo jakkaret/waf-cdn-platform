@@ -8,7 +8,7 @@ rate_limiter = RedisRateLimiter()
 DEFAULT_LIMIT = 10
 DEFAULT_WINDOW = 10
 
-@router.get("/check")
+@router.api_route("/check", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def check_rate_limit(request: Request, response: Response):
     # Retrieve client IP
     client_ip = request.headers.get("X-Forwarded-For")
@@ -18,7 +18,7 @@ async def check_rate_limit(request: Request, response: Response):
         client_ip = request.headers.get("X-Real-IP")
         
     if not client_ip:
-        client_ip = request.client.host
+        client_ip = request.client.host if request.client else "127.0.0.1"
         
     is_allowed, current_count, retry_after = rate_limiter.is_allowed(
         ip=client_ip,

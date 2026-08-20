@@ -24,26 +24,27 @@ server {
     SecRuleEngine On
     SecRule REQUEST_HEADERS:X-Request-ID "@rx .*" "id:900001,phase:1,pass,setvar:tx.request_id=%{REQUEST_HEADERS.X-Request-ID}"';
     location = /healthz {
-    access_log off;
-}
+        access_log off;
+    }
     location / {
         auth_request /internal-rate-limit;
         auth_request_set $retry_after $upstream_http_retry_after;
         
-	    proxy_pass http://dvwa_backend;
+        proxy_pass http://dvwa_backend;
         proxy_set_header Host $host;
-	    proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Request-ID $request_id;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
-	    proxy_redirect off;
-	    proxy_buffering off;
+        proxy_redirect off;
+        proxy_buffering off;
     }
 
     location = /internal-rate-limit {
         internal;
+        proxy_method GET;
         proxy_pass http://host.docker.internal:8000/api/limiter/check;
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
@@ -62,11 +63,10 @@ server {
     error_page 403 /403.html; 
     
     location = /403.html { 
-	root /usr/share/nginx/html; internal; 
+        root /usr/share/nginx/html; internal; 
     }
 
     include includes/location_common.conf;
-
 }
 
 server {
@@ -102,8 +102,8 @@ server {
         proxy_set_header X-Forwarded-Proto https;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
-	    proxy_redirect off;
-	    proxy_ssl_verify off;   #ใช้ self-signed cert
+        proxy_redirect off;
+        proxy_ssl_verify off;
     }
 
     error_page 403 /403.html;
@@ -113,14 +113,4 @@ server {
     }
 
     include includes/location_common.conf;
-} 
-
-#location / {
-       # client_max_body_size 0;
-
-       # include includes/cors.conf;
-       # include includes/proxy_backend.conf;
-
-        #index index.html index.htm;
-        #root /usr/share/nginx/html;
-    #}
+}

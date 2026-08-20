@@ -21,15 +21,15 @@ export const AddOriginModal: React.FC<AddOriginModalProps> = ({ open, onClose, o
     const newErrors: Record<string, string> = {};
     if (!label.trim()) newErrors.label = 'Label is required';
     
-    // IPv4 validation
+    // Accept valid IPv4 or Hostname/Domain Name
     const ipRegex = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
-    if (!ipRegex.test(ip)) {
-      newErrors.ip = 'Valid IPv4 address is required';
-    } else {
-      const parts = ip.split('.');
-      if (parts.some(p => parseInt(p, 10) > 255)) {
-        newErrors.ip = 'Valid IPv4 address is required';
-      }
+    const domainRegex = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    const trimmedTarget = ip.trim();
+
+    if (!trimmedTarget) {
+      newErrors.ip = 'IP Address or Domain Hostname is required';
+    } else if (!ipRegex.test(trimmedTarget) && !domainRegex.test(trimmedTarget) && trimmedTarget !== 'localhost') {
+      newErrors.ip = 'Enter a valid IPv4 address or Domain Hostname (e.g. 192.168.1.100 or tunnel.trycloudflare.com)';
     }
     
     if (port < 1 || port > 65535) newErrors.port = 'Port must be between 1 and 65535';
