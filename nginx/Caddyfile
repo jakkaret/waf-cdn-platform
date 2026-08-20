@@ -2,35 +2,15 @@
 # ----------------------------------
 
 {
-    # Enable On-Demand TLS
-    on_demand_tls {
-        # Query backend API to verify if the domain is registered and has valid DNS before requesting SSL
-        ask http://host.docker.internal:8000/api/domains/check-ssl-allowed
-    }
-    
-    # Use Local CA for local test domains (e.g. .test, .local) automatically
-    local_certs
+    auto_https off
 }
 
-# Catch-all HTTPS block for all customer domains
-:443 {
-    tls {
-        # Trigger On-Demand Let's Encrypt / ZeroSSL certificate request during handshake
-        on_demand
-    }
-
-    # Forward to stock Nginx WAF Engine running ModSecurity
-    reverse_proxy http://waf:8080 {
+# IP Direct Access & Dashboard Reverse Proxy (Port 80)
+http://178.104.53.123, http://localhost, :80 {
+    reverse_proxy http://host.docker.internal:8000 {
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
     }
-}
-
-# Catch-all HTTP block (Handles HTTP Let's Encrypt challenges and redirects)
-:80 {
-    # Let Caddy handle Let's Encrypt HTTP-01 challenges internally.
-    # For normal HTTP traffic, redirect to HTTPS.
-    redir https://{host}{uri}
 }
