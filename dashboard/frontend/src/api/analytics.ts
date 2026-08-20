@@ -19,6 +19,7 @@ export interface AnalyticsSummary {
   total_requests: number
   allowed_requests: number
   blocked_requests: number
+  unique_ips?: number
   average_latency_ms: number
   attack_types: Record<string, number>
   suspicious_ips: SuspiciousIp[]
