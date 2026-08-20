@@ -20,5 +20,10 @@ export const rulesApi = {
   deleteRule: async (id: string) => {
     const res = await api.delete(`/rules/${id}`)
     return res.data
+  },
+
+  syncRules: async () => {
+    const res = await api.post('/rules/sync')
+    return res.data
   }
 }

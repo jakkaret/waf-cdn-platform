@@ -55,30 +55,6 @@ SecRule REQUEST_URI|REQUEST_BODY "@rx or\s+['\"]?1['\"]?\s*=\s*['\"]?1" \
 
 ---
 
-## 📂 4. โครงสร้างไฟล์ในโปรเจกต์ (Updated Layout)
-
-```
-ml/
-├── dataset/
-│   ├── csic_final.csv             # ชุดข้อมูล CSIC 2010 (26.11 MB)
-│   └── enhanced_payloads.csv      # ชุดข้อมูล Web Attack Payloads เสริม
-├── models/
-│   ├── random_forest_waf.joblib   # โมเดล Random Forest Classifier (Supervised)
-│   ├── isolation_forest_waf.joblib # โมเดล Isolation Forest (Anomaly Score)
-│   └── eval_results.json          # ไฟล์เก็บค่า Accuracy (93.40%), ROC Curve, Confusion Matrix
-├── dashboard/
-│   ├── index.html                 # หน้าเว็บ Single-Page Dashboard & Auto Rule Generator
-│   ├── styles.css                 # สไตล์ชีต Cyber Obsidian Theme
-│   └── app.js                     # โค้ด JavaScript แสดงผลและยิง API /generate-rule
-├── auto_rule_generator.py         # มอดูลสร้าง ModSecurity SecRules อัตโนมัติ
-├── download_dataset.py            # สคริปต์ดาวน์โหลดและรวม Multi-Dataset
-├── feature_engineering.py         # มอดูลสกัดฟีเจอร์ 14 ตัวแปร (พร้อม URL Decoding)
-├── train_model.py                 # สคริปต์ฝึกโมเดล Random Forest + Isolation Forest (Accuracy 93.40%)
-└── ml_api.py                      # FastAPI Microservice (Port 5000) สำหรับ Predict & /generate-rule
-```
-
----
-
 ## 🚀 5. คำสั่งการรันและทดสอบยิง API Auto Generate Rule
 
 ### 1. ทดสอบยิง API สร้างกฎอัตโนมัติจาก Terminal:

@@ -1,86 +1,135 @@
-import React, { useState } from 'react'
+import React from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { authApi } from '../api/auth'
 import { TopBar } from '../components/layout/TopBar'
-import { Card } from '../components/ui/Card'
-import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
+import { Button } from '../components/ui/Button'
+import { Users as UsersIcon, Shield, Trash2, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export const Users: React.FC = () => {
   const queryClient = useQueryClient()
-  
+
   const { data: users = [], isLoading } = useQuery({
     queryKey: ['users'],
     queryFn: authApi.getUsers,
   })
 
   const updateRoleMutation = useMutation({
-    mutationFn: ({ id, role }: { id: string, role: 'admin' | 'viewer' }) => authApi.updateRole(id, role),
+    mutationFn: ({ id, role }: { id: string; role: 'admin' | 'viewer' }) => authApi.updateRole(id, role),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast.success('Role updated successfully')
+      toast.success('Access role updated successfully')
     },
-    onError: () => toast.error('Failed to update role')
+    onError: () => toast.error('Failed to update role'),
   })
 
   const deleteMutation = useMutation({
     mutationFn: authApi.deleteUser,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast.success('User deleted')
+      toast.success('User access revoked')
     },
-    onError: () => toast.error('Failed to delete user')
+    onError: () => toast.error('Failed to delete user'),
   })
 
   return (
-    <div>
-      <TopBar title="Users & Roles" subtitle="Manage access control (Admin Only)" />
+    <div className="space-y-6 animate-fade-in">
+      <TopBar
+        title="Role-Based Access Control (RBAC)"
+        subtitle="Manage administrator and observer privileges across the CloudWAF control plane"
+        badge={
+          <Badge color="brand" dot>
+            {users.length} ACCOUNTS
+          </Badge>
+        }
+      />
 
-      <Card noPadding>
+      <div className="dash-card overflow-hidden">
+        <div className="dash-card-header">
+          <div className="flex items-center gap-2">
+            <UsersIcon size={16} className="text-orange-500" />
+            <h3>Authorized Accounts</h3>
+          </div>
+          <span className="text-[11px] font-mono text-[var(--text-muted)]">Admin Management</span>
+        </div>
+
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-white/5 text-text-muted text-[11px] uppercase tracking-wider">
+          <table className="dash-table">
+            <thead>
               <tr>
-                <th className="p-4 font-semibold">User</th>
-                <th className="p-4 font-semibold">Email</th>
-                <th className="p-4 font-semibold">Provider</th>
-                <th className="p-4 font-semibold">Role</th>
-                <th className="p-4 font-semibold">Actions</th>
+                <th>User Identity</th>
+                <th>Email Address</th>
+                <th>Authentication Provider</th>
+                <th>Privilege Level</th>
+                <th className="text-right">Revoke Access</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody>
               {isLoading ? (
-                <tr><td colSpan={5} className="p-8 text-center text-text-muted">Loading users...</td></tr>
+                <tr>
+                  <td colSpan={5} className="py-10 text-center text-[var(--text-muted)] font-mono text-[12px]">
+                    <RefreshCw size={16} className="animate-spin inline mr-2 text-orange-500" />
+                    Loading user directory...
+                  </td>
+                </tr>
               ) : users.length === 0 ? (
-                <tr><td colSpan={5} className="p-8 text-center text-text-muted">No users found</td></tr>
+                <tr>
+                  <td colSpan={5} className="py-10 text-center text-[var(--text-muted)] font-mono text-[12px]">
+                    No users registered in system.
+                  </td>
+                </tr>
               ) : (
                 users.map((u) => (
-                  <tr key={u.user_id} className="hover:bg-white/5 transition-colors">
-                    <td className="p-4">
+                  <tr key={u.user_id} className="hover:bg-[var(--bg-hover)]">
+                    <td>
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center font-bold">
-                          {u.avatar_url ? <img src={u.avatar_url} className="rounded-full" alt="avatar" /> : u.username.charAt(0).toUpperCase()}
+                        <div className="w-8 h-8 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-500 flex items-center justify-center font-mono font-bold text-[12px]">
+                          {u.avatar_url ? (
+                            <img src={u.avatar_url} className="w-full h-full rounded-lg object-cover" alt="avatar" />
+                          ) : (
+                            u.username.charAt(0).toUpperCase()
+                          )}
                         </div>
-                        <span className="font-semibold">{u.username}</span>
+                        <span className="font-semibold text-[13px] font-mono text-[var(--text-primary)]">
+                          {u.username}
+                        </span>
                       </div>
                     </td>
-                    <td className="p-4 text-text-muted">{u.email}</td>
-                    <td className="p-4"><Badge color={u.auth_provider === 'google' ? 'info' : 'gray'}>{u.auth_provider}</Badge></td>
-                    <td className="p-4">
-                      <select 
-                        className="bg-bg-surface border border-white/10 rounded px-2 py-1 text-sm outline-none"
+                    <td className="font-mono text-[12px] text-[var(--text-secondary)]">{u.email}</td>
+                    <td>
+                      <Badge color={u.auth_provider === 'google' ? 'info' : 'gray'}>
+                        {u.auth_provider.toUpperCase()}
+                      </Badge>
+                    </td>
+                    <td>
+                      <select
+                        className="dash-input py-1 text-[12px] font-mono cursor-pointer"
                         value={u.role}
-                        onChange={(e) => updateRoleMutation.mutate({ id: u.user_id, role: e.target.value as 'admin'|'viewer' })}
+                        onChange={(e) =>
+                          updateRoleMutation.mutate({
+                            id: u.user_id,
+                            role: e.target.value as 'admin' | 'viewer',
+                          })
+                        }
                       >
-                        <option value="viewer">Viewer</option>
-                        <option value="admin">Admin</option>
+                        <option value="viewer">Viewer (Read-Only)</option>
+                        <option value="admin">Admin (Full Control)</option>
                       </select>
                     </td>
-                    <td className="p-4">
-                      <Button variant="danger" size="sm" onClick={() => {
-                        if(window.confirm('Delete user?')) deleteMutation.mutate(u.user_id)
-                      }}>Remove</Button>
+                    <td className="text-right">
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => {
+                          if (window.confirm(`Revoke access for user ${u.username}?`)) {
+                            deleteMutation.mutate(u.user_id)
+                          }
+                        }}
+                        icon={<Trash2 size={13} />}
+                      >
+                        Revoke
+                      </Button>
                     </td>
                   </tr>
                 ))
@@ -88,7 +137,7 @@ export const Users: React.FC = () => {
             </tbody>
           </table>
         </div>
-      </Card>
+      </div>
     </div>
   )
 }

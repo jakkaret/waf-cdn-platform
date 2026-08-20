@@ -11,7 +11,9 @@ import {
   LogOut,
   Server,
   Brain,
-  Sparkles
+  Sparkles,
+  Shield,
+  Activity,
 } from 'lucide-react'
 
 export const Sidebar: React.FC = () => {
@@ -25,83 +27,98 @@ export const Sidebar: React.FC = () => {
 
   const sections = [
     {
-      label: 'Main',
+      label: 'Monitoring & Core',
       items: [
-        { label: 'Overview', path: '/', icon: <LayoutDashboard size={18} />, roles: ['admin', 'viewer'] },
-        { label: 'Origin Servers', path: '/origins', icon: <Server size={18} />, roles: ['admin', 'viewer'] },
-        { label: 'ML Analyst', path: '/ml-analyst', icon: <Brain size={18} />, roles: ['admin', 'viewer'] },
+        { label: 'Security Dashboard', path: '/', icon: <LayoutDashboard size={15} />, roles: ['admin', 'viewer'] },
+        { label: 'Traffic Logs', path: '/logs', icon: <ListFilter size={15} />, roles: ['admin', 'viewer'] },
+        { label: 'Origin Servers', path: '/origins', icon: <Server size={15} />, roles: ['admin', 'viewer'] },
       ],
     },
     {
-      label: 'Monitoring',
+      label: 'Security & Rules',
       items: [
-        { label: 'Attack Logs', path: '/logs', icon: <ListFilter size={18} />, roles: ['admin', 'viewer'] },
-        { label: 'Custom Rules', path: '/rules', icon: <ShieldAlert size={18} />, roles: ['admin', 'viewer'] },
-        { label: 'ML Rules', path: '/ml-rules', icon: <Sparkles size={18} />, roles: ['admin', 'viewer'] },
-        { label: 'Alerts', path: '/alerts', icon: <Bell size={18} />, roles: ['admin', 'viewer'] },
-        { label: 'CDN Monitor', path: '/cdn', icon: <Globe size={18} />, roles: ['admin', 'viewer'] },
+        { label: 'WAF Rules', path: '/rules', icon: <ShieldAlert size={15} />, roles: ['admin', 'viewer'] },
+        { label: 'ML Anomaly Rules', path: '/ml-rules', icon: <Sparkles size={15} />, roles: ['admin', 'viewer'] },
+        { label: 'AI Security Analyst', path: '/ml-analyst', icon: <Brain size={15} />, roles: ['admin', 'viewer'] },
+        { label: 'Alert Center', path: '/alerts', icon: <Bell size={15} />, roles: ['admin', 'viewer'] },
       ],
     },
     {
-      label: 'Admin',
+      label: 'Edge & Delivery',
       items: [
-        { label: 'Users & Roles', path: '/users', icon: <Users size={18} />, roles: ['admin'] },
+        { label: 'CDN Edge Nodes', path: '/cdn', icon: <Globe size={15} />, roles: ['admin', 'viewer'] },
+      ],
+    },
+    {
+      label: 'Administration',
+      items: [
+        { label: 'Access Control', path: '/users', icon: <Users size={15} />, roles: ['admin'] },
       ],
     },
   ]
 
   return (
-    <div className="w-[260px] gradient-sidebar flex flex-col h-screen fixed left-0 top-0 border-r border-white/[0.04]">
-      {/* Logo */}
-      <div className="px-6 pt-7 pb-1">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-[10px] gradient-brand flex items-center justify-center font-bold text-white text-lg shadow-glow relative">
-            W
-            {/* Subtle pulse ring */}
-            <div className="absolute inset-0 rounded-[10px] gradient-brand opacity-0 animate-ping" style={{ animationDuration: '3s' }} />
+    <aside className="w-[240px] bg-[var(--bg-surface)] flex flex-col h-screen fixed left-0 top-0 border-r border-[var(--bg-border)] z-30 select-none">
+      {/* Brand Header */}
+      <div className="h-16 px-4 flex items-center justify-between border-b border-[var(--bg-border)] bg-[var(--bg-surface)]">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white shadow-sm shadow-orange-500/20">
+            <Shield size={17} className="stroke-[2.2]" />
           </div>
           <div>
-            <h2 className="text-[16px] font-extrabold tracking-wide text-white m-0 leading-none font-heading">WAF</h2>
-            <span className="text-[10px] text-accent-light/70 font-semibold tracking-[0.15em] uppercase">Security</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[14px] font-bold text-[var(--text-primary)] tracking-tight font-mono">
+                CloudWAF
+              </span>
+              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-orange-500/10 text-orange-500 border border-orange-500/20 uppercase font-mono">
+                EDGE
+              </span>
+            </div>
+            <div className="text-[10.5px] text-[var(--text-muted)] tracking-tight flex items-center gap-1 mt-0.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span>ModSec CRS 3.3</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Navigation */}
-      <div className="mt-7 px-3 flex-1 overflow-y-auto">
+      {/* Navigation Groups */}
+      <nav className="flex-1 overflow-y-auto py-4 px-2.5 space-y-5">
         {sections.map((section) => {
-          const visibleItems = section.items.filter(item => user && item.roles.includes(user.role))
-          if (visibleItems.length === 0) return null
-
+          const items = section.items.filter((item) => user && item.roles.includes(user.role))
+          if (!items.length) return null
           return (
-            <div key={section.label} className="mb-5">
-              <p className="text-[10px] font-bold text-white/20 uppercase tracking-[0.12em] mb-2 px-3">
+            <div key={section.label}>
+              <p className="text-[10px] font-bold text-[var(--text-dim)] uppercase tracking-wider px-3 mb-1 font-mono">
                 {section.label}
               </p>
-              <div className="flex flex-col gap-0.5">
-                {visibleItems.map((item) => (
+              <div className="space-y-0.5">
+                {items.map((item) => (
                   <NavLink
                     key={item.path}
                     to={item.path}
                     end={item.path === '/'}
                     className={({ isActive }) =>
-                      `group relative flex items-center gap-2.5 px-3 py-[9px] rounded-[10px] text-[13px] font-medium transition-all duration-200 ${
+                      `group flex items-center gap-2.5 px-3 py-2 text-[12.5px] rounded-md transition-all duration-150 relative ${
                         isActive
-                          ? 'bg-accent/[0.08] text-accent-light'
-                          : 'text-white/35 hover:text-white/60 hover:bg-white/[0.03]'
+                          ? 'bg-orange-500/10 text-orange-500 font-semibold dark:text-orange-400 border border-orange-500/20'
+                          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-transparent'
                       }`
                     }
                   >
                     {({ isActive }) => (
                       <>
-                        {/* Active left accent bar */}
-                        {isActive && (
-                          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-[16px] rounded-r-full bg-accent shadow-[0_0_8px_rgba(102,126,234,0.4)]" />
-                        )}
-                        <span className={`transition-transform duration-200 ${isActive ? '' : 'group-hover:scale-110'}`}>
+                        <span
+                          className={`shrink-0 transition-colors ${
+                            isActive ? 'text-orange-500 dark:text-orange-400' : 'text-[var(--text-muted)] group-hover:text-[var(--text-primary)]'
+                          }`}
+                        >
                           {item.icon}
                         </span>
-                        {item.label}
+                        <span className="truncate">{item.label}</span>
+                        {isActive && (
+                          <span className="ml-auto w-1 h-3.5 rounded-full bg-orange-500" />
+                        )}
                       </>
                     )}
                   </NavLink>
@@ -110,31 +127,32 @@ export const Sidebar: React.FC = () => {
             </div>
           )
         })}
-      </div>
+      </nav>
 
-      {/* User section */}
-      <div className="p-3 border-t border-white/[0.04]">
-        <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] bg-white/[0.02] border border-white/[0.04] mb-2">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-accent/20 to-accent-dark/20 border border-accent/10 flex items-center justify-center text-[12px] font-bold text-accent-light uppercase overflow-hidden shrink-0">
-            {user?.avatar_url ? (
-              <img src={user.avatar_url} alt="avatar" className="w-full h-full object-cover rounded-full" />
-            ) : (
-              user?.username?.charAt(0) || 'U'
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[12px] font-semibold text-white/70 m-0 truncate">{user?.username}</p>
-            <p className="text-[10px] text-accent-light/50 uppercase tracking-[0.1em] m-0 font-semibold">{user?.role}</p>
+      {/* Footer User Card */}
+      <div className="p-3 border-t border-[var(--bg-border)] bg-[var(--bg-surface)]">
+        <div className="px-3 py-2 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border-subtle)] mb-2 flex items-center justify-between">
+          <div className="min-w-0 pr-2">
+            <p className="text-[12px] font-semibold text-[var(--text-primary)] truncate m-0 font-mono">
+              {user?.username || user?.email}
+            </p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[10.5px] font-mono text-[var(--text-muted)] capitalize">
+                {user?.role || 'Viewer'} Mode
+              </span>
+            </div>
           </div>
         </div>
+
         <button
           onClick={handleLogout}
-          className="flex items-center gap-2.5 px-3 py-2 w-full rounded-[10px] text-[12px] font-medium text-white/25 hover:bg-danger/[0.06] hover:text-danger/80 transition-all duration-200"
+          className="flex items-center justify-center gap-2 px-3 py-1.5 w-full text-[12px] font-medium text-[var(--text-muted)] hover:text-red-400 rounded-md hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all cursor-pointer"
         >
-          <LogOut size={15} />
-          Sign Out
+          <LogOut size={13.5} />
+          <span>Sign out</span>
         </button>
       </div>
-    </div>
+    </aside>
   )
 }

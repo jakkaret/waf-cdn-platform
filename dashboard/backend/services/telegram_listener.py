@@ -1,11 +1,12 @@
-from telethon import TelegramClient
-from dotenv import load_dotenv
-from services.dynamodb_service import DynamoDBService
-from boto3.dynamodb.conditions import Attr
 import asyncio
 import logging
 import os
 import time
+import httpx
+from datetime import datetime
+from dotenv import load_dotenv
+from services.dynamodb_service import DynamoDBService
+from boto3.dynamodb.conditions import Attr
 
 load_dotenv()
 
@@ -17,21 +18,12 @@ API_ID = int(_api_id_raw) if _api_id_raw and _api_id_raw.isdigit() else None
 API_HASH = os.getenv("TELEGRAM_API_HASH")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOTTOKEN")
 
-# [R3 FIX] Cache user list แทนการ scan DynamoDB ทุก 5 วินาที
-# cache จะถูก refresh อัตโนมัติเมื่อครบ USER_CACHE_TTL วินาที
 _user_cache: list = []
 _user_cache_ts: float = 0.0
-USER_CACHE_TTL = 60  # วินาที — refresh ทุก 1 นาที
-
-alerted_events = {}  # key -> timestamp
-ALERT_TTL = 600  # 10 นาที
+USER_CACHE_TTL = 60
 
 
 def _get_telegram_users() -> list:
-    """
-    [R3 FIX] ดึง users ที่มี telegram_chat_id โดยใช้ cache TTL 60 วินาที
-    แทนการ scan DynamoDB ทุก 5 วินาที (loop ของ alert_worker)
-    """
     global _user_cache, _user_cache_ts
     now = time.monotonic()
     if now - _user_cache_ts < USER_CACHE_TTL and _user_cache:
@@ -51,76 +43,80 @@ def _get_telegram_users() -> list:
 
 
 def invalidate_user_cache():
-    """เรียกเมื่อมีการ connect/disconnect Telegram เพื่อ force refresh"""
     global _user_cache_ts
     _user_cache_ts = 0.0
 
 
-# 🔁 background worker
-async def alert_worker():
-    logger.info("📡 Telegram Alert Worker started")
-    if not API_ID or not API_HASH or not BOT_TOKEN:
-        logger.warning(
-            "⚠️ Telegram worker disabled: missing TELEGRAM_API_ID/TELEGRAM_API_HASH/TELEGRAM_BOT_TOKEN"
-        )
-        return
-
-    client = TelegramClient("waf_alert_bot", API_ID, API_HASH)
-    await client.start(bot_token=BOT_TOKEN)
-
+async def dispatch_telegram_alert(data: dict):
+    """Send real-time Telegram alert for 403 / 429 / Critical attacks and save to DynamoDB waf_alerts"""
     try:
-        while True:
-            logs = db.get_unalerted_403_logs()
-            # [Q4 FIX] เปลี่ยนจาก print("DEBUG logs:", logs) → logging.debug
-            logger.debug("Fetched unalerted 403 logs: %d entries", len(logs))
+        ip = str(data.get("ip") or data.get("remote_addr") or data.get("client_ip") or "unknown").strip()
+        url = str(data.get("url") or data.get("request_uri") or data.get("uri") or "unknown").strip()
+        status_code = str(data.get("status") or data.get("status_code") or "403")
+        time_local = str(data.get("datetime") or data.get("time") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
+        attack_type = str(data.get("attack_type") or "WAF Security Block")
+        rule_id = str(data.get("rule_id") or "WAF-CRS")
+        severity = str(data.get("severity") or "CRITICAL")
+        edge_node = str(data.get("edge_node") or data.get("region") or "Edge-TH")
 
-            if logs:
-                logger.info("Found %d new 403 logs to alert", len(logs))
+        # 1. Save alert into AWS DynamoDB waf_alerts
+        timestamp_int = int(data.get("timestamp") or time.time())
+        try:
+            db.save_alert(
+                user_id="default-user",
+                alert_id=f"{timestamp_int}-{ip}",
+                ip=ip,
+                url=url,
+                status=status_code,
+                message=f"{attack_type} (Rule: {rule_id})"
+            )
+        except Exception as err:
+            logger.error("Error saving alert to DynamoDB: %s", err)
 
-            # [R3 FIX] ใช้ cached user list แทนการ scan ทุก loop
-            users = _get_telegram_users()
+        if not BOT_TOKEN:
+            logger.warning("Telegram BOT_TOKEN missing, alert not sent via Telegram")
+            return
 
-            for log in logs:
-                ip = log.get("ip", "unknown")
-                url = log.get("url", "unknown")
-                timestamp = log.get("timestamp")
-                time_local = log.get("datetime", "unknown")
-                user_id = log.get("user_id", "default-user")
+        # 2. Get registered users with chat_id from DynamoDB
+        users = _get_telegram_users()
+        if not users:
+            logger.warning("No users registered with telegram_chat_id")
+            return
 
-                if not timestamp:
-                    continue
+        msg = (
+            f"🚨 <b>WAF SECURITY ALERT ({status_code})</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🌐 <b>Node:</b> <code>{edge_node}</code>\n"
+            f"📍 <b>Client IP:</b> <code>{ip}</code>\n"
+            f"🎯 <b>URL:</b> <code>{url}</code>\n"
+            f"🛡️ <b>Rule ID:</b> <code>{rule_id}</code> ({severity})\n"
+            f"⚠️ <b>Attack Type:</b> {attack_type}\n"
+            f"⏰ <b>Time:</b> <code>{time_local}</code>"
+        )
 
-                msg = (
-                    f"🚨 WAF ALERT (403)\n"
-                    f"IP: {ip}\n"
-                    f"URL: {url}\n"
-                    f"Status: 403\n"
-                    f"Time: {time_local}"
-                )
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            for user in users:
+                chat_id = user.get("telegram_chat_id")
+                if chat_id and str(chat_id).strip():
+                    try:
+                        res = await client.post(
+                            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                            json={
+                                "chat_id": chat_id,
+                                "text": msg,
+                                "parse_mode": "HTML"
+                            }
+                        )
+                        print(f"✅ Telegram Alert sent to chat_id: {chat_id}, status: {res.status_code}")
+                    except Exception as e:
+                        print(f"❌ Failed to send Telegram alert to {chat_id}: {e}")
 
-                # ส่งให้ทุก user ที่มี telegram_chat_id
-                for user in users:
-                    chat_id = user.get("telegram_chat_id")
-                    if chat_id:
-                        try:
-                            await client.send_message(int(chat_id), msg)
-                        except Exception as e:
-                            logger.error("Send telegram error to %s: %s", chat_id, e)
+    except Exception as e:
+        print(f"❌ Error in dispatch_telegram_alert: {e}")
 
-                # save alert
-                db.save_alert(
-                    user_id=user_id,
-                    alert_id=str(timestamp),
-                    ip=ip,
-                    url=url,
-                    status="403",
-                    message="WAF 403 detected"
-                )
 
-                # mark alerted
-                db.mark_log_alerted(user_id, timestamp)
-
-            await asyncio.sleep(5)
-
-    finally:
-        await client.disconnect()
+# Background worker placeholder (kept for lifecycle compatibility)
+async def alert_worker():
+    logger.info("📡 Telegram Alert Worker active")
+    while True:
+        await asyncio.sleep(60)

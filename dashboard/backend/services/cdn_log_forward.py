@@ -11,6 +11,25 @@ logger = logging.getLogger(__name__)
 db = DynamoDBService()
 ch = ClickHouseService()
 
+SEVERITY_NUM_MAP = {
+    "0": "CRITICAL",
+    "1": "CRITICAL",
+    "2": "CRITICAL",
+    "3": "HIGH",
+    "4": "MEDIUM",
+    "5": "LOW",
+    "6": "INFO",
+    "7": "DEBUG",
+    0: "CRITICAL",
+    1: "CRITICAL",
+    2: "CRITICAL",
+    3: "HIGH",
+    4: "MEDIUM",
+    5: "LOW",
+    6: "INFO",
+    7: "DEBUG",
+}
+
 def save_hybrid_log(data: dict):
     if ch.connected:
         ch.save_log("access_logs", data)
@@ -24,7 +43,10 @@ REGIONS = ["sg", "jp", "th"]
 
 def normalize_cdn_access(data, region):
     method = data.get("method", "")
-    url = data.get("uri", "")
+    # Prioritize actual request URI with query parameters over internal error_page path
+    url = data.get("request_uri") or data.get("uri") or data.get("url") or ""
+    status_code = int(data.get("status", 0))
+    is_blocked = (status_code == 403)
     
     req_time = data.get("request_time", "0")
     try:
@@ -32,18 +54,29 @@ def normalize_cdn_access(data, region):
     except (ValueError, TypeError):
         latency_ms = 0
 
-    # Map edge region to ISO country code for GeoIP analytics
-    # Uses the edge node's region as a reliable approximation —
-    # requests are routed to the closest regional edge by GeoDNS
     _REGION_TO_COUNTRY = {"sg": "SG", "jp": "JP", "th": "TH"}
     country = _REGION_TO_COUNTRY.get(region.lower(), region.upper())
 
+    # Extract Rule ID & Severity from Edge Logs
+    raw_rule = data.get("rule_id") or data.get("waf_rule_id") or data.get("matched_rule_id")
+    raw_sev = data.get("severity") or data.get("waf_severity")
+    
+    severity = None
+    if raw_sev is not None:
+        severity = SEVERITY_NUM_MAP.get(str(raw_sev).strip(), str(raw_sev).upper())
+    elif is_blocked:
+        severity = "CRITICAL"
+
+    attack_type = data.get("attack_type") or data.get("message")
+    if is_blocked and not attack_type:
+        attack_type = f"WAF Block (Rule {raw_rule})" if raw_rule else "WAF Security Block"
+
     return {
         "request_id": data.get("request_id", ""),
-        "ip": data.get("remote_addr"),
+        "ip": data.get("remote_addr") or data.get("ip") or data.get("client_ip"),
         "method": method,
         "url": url,
-        "status": int(data.get("status", 0)),
+        "status": status_code,
         "user_agent": data.get("http_user_agent", ""),
         "timestamp": int(time.time()),
         "datetime": data.get("time", datetime.utcnow().isoformat() + "Z"),
@@ -53,6 +86,9 @@ def normalize_cdn_access(data, region):
         "edge_node": f"edge-{region.lower()}",
         "cache_status": data.get("cache_status", "MISS"),
         "latency_ms": latency_ms,
+        "rule_id": str(raw_rule) if raw_rule else ("WAF-CRS" if is_blocked else None),
+        "severity": severity,
+        "attack_type": attack_type,
         "alert": False,
         "raw": data
     }
@@ -78,8 +114,6 @@ async def process_cdn_log(region):
     async for line in tail_file(log_path):
         try:
             raw = json.loads(line)
-            
-            # Check if logs are batched under 'logs' array
             logs_to_process = raw.get("logs", [raw]) if isinstance(raw, dict) else [raw]
             
             for log_entry in logs_to_process:
