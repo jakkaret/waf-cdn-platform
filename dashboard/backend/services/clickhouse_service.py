@@ -169,7 +169,7 @@ class ClickHouseService:
         if not self.connected:
             return {"logs": [], "total": 0, "page": page, "limit": limit, "total_pages": 1}
         
-        limit = max(1, min(limit, 100))
+        limit = max(1, min(limit, 1000))
         page = max(1, page)
         offset = (page - 1) * limit
         

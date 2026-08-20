@@ -83,9 +83,9 @@ export const Dashboard: React.FC = () => {
   }
 
   // Calculations
-  const blockedCount = logs.filter((l) => l.status === 403 || l.status === 429).length
-  const totalRequests = logs.length
-  const uniqueIPs = new Set(logs.map((l) => l.ip)).size
+  const totalRequests = analytics?.total_requests ?? logs.length
+  const blockedCount = analytics?.blocked_requests ?? logs.filter((l) => l.status === 403 || l.status === 429).length
+  const uniqueIPs = analytics?.unique_ips ?? new Set(logs.map((l) => l.ip)).size
   const blockRate = totalRequests > 0 ? ((blockedCount / totalRequests) * 100).toFixed(1) : '0.0'
 
   // Time aggregated timeline
