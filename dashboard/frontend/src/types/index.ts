@@ -49,6 +49,8 @@ export interface WafAlert {
   status: string
   message: string
   timestamp: string
+  rule_id?: string | null
+  severity?: string | null
 }
 
 export interface CdnNode {

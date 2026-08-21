@@ -118,12 +118,15 @@ app.include_router(auth.router)
 app.include_router(rules.router)
 app.include_router(alerts.router)
 app.include_router(cdn.router)
-from api import ml, ml_rules, analytics, origins, domains
+from api import ml, ml_rules, analytics, origins, domains, ip_rules, rate_limits, settings
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
 app.include_router(origins.router)
 app.include_router(domains.router)
+app.include_router(ip_rules.router)
+app.include_router(rate_limits.router)
+app.include_router(settings.router)
 
 # Error Handlers
 from fastapi import Request

@@ -12,6 +12,9 @@ import OAuthSuccess from './pages/OAuthSuccess'
 import Dashboard from './pages/Dashboard'
 import Logs from './pages/Logs'
 import Rules from './pages/Rules'
+import IPRules from './pages/IPRules'
+import RateLimiting from './pages/RateLimiting'
+import Settings from './pages/Settings'
 import Alerts from './pages/Alerts'
 import Users from './pages/Users'
 import CDN from './pages/CDN'
@@ -94,6 +97,22 @@ export const App: React.FC = () => {
             }
           />
           <Route
+            path="/ip-rules"
+            element={
+              <ProtectedRoute>
+                <IPRules />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rate-limits"
+            element={
+              <ProtectedRoute>
+                <RateLimiting />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/ml-rules"
             element={
               <ProtectedRoute>
@@ -138,6 +157,14 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 <MLAnalyst />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <Settings />
               </ProtectedRoute>
             }
           />

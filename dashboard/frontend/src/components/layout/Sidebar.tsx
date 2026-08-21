@@ -14,6 +14,9 @@ import {
   Sparkles,
   Shield,
   Activity,
+  Ban,
+  Gauge,
+  Settings as SettingsIcon,
 } from 'lucide-react'
 
 export const Sidebar: React.FC = () => {
@@ -35,9 +38,11 @@ export const Sidebar: React.FC = () => {
       ],
     },
     {
-      label: 'Security & Rules',
+      label: 'Security & Access Control',
       items: [
         { label: 'WAF Rules', path: '/rules', icon: <ShieldAlert size={15} />, roles: ['admin', 'viewer'] },
+        { label: 'IP Access List', path: '/ip-rules', icon: <Ban size={15} />, roles: ['admin', 'viewer'] },
+        { label: 'Rate Limiting', path: '/rate-limits', icon: <Gauge size={15} />, roles: ['admin', 'viewer'] },
         { label: 'ML Anomaly Rules', path: '/ml-rules', icon: <Sparkles size={15} />, roles: ['admin', 'viewer'] },
         { label: 'AI Security Analyst', path: '/ml-analyst', icon: <Brain size={15} />, roles: ['admin', 'viewer'] },
         { label: 'Alert Center', path: '/alerts', icon: <Bell size={15} />, roles: ['admin', 'viewer'] },
@@ -50,15 +55,16 @@ export const Sidebar: React.FC = () => {
       ],
     },
     {
-      label: 'Administration',
+      label: 'Administration & System',
       items: [
         { label: 'Access Control', path: '/users', icon: <Users size={15} />, roles: ['admin'] },
+        { label: 'System Settings', path: '/settings', icon: <SettingsIcon size={15} />, roles: ['admin', 'viewer'] },
       ],
     },
   ]
 
   return (
-    <aside className="w-[240px] bg-[var(--bg-surface)] flex flex-col h-screen fixed left-0 top-0 border-r border-[var(--bg-border)] z-30 select-none">
+    <aside className="w-[240px] bg-[var(--bg-surface)] flex flex-col h-screen fixed left-0 top-0 border-r border-[var(--bg-border)] z-50 select-none">
       {/* Brand Header */}
       <div className="h-16 px-4 flex items-center justify-between border-b border-[var(--bg-border)] bg-[var(--bg-surface)]">
         <div className="flex items-center gap-2.5">

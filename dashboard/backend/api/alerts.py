@@ -32,12 +32,12 @@ async def _cleanup_expired_codes():
 # GET /api/alerts/recent
 @router.get("/recent")
 async def get_recent_alerts(
-    limit: int = 50,
+    limit: int = 200,
     current_user: dict = Depends(get_current_user),
 ):
     try:
-        if limit > 100:
-            limit = 100
+        if limit > 500:
+            limit = 500
         response = db.alerts_table.scan(Limit=limit)
         alerts = response.get("Items", [])
         alerts.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
