@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rulesApi } from '../api/rules'
 import { TopBar } from '../components/layout/TopBar'
@@ -284,9 +285,17 @@ export const Rules: React.FC = () => {
       </div>
 
       {/* Create / Edit Rule Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="w-full max-w-lg dash-card overflow-hidden shadow-2xl border border-[var(--bg-border-hover)]">
+      {isModalOpen && typeof document !== 'undefined' && createPortal(
+        <div
+          className="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsModalOpen(false)
+          }}
+        >
+          <div
+            className="dash-modal w-full max-w-lg shadow-2xl animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="dash-card-header bg-[var(--bg-surface-elevated)]">
               <div className="flex items-center gap-2">
                 <Code size={16} className="text-orange-500" />
@@ -397,7 +406,8 @@ export const Rules: React.FC = () => {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

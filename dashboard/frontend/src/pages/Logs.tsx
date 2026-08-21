@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { logsApi } from '../api/logs'
 import { TopBar } from '../components/layout/TopBar'
@@ -427,9 +428,17 @@ export const Logs: React.FC = () => {
       </div>
 
       {/* Log Detail Inspector Modal */}
-      {selectedLog && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="w-full max-w-2xl dash-card overflow-hidden shadow-2xl border border-[var(--bg-border-hover)]">
+      {selectedLog && typeof document !== 'undefined' && createPortal(
+        <div
+          className="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedLog(null)
+          }}
+        >
+          <div
+            className="dash-modal w-full max-w-2xl shadow-2xl animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="dash-card-header bg-[var(--bg-surface-elevated)]">
               <div className="flex items-center gap-2.5">
                 <Code size={16} className="text-orange-500" />
@@ -525,7 +534,8 @@ export const Logs: React.FC = () => {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
