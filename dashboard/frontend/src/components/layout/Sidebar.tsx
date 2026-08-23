@@ -12,8 +12,6 @@ import {
   Server,
   Brain,
   Sparkles,
-  Shield,
-  Activity,
   Ban,
   Gauge,
   Settings as SettingsIcon,
@@ -68,13 +66,11 @@ export const Sidebar: React.FC = () => {
       {/* Brand Header */}
       <div className="h-16 px-4 flex items-center justify-between border-b border-[var(--bg-border)] bg-[var(--bg-surface)]">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white shadow-sm shadow-orange-500/20">
-            <Shield size={17} className="stroke-[2.2]" />
-          </div>
+          <img src="/firewall.png" alt="Firewall" className="w-8 h-8 object-contain rounded-lg drop-shadow-md" />
           <div>
             <div className="flex items-center gap-1.5">
               <span className="text-[14px] font-bold text-[var(--text-primary)] tracking-tight font-mono">
-                CloudWAF
+                Firewall WAF
               </span>
               <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-orange-500/10 text-orange-500 border border-orange-500/20 uppercase font-mono">
                 EDGE
@@ -82,7 +78,7 @@ export const Sidebar: React.FC = () => {
             </div>
             <div className="text-[10.5px] text-[var(--text-muted)] tracking-tight flex items-center gap-1 mt-0.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span>ModSec CRS 3.3</span>
+              <span>ModSec CRS 4.0</span>
             </div>
           </div>
         </div>
@@ -108,23 +104,22 @@ export const Sidebar: React.FC = () => {
                       `group flex items-center gap-2.5 px-3 py-2 text-[12.5px] rounded-md transition-all duration-150 relative ${
                         isActive
                           ? 'bg-orange-500/10 text-orange-500 font-semibold dark:text-orange-400 border border-orange-500/20'
-                          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-transparent'
+                          : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
                       }`
                     }
                   >
                     {({ isActive }) => (
                       <>
                         <span
-                          className={`shrink-0 transition-colors ${
-                            isActive ? 'text-orange-500 dark:text-orange-400' : 'text-[var(--text-muted)] group-hover:text-[var(--text-primary)]'
+                          className={`transition-colors ${
+                            isActive
+                              ? 'text-orange-500 dark:text-orange-400'
+                              : 'text-[var(--text-muted)] group-hover:text-[var(--text-primary)]'
                           }`}
                         >
                           {item.icon}
                         </span>
-                        <span className="truncate">{item.label}</span>
-                        {isActive && (
-                          <span className="ml-auto w-1 h-3.5 rounded-full bg-orange-500" />
-                        )}
+                        <span className="font-mono">{item.label}</span>
                       </>
                     )}
                   </NavLink>
@@ -135,29 +130,31 @@ export const Sidebar: React.FC = () => {
         })}
       </nav>
 
-      {/* Footer User Card */}
+      {/* Footer Profile & Logout */}
       <div className="p-3 border-t border-[var(--bg-border)] bg-[var(--bg-surface)]">
-        <div className="px-3 py-2 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border-subtle)] mb-2 flex items-center justify-between">
-          <div className="min-w-0 pr-2">
-            <p className="text-[12px] font-semibold text-[var(--text-primary)] truncate m-0 font-mono">
-              {user?.username || user?.email}
-            </p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10.5px] font-mono text-[var(--text-muted)] capitalize">
-                {user?.role || 'Viewer'} Mode
+        <div className="flex items-center justify-between p-2 rounded-lg bg-[var(--bg-app)] border border-[var(--bg-border-subtle)]">
+          <div className="flex items-center gap-2.5 overflow-hidden">
+            <div className="w-7 h-7 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-mono text-[11px] font-bold shrink-0">
+              {(user?.username || 'U')[0].toUpperCase()}
+            </div>
+            <div className="truncate">
+              <p className="text-[12px] font-medium text-[var(--text-primary)] truncate m-0 font-mono">
+                {user?.username || 'User'}
+              </p>
+              <span className="text-[10px] text-[var(--text-muted)] uppercase font-mono tracking-wider">
+                {user?.role || 'Viewer'}
               </span>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="p-1.5 rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+            title="Sign Out"
+          >
+            <LogOut size={14} />
+          </button>
         </div>
-
-        <button
-          onClick={handleLogout}
-          className="flex items-center justify-center gap-2 px-3 py-1.5 w-full text-[12px] font-medium text-[var(--text-muted)] hover:text-red-400 rounded-md hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all cursor-pointer"
-        >
-          <LogOut size={13.5} />
-          <span>Sign out</span>
-        </button>
       </div>
     </aside>
   )

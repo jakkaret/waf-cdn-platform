@@ -1,66 +1,143 @@
 import os
 import sys
-import time
-import requests
+import asyncio
 import json
+import urllib.request
+import urllib.parse
+from typing import Dict, Any
 
-# ML API Endpoint (FastAPI Microservice)
-ML_API_URL = "http://localhost:5000/predict"
+# ML API Endpoints
+BASE_ML_URL = os.environ.get("ML_API_URL", "http://127.0.0.1:5000").rstrip("/")
+PREDICT_URL = f"{BASE_ML_URL}/predict" if not BASE_ML_URL.endswith("/predict") else BASE_ML_URL
+RULE_GEN_URL = f"{BASE_ML_URL}/generate-rule"
 
-def analyze_single_log(request_url: str, method: str = "GET", body: str = ""):
-    """Send log event to ML Microservice for prediction."""
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# Log targets: All CDN Edge Nodes (TH, SG, JP) + Main Origin WAF
+TARGET_LOG_FILES = {
+    "TH": os.path.join(BASE_DIR, "logs/cdn/th/access.json"),
+    "SG": os.path.join(BASE_DIR, "logs/cdn/sg/access.json"),
+    "JP": os.path.join(BASE_DIR, "logs/cdn/jp/access.json"),
+    "MAIN-WAF": os.path.join(BASE_DIR, "logs/nginx/access.json")
+}
+
+def send_prediction_request(url: str, method: str = "GET", body: str = "") -> Dict[str, Any]:
+    """Synchronous HTTP call to FastAPI ML Microservice with fast timeout."""
     try:
-        payload = {
-            "url": request_url,
-            "method": method,
-            "body": body
-        }
-        res = requests.post(ML_API_URL, json=payload, timeout=2.0)
-        if res.status_code == 200:
-            return res.json()
+        data = json.dumps({"url": url, "method": method, "body": body}).encode("utf-8")
+        req = urllib.request.Request(PREDICT_URL, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            if resp.status == 200:
+                return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
-        print(f"[!] Error connecting to ML API: {e}")
+        # Ignore silent network hiccups
+        pass
     return None
 
-def process_log_stream(log_file_path: str):
-    """
-    Tail log file and process incoming WAF logs continuously.
-    """
-    print(f"[*] Starting Real-time Log Stream Analyzer on: {log_file_path}")
-    if not os.path.exists(log_file_path):
-        print(f"[!] Log file not found at {log_file_path}. Creating sample log stream...")
-        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
-        with open(log_file_path, "w") as f:
-            f.write("")
+def send_rule_generation_request(url: str, method: str = "GET", body: str = "", attack_type: str = "Anomaly") -> Dict[str, Any]:
+    """Request auto-generation of ModSecurity SecRule."""
+    try:
+        data = json.dumps({"url": url, "method": method, "body": body, "attack_type": attack_type}).encode("utf-8")
+        req = urllib.request.Request(RULE_GEN_URL, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            if resp.status == 200:
+                return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        pass
+    return None
 
-    with open(log_file_path, "r") as f:
-        # Move pointer to end of file
-        f.seek(0, 2)
+async def tail_log_channel(channel_name: str, log_path: str):
+    """Asynchronously tail a specific log file and process events in real-time."""
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    if not os.path.exists(log_path):
+        with open(log_path, "w", encoding="utf-8") as f:
+            pass
+        print(f"[*] Initialized log file for [{channel_name}]: {log_path}")
+
+    print(f"[+] Channel [{channel_name}] active. Watching: {log_path}")
+
+    # Open file and seek to the end
+    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+        f.seek(0, os.SEEK_END)
         while True:
             line = f.readline()
             if not line:
-                time.sleep(1)
+                await asyncio.sleep(0.5)
                 continue
 
-            # Example JSON log parsing: {"ip": "1.2.3.4", "url": "/login", "method": "GET"}
-            try:
-                log_entry = json.loads(line.strip())
-                url = log_entry.get("url") or log_entry.get("request_uri", "")
-                method = log_entry.get("method", "GET")
-                body = log_entry.get("body", "")
-                ip = log_entry.get("ip", "unknown")
+            line = line.strip()
+            if not line:
+                continue
 
-                result = analyze_single_log(url, method, body)
-                if result and result.get("is_anomaly"):
-                    prob = result.get("attack_probability", 0.0) * 100
-                    print(f"🚨 [MALICIOUS DETECTED] IP: {ip:<15} | Prob: {prob:.1f}% | URL: {url}")
-                    # ACTION: Push IP to blocklist or trigger alert
-                else:
-                    print(f"✅ [BENIGN PASS] IP: {ip:<15} | URL: {url}")
+            try:
+                raw = json.loads(line)
+                # Some logs arrive as array of logs or wrapped dict
+                log_entries = raw.get("logs", [raw]) if isinstance(raw, dict) else [raw]
+
+                for log_entry in log_entries:
+                    if not isinstance(log_entry, dict):
+                        continue
+
+                    url = (
+                        log_entry.get("request_uri") or
+                        log_entry.get("uri") or
+                        log_entry.get("url") or
+                        log_entry.get("request") or
+                        ""
+                    )
+                    if " " in url:
+                        parts = url.split(" ")
+                        method = parts[0]
+                        url = parts[1] if len(parts) > 1 else url
+                    else:
+                        method = log_entry.get("method") or log_entry.get("request_method") or "GET"
+
+                    body = log_entry.get("body") or log_entry.get("request_body") or ""
+                    ip = (
+                        log_entry.get("remote_addr") or
+                        log_entry.get("client_ip") or
+                        log_entry.get("ip") or
+                        "unknown"
+                    )
+
+                    if not url:
+                        continue
+
+                    # Run ML Prediction in thread pool to avoid blocking async loop
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(None, send_prediction_request, url, method, body)
+
+                    if result and result.get("is_anomaly"):
+                        prob = result.get("attack_probability", 0.0) * 100
+                        print(f"🚨 [{channel_name} DETECTED] IP: {ip:<15} | Prob: {prob:5.1f}% | URL: {url}")
+
+                        # Trigger Auto Rule Suggestion
+                        rule_res = await loop.run_in_executor(None, send_rule_generation_request, url, method, body, "Threat Payload")
+                        if rule_res and rule_res.get("pattern"):
+                            print(f"✨ [{channel_name} RULE SUGGESTED] Pattern: {rule_res.get('pattern')} -> Pending Approval")
+                    elif result:
+                        print(f"✅ [{channel_name} PASS] IP: {ip:<15} | URL: {url}")
 
             except json.JSONDecodeError:
                 pass
+            except Exception as ex:
+                print(f"[!] Error in channel [{channel_name}]: {ex}")
+
+async def main():
+    print("==================================================================")
+    print("🚀 WAF Real-time Multi-Channel Stream Log Analyzer Starting...")
+    print(f"[*] Target ML Microservice: {PREDICT_URL}")
+    print(f"[*] Channels: {list(TARGET_LOG_FILES.keys())}")
+    print("==================================================================")
+
+    tasks = [
+        tail_log_channel(name, path)
+        for name, path in TARGET_LOG_FILES.items()
+    ]
+    await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    sample_log_path = "/home/chirachot/seminar/waf_project/logs/waf_stream.log"
-    process_log_stream(sample_log_path)
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n[*] Log Analyzer stopped by user.")

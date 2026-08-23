@@ -39,6 +39,7 @@ services:
       - MYSQL_DATABASE=dvwa
       - MYSQL_USERNAME=dvwa
       - MYSQL_PASSWORD=dvwa
+    restart: unless-stopped
     networks:
       - waf-net
 

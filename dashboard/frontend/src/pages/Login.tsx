@@ -53,11 +53,9 @@ export const Login: React.FC = () => {
       {/* Top Bar */}
       <header className="flex justify-between items-center px-6 py-4 border-b border-[var(--bg-border-subtle)]">
         <Link to="/" className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white shadow-sm">
-            <Shield size={18} className="stroke-[2.2]" />
-          </div>
+          <img src="/firewall.png" alt="Firewall" className="w-8 h-8 object-contain rounded-lg drop-shadow-sm" />
           <span className="font-bold text-[15px] font-mono tracking-tight text-[var(--text-primary)]">
-            CloudWAF
+            Firewall WAF
           </span>
         </Link>
         <ThemeToggle />
@@ -72,7 +70,7 @@ export const Login: React.FC = () => {
               Sign in
             </h1>
             <p className="text-[12.5px] text-[var(--text-muted)]">
-              Enter your credentials to continue to CloudWAF
+              Enter your credentials to continue to Firewall WAF
             </p>
           </div>
 

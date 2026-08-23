@@ -22,7 +22,7 @@ server {
     SecAuditLogParts ABCIJDEFHZ
     SecAuditLogRelevantStatus ".*"
     SecRuleEngine On
-    SecRule REQUEST_HEADERS:X-Request-ID "@rx .*" "id:900001,phase:1,pass,setvar:tx.request_id=%{REQUEST_HEADERS.X-Request-ID}"';
+    SecRule REQUEST_HEADERS:X-Request-ID "@rx .*" "id:900001,phase:1,pass,nolog,setvar:tx.request_id=%{REQUEST_HEADERS.X-Request-ID}"';
     location = /healthz {
         access_log off;
     }

@@ -105,22 +105,37 @@ class DynamoDBService:
         url: str,
         status: str,
         message: str,
+        ai_summary: str = None,
+        rule_id: str = None,
+        attack_type: str = None,
+        severity: str = None,
+        edge_node: str = None,
     ) -> bool:
         
         #บันทึก alert ที่จำเป็นลง DynamoDB (waf_alerts)
         
         try:
-            self.alerts_table.put_item(
-                Item={
-                    "user_id": user_id,
-                    "alert_id": alert_id,
-                    "ip": ip,
-                    "url": url,
-                    "status": status,
-                    "message": message,
-                    "timestamp": datetime.now().isoformat() + "Z",  # String ISO
-                }
-            )
+            item = {
+                "user_id": user_id,
+                "alert_id": alert_id,
+                "ip": ip,
+                "url": url,
+                "status": str(status),
+                "message": message,
+                "timestamp": datetime.now().isoformat() + "Z",
+                "read": False
+            }
+            if ai_summary:
+                item["ai_summary"] = ai_summary
+            if rule_id:
+                item["rule_id"] = rule_id
+            if attack_type:
+                item["attack_type"] = attack_type
+            if severity:
+                item["severity"] = severity
+            if edge_node:
+                item["edge_node"] = edge_node
+            self.alerts_table.put_item(Item=item)
             print("Saved alert")
             return True
         except Exception as e:
