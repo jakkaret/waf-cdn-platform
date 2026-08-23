@@ -6,6 +6,7 @@ import httpx
 from datetime import datetime
 from dotenv import load_dotenv
 from services.dynamodb_service import DynamoDBService
+from services.gemini_service import gemini_service
 from boto3.dynamodb.conditions import Attr
 
 load_dotenv()
@@ -48,28 +49,42 @@ def invalidate_user_cache():
 
 
 async def dispatch_telegram_alert(data: dict):
-    """Send real-time Telegram alert for 403 / 429 / Critical attacks and save to DynamoDB waf_alerts"""
+    """Send real-time Telegram alert with Gemini AI Human-Readable Explanation and persist to DB"""
     try:
         ip = str(data.get("ip") or data.get("remote_addr") or data.get("client_ip") or "unknown").strip()
         url = str(data.get("url") or data.get("request_uri") or data.get("uri") or "unknown").strip()
         status_code = str(data.get("status") or data.get("status_code") or "403")
-        time_local = str(data.get("datetime") or data.get("time") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
+        time_local = str(data.get("datetime") or data.get("time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         attack_type = str(data.get("attack_type") or "WAF Security Block")
         rule_id = str(data.get("rule_id") or "WAF-CRS")
         severity = str(data.get("severity") or "CRITICAL")
         edge_node = str(data.get("edge_node") or data.get("region") or "Edge-TH")
 
-        # 1. Save alert into AWS DynamoDB waf_alerts
+        # 1. Generate human-readable AI explanation using Gemini 2.0/Flash
+        ai_summary = await gemini_service.explain_attack(data)
+
+        # 2. Save alert into AWS DynamoDB waf_alerts with AI analysis
         timestamp_int = int(data.get("timestamp") or time.time())
+        alert_id = f"{timestamp_int}-{ip}"
         try:
-            db.save_alert(
-                user_id="default-user",
-                alert_id=f"{timestamp_int}-{ip}",
-                ip=ip,
-                url=url,
-                status=status_code,
-                message=f"{attack_type} (Rule: {rule_id})"
+            db.alerts_table.put_item(
+                Item={
+                    "user_id": "default-user",
+                    "alert_id": alert_id,
+                    "ip": ip,
+                    "url": url,
+                    "status": status_code,
+                    "rule_id": rule_id,
+                    "attack_type": attack_type,
+                    "severity": severity,
+                    "edge_node": edge_node,
+                    "ai_summary": ai_summary,
+                    "message": f"{attack_type} (Rule: {rule_id})",
+                    "timestamp": datetime.now().isoformat(),
+                    "read": False
+                }
             )
+            print(f"✅ Alert saved to DynamoDB with AI summary: {alert_id}")
         except Exception as err:
             logger.error("Error saving alert to DynamoDB: %s", err)
 
@@ -77,12 +92,13 @@ async def dispatch_telegram_alert(data: dict):
             logger.warning("Telegram BOT_TOKEN missing, alert not sent via Telegram")
             return
 
-        # 2. Get registered users with chat_id from DynamoDB
+        # 3. Get registered users with chat_id from DynamoDB
         users = _get_telegram_users()
         if not users:
             logger.warning("No users registered with telegram_chat_id")
             return
 
+        # Format beautiful Telegram HTML Message with AI Explanation
         msg = (
             f"🚨 <b>WAF SECURITY ALERT ({status_code})</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
@@ -90,7 +106,10 @@ async def dispatch_telegram_alert(data: dict):
             f"📍 <b>Client IP:</b> <code>{ip}</code>\n"
             f"🎯 <b>URL:</b> <code>{url}</code>\n"
             f"🛡️ <b>Rule ID:</b> <code>{rule_id}</code> ({severity})\n"
-            f"⚠️ <b>Attack Type:</b> {attack_type}\n"
+            f"⚠️ <b>Attack Type:</b> {attack_type}\n\n"
+            f"🤖 <b>[บทวิเคราะห์โดย AI]:</b>\n"
+            f"<i>{ai_summary}</i>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
             f"⏰ <b>Time:</b> <code>{time_local}</code>"
         )
 
@@ -115,7 +134,6 @@ async def dispatch_telegram_alert(data: dict):
         print(f"❌ Error in dispatch_telegram_alert: {e}")
 
 
-# Background worker placeholder (kept for lifecycle compatibility)
 async def alert_worker():
     logger.info("📡 Telegram Alert Worker active")
     while True:

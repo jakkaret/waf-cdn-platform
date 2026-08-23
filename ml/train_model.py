@@ -69,9 +69,17 @@ def train_and_evaluate():
     print(f"[*] Train set size: {len(X_train)} (Benign: {sum(y_train == 0)}, Attack: {sum(y_train == 1)})")
     print(f"[*] Test set size:  {len(X_test)} (Benign: {sum(y_test == 0)}, Attack: {sum(y_test == 1)})")
 
-    # 3. Train Supervised Classifier (Random Forest) for High Accuracy (>90-95%)
-    print("[*] Training Random Forest Classifier (n_estimators=200) ...")
-    rf_model = RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1)
+    # 3. Train Supervised Classifier (Random Forest) for High Accuracy & Strong Generalization
+    print("[*] Training Random Forest Classifier (n_estimators=200, max_depth=20, min_samples_leaf=3) ...")
+    rf_model = RandomForestClassifier(
+        n_estimators=200,
+        max_depth=20,
+        min_samples_split=6,
+        min_samples_leaf=3,
+        class_weight="balanced",
+        random_state=42,
+        n_jobs=-1
+    )
     rf_model.fit(X_train, y_train)
 
     # 4. Train Unsupervised Anomaly Detector (Isolation Forest) for Anomaly Score

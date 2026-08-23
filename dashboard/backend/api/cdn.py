@@ -1,3 +1,4 @@
+from services.pii_masker import pii_masker
 import os
 import time
 import httpx
@@ -274,7 +275,11 @@ async def ingest_logs(request: _Request):
                 f.write(_json.dumps(entry) + "\n")
                 
                 # Real-time Ingestion directly into ClickHouse
+                masked_entry, pii_meta = pii_masker.mask_payload(entry)
+                entry.update(masked_entry)
                 norm = normalize_cdn_access(entry, region)
+                if pii_meta:
+                    norm.update(pii_meta)
                 ch.save_log("access_logs", norm)
 
                 # Trigger Real-time Telegram Alert & DynamoDB Alert for Blocked / Critical Attacks

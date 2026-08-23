@@ -40,6 +40,18 @@ def generate_modsec_pattern(url: str, body: str = "") -> str:
     if re.search(r"(\||;|`)\s*(cat|nc|wget|curl|bash|sh)\s", decoded_str, re.I):
         return r"@rx (?i)(?:\||;|`)\s*(cat|nc|wget|curl|bash|sh)\s"
 
+    # 5. SSRF / Cloud Metadata
+    if "169.254.169.254" in decoded_str or "metadata.google" in decoded_str:
+        return r"@rx (?i)(169\.254\.169\.254|metadata\.google)"
+
+    # 6. SSTI (Template Injection)
+    if re.search(r"\{\{.*?\}\}|\$\{.*?\}", decoded_str):
+        return r"@rx (\{\{.*?\}\}|\$\{.*?\})"
+
+    # 7. NoSQL / Log4j Injection
+    if re.search(r"\$ne|\$gt|\$where|\$\{jndi:", decoded_str, re.I):
+        return r"@rx (?i)(\$ne|\$gt|\$where|\$\{jndi:)"
+
     # Fallback: Escaped specific query fragment
     if body:
         safe_body = re.escape(body[:40])

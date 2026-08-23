@@ -16,6 +16,8 @@ from fastapi import FastAPI, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from api import rules
+from api import limiter as limiter_api
+from api import logs as logs_api
 from api import auth
 from api import cdn
 from services.log_forward import log_forward_worker
@@ -116,9 +118,11 @@ async def fetch_recent_logs(
 # API Routers
 app.include_router(auth.router)
 app.include_router(rules.router)
+app.include_router(limiter_api.router)
+app.include_router(logs_api.router)
 app.include_router(alerts.router)
 app.include_router(cdn.router)
-from api import ml, ml_rules, analytics, origins, domains, ip_rules, rate_limits, settings
+from api import ml, ml_rules, analytics, origins, domains, ip_rules, rate_limits, settings, ai_summary
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
@@ -127,6 +131,7 @@ app.include_router(domains.router)
 app.include_router(ip_rules.router)
 app.include_router(rate_limits.router)
 app.include_router(settings.router)
+app.include_router(ai_summary.router)
 
 # Error Handlers
 from fastapi import Request
@@ -187,6 +192,11 @@ async def serve_react_app(full_path: str):
     if full_path.startswith("api/"):
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="API route not found")
+
+    if full_path:
+        target_file = FRONTEND_DIST / full_path
+        if target_file.is_file():
+            return FileResponse(str(target_file))
 
     index_file = FRONTEND_DIST / "index.html"
     if index_file.exists():

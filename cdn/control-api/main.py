@@ -100,36 +100,43 @@ def remove_block(ip: str, x_control_token: str = Header(default="")) -> dict:
 
 @app.get("/api/sync/bundle")
 def get_bundle() -> Response:
-    # Build a gzip tar with rules + global blocklist assets.
-    conn = db()
-    rows = conn.execute("SELECT ip FROM blocklist ORDER BY created_at DESC").fetchall()
-    conn.close()
-    ips = [ip for (ip,) in rows if ip]
-    blocklist_txt = "\n".join(ips) + ("\n" if ips else "")
-
+    # Build a gzip tar with rules + global blocklist assets from RULES_DIR
     tar_buf = io.BytesIO()
     with tarfile.open(fileobj=tar_buf, mode="w") as tar:
-        # Custom rules from repo
+        # 1. Add all .conf and .txt files from RULES_DIR
         if RULES_DIR.exists():
-            for p in sorted(RULES_DIR.glob("*.conf")):
-                data = p.read_bytes()
-                info = tarfile.TarInfo(name=p.name)
-                info.size = len(data)
-                info.mtime = int(time.time())
-                tar.addfile(info, io.BytesIO(data))
+            for p in sorted(RULES_DIR.glob("*")):
+                if p.is_file() and (p.suffix in [".conf", ".txt", ".data"] or p.name.endswith(".conf") or p.name.endswith(".txt")):
+                    data = p.read_bytes()
+                    info = tarfile.TarInfo(name=p.name)
+                    info.size = len(data)
+                    info.mtime = int(p.stat().st_mtime)
+                    tar.addfile(info, io.BytesIO(data))
 
-        # Global blocklist files
-        bl_bytes = blocklist_txt.encode("utf-8")
-        bl_info = tarfile.TarInfo(name="global_blocklist.txt")
-        bl_info.size = len(bl_bytes)
-        bl_info.mtime = int(time.time())
-        tar.addfile(bl_info, io.BytesIO(bl_bytes))
+        # 2. If global_blocklist.txt exists in control.db but not in RULES_DIR, merge
+        conn = db()
+        rows = conn.execute("SELECT ip FROM blocklist ORDER BY created_at DESC").fetchall()
+        conn.close()
+        db_ips = [ip for (ip,) in rows if ip]
 
-        rule_bytes = _block_rule_content().encode("utf-8")
-        rule_info = tarfile.TarInfo(name="custom-000000-global-blocklist.conf")
-        rule_info.size = len(rule_bytes)
-        rule_info.mtime = int(time.time())
-        tar.addfile(rule_info, io.BytesIO(rule_bytes))
+        bl_file = RULES_DIR / "global_blocklist.txt"
+        file_ips = []
+        if bl_file.exists():
+            file_ips = [line.strip() for line in bl_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+        all_ips = list(dict.fromkeys(file_ips + db_ips))
+        if all_ips:
+            bl_bytes = ("\n".join(all_ips) + "\n").encode("utf-8")
+            bl_info = tarfile.TarInfo(name="global_blocklist.txt")
+            bl_info.size = len(bl_bytes)
+            bl_info.mtime = int(time.time())
+            tar.addfile(bl_info, io.BytesIO(bl_bytes))
+
+            rule_bytes = _block_rule_content().encode("utf-8")
+            rule_info = tarfile.TarInfo(name="custom-000000-global-blocklist.conf")
+            rule_info.size = len(rule_bytes)
+            rule_info.mtime = int(time.time())
+            tar.addfile(rule_info, io.BytesIO(rule_bytes))
 
     gz = gzip.compress(tar_buf.getvalue())
     return Response(content=gz, media_type="application/gzip")
