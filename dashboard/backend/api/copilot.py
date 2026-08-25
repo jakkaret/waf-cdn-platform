@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from services.gemini_service import gemini_service, CANDIDATE_MODELS
+from services.gemini_service import GeminiService
 from services.clickhouse_service import ClickHouseService
 from services.dynamodb_service import DynamoDBService
 from services.rbac import require_viewer_or_above
@@ -17,6 +17,14 @@ router = APIRouter(prefix="/api/copilot", tags=["copilot"])
 
 ch = ClickHouseService()
 db = DynamoDBService()
+gemini_service = GeminiService()
+
+CANDIDATE_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-flash-lite-latest"
+]
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
