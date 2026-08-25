@@ -1,5 +1,6 @@
 import React from 'react'
 import { Sidebar } from './Sidebar'
+import { AICopilotWidget } from '../copilot/AICopilotWidget'
 
 export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
@@ -10,6 +11,9 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
           {children}
         </div>
       </main>
+      <AICopilotWidget />
     </div>
   )
 }
+
+export default AppLayout

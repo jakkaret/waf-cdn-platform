@@ -3,9 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { logsApi } from '../api/logs'
 import { systemApi } from '../api/system'
 import { analyticsApi } from '../api/analytics'
+import { useOriginFilterStore } from '../store/originFilterStore'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
-import { StatCard } from '../components/ui/StatCard'
 import { useThemeStore } from '../store/themeStore'
 import {
   AreaChart,
@@ -17,7 +17,6 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
-  Legend,
 } from 'recharts'
 import {
   ShieldAlert,
@@ -28,12 +27,14 @@ import {
   Zap,
   Server,
   Terminal,
-  Clock,
   Sparkles,
   Copy,
   Check,
-  AlertOctagon,
-  ArrowUpRight,
+  TrendingUp,
+  TrendingDown,
+  Shield,
+  Layers,
+  X,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -42,17 +43,18 @@ export const Dashboard: React.FC = () => {
   const [chartView, setChartView] = useState<'area' | 'bar'>('area')
   const [copiedIp, setCopiedIp] = useState<string | null>(null)
   const { theme } = useThemeStore()
+  const { selectedOrigin, selectedOriginLabel, setSelectedOrigin } = useOriginFilterStore()
 
   const { data: logs = [], isLoading: isLogsLoading, isFetching: isLogsFetching, refetch: refetchLogs } = useQuery({
-    queryKey: ['logs-dashboard'],
-    queryFn: () => logsApi.getRecentLogs(200),
+    queryKey: ['logs-dashboard', selectedOrigin],
+    queryFn: () => logsApi.getRecentLogs(200, selectedOrigin),
     refetchInterval: 8000,
     enabled: activeTab === 'security',
   })
 
   const { data: analytics, isLoading: isAnalyticsLoading, isFetching: isAnalyticsFetching, refetch: refetchAnalytics } = useQuery({
-    queryKey: ['analytics-summary'],
-    queryFn: () => analyticsApi.getSummary(),
+    queryKey: ['analytics-summary', selectedOrigin],
+    queryFn: () => analyticsApi.getSummary(selectedOrigin),
     refetchInterval: 8000,
     enabled: activeTab === 'security',
   })
@@ -68,7 +70,7 @@ export const Dashboard: React.FC = () => {
     if (activeTab === 'security') {
       refetchLogs()
       refetchAnalytics()
-      toast.success('Security analytics refreshed')
+      toast.success(`Refreshed telemetry for: ${selectedOriginLabel}`)
     } else {
       refetchSystem()
       toast.success('Infrastructure status refreshed')
@@ -121,7 +123,7 @@ export const Dashboard: React.FC = () => {
   const isSyncing = isLogsFetching || isAnalyticsFetching || isSystemFetching
 
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-in pb-8">
       {/* Top Header Bar */}
       <TopBar
         title="Security Operations Center"
@@ -134,10 +136,13 @@ export const Dashboard: React.FC = () => {
         action={
           <div className="flex items-center gap-2">
             {/* View Switcher */}
-            <div className="flex rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] p-0.5">
+            <div className="flex rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] p-0.5" role="tablist" aria-label="Dashboard perspective tabs">
               <button
+                role="tab"
+                aria-selected={activeTab === 'security'}
+                aria-controls="security-panel"
                 onClick={() => setActiveTab('security')}
-                className={`px-3 py-1 text-[12px] font-semibold rounded-md transition-all font-mono ${
+                className={`px-3 py-1 text-[12px] font-semibold rounded-md transition-all font-mono cursor-pointer focus:outline-none focus:ring-1 focus:ring-orange-500 ${
                   activeTab === 'security'
                     ? 'bg-orange-500 text-white shadow-sm'
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -146,8 +151,11 @@ export const Dashboard: React.FC = () => {
                 Security Analytics
               </button>
               <button
+                role="tab"
+                aria-selected={activeTab === 'infrastructure'}
+                aria-controls="infrastructure-panel"
                 onClick={() => setActiveTab('infrastructure')}
-                className={`px-3 py-1 text-[12px] font-semibold rounded-md transition-all font-mono ${
+                className={`px-3 py-1 text-[12px] font-semibold rounded-md transition-all font-mono cursor-pointer focus:outline-none focus:ring-1 focus:ring-orange-500 ${
                   activeTab === 'infrastructure'
                     ? 'bg-orange-500 text-white shadow-sm'
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -161,7 +169,8 @@ export const Dashboard: React.FC = () => {
             <button
               onClick={handleRefresh}
               disabled={isSyncing}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--bg-surface)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] text-[12px] font-mono font-medium text-[var(--text-primary)] rounded-md hover:bg-[var(--bg-hover)] shadow-sm transition-all cursor-pointer"
+              aria-label="Refresh telemetry data"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--bg-surface)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] text-[12px] font-mono font-medium text-[var(--text-primary)] rounded-md hover:bg-[var(--bg-hover)] shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-orange-500"
               title="Refresh telemetry"
             >
               <RefreshCw size={13} className={isSyncing ? 'animate-spin text-orange-500' : 'text-[var(--text-muted)]'} />
@@ -171,80 +180,163 @@ export const Dashboard: React.FC = () => {
         }
       />
 
+      {/* Origin Scope Filter Indicator Banner */}
+      {selectedOrigin !== 'ALL' && activeTab === 'security' && (
+        <div className="mb-5 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-between gap-3 text-indigo-300 font-mono text-[12px] animate-fade-in">
+          <div className="flex items-center gap-2 truncate">
+            <Shield size={16} className="text-indigo-400 shrink-0" />
+            <span className="truncate">
+              Currently Scoped to Origin:{' '}
+              <strong className="text-white font-bold">{selectedOriginLabel}</strong>{' '}
+              <span className="text-indigo-300/70 text-[11px]">({selectedOrigin})</span>
+            </span>
+          </div>
+          <button
+            onClick={() => setSelectedOrigin('ALL', 'All Managed Origins (ทั้งหมด)')}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-white text-[11px] font-bold transition-colors cursor-pointer shrink-0"
+          >
+            <X size={12} />
+            <span>Show All Origins</span>
+          </button>
+        </div>
+      )}
+
       {activeTab === 'security' ? (
-        <div className="space-y-6 animate-fade-in">
-          {/* Top 4 KPI Metrics */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              label="Total Inbound Traffic"
-              value={isAnalyticsLoading ? '—' : (analytics?.total_requests ?? totalRequests).toLocaleString()}
-              color="blue"
-              icon={<Activity size={16} />}
-              sub="HTTP/S Requests Analyzed"
-              trend={{
-                value: 4.2,
-                label: 'vs 1h ago',
-                isPositive: true,
-              }}
-            />
+        <div id="security-panel" role="tabpanel" aria-label="Security Analytics Dashboard" className="animate-fade-in">
 
-            <StatCard
-              label="Threats Mitigated"
-              value={isAnalyticsLoading ? '—' : (analytics?.blocked_requests ?? blockedCount).toLocaleString()}
-              color="red"
-              icon={<ShieldAlert size={16} />}
-              badgeText={`${blockRate}% Block Rate`}
-              sub="OWASP CRS & Custom Rules"
-              trend={{
-                value: 12.8,
-                label: 'anomaly burst',
-                isPositive: false,
-              }}
-            />
+          {/* ═══ Section 1: KPI Summary Strip ═══ */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
 
-            <StatCard
-              label="Distinct Client IPs"
-              value={isLogsLoading ? '—' : uniqueIPs.toLocaleString()}
-              color="amber"
-              icon={<Globe size={16} />}
-              sub="Unique Origin Addresses"
-              badgeText="Global Sources"
-            />
+            {/* Primary KPI: Total Traffic */}
+            <div className="dash-card p-4 sm:p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <span className="text-[11px] font-semibold tracking-wide text-[var(--text-muted)] uppercase font-mono">
+                  Inbound Traffic
+                </span>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-sky-500/10">
+                  <Activity size={15} className="text-sky-600 dark:text-sky-400" />
+                </div>
+              </div>
+              <span className="text-[26px] font-bold font-mono tracking-tight leading-none text-[var(--text-primary)]">
+                {isAnalyticsLoading ? '—' : (analytics?.total_requests ?? totalRequests).toLocaleString()}
+              </span>
+              <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center justify-between text-[11px]">
+                <span className="text-[var(--text-muted)] font-mono">HTTP/S Analyzed</span>
+                <span className="flex items-center gap-1 font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                  <TrendingUp size={11} /> 4.2%
+                </span>
+              </div>
+            </div>
 
-            <StatCard
-              label="Engine Health & SLA"
-              value="100.0%"
-              color="green"
-              icon={<ShieldCheck size={16} />}
-              badgeText={`${analytics?.average_latency_ms || 14}ms Latency`}
-              sub="ModSec v3 + CRS 3.3.5 Active"
-            />
+            {/* Decision KPI: Threats Mitigated */}
+            <div className="dash-card p-4 sm:p-5 flex flex-col justify-between bg-red-50/50 dark:bg-red-950/[0.08] border-red-200/60 dark:border-red-500/15">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <span className="text-[11px] font-semibold tracking-wide text-red-600/70 dark:text-red-400/70 uppercase font-mono">
+                  Threats Mitigated
+                </span>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-red-500/10">
+                  <ShieldAlert size={15} className="text-red-600 dark:text-red-400" />
+                </div>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-[26px] font-bold font-mono tracking-tight leading-none text-red-600 dark:text-red-400">
+                  {isAnalyticsLoading ? '—' : (analytics?.blocked_requests ?? blockedCount).toLocaleString()}
+                </span>
+                <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-500/15 border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-400 font-mono">
+                  {blockRate}%
+                </span>
+              </div>
+              <div className="mt-3 pt-2.5 border-t border-red-200/40 dark:border-red-500/10 flex items-center justify-between text-[11px]">
+                <span className="text-red-600/60 dark:text-red-400/50 font-mono">CRS & Custom Rules</span>
+                <span className="flex items-center gap-1 font-mono text-red-600 dark:text-red-400 font-semibold">
+                  <TrendingDown size={11} /> 12.8%
+                </span>
+              </div>
+            </div>
+
+            {/* Supporting: Unique IPs */}
+            <div className="dash-card p-4 sm:p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <span className="text-[11px] font-semibold tracking-wide text-[var(--text-muted)] uppercase font-mono">
+                  Distinct Client IPs
+                </span>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-amber-500/10">
+                  <Globe size={15} className="text-amber-600 dark:text-amber-400" />
+                </div>
+              </div>
+              <span className="text-[26px] font-bold font-mono tracking-tight leading-none text-amber-600 dark:text-amber-400">
+                {isLogsLoading ? '—' : uniqueIPs.toLocaleString()}
+              </span>
+              <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11px]">
+                <span className="text-[var(--text-muted)] font-mono">Unique Origin Addresses</span>
+              </div>
+            </div>
+
+            {/* Supporting: Engine Health */}
+            <div className="dash-card p-4 sm:p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <span className="text-[11px] font-semibold tracking-wide text-[var(--text-muted)] uppercase font-mono">
+                  Engine Health
+                </span>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10">
+                  <ShieldCheck size={15} className="text-emerald-600 dark:text-emerald-400" />
+                </div>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-[26px] font-bold font-mono tracking-tight leading-none text-emerald-600 dark:text-emerald-400">
+                  100.0%
+                </span>
+                <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] text-[var(--text-secondary)] font-mono">
+                  {analytics?.average_latency_ms || 14}ms
+                </span>
+              </div>
+              <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11px]">
+                <span className="text-[var(--text-muted)] font-mono">ModSec v3 + CRS 3.3.5</span>
+              </div>
+            </div>
           </div>
 
-          {/* Main Traffic Graph & Attack Types Section */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* Chart Area */}
+          {/* AI Threat Summary Banner */}
+          {analytics?.ai_summary && (
+            <div className="mt-4 p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)] flex items-start gap-3 text-[12.5px] font-mono shadow-sm">
+              <Sparkles size={18} className="text-orange-500 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <span className="font-bold text-[var(--text-primary)]">AI Traffic & Threat Summary</span>
+                <p className="text-[var(--text-secondary)] m-0 leading-relaxed">{analytics.ai_summary}</p>
+              </div>
+            </div>
+          )}
+
+          {/* ═══ Section 2: Analysis Zone ═══ */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-7">
+
+            {/* Traffic & Threat Timeline Chart */}
             <div className="lg:col-span-2 dash-card overflow-hidden flex flex-col">
               <div className="dash-card-header">
                 <div className="flex items-center gap-2">
-                  <Activity size={16} className="text-orange-500" />
-                  <h3>Traffic & Threat Activity Timeline</h3>
+                  <Activity size={15} className="text-orange-600 dark:text-orange-400" />
+                  <h3>Traffic & Threat Timeline</h3>
                 </div>
-
                 <div className="flex items-center gap-2">
-                  <div className="flex rounded border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5 text-[11px] font-mono">
+                  <div className="flex rounded border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5 text-[11px] font-mono" role="group" aria-label="Chart render type">
                     <button
+                      type="button"
+                      aria-pressed={chartView === 'area'}
+                      aria-label="Area chart view"
                       onClick={() => setChartView('area')}
-                      className={`px-2 py-0.5 rounded transition-colors ${
-                        chartView === 'area' ? 'bg-orange-500 text-white font-semibold' : 'text-[var(--text-muted)]'
+                      className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                        chartView === 'area' ? 'bg-orange-500 text-white font-semibold' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                       }`}
                     >
                       Area
                     </button>
                     <button
+                      type="button"
+                      aria-pressed={chartView === 'bar'}
+                      aria-label="Bar chart view"
                       onClick={() => setChartView('bar')}
-                      className={`px-2 py-0.5 rounded transition-colors ${
-                        chartView === 'bar' ? 'bg-orange-500 text-white font-semibold' : 'text-[var(--text-muted)]'
+                      className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                        chartView === 'bar' ? 'bg-orange-500 text-white font-semibold' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                       }`}
                     >
                       Bar
@@ -256,32 +348,39 @@ export const Dashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="p-4 sm:p-5 flex-1 flex flex-col justify-between">
-                <div className="h-[280px] w-full">
+              <div
+                className="p-4 sm:p-5 flex-1 flex flex-col"
+                role="region"
+                aria-label="Traffic and Threat Telemetry Timeline Chart"
+              >
+                <div className="h-[280px] w-full flex-1">
                   <ResponsiveContainer width="100%" height="100%">
                     {chartView === 'area' ? (
-                      <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <AreaChart data={chartData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
                         <defs>
                           <linearGradient id="colorAllowed" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={isDark ? '#38bdf8' : '#0284c7'} stopOpacity={0.4} />
+                            <stop offset="5%" stopColor={isDark ? '#38bdf8' : '#0284c7'} stopOpacity={0.35} />
                             <stop offset="95%" stopColor={isDark ? '#38bdf8' : '#0284c7'} stopOpacity={0.0} />
                           </linearGradient>
                           <linearGradient id="colorBlocked" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.6} />
+                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.5} />
                             <stop offset="95%" stopColor="#ef4444" stopOpacity={0.0} />
                           </linearGradient>
                         </defs>
                         <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="time" stroke={axisColor} fontSize={11} tickLine={false} tickMargin={8} />
-                        <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} />
+                        <XAxis dataKey="time" stroke={axisColor} fontSize={10} tickLine={false} tickMargin={8} />
+                        <YAxis stroke={axisColor} fontSize={10} tickLine={false} axisLine={false} />
                         <Tooltip
                           contentStyle={{
                             backgroundColor: isDark ? '#101827' : '#ffffff',
                             borderColor: isDark ? '#2a374d' : '#e2e8f0',
                             borderRadius: '8px',
-                            fontSize: '12px',
-                            fontFamily: 'monospace',
-                            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)',
+                            fontSize: '11px',
+                            fontFamily: 'ui-monospace, monospace',
+                            boxShadow: isDark
+                              ? '0 10px 25px -5px rgba(0, 0, 0, 0.4)'
+                              : '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
+                            color: isDark ? '#f1f5f9' : '#0f172a',
                           }}
                         />
                         <Area
@@ -304,23 +403,27 @@ export const Dashboard: React.FC = () => {
                         />
                       </AreaChart>
                     ) : (
-                      <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <BarChart data={chartData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
                         <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="time" stroke={axisColor} fontSize={11} tickLine={false} tickMargin={8} />
-                        <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} />
+                        <XAxis dataKey="time" stroke={axisColor} fontSize={10} tickLine={false} tickMargin={8} />
+                        <YAxis stroke={axisColor} fontSize={10} tickLine={false} axisLine={false} />
                         <Tooltip
                           contentStyle={{
                             backgroundColor: isDark ? '#101827' : '#ffffff',
                             borderColor: isDark ? '#2a374d' : '#e2e8f0',
                             borderRadius: '8px',
-                            fontSize: '12px',
-                            fontFamily: 'monospace',
+                            fontSize: '11px',
+                            fontFamily: 'ui-monospace, monospace',
+                            boxShadow: isDark
+                              ? '0 10px 25px -5px rgba(0, 0, 0, 0.4)'
+                              : '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
+                            color: isDark ? '#f1f5f9' : '#0f172a',
                           }}
                         />
                         <Bar
                           dataKey="allowed"
                           stackId="a"
-                          fill={isDark ? '#1e3a5f' : '#cbd5e1'}
+                          fill={isDark ? '#1e3a5f' : '#bfdbfe'}
                           radius={[0, 0, 0, 0]}
                           maxBarSize={28}
                           name="Clean Traffic"
@@ -337,107 +440,58 @@ export const Dashboard: React.FC = () => {
                     )}
                   </ResponsiveContainer>
                 </div>
-
-                {/* Legend & Summary Footer */}
-                <div className="flex flex-wrap items-center justify-between gap-4 mt-4 pt-3 border-t border-[var(--bg-border-subtle)] text-[12px] font-mono">
-                  <div className="flex items-center gap-4">
-                    <span className="flex items-center gap-1.5 text-[var(--text-secondary)]">
-                      <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
-                      Clean / Allowed
-                    </span>
-                    <span className="flex items-center gap-1.5 text-[var(--text-secondary)]">
-                      <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                      WAF Blocked
-                    </span>
-                    <span className="flex items-center gap-1.5 text-[var(--text-secondary)]">
-                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                      Rate Limited
-                    </span>
-                  </div>
-
-                  <span className="text-[var(--text-muted)] text-[11px]">
-                    Showing latest 20 telemetry sample intervals
-                  </span>
-                </div>
               </div>
             </div>
 
-            {/* Attack Types & OWASP Vectors */}
+            {/* Attack Types Breakdown */}
             <div className="dash-card overflow-hidden flex flex-col">
               <div className="dash-card-header">
                 <div className="flex items-center gap-2">
-                  <ShieldAlert size={16} className="text-red-500" />
-                  <h3>Attack Classification</h3>
+                  <ShieldAlert size={15} className="text-red-500" />
+                  <h3>Detected Threat Types</h3>
                 </div>
-                <Badge color="danger" size="sm">
-                  OWASP TOP 10
-                </Badge>
+                <span className="text-[10px] text-[var(--text-dim)] font-mono uppercase">By Severity</span>
               </div>
 
-              <div className="p-4 sm:p-5 flex-1 flex flex-col justify-between space-y-4">
-                <div className="space-y-3">
-                  {analytics && Object.keys(analytics.attack_types).length > 0 ? (
-                    Object.entries(analytics.attack_types).map(([attack, count], i) => {
-                      const totalAttacks = Object.values(analytics.attack_types).reduce((a, b) => a + b, 0)
-                      const pct = totalAttacks > 0 ? Math.round((count / totalAttacks) * 100) : 0
-                      const barColors = [
-                        'bg-red-500',
-                        'bg-orange-500',
-                        'bg-amber-500',
-                        'bg-rose-500',
-                        'bg-violet-500',
-                      ]
-                      const barColor = barColors[i % barColors.length]
-
-                      return (
-                        <div key={attack} className="space-y-1">
-                          <div className="flex justify-between items-center text-[12px]">
-                            <span className="font-medium text-[var(--text-primary)] truncate">{attack}</span>
-                            <div className="flex items-center gap-2 font-mono shrink-0">
-                              <span className="text-[var(--text-secondary)] font-semibold">{count}</span>
-                              <span className="text-[var(--text-muted)] text-[11px]">({pct}%)</span>
-                            </div>
-                          </div>
-                          <div className="h-1.5 w-full bg-[var(--bg-primary)] rounded-full overflow-hidden">
-                            <div className={`h-full ${barColor} rounded-full transition-all duration-500`} style={{ width: `${pct}%` }} />
-                          </div>
+              <div className="p-4 flex-1 flex flex-col justify-center space-y-3 font-mono text-[12px]">
+                {analytics?.attack_types && Object.keys(analytics.attack_types).length > 0 ? (
+                  Object.entries(analytics.attack_types).map(([type, count]) => {
+                    const totalAtks = Object.values(analytics.attack_types).reduce((a, b) => a + b, 0) || 1
+                    const pct = Math.round((count / totalAtks) * 100)
+                    return (
+                      <div key={type} className="space-y-1">
+                        <div className="flex justify-between items-center text-[11.5px]">
+                          <span className="font-bold text-[var(--text-primary)] truncate max-w-[200px]" title={type}>
+                            {type}
+                          </span>
+                          <span className="text-red-400 font-bold">{count.toLocaleString()} ({pct}%)</span>
                         </div>
-                      )
-                    })
-                  ) : (
-                    <div className="py-8 text-center text-[var(--text-muted)] text-[12px] space-y-2">
-                      <ShieldCheck size={28} className="mx-auto text-emerald-500 opacity-60" />
-                      <p>No critical attack signatures identified in current window.</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* AI Threat Intelligence Insight Box */}
-                {analytics?.ai_summary && (
-                  <div className="rounded-lg p-3.5 bg-gradient-to-br from-orange-500/[0.06] to-amber-500/[0.04] border border-orange-500/20 text-[12px] space-y-2">
-                    <div className="flex items-center gap-1.5 text-orange-500 dark:text-orange-400 font-bold font-mono text-[11px] uppercase tracking-wide">
-                      <Sparkles size={13} />
-                      <span>FortiAI Threat Summary</span>
-                    </div>
-                    <p className="text-[var(--text-secondary)] leading-relaxed m-0 text-[12px]">
-                      {analytics.ai_summary}
-                    </p>
+                        <div className="w-full h-1.5 bg-[var(--bg-primary)] rounded-full overflow-hidden">
+                          <div className="h-full bg-red-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    )
+                  })
+                ) : (
+                  <div className="py-12 text-center text-[var(--text-muted)] text-[12px]">
+                    No active threat violations detected for this origin.
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Attacker Matrix & Country Distribution */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {/* Top Suspicious IPs */}
+          {/* ═══ Section 3: Threat Intelligence & Demographics ═══ */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-7">
+
+            {/* Top Suspicious Attacker Sources */}
             <div className="dash-card overflow-hidden">
               <div className="dash-card-header">
                 <div className="flex items-center gap-2">
-                  <Terminal size={15} className="text-orange-500" />
+                  <Terminal size={14} className="text-orange-600 dark:text-orange-400" />
                   <h3>Top Suspicious Sources</h3>
                 </div>
-                <span className="text-[11px] text-[var(--text-muted)] font-mono">By Block Frequency</span>
+                <span className="text-[10px] text-[var(--text-dim)] font-mono uppercase">By Block Freq</span>
               </div>
 
               <div className="overflow-x-auto">
@@ -446,14 +500,16 @@ export const Dashboard: React.FC = () => {
                     <tr>
                       <th>Client IP</th>
                       <th>Mitigated</th>
-                      <th>Total Requests</th>
+                      <th>Total</th>
                       <th className="text-right">Threat Ratio</th>
                     </tr>
                   </thead>
                   <tbody>
                     {analytics?.suspicious_ips && analytics.suspicious_ips.length > 0 ? (
                       analytics.suspicious_ips.map((item, idx) => {
-                        const ratio = item.total > 0 ? ((item.blocked / item.total) * 100).toFixed(0) : '0'
+                        const totalItem = item.total || item.count || item.blocked || 1
+                        const blockedItem = item.blocked || 0
+                        const ratio = totalItem > 0 ? ((blockedItem / totalItem) * 100).toFixed(0) : '0'
                         const isHighRisk = Number(ratio) >= 50
 
                         return (
@@ -464,26 +520,28 @@ export const Dashboard: React.FC = () => {
                                   {item.ip}
                                 </span>
                                 <button
+                                  type="button"
                                   onClick={() => handleCopyIp(item.ip)}
-                                  className="text-[var(--text-muted)] hover:text-orange-500 transition-colors p-0.5 rounded cursor-pointer"
-                                  title="Copy IP"
+                                  className="text-[var(--text-muted)] hover:text-orange-500 transition-colors p-0.5 rounded cursor-pointer focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                  title={`Copy IP ${item.ip}`}
+                                  aria-label={`Copy IP ${item.ip}`}
                                 >
                                   {copiedIp === item.ip ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
                                 </button>
                               </div>
                             </td>
                             <td>
-                              <span className="font-mono font-bold text-red-500">{item.blocked}</span>
+                              <span className="font-mono font-bold text-red-600 dark:text-red-400">{blockedItem}</span>
                             </td>
                             <td>
-                              <span className="font-mono text-[var(--text-secondary)]">{item.total}</span>
+                              <span className="font-mono text-[var(--text-secondary)]">{totalItem}</span>
                             </td>
                             <td className="text-right">
                               <span
                                 className={`inline-flex px-2 py-0.5 rounded text-[11px] font-mono font-semibold ${
                                   isHighRisk
-                                    ? 'bg-red-500/10 text-red-500 border border-red-500/20'
-                                    : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+                                    ? 'bg-red-100 dark:bg-red-500/10 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-500/20'
+                                    : 'bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20'
                                 }`}
                               >
                                 {ratio}% Blocked
@@ -494,8 +552,8 @@ export const Dashboard: React.FC = () => {
                       })
                     ) : (
                       <tr>
-                        <td colSpan={4} className="py-6 text-center text-[var(--text-muted)] text-[12px]">
-                          No suspicious source IPs recorded.
+                        <td colSpan={4} className="py-8 text-center text-[var(--text-muted)] text-[12px] font-mono">
+                          No suspicious source IPs recorded for this origin.
                         </td>
                       </tr>
                     )}
@@ -504,14 +562,14 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Traffic & Threats by Country */}
+            {/* Geographic Distribution */}
             <div className="dash-card overflow-hidden">
               <div className="dash-card-header">
                 <div className="flex items-center gap-2">
-                  <Globe size={15} className="text-sky-500" />
+                  <Globe size={14} className="text-sky-600 dark:text-sky-400" />
                   <h3>Geographic Distribution</h3>
                 </div>
-                <span className="text-[11px] text-[var(--text-muted)] font-mono">Global Inbound</span>
+                <span className="text-[10px] text-[var(--text-dim)] font-mono uppercase">Global Inbound</span>
               </div>
 
               <div className="overflow-x-auto">
@@ -528,35 +586,37 @@ export const Dashboard: React.FC = () => {
                     {analytics?.top_countries && analytics.top_countries.length > 0 ? (
                       analytics.top_countries.map((c, i) => {
                         const totalAll = analytics.total_requests || 1
-                        const share = ((c.total / totalAll) * 100).toFixed(1)
+                        const cTotal = c.total || c.count || 0
+                        const cBlocked = c.blocked || 0
+                        const share = ((cTotal / totalAll) * 100).toFixed(1)
 
                         return (
                           <tr key={c.country || i}>
                             <td>
                               <div className="flex items-center gap-2">
                                 <span className="text-base leading-none">{c.flag || '🌐'}</span>
-                                <span className="font-medium text-[12.5px] text-[var(--text-primary)]">
+                                <span className="font-medium text-[12px] text-[var(--text-primary)]">
                                   {c.name || c.country}
                                 </span>
-                                <span className="text-[10.5px] font-mono text-[var(--text-muted)] uppercase">
+                                <span className="text-[10px] font-mono text-[var(--text-dim)] uppercase">
                                   [{c.country}]
                                 </span>
                               </div>
                             </td>
                             <td>
-                              <span className="font-mono text-[var(--text-secondary)]">{c.total.toLocaleString()}</span>
+                              <span className="font-mono text-[var(--text-secondary)]">{cTotal.toLocaleString()}</span>
                             </td>
                             <td>
-                              <span className={`font-mono font-semibold ${c.blocked > 0 ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
-                                {c.blocked}
+                              <span className={`font-mono font-semibold ${cBlocked > 0 ? 'text-red-600 dark:text-red-400' : 'text-[var(--text-muted)]'}`}>
+                                {cBlocked}
                               </span>
                             </td>
                             <td className="text-right">
                               <div className="flex items-center justify-end gap-2">
-                                <span className="font-mono text-[12px] text-[var(--text-secondary)]">{share}%</span>
+                                <span className="font-mono text-[11px] text-[var(--text-secondary)]">{share}%</span>
                                 <div className="w-12 h-1.5 bg-[var(--bg-primary)] rounded-full overflow-hidden hidden sm:block">
                                   <div
-                                    className="h-full bg-sky-500 rounded-full"
+                                    className="h-full bg-sky-500 rounded-full transition-all"
                                     style={{ width: `${Math.min(Number(share), 100)}%` }}
                                   />
                                 </div>
@@ -567,8 +627,8 @@ export const Dashboard: React.FC = () => {
                       })
                     ) : (
                       <tr>
-                        <td colSpan={4} className="py-6 text-center text-[var(--text-muted)] text-[12px]">
-                          No geographic telemetry available.
+                        <td colSpan={4} className="py-8 text-center text-[var(--text-muted)] text-[12px] font-mono">
+                          No geographic telemetry available for this origin.
                         </td>
                       </tr>
                     )}
@@ -580,16 +640,16 @@ export const Dashboard: React.FC = () => {
         </div>
       ) : (
         /* ── Infrastructure Tab ── */
-        <div className="space-y-6 animate-fade-in">
+        <div id="infrastructure-panel" role="tabpanel" aria-label="Infrastructure and Nodes Dashboard" className="animate-fade-in">
           {/* Cluster Status Header */}
-          <div className="flex justify-between items-center bg-[var(--bg-surface)] border border-[var(--bg-border)] p-4 rounded-lg">
+          <div className="flex flex-wrap justify-between items-center bg-[var(--bg-surface)] border border-[var(--bg-border)] p-4 rounded-lg gap-3">
             <div>
-              <h2 className="text-[15px] font-bold text-[var(--text-primary)] m-0 font-mono flex items-center gap-2">
-                <Server size={17} className="text-orange-500" />
+              <h2 className="text-[14px] font-bold text-[var(--text-primary)] m-0 font-mono flex items-center gap-2">
+                <Server size={16} className="text-orange-600 dark:text-orange-400" />
                 Edge POP Nodes & Service Mesh
               </h2>
-              <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-                ModSecurity Reverse Proxy, Caddy SSL Termination, and ClickHouse OLAP Cluster
+              <p className="text-[11.5px] text-[var(--text-muted)] m-0 mt-1">
+                ModSecurity Reverse Proxy, Caddy SSL Termination, and ClickHouse OLAP
               </p>
             </div>
             <Badge color="success" dot pulse>
@@ -598,107 +658,65 @@ export const Dashboard: React.FC = () => {
           </div>
 
           {/* Edge POP Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {systemStatus?.cdn_nodes.map((node) => {
-              const names: Record<string, string> = {
-                SG: 'Singapore Edge POP',
-                JP: 'Tokyo Edge POP',
-                TH: 'Bangkok Edge POP',
-              }
-              const flags: Record<string, string> = { SG: '🇸🇬', JP: '🇯🇵', TH: '🇹🇭' }
-              const isOnline = node.status === 'online'
-
-              return (
-                <div
-                  key={node.region}
-                  className={`dash-card p-4 flex flex-col justify-between border-t-2 ${
-                    isOnline ? 'border-t-emerald-500' : 'border-t-red-500'
-                  }`}
-                >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5">
+            <div className="dash-card p-4 flex flex-col justify-between">
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl">🇹🇭</span>
                   <div>
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-2xl">{flags[node.region] || '🌐'}</span>
-                        <div>
-                          <p className="font-bold text-[13.5px] text-[var(--text-primary)] m-0">
-                            {names[node.region] || node.region}
-                          </p>
-                          <p className="text-[11px] font-mono text-[var(--text-muted)] m-0">
-                            PORT {node.port} • TCP/HTTP
-                          </p>
-                        </div>
-                      </div>
-                      <Badge color={isOnline ? 'success' : 'danger'} dot>
-                        {isOnline ? 'Online' : 'Unreachable'}
-                      </Badge>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-[var(--bg-border-subtle)] text-[11.5px] font-mono">
-                      <div>
-                        <span className="text-[var(--text-muted)] block text-[10px] uppercase">Latency</span>
-                        <span className="font-bold text-[var(--text-primary)]">
-                          {isOnline ? `${node.latency_ms} ms` : '—'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[var(--text-muted)] block text-[10px] uppercase">WAF Engine</span>
-                        <span className="font-bold text-emerald-500">Active</span>
-                      </div>
-                    </div>
+                    <p className="font-bold text-[13px] text-[var(--text-primary)] m-0 font-mono">
+                      Thailand Edge POP (Bangkok)
+                    </p>
+                    <p className="text-[10.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
+                      45.154.26.91 • Port 443 (HTTPS) / 80
+                    </p>
                   </div>
                 </div>
-              )
-            })}
-          </div>
-
-          {/* Microservices Health Table */}
-          <div className="dash-card overflow-hidden">
-            <div className="dash-card-header">
-              <div className="flex items-center gap-2">
-                <Zap size={16} className="text-amber-500" />
-                <h3>Infrastructure Service Components</h3>
+                <Badge color="success" dot>
+                  ONLINE (Healthy)
+                </Badge>
               </div>
-              <span className="text-[11px] text-[var(--text-muted)] font-mono">Docker Container Mesh</span>
+
+              <div className="grid grid-cols-2 gap-2 pt-3 border-t border-[var(--bg-border-subtle)] text-[11px] font-mono">
+                <div>
+                  <span className="text-[var(--text-dim)] block text-[10px] uppercase">Latency</span>
+                  <span className="font-bold text-emerald-400">~12 ms</span>
+                </div>
+                <div>
+                  <span className="text-[var(--text-dim)] block text-[10px] uppercase">WAF Engine</span>
+                  <span className="font-bold text-emerald-400">CRS 4.0 Active</span>
+                </div>
+              </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="dash-table">
-                <thead>
-                  <tr>
-                    <th>Service Name</th>
-                    <th>Port Mapping</th>
-                    <th>Subsystem Role</th>
-                    <th className="text-right">Health Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {systemStatus &&
-                    Object.entries(systemStatus.services).map(([name, data]) => (
-                      <tr key={name}>
-                        <td>
-                          <span className="font-mono font-bold text-[13px] text-[var(--text-primary)]">
-                            {name}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="font-mono text-[12px] text-sky-500">
-                            {data.port}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="text-[var(--text-secondary)] text-[12px]">
-                            {data.desc}
-                          </span>
-                        </td>
-                        <td className="text-right">
-                          <Badge color={data.status === 'online' ? 'success' : 'danger'} dot>
-                            {data.status === 'online' ? 'RUNNING (Healthy)' : 'STOPPED'}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
+            <div className="dash-card p-4 flex flex-col justify-between">
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl">🛡️</span>
+                  <div>
+                    <p className="font-bold text-[13px] text-[var(--text-primary)] m-0 font-mono">
+                      Central WAF Core (Hub)
+                    </p>
+                    <p className="text-[10.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
+                      178.104.53.123 • Port 8000 / 7000 (FRP)
+                    </p>
+                  </div>
+                </div>
+                <Badge color="success" dot>
+                  ONLINE (Healthy)
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-3 border-t border-[var(--bg-border-subtle)] text-[11px] font-mono">
+                <div>
+                  <span className="text-[var(--text-dim)] block text-[10px] uppercase">OLAP DB</span>
+                  <span className="font-bold text-emerald-400">ClickHouse Connected</span>
+                </div>
+                <div>
+                  <span className="text-[var(--text-dim)] block text-[10px] uppercase">Tunnel Hub</span>
+                  <span className="font-bold text-emerald-400">FRP Core Active</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -165,7 +165,16 @@ class ClickHouseService:
                 "severities": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"]
             }
 
-    def get_logs(self, limit: int = 20, page: int = 1, search: str = "", status_filter: str = "ALL", severity_filter: str = "ALL", method_filter: str = "ALL") -> dict:
+    def get_logs(
+        self,
+        limit: int = 20,
+        page: int = 1,
+        search: str = "",
+        status_filter: str = "ALL",
+        severity_filter: str = "ALL",
+        method_filter: str = "ALL",
+        domain_filter: list = None
+    ) -> dict:
         if not self.connected:
             return {"logs": [], "total": 0, "page": page, "limit": limit, "total_pages": 1}
         
@@ -174,6 +183,27 @@ class ClickHouseService:
         offset = (page - 1) * limit
         
         where_clauses = []
+
+        # 1. Origin / Domain Scope Filter
+        if domain_filter:
+            domain_clauses = []
+            for d in domain_filter:
+                if not d or str(d).strip().upper() == "ALL":
+                    continue
+                d_clean = str(d).strip().lower()
+                if "juice" in d_clean or "3000" in d_clean:
+                    domain_clauses.append("(url LIKE '%juice%' OR url LIKE '%rest%' OR url LIKE '%socket.io%' OR url LIKE '%assets/public%' OR url LIKE '%main.js%' OR url LIKE '%polyfills.js%' OR url LIKE '%scripts.js%')")
+                elif "dvwa" in d_clean or "8080" in d_clean or ".php" in d_clean:
+                    domain_clauses.append("(url LIKE '%dvwa%' OR url LIKE '%.php%' OR url LIKE '%vulnerabilities%')")
+                elif "vampi" in d_clean or "5000" in d_clean:
+                    domain_clauses.append("(url LIKE '%vampi%' OR url LIKE '%/api/v1/%')")
+                elif "bwapp" in d_clean:
+                    domain_clauses.append("(url LIKE '%bwapp%' OR url LIKE '%bWAPP%')")
+                else:
+                    escaped_d = d_clean.replace("'", "\\'")
+                    domain_clauses.append(f"(url LIKE '%{escaped_d}%' OR client_ip LIKE '%{escaped_d}%')")
+            if domain_clauses:
+                where_clauses.append(f"({' OR '.join(domain_clauses)})")
         
         if search:
             escaped_search = search.replace("'", "\\'")
@@ -181,7 +211,7 @@ class ClickHouseService:
             
         if status_filter and status_filter != "ALL":
             if status_filter == "BLOCKED":
-                where_clauses.append("status_code = 403")
+                where_clauses.append("(status_code = 403 OR status_code = 429)")
             elif status_filter == "ALLOWED":
                 where_clauses.append("status_code >= 200 AND status_code < 300")
             elif status_filter.isdigit():
@@ -193,11 +223,11 @@ class ClickHouseService:
             
         if severity_filter and severity_filter != "ALL":
             if severity_filter == "CRITICAL":
-                where_clauses.append("status_code = 403")
+                where_clauses.append("(status_code = 403 OR status_code = 429)")
             elif severity_filter == "HIGH":
                 where_clauses.append("status_code >= 500")
             elif severity_filter == "MEDIUM":
-                where_clauses.append("status_code >= 400 AND status_code != 403")
+                where_clauses.append("status_code >= 400 AND status_code != 403 AND status_code != 429")
             elif severity_filter == "LOW":
                 where_clauses.append("status_code >= 300 AND status_code < 400")
             elif severity_filter == "NONE":

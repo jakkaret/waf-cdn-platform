@@ -14,6 +14,8 @@ import {
   Sparkles,
   Ban,
   Gauge,
+  Shield,
+  Network,
   Settings as SettingsIcon,
 } from 'lucide-react'
 
@@ -50,6 +52,7 @@ export const Sidebar: React.FC = () => {
       label: 'Edge & Delivery',
       items: [
         { label: 'CDN Edge Nodes', path: '/cdn', icon: <Globe size={15} />, roles: ['admin', 'viewer'] },
+        { label: 'Zero Trust Tunnels', path: '/tunnels', icon: <Shield size={15} />, roles: ['admin', 'viewer'] },
       ],
     },
     {

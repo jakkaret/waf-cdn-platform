@@ -2,12 +2,12 @@ import React, { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { logsApi } from '../api/logs'
+import { useOriginFilterStore } from '../store/originFilterStore'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
 import {
   Download,
   Search,
-  Filter,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -17,11 +17,55 @@ import {
   ShieldAlert,
   ShieldCheck,
   RefreshCw,
-  ExternalLink,
   Code,
+  Shield,
+  X,
 } from 'lucide-react'
 import { WafLog } from '../types'
 import toast from 'react-hot-toast'
+
+// Helper function to format timestamp to Thailand Timezone (Asia/Bangkok • UTC+7)
+export const formatThaiDateTime = (rawDate?: string | number | Date | null): string => {
+  if (!rawDate) return '—'
+  try {
+    let d: Date
+    if (rawDate instanceof Date) {
+      d = rawDate
+    } else if (typeof rawDate === 'number') {
+      d = rawDate < 1e12 ? new Date(rawDate * 1000) : new Date(rawDate)
+    } else {
+      let s = String(rawDate).trim()
+      if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
+        s = s.replace(' ', 'T') + 'Z'
+      } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s)) {
+        s = s + 'Z'
+      }
+      d = new Date(s)
+    }
+
+    if (isNaN(d.getTime())) return String(rawDate)
+
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(d)
+
+    const map: Record<string, string> = {}
+    parts.forEach((p) => {
+      map[p.type] = p.value
+    })
+
+    return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`
+  } catch {
+    return String(rawDate)
+  }
+}
 
 export const Logs: React.FC = () => {
   const [page, setPage] = useState(1)
@@ -34,6 +78,8 @@ export const Logs: React.FC = () => {
   const [copiedText, setCopiedText] = useState<string | null>(null)
   const limit = 20
 
+  const { selectedOrigin, selectedOriginLabel, setSelectedOrigin } = useOriginFilterStore()
+
   const { data: filterOptions } = useQuery({
     queryKey: ['log-filters'],
     queryFn: () => logsApi.getFilterOptions(),
@@ -41,7 +87,7 @@ export const Logs: React.FC = () => {
   })
 
   const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['logs-paginated', page, search, statusFilter, severityFilter, methodFilter],
+    queryKey: ['logs-paginated', page, search, statusFilter, severityFilter, methodFilter, selectedOrigin],
     queryFn: () =>
       logsApi.getLogsPaginated({
         page,
@@ -50,6 +96,7 @@ export const Logs: React.FC = () => {
         status_filter: statusFilter,
         severity_filter: severityFilter,
         method_filter: methodFilter,
+        origin: selectedOrigin,
       }),
     refetchInterval: 6000,
   })
@@ -81,11 +128,11 @@ export const Logs: React.FC = () => {
 
   const exportToCSV = () => {
     if (logs.length === 0) return
-    const headers = ['datetime', 'ip', 'method', 'url', 'status', 'rule_id', 'severity']
+    const headers = ['datetime_bkk', 'ip', 'method', 'url', 'status', 'rule_id', 'severity']
     const csvRows = [
       headers.join(','),
       ...logs.map((log) => [
-        `"${log.datetime}"`,
+        `"${formatThaiDateTime(log.datetime)}"`,
         `"${log.ip}"`,
         `"${log.method}"`,
         `"${(log.url || '').replace(/"/g, '""')}"`,
@@ -97,7 +144,7 @@ export const Logs: React.FC = () => {
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
     const a = document.createElement('a')
     a.href = window.URL.createObjectURL(blob)
-    a.download = `waf_traffic_logs_page${page}_${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `waf_traffic_logs_page${page}_${formatThaiDateTime(new Date()).slice(0, 10)}.csv`
     a.click()
     toast.success('Downloaded log records CSV')
   }
@@ -106,320 +153,267 @@ export const Logs: React.FC = () => {
     if (status === 403) return <Badge color="danger">403 BLOCKED</Badge>
     if (status === 429) return <Badge color="warning">429 RATE LIMIT</Badge>
     if (status >= 500) return <Badge color="danger">{status} SERVER ERR</Badge>
-    if (status >= 400) return <Badge color="gray">{status} CLIENT ERR</Badge>
+    if (status >= 400) return <Badge color="warning">{status} CLIENT ERR</Badge>
     if (status >= 300) return <Badge color="info">{status} REDIRECT</Badge>
-    if (status >= 200) return <Badge color="success">{status} OK</Badge>
-    return <Badge>{status}</Badge>
+    return <Badge color="success">{status} OK</Badge>
   }
 
-  const getSeverityBadge = (severity?: string | null, status?: number) => {
-    if (!severity && status === 403) return <Badge color="danger">CRITICAL</Badge>
-    if (!severity) return <Badge color="gray">NONE</Badge>
-    const s = String(severity).toUpperCase()
-    if (s === 'CRITICAL' || s === '0' || s === '1' || s === '2') return <Badge color="danger">CRITICAL</Badge>
-    if (s === 'HIGH' || s === '3' || s === 'ERROR') return <Badge color="warning">HIGH</Badge>
-    if (s === 'MEDIUM' || s === '4' || s === 'WARNING') return <Badge color="info">MEDIUM</Badge>
-    if (s === 'LOW' || s === '5' || s === 'NOTICE') return <Badge color="success">LOW</Badge>
-    return <Badge color="gray">{s}</Badge>
+  const getSeverityBadge = (severity?: string | null) => {
+    const sev = (severity || 'NONE').toUpperCase()
+    if (sev === 'CRITICAL') return <Badge color="danger">CRITICAL</Badge>
+    if (sev === 'HIGH') return <Badge color="danger">HIGH</Badge>
+    if (sev === 'MEDIUM') return <Badge color="warning">MEDIUM</Badge>
+    if (sev === 'LOW') return <Badge color="info">LOW</Badge>
+    return <Badge color="gray">NONE</Badge>
   }
 
-  const getMethodBadge = (method: string) => {
-    const m = (method || 'GET').toUpperCase()
-    if (m === 'GET') return <span className="font-mono font-bold text-[11px] text-sky-500">GET</span>
-    if (m === 'POST') return <span className="font-mono font-bold text-[11px] text-emerald-500">POST</span>
-    if (m === 'PUT') return <span className="font-mono font-bold text-[11px] text-amber-500">PUT</span>
-    if (m === 'DELETE') return <span className="font-mono font-bold text-[11px] text-red-500">DELETE</span>
-    return <span className="font-mono font-bold text-[11px] text-[var(--text-secondary)]">{m}</span>
-  }
-
-  const startRecord = total === 0 ? 0 : (page - 1) * limit + 1
+  const startRecord = (page - 1) * limit + 1
   const endRecord = Math.min(page * limit, total)
 
-  const getPageNumbers = () => {
-    const pages: (number | string)[] = []
-    if (totalPages <= 7) {
-      for (let i = 1; i <= totalPages; i++) pages.push(i)
-    } else {
-      pages.push(1)
-      if (page > 3) pages.push('...')
-      for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i)
-      if (page < totalPages - 2) pages.push('...')
-      pages.push(totalPages)
-    }
-    return pages
-  }
-
   return (
-    <div className="space-y-5 animate-fade-in">
+    <div className="animate-fade-in pb-8">
+      {/* Top Header Bar */}
       <TopBar
-        title="Live Traffic & Threat Inspector"
-        subtitle="Full real-time ModSecurity & Nginx HTTP request stream"
+        title="Traffic Inspection Log"
+        subtitle="Real-time reverse proxy access stream and deep threat inspection"
         badge={
-          <Badge color="brand" dot pulse>
-            STREAMING ACTIVE
+          <Badge color="success" dot pulse>
+            LIVE TELEMETRY
           </Badge>
         }
         action={
           <div className="flex items-center gap-2">
             <button
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--bg-surface)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] text-[12px] font-mono font-medium text-[var(--text-primary)] rounded-md hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
-            >
-              <RefreshCw size={13} className={isFetching ? 'animate-spin text-orange-500' : 'text-[var(--text-muted)]'} />
-              <span>Refresh</span>
-            </button>
-            <button
               onClick={exportToCSV}
               disabled={logs.length === 0}
-              className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 text-[12px] font-mono font-semibold rounded-md disabled:opacity-40 shadow-sm transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.8 bg-[var(--bg-surface)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] text-[12px] font-mono font-medium text-[var(--text-primary)] rounded-xl hover:bg-[var(--bg-hover)] shadow-sm transition-all cursor-pointer disabled:opacity-40"
+              title="Export visible log rows to CSV"
             >
-              <Download size={13} />
-              <span>Export CSV</span>
+              <Download size={13} className="text-[var(--text-muted)]" />
+              <span className="hidden sm:inline">Export CSV</span>
+            </button>
+            <button
+              onClick={() => {
+                refetch()
+                toast.success('Logs refreshed')
+              }}
+              disabled={isFetching}
+              className="flex items-center gap-1.5 px-3 py-1.8 bg-[var(--bg-surface)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] text-[12px] font-mono font-medium text-[var(--text-primary)] rounded-xl hover:bg-[var(--bg-hover)] shadow-sm transition-all cursor-pointer"
+              title="Refresh log stream"
+            >
+              <RefreshCw size={13} className={isFetching ? 'animate-spin text-orange-500' : 'text-[var(--text-muted)]'} />
+              <span className="hidden sm:inline">Refresh</span>
             </button>
           </div>
         }
       />
 
-      <div className="dash-card overflow-hidden">
-        {/* Advanced Filter Toolbar */}
-        <div className="p-3.5 border-b border-[var(--bg-border)] bg-[var(--bg-surface)] flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2.5 flex-1">
-            {/* Search Box */}
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
-              <Search className="absolute left-3 top-2.5 text-[var(--text-muted)]" size={14} />
-              <input
-                type="text"
-                placeholder="Filter by IP, Path, Rule ID, or URI..."
-                className="w-full dash-input pl-8 py-1.5 text-[12px] font-mono"
-                value={search}
-                onChange={handleSearchChange}
-              />
-            </div>
+      {/* Origin Scope Filter Indicator Banner */}
+      {selectedOrigin !== 'ALL' && (
+        <div className="mb-5 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-between gap-3 text-indigo-300 font-mono text-[12px] animate-fade-in">
+          <div className="flex items-center gap-2 truncate">
+            <Shield size={16} className="text-indigo-400 shrink-0" />
+            <span className="truncate">
+              Showing Traffic Logs for Origin:{' '}
+              <strong className="text-white font-bold">{selectedOriginLabel}</strong>{' '}
+              <span className="text-indigo-300/70 text-[11px]">({selectedOrigin})</span>
+            </span>
+          </div>
+          <button
+            onClick={() => setSelectedOrigin('ALL', 'All Managed Origins (ทั้งหมด)')}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-white text-[11px] font-bold transition-colors cursor-pointer shrink-0"
+          >
+            <X size={12} />
+            <span>Show All Origins</span>
+          </button>
+        </div>
+      )}
 
-            {/* Status Filter */}
+      {/* Filter and Search Bar */}
+      <div className="dash-card p-4 mb-4 font-mono">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+          {/* Search Box */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" size={14} />
+            <input
+              type="text"
+              placeholder="Search IP, URL, Rule ID..."
+              value={search}
+              onChange={handleSearchChange}
+              className="w-full pl-9 pr-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-orange-500 transition-colors"
+            />
+          </div>
+
+          {/* Status Filter */}
+          <div>
             <select
-              className="dash-input py-1.5 text-[12px] font-mono cursor-pointer"
               value={statusFilter}
               onChange={(e) => {
                 setStatusFilter(e.target.value)
                 setPage(1)
               }}
+              className="w-full px-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
             >
-              <option value="ALL">All Status Codes</option>
-              <option value="BLOCKED">403 (WAF Blocked)</option>
-              <option value="ALLOWED">2xx (Clean / OK)</option>
-              <option value="429">429 (Rate Limited)</option>
-              <option value="500">500 (Server Error)</option>
+              <option value="ALL">All HTTP Status</option>
+              <option value="BLOCKED">Blocked (403 / 429)</option>
+              <option value="ALLOWED">Allowed (2xx OK)</option>
+              {filterOptions?.status_codes?.map((code) => (
+                <option key={code} value={String(code)}>
+                  Status {code}
+                </option>
+              ))}
             </select>
+          </div>
 
-            {/* Method Filter */}
+          {/* Severity Filter */}
+          <div>
             <select
-              className="dash-input py-1.5 text-[12px] font-mono cursor-pointer"
-              value={methodFilter}
-              onChange={(e) => {
-                setMethodFilter(e.target.value)
-                setPage(1)
-              }}
-            >
-              <option value="ALL">All HTTP Methods</option>
-              <option value="GET">GET</option>
-              <option value="POST">POST</option>
-              <option value="PUT">PUT</option>
-              <option value="DELETE">DELETE</option>
-            </select>
-
-            {/* Severity Filter */}
-            <select
-              className="dash-input py-1.5 text-[12px] font-mono cursor-pointer"
               value={severityFilter}
               onChange={(e) => {
                 setSeverityFilter(e.target.value)
                 setPage(1)
               }}
+              className="w-full px-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
             >
               <option value="ALL">All Severities</option>
-              <option value="CRITICAL">Critical</option>
-              <option value="HIGH">High</option>
-              <option value="MEDIUM">Medium</option>
-              <option value="LOW">Low</option>
-              <option value="NONE">None</option>
+              <option value="CRITICAL">CRITICAL (Mitigated)</option>
+              <option value="HIGH">HIGH (Server Errors)</option>
+              <option value="MEDIUM">MEDIUM (Client Warnings)</option>
+              <option value="LOW">LOW (Redirects)</option>
+              <option value="NONE">NONE (Clean Traffic)</option>
             </select>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="text-[var(--text-secondary)] text-[12px] font-mono whitespace-nowrap">
-              {total > 0 ? (
-                <>
-                  <strong className="text-[var(--text-primary)]">{startRecord.toLocaleString()}</strong>–
-                  <strong className="text-[var(--text-primary)]">{endRecord.toLocaleString()}</strong> of{' '}
-                  <strong className="text-orange-500">{total.toLocaleString()}</strong> events
-                </>
-              ) : (
-                '0 matching events'
-              )}
-            </span>
+          {/* Method Filter */}
+          <div>
+            <select
+              value={methodFilter}
+              onChange={(e) => {
+                setMethodFilter(e.target.value)
+                setPage(1)
+              }}
+              className="w-full px-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
+            >
+              <option value="ALL">All Methods</option>
+              {filterOptions?.methods?.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
+      </div>
 
-        {/* Enterprise Log Table */}
+      {/* Main Table */}
+      <div className="dash-card overflow-hidden font-mono">
         <div className="overflow-x-auto">
-          <table className="dash-table">
-            <thead>
+          <table className="w-full text-left text-[12px]">
+            <thead className="bg-[var(--bg-primary)] border-b border-[var(--bg-border)] text-[var(--text-muted)] uppercase text-[10.5px]">
               <tr>
-                <th>Timestamp (UTC+7)</th>
-                <th>Client IP</th>
-                <th>Method</th>
-                <th>Request URI</th>
-                <th>Status</th>
-                <th>Triggered Rule</th>
-                <th>Severity</th>
-                <th className="text-right">Inspect</th>
+                <th className="py-3 px-3.5">Timestamp (BKK)</th>
+                <th className="py-3 px-3.5">Client IP</th>
+                <th className="py-3 px-3.5">Method</th>
+                <th className="py-3 px-3.5">Target Path / URL</th>
+                <th className="py-3 px-3.5">Status</th>
+                <th className="py-3 px-3.5">Severity</th>
+                <th className="py-3 px-3.5 text-right">Details</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-[var(--bg-border-subtle)]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-[var(--text-muted)] text-[12.5px] font-mono">
-                    <RefreshCw size={18} className="animate-spin inline mr-2 text-orange-500" />
-                    Querying ClickHouse telemetry database...
+                  <td colSpan={7} className="py-12 text-center text-[var(--text-muted)]">
+                    <div className="flex items-center justify-center gap-2">
+                      <RefreshCw size={14} className="animate-spin text-orange-500" />
+                      <span>Loading logs from ClickHouse database...</span>
+                    </div>
                   </td>
                 </tr>
               ) : logs.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-[var(--text-muted)] text-[12.5px] font-mono">
-                    <ShieldCheck size={24} className="mx-auto mb-2 text-emerald-500 opacity-60" />
-                    No traffic records match the specified query filters.
+                  <td colSpan={7} className="py-12 text-center text-[var(--text-muted)]">
+                    No traffic log records found for this query / origin.
                   </td>
                 </tr>
               ) : (
-                logs.map((log: WafLog, idx: number) => {
-                  const isThreat = log.status === 403 || log.status === 429
-                  return (
-                    <tr
-                      key={log.log_id || idx}
-                      className={`cursor-pointer transition-colors ${
-                        isThreat
-                          ? 'bg-red-500/[0.04] hover:bg-red-500/[0.08]'
-                          : 'hover:bg-[var(--bg-hover)]'
-                      }`}
-                      onClick={() => setSelectedLog(log)}
-                    >
-                      <td className="font-mono text-[11px] text-[var(--text-muted)] whitespace-nowrap">
-                        {log.datetime}
-                      </td>
-                      <td>
-                        <div className="flex items-center gap-1.5 font-mono font-bold text-[12px] text-[var(--text-primary)]">
-                          <span>{log.ip}</span>
-                        </div>
-                      </td>
-                      <td>{getMethodBadge(log.method)}</td>
-                      <td className="font-mono text-[11.5px] max-w-[320px] truncate text-[var(--text-primary)]" title={log.url}>
-                        {log.url}
-                      </td>
-                      <td>{getStatusBadge(log.status)}</td>
-                      <td>
-                        <span className="font-mono text-[11px] text-[var(--text-secondary)]">
-                          {log.rule_id || (log.status === 403 ? 'WAF-CRS-942100' : '—')}
-                        </span>
-                      </td>
-                      <td>{getSeverityBadge(log.severity, log.status)}</td>
-                      <td className="text-right">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setSelectedLog(log)
-                          }}
-                          className="px-2 py-1 text-[11px] font-mono font-semibold rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] text-[var(--text-secondary)] hover:text-orange-500 hover:border-orange-500/30 transition-colors"
-                        >
-                          Details
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })
+                logs.map((log, idx) => (
+                  <tr
+                    key={log.request_id || `log-${idx}`}
+                    onClick={() => setSelectedLog(log)}
+                    className="hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+                  >
+                    <td className="py-2.5 px-3.5 text-[var(--text-secondary)] whitespace-nowrap">
+                      {formatThaiDateTime(log.datetime)}
+                    </td>
+                    <td className="py-2.5 px-3.5 font-bold text-[var(--text-primary)] whitespace-nowrap">
+                      {log.ip}
+                    </td>
+                    <td className="py-2.5 px-3.5">
+                      <span className="px-1.5 py-0.5 rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] text-[10.5px] font-bold text-sky-400">
+                        {log.method}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3.5 text-[var(--text-primary)] truncate max-w-[280px]">
+                      {log.url || '/'}
+                    </td>
+                    <td className="py-2.5 px-3.5 whitespace-nowrap">
+                      {getStatusBadge(log.status)}
+                    </td>
+                    <td className="py-2.5 px-3.5 whitespace-nowrap">
+                      {getSeverityBadge(log.severity)}
+                    </td>
+                    <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
+                      <span className="text-orange-500 font-semibold text-[11px] hover:underline">
+                        Inspect →
+                      </span>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
         </div>
 
-        {/* Enterprise Pagination Bar */}
-        <div className="px-4 py-3 border-t border-[var(--bg-border)] bg-[var(--bg-surface)] flex items-center justify-between gap-4 flex-wrap text-[12px] font-mono">
-          <form onSubmit={handleJumpPage} className="flex items-center gap-2 text-[var(--text-secondary)]">
-            <span>
-              Page <strong className="text-[var(--text-primary)]">{page}</strong> of{' '}
-              <strong className="text-[var(--text-primary)]">{totalPages.toLocaleString()}</strong>
-            </span>
-            <span className="opacity-30">|</span>
-            <span className="text-[11px] text-[var(--text-muted)]">Go to:</span>
-            <input
-              type="number"
-              min={1}
-              max={totalPages}
-              placeholder="#"
-              value={pageInput}
-              onChange={(e) => setPageInput(e.target.value)}
-              className="w-14 dash-input py-0.5 px-2 text-center text-[12px] font-mono"
-            />
-            <button
-              type="submit"
-              disabled={!pageInput}
-              className="bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] px-2.5 py-1 text-[11.5px] font-semibold rounded disabled:opacity-40 hover:bg-[var(--bg-hover)] cursor-pointer"
-            >
-              Jump
-            </button>
-            {isFetching && <span className="ml-1 text-orange-500 text-[11px] animate-pulse">Syncing...</span>}
-          </form>
+        {/* Pagination Bar */}
+        <div className="p-3.5 border-t border-[var(--bg-border)] flex flex-col sm:flex-row items-center justify-between gap-3 text-[12px] font-mono text-[var(--text-muted)]">
+          <div>
+            Showing <strong className="text-[var(--text-primary)]">{total > 0 ? startRecord : 0}</strong>–
+            <strong className="text-[var(--text-primary)]">{endRecord}</strong> of{' '}
+            <strong className="text-orange-500">{total.toLocaleString()}</strong> events
+          </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setPage(1)}
               disabled={page <= 1}
-              title="First Page"
-              className="p-1.5 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] disabled:opacity-30 cursor-pointer"
+              className="p-1.5 rounded-lg border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
             >
               <ChevronsLeft size={14} />
             </button>
             <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => setPage((p) => Math.max(p - 1, 1))}
               disabled={page <= 1}
-              className="flex items-center gap-1 px-2.5 py-1 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] disabled:opacity-30 cursor-pointer"
+              className="p-1.5 rounded-lg border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
             >
-              <ChevronLeft size={13} /> Prev
+              <ChevronLeft size={14} />
             </button>
 
-            {getPageNumbers().map((num, idx) =>
-              num === '...' ? (
-                <span key={`ellipsis-${idx}`} className="px-1 text-[var(--text-muted)]">
-                  …
-                </span>
-              ) : (
-                <button
-                  key={`page-${num}`}
-                  onClick={() => setPage(num as number)}
-                  className={`min-w-[28px] h-7 text-[12px] font-mono font-semibold rounded border cursor-pointer ${
-                    page === num
-                      ? 'bg-orange-500 text-white border-orange-500 shadow-sm'
-                      : 'bg-[var(--bg-surface)] border-[var(--bg-border)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]'
-                  }`}
-                >
-                  {num}
-                </button>
-              )
-            )}
+            <span className="px-2 font-bold text-[var(--text-primary)]">
+              Page {page} of {totalPages}
+            </span>
 
             <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
               disabled={page >= totalPages}
-              className="flex items-center gap-1 px-2.5 py-1 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] disabled:opacity-30 cursor-pointer"
+              className="p-1.5 rounded-lg border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
             >
-              Next <ChevronRight size={13} />
+              <ChevronRight size={14} />
             </button>
             <button
               onClick={() => setPage(totalPages)}
               disabled={page >= totalPages}
-              title="Last Page"
-              className="p-1.5 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] disabled:opacity-30 cursor-pointer"
+              className="p-1.5 rounded-lg border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
             >
               <ChevronsRight size={14} />
             </button>
@@ -427,116 +421,76 @@ export const Logs: React.FC = () => {
         </div>
       </div>
 
-      {/* Log Detail Inspector Modal */}
-      {selectedLog && typeof document !== 'undefined' && createPortal(
-        <div
-          className="modal-backdrop"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setSelectedLog(null)
-          }}
-        >
-          <div
-            className="dash-modal w-full max-w-2xl shadow-2xl animate-fade-in"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="dash-card-header bg-[var(--bg-surface-elevated)]">
-              <div className="flex items-center gap-2.5">
-                <Code size={16} className="text-orange-500" />
-                <h3 className="font-mono">Security Event Inspector</h3>
-              </div>
-              <button
-                onClick={() => setSelectedLog(null)}
-                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] font-mono text-base px-2 cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto font-mono text-[12px]">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
-                  <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
-                    Event Time
-                  </span>
-                  <span className="text-[var(--text-primary)]">{selectedLog.datetime}</span>
-                </div>
-
-                <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)] flex items-center justify-between">
-                  <div>
-                    <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
-                      Client IP
-                    </span>
-                    <span className="text-[var(--text-primary)] font-bold">{selectedLog.ip}</span>
-                  </div>
-                  <button
-                    onClick={() => handleCopy(selectedLog.ip, 'IP')}
-                    className="p-1 rounded text-[var(--text-muted)] hover:text-orange-500 cursor-pointer"
-                  >
-                    {copiedText === selectedLog.ip ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
-                <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
-                  HTTP Request Target
-                </span>
+      {/* Log Detail Modal */}
+      {selectedLog &&
+        createPortal(
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in font-mono">
+            <div className="bg-[var(--bg-surface)] border border-[var(--bg-border)] rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl overflow-y-auto max-h-[90vh]">
+              <div className="flex justify-between items-center border-b border-[var(--bg-border)] pb-3">
                 <div className="flex items-center gap-2">
-                  {getMethodBadge(selectedLog.method)}
-                  <span className="text-[var(--text-primary)] break-all">{selectedLog.url}</span>
+                  <Code size={16} className="text-orange-500" />
+                  <h3 className="text-[14px] font-bold text-[var(--text-primary)] m-0">
+                    Event Inspection Details
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setSelectedLog(null)}
+                  className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] text-[16px] cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-[12px]">
+                <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
+                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Timestamp (Asia/Bangkok)</span>
+                  <p className="font-bold text-[var(--text-primary)] m-0">{formatThaiDateTime(selectedLog.datetime)}</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
+                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Client IPv4</span>
+                  <p className="font-bold text-orange-400 m-0">{selectedLog.ip}</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
-                  <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
-                    HTTP Status
-                  </span>
-                  {getStatusBadge(selectedLog.status)}
-                </div>
+              <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1 text-[12px]">
+                <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Requested URL</span>
+                <p className="font-bold text-[var(--text-primary)] break-all m-0">{selectedLog.url}</p>
+              </div>
 
-                <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
-                  <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
-                    Threat Severity
-                  </span>
-                  {getSeverityBadge(selectedLog.severity, selectedLog.status)}
+              <div className="grid grid-cols-3 gap-3 text-[12px]">
+                <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
+                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">HTTP Method</span>
+                  <p className="font-bold text-sky-400 m-0">{selectedLog.method}</p>
                 </div>
-
-                <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
-                  <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
-                    Rule ID
-                  </span>
-                  <span className="font-bold text-orange-500">
-                    {selectedLog.rule_id || (selectedLog.status === 403 ? 'WAF-CRS-942100' : 'NONE')}
-                  </span>
+                <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
+                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Status Code</span>
+                  <p className="font-bold text-[var(--text-primary)] m-0">{selectedLog.status}</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
+                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Severity</span>
+                  <p className="font-bold text-[var(--text-primary)] m-0">{selectedLog.severity || 'LOW'}</p>
                 </div>
               </div>
 
-              {selectedLog.status === 403 && (
-                <div className="p-3.5 rounded-lg bg-red-500/[0.08] border border-red-500/20 text-red-400 space-y-1">
-                  <div className="flex items-center gap-1.5 font-bold text-[11px] uppercase">
-                    <ShieldAlert size={14} />
-                    <span>ModSecurity Inbound Anomaly Score Exceeded</span>
-                  </div>
-                  <p className="text-[11.5px] text-[var(--text-secondary)] m-0">
-                    This request was intercepted and denied by the OWASP ModSecurity Core Rule Set (CRS 3.3) engine.
-                  </p>
+              {selectedLog.rule_id && (
+                <div className="p-2.5 rounded-xl bg-red-950/20 border border-red-500/30 space-y-1 text-[12px]">
+                  <span className="text-[10.5px] text-red-400 uppercase font-bold">Triggered ModSecurity Rule</span>
+                  <p className="font-bold text-red-300 m-0">Rule ID: {selectedLog.rule_id}</p>
                 </div>
               )}
 
-              <div className="flex justify-end pt-3 border-t border-[var(--bg-border)]">
+              <div className="flex justify-end pt-2">
                 <button
                   onClick={() => setSelectedLog(null)}
-                  className="px-4 py-1.5 bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] rounded-md font-semibold text-[12px] cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-[12px] transition-colors cursor-pointer"
                 >
-                  Close Inspector
+                  Close Inspection
                 </button>
               </div>
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   )
 }

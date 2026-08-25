@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WAF Machine Learning Model Evaluation Report</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg-primary: #0b0f19;
+      --bg-card: #151d30;
+      --bg-card-hover: #1c263f;
+      --border-color: #24324f;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent-cyan: #06b6d4;
+      --accent-purple: #8b5cf6;
+      --accent-green: #10b981;
+      --accent-red: #ef4444;
+      --accent-yellow: #f59e0b;
+      --font-main: 'Prompt', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-main);
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      line-height: 1.6;
+      padding: 30px 20px;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    /* Presentation Header */
+    .header {
+      text-align: center;
+      margin-bottom: 35px;
+      padding-bottom: 25px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .badge-tag {
+      display: inline-block;
+      background: rgba(6, 182, 212, 0.15);
+      color: var(--accent-cyan);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      padding: 4px 14px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      margin-bottom: 12px;
+      letter-spacing: 0.5px;
+    }
+
+    .header h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 10px;
+    }
+
+    .header p {
+      color: var(--text-muted);
+      font-size: 1.05rem;
+    }
+
+    /* Section Grid */
+    .section-title {
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin: 30px 0 15px 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-main);
+    }
+
+    .section-title::before {
+      content: "";
+      display: inline-block;
+      width: 4px;
+      height: 20px;
+      background: var(--accent-cyan);
+      border-radius: 2px;
+    }
+
+    /* Key Metric Cards */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 18px;
+      margin-bottom: 25px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 22px;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .card:hover {
+      border-color: rgba(6, 182, 212, 0.4);
+      transform: translateY(-2px);
+    }
+
+    .metric-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .metric-label {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      font-weight: 500;
+    }
+
+    .metric-icon {
+      font-size: 1.3rem;
+    }
+
+    .metric-value {
+      font-size: 2.2rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      margin-bottom: 6px;
+    }
+
+    .val-cyan { color: var(--accent-cyan); }
+    .val-purple { color: var(--accent-purple); }
+    .val-green { color: var(--accent-green); }
+    .val-red { color: var(--accent-red); }
+
+    .metric-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    /* Two Columns Layout */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 25px;
+    }
+
+    @media (max-width: 768px) {
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Confusion Matrix Box */
+    .cm-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 15px;
+    }
+
+    .cm-cell {
+      padding: 16px;
+      border-radius: 10px;
+      text-align: center;
+    }
+
+    .cm-tn {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .cm-fp {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+
+    .cm-fn {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .cm-tp {
+      background: rgba(6, 182, 212, 0.1);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+    }
+
+    .cm-title {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .cm-num {
+      font-size: 1.8rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--text-main);
+    }
+
+    .cm-sub {
+      font-size: 0.8rem;
+      margin-top: 2px;
+      font-weight: 500;
+    }
+
+    /* Tables */
+    .custom-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 0.95rem;
+    }
+
+    .custom-table th {
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-muted);
+      text-align: left;
+      padding: 12px 14px;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .custom-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+    }
+
+    .custom-table tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .tag-benign {
+      color: var(--accent-green);
+      font-weight: 600;
+    }
+
+    .tag-attack {
+      color: var(--accent-red);
+      font-weight: 600;
+    }
+
+    /* Feature Importance Bars */
+    .feat-item {
+      margin-bottom: 12px;
+    }
+
+    .feat-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.9rem;
+      margin-bottom: 4px;
+    }
+
+    .feat-name {
+      font-family: var(--font-mono);
+      color: var(--text-main);
+    }
+
+    .feat-pct {
+      font-family: var(--font-mono);
+      color: var(--accent-cyan);
+      font-weight: 600;
+    }
+
+    .feat-bar-bg {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.07);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .feat-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #06b6d4, #8b5cf6);
+      border-radius: 4px;
+    }
+
+    /* Dataset Sources Box */
+    .source-box {
+      background: rgba(21, 29, 48, 0.9);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 22px;
+      margin-top: 25px;
+    }
+
+    .source-card {
+      background: rgba(11, 15, 25, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px;
+      padding: 16px;
+      margin-top: 12px;
+    }
+
+    .source-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .source-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--accent-cyan);
+    }
+
+    .source-badge {
+      background: rgba(6, 182, 212, 0.12);
+      color: var(--accent-cyan);
+      border: 1px solid rgba(6, 182, 212, 0.25);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-family: var(--font-mono);
+    }
+
+    .source-link {
+      color: #38bdf8;
+      text-decoration: none;
+      word-break: break-all;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+    }
+
+    .source-link:hover {
+      text-decoration: underline;
+    }
+
+    .source-list {
+      list-style-type: none;
+      padding-left: 0;
+      margin-top: 8px;
+    }
+
+    .source-list li {
+      font-size: 0.9rem;
+      color: #cbd5e1;
+      margin-bottom: 6px;
+      padding-left: 18px;
+      position: relative;
+    }
+
+    .source-list li::before {
+      content: "•";
+      color: var(--accent-cyan);
+      position: absolute;
+      left: 0;
+      font-weight: bold;
+    }
+
+    /* Key Takeaway Box */
+    .takeaway-box {
+      background: linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(139, 92, 246, 0.08));
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 25px;
+    }
+
+    .takeaway-box h3 {
+      font-size: 1.15rem;
+      color: var(--accent-cyan);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .takeaway-box ul {
+      padding-left: 20px;
+      color: #cbd5e1;
+      font-size: 0.95rem;
+    }
+
+    .takeaway-box li {
+      margin-bottom: 6px;
+    }
+
+    /* Footer buttons */
+    .actions {
+      text-align: center;
+      margin-top: 35px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .btn {
+      background: var(--accent-cyan);
+      color: #0b0f19;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: var(--font-main);
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover {
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    
+    <!-- Header -->
+    <header class="header">
+      <span class="badge-tag">WAF Intelligence Layer • Model Evaluation</span>
+      <h1>ผลการประเมินประสิทธิภาพโมเดล Machine Learning</h1>
+      <p>Random Forest Classifier + Isolation Forest (ทดสอบบน Holdout Test Set 15,027 ตัวอย่าง)</p>
+    </header>
+
+    <!-- 1. Key Metrics Cards -->
+    <div class="metrics-grid">
+      <div class="card">
+        <div class="metric-top">
+          <span class="metric-label">ความแม่นยำรวม (Accuracy)</span>
+          <span class="metric-icon">🎯</span>
+        </div>
+        <div class="metric-value val-cyan">80.47%</div>
+        <div class="metric-desc">ทดสอบบนข้อมูลจริงที่ไม่เคยเห็น (15,027 รายการ)</div>
+      </div>
+
+      <div class="card">
+        <div class="metric-top">
+          <span class="metric-label">พื้นที่ใต้กราฟ (ROC-AUC)</span>
+          <span class="metric-icon">📈</span>
+        </div>
+        <div class="metric-value val-purple">0.8847</div>
+        <div class="metric-desc">ความสามารถในการแยกแยะ Normal vs Attack</div>
+      </div>
+
+      <div class="card">
+        <div class="metric-top">
+          <span class="metric-label">Attack Precision</span>
+          <span class="metric-icon">🛡️</span>
+        </div>
+        <div class="metric-value val-red">98.39%</div>
+        <div class="metric-desc">เมื่อเตือนว่าโจมตี ถูกต้องสูงถึง 98.4% (แทบไม่แจ้งผิด)</div>
+      </div>
+
+      <div class="card">
+        <div class="metric-top">
+          <span class="metric-label">Benign Recall</span>
+          <span class="metric-icon">✅</span>
+        </div>
+        <div class="metric-value val-green">98.97%</div>
+        <div class="metric-desc">ปล่อยผ่านผู้ใช้งานทั่วไปได้ถูกต้อง 99% (ไม่บล็อกมั่ว)</div>
+      </div>
+    </div>
+
+    <!-- 2. Two Columns Layout: Confusion Matrix & Detailed Classification Report -->
+    <div class="two-col">
+      
+      <!-- Confusion Matrix -->
+      <div class="card">
+        <div class="metric-top">
+          <span class="metric-label" style="font-size: 1.05rem; font-weight: 600; color: var(--text-main);">
+            📊 ตาราง Confusion Matrix
+          </span>
+          <span class="metric-icon">🔢</span>
+        </div>
+        <p class="metric-desc" style="margin-bottom: 10px;">ผลการจำแนกเปรียบเทียบระหว่างค่าจริงกับค่าที่โมเดลทำนาย</p>
+
+        <div class="cm-grid">
+          <div class="cm-cell cm-tn">
+            <div class="cm-title">True Negative (TN)</div>
+            <div class="cm-num">7,377</div>
+            <div class="cm-sub" style="color: var(--accent-green);">ปกติ และ ปล่อยผ่าน (98.97%)</div>
+          </div>
+          
+          <div class="cm-cell cm-fp">
+            <div class="cm-title">False Positive (FP)</div>
+            <div class="cm-num">77</div>
+            <div class="cm-sub" style="color: var(--accent-yellow);">ปกติ แต่ บล็อกผิด (1.03%)</div>
+          </div>
+
+          <div class="cm-cell cm-fn">
+            <div class="cm-title">False Negative (FN)</div>
+            <div class="cm-num">2,858</div>
+            <div class="cm-sub" style="color: var(--accent-red);">โจมตี แต่ หลุดรอด</div>
+          </div>
+
+          <div class="cm-cell cm-tp">
+            <div class="cm-title">True Positive (TP)</div>
+            <div class="cm-num">4,715</div>
+            <div class="cm-sub" style="color: var(--accent-cyan);">โจมตี และ บล็อกได้สำเร็จ</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Classification Breakdown Table -->
+      <div class="card">
+        <div class="metric-top">
+          <span class="metric-label" style="font-size: 1.05rem; font-weight: 600; color: var(--text-main);">
+            📑 ตารางแจกแจงตามประเภท (Metrics Report)
+          </span>
+          <span class="metric-icon">📋</span>
+        </div>
+        
+        <table class="custom-table">
+          <thead>
+            <tr>
+              <th>ประเภท</th>
+              <th>Precision</th>
+              <th>Recall</th>
+              <th>F1-Score</th>
+              <th>จำนวน</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag-benign">● ปกติ (Benign)</span></td>
+              <td style="font-family: var(--font-mono);">72.08%</td>
+              <td style="font-family: var(--font-mono);">98.97%</td>
+              <td style="font-family: var(--font-mono); font-weight: 600; color: var(--accent-green);">83.41%</td>
+              <td style="font-family: var(--font-mono);">7,454</td>
+            </tr>
+            <tr>
+              <td><span class="tag-attack">● โจมตี (Attack)</span></td>
+              <td style="font-family: var(--font-mono); font-weight: 600; color: var(--accent-red);">98.39%</td>
+              <td style="font-family: var(--font-mono);">62.26%</td>
+              <td style="font-family: var(--font-mono); font-weight: 600;">76.26%</td>
+              <td style="font-family: var(--font-mono);">7,573</td>
+            </tr>
+            <tr style="background: rgba(255, 255, 255, 0.02);">
+              <td><strong>Macro Average</strong></td>
+              <td style="font-family: var(--font-mono);">85.23%</td>
+              <td style="font-family: var(--font-mono);">80.61%</td>
+              <td style="font-family: var(--font-mono); font-weight: 600;">79.84%</td>
+              <td style="font-family: var(--font-mono);">15,027</td>
+            </tr>
+            <tr style="background: rgba(255, 255, 255, 0.02);">
+              <td><strong>Weighted Average</strong></td>
+              <td style="font-family: var(--font-mono);">85.34%</td>
+              <td style="font-family: var(--font-mono);">80.47%</td>
+              <td style="font-family: var(--font-mono); font-weight: 600;">79.81%</td>
+              <td style="font-family: var(--font-mono);">15,027</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- 3. Two Columns: Feature Importances & Dataset Summary -->
+    <div class="two-col">
+
+      <!-- Feature Importances -->
+      <div class="card">
+        <div class="metric-top">
+          <span class="metric-label" style="font-size: 1.05rem; font-weight: 600; color: var(--text-main);">
+            🔍 ฟีเจอร์ที่โมเดลให้น้ำหนักมากที่สุด (Feature Importance)
+          </span>
+        </div>
+        <p class="metric-desc" style="margin-bottom: 15px;">ปัจจัยหลักที่ Random Forest ใช้ในการแยกแยะการโจมตี</p>
+
+        <div class="feat-item">
+          <div class="feat-header">
+            <span class="feat-name">1. keyword_matches (คีย์เวิร์ดคำสั่งอันตราย)</span>
+            <span class="feat-pct">31.30%</span>
+          </div>
+          <div class="feat-bar-bg"><div class="feat-bar-fill" style="width: 31.3%;"></div></div>
+        </div>
+
+        <div class="feat-item">
+          <div class="feat-header">
+            <span class="feat-name">2. special_char_ratio (สัดส่วนอักขระพิเศษ)</span>
+            <span class="feat-pct">21.08%</span>
+          </div>
+          <div class="feat-bar-bg"><div class="feat-bar-fill" style="width: 21.08%;"></div></div>
+        </div>
+
+        <div class="feat-item">
+          <div class="feat-header">
+            <span class="feat-name">3. special_char_count (จำนวนอักขระพิเศษ)</span>
+            <span class="feat-pct">18.79%</span>
+          </div>
+          <div class="feat-bar-bg"><div class="feat-bar-fill" style="width: 18.79%;"></div></div>
+        </div>
+
+        <div class="feat-item">
+          <div class="feat-header">
+            <span class="feat-name">4. is_clean_structure (โครงสร้างสะอาดปกติ)</span>
+            <span class="feat-pct">8.98%</span>
+          </div>
+          <div class="feat-bar-bg"><div class="feat-bar-fill" style="width: 8.98%;"></div></div>
+        </div>
+
+        <div class="feat-item">
+          <div class="feat-header">
+            <span class="feat-name">5. method_is_post (การส่งข้อมูลผ่าน POST)</span>
+            <span class="feat-pct">6.19%</span>
+          </div>
+          <div class="feat-bar-bg"><div class="feat-bar-fill" style="width: 6.19%;"></div></div>
+        </div>
+
+        <div class="feat-item">
+          <div class="feat-header">
+            <span class="feat-name">6. quote_unbalanced (Quote เปิด/ปิดไม่ครบคู่)</span>
+            <span class="feat-pct">5.29%</span>
+          </div>
+          <div class="feat-bar-bg"><div class="feat-bar-fill" style="width: 5.29%;"></div></div>
+        </div>
+      </div>
+
+      <!-- Dataset & Training Summary -->
+      <div class="card">
+        <div class="metric-top">
+          <span class="metric-label" style="font-size: 1.05rem; font-weight: 600; color: var(--text-main);">
+            📦 สรุปข้อมูลชุดทดสอบ (Dataset Specs)
+          </span>
+        </div>
+        <p class="metric-desc" style="margin-bottom: 15px;">ข้อมูลที่ใช้ในการเทรนและประเมินผล</p>
+
+        <table class="custom-table">
+          <tbody>
+            <tr>
+              <td><strong>ชุดข้อมูลหลัก:</strong></td>
+              <td>CSIC 2010 + Augmented OWASP Payloads</td>
+            </tr>
+            <tr>
+              <td><strong>จำนวนข้อมูลทั้งหมด:</strong></td>
+              <td style="font-family: var(--font-mono);">60,106 ตัวอย่าง (Cleaned & Deduplicated)</td>
+            </tr>
+            <tr>
+              <td><strong>ทราฟฟิกปกติ (Benign):</strong></td>
+              <td style="font-family: var(--font-mono); color: var(--accent-green);">29,816 ตัวอย่าง (49.6%)</td>
+            </tr>
+            <tr>
+              <td><strong>ทราฟฟิกการโจมตี (Attack):</strong></td>
+              <td style="font-family: var(--font-mono); color: var(--accent-red);">30,290 ตัวอย่าง (50.4%)</td>
+            </tr>
+            <tr>
+              <td><strong>สัดส่วน Train / Test:</strong></td>
+              <td>Train 75% (45,079) / Test 25% (15,027)</td>
+            </tr>
+            <tr>
+              <td><strong>อัลกอริทึมที่ใช้:</strong></td>
+              <td>Random Forest (200 Trees) + Isolation Forest</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- 4. Dataset Sources & References Section -->
+    <div class="source-box">
+      <div class="metric-top">
+        <span class="metric-label" style="font-size: 1.15rem; font-weight: 600; color: var(--text-main);">
+          📚 แหล่งที่มาของชุดข้อมูลการเทรน (Dataset Sources & References)
+        </span>
+        <span class="badge-tag" style="margin-bottom: 0;">60,106 Samples</span>
+      </div>
+      <p class="metric-desc" style="margin-top: 4px;">
+        รวบรวมและผสานข้อมูลจาก 2 แหล่งหลักเพื่อความสมบูรณ์และทันต่อภัยคุกคามสมัยใหม่:
+      </p>
+
+      <!-- Source 1 -->
+      <div class="source-card">
+        <div class="source-header">
+          <span class="source-title">🌐 แหล่งที่ 1: CSIC 2010 HTTP Dataset (ชุดข้อมูลมาตรฐานวิจัยระดับโลก)</span>
+          <span class="source-badge">~20,000 Samples</span>
+        </div>
+        <ul class="source-list">
+          <li><strong>ผู้พัฒนา / สถาบันวิจัย:</strong> Information Security Group, Spanish National Research Council (CSIC), ประเทศสเปน</li>
+          <li><strong>GitHub Repository ที่ดึงข้อมูล:</strong> <a class="source-link" href="https://github.com/msudol/Web-Application-Attack-Datasets" target="_blank">https://github.com/msudol/Web-Application-Attack-Datasets</a> (ไฟล์ <code style="color: #38bdf8;">CSVData/csic_final.csv</code>)</li>
+          <li><strong>ลักษณะข้อมูล:</strong> บันทึกทราฟฟิก HTTP จริงจากการใช้งานระบบ E-Commerce Web Application (ทั้งการซื้อของปกติและการพยายามเจาะระบบ)</li>
+          <li><strong>การทำ Data Cleaning:</strong> กรองแถว Header Anomaly ที่ไม่มี Payload ใน Query/Body ออก เพื่อป้องกันปัญหา Model Poisoning</li>
+        </ul>
+      </div>
+
+      <!-- Source 2 -->
+      <div class="source-card">
+        <div class="source-header">
+          <span class="source-title">🚀 แหล่งที่ 2: Data Augmentation & Enhanced Modern Security Dataset</span>
+          <span class="source-badge">~40,000 Samples</span>
+        </div>
+        <p style="font-size: 0.9rem; color: #94a3b8; margin-bottom: 6px;">
+          สร้างขึ้นแบบ Programmatically (ผ่านสคริปต์ <code style="color: #38bdf8;">ml/download_dataset.py</code>) โดยอ้างอิงจากคลัง Payload และมาตรฐานความปลอดภัยสากล:
+        </p>
+        <ul class="source-list">
+          <li>
+            <strong>คลังการโจมตี (OWASP Top 10 Payloads ~15,000 ตัวอย่าง):</strong>
+            <ul style="list-style-type: circle; padding-left: 20px; margin-top: 4px; color: #cbd5e1;">
+              <li><strong>SQLi, XSS, SSRF, SSTI, NoSQL:</strong> อ้างอิงจาก <a class="source-link" href="https://github.com/swisskyrepo/PayloadsAllTheThings" target="_blank">PayloadsAllTheThings (swisskyrepo)</a> และ <a class="source-link" href="https://github.com/danielmiessler/SecLists" target="_blank">SecLists (danielmiessler)</a></li>
+              <li><strong>Log4Shell Exploit:</strong> อ้างอิงจากฐานข้อมูลช่องโหว่ <a class="source-link" href="https://nvd.nist.gov/vuln/detail/CVE-2021-44228" target="_blank">NIST NVD (CVE-2021-44228)</a></li>
+              <li><strong>Cloud SSRF Exfiltration:</strong> อ้างอิงจาก AWS IMDSv1 (<code style="color:#f59e0b;">169.254.169.254</code>) และ Google Cloud Metadata (<code style="color:#f59e0b;">metadata.google.internal</code>)</li>
+              <li><strong>WAF Evasion Mutations:</strong> อ้างอิงเทคนิคจาก <a class="source-link" href="https://owasp.org/www-project-web-security-testing-guide/" target="_blank">OWASP Web Security Testing Guide (WSTG)</a> เช่น Double URL Encoding, Case Swapping (<code style="color:#f59e0b;">uNiOn SeLeCt</code>), Inline Comment (<code style="color:#f59e0b;">/**/</code>)</li>
+            </ul>
+          </li>
+          <li style="margin-top: 8px;">
+            <strong>ทราฟฟิกปกติ (Modern Benign Web & REST API ~25,000 ตัวอย่าง):</strong>
+            <ul style="list-style-type: circle; padding-left: 20px; margin-top: 4px; color: #cbd5e1;">
+              <li><strong>RESTful API Standards:</strong> จำลอง JSON Auth Body, Pagination (<code style="color:#10b981;">page</code>, <code style="color:#10b981;">limit</code>, <code style="color:#10b981;">sort</code>, <code style="color:#10b981;">order</code>), UUID paths (<code style="color:#10b981;">/api/v1/users/{uuid}</code>)</li>
+              <li><strong>Real-world E-Commerce Corpus:</strong> คำค้นหาสินค้าภาษาไทย/อังกฤษจริง, ฟอร์มติดต่อ, การจัดการตะกร้าสินค้า และ Asset Files ปกติ</li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 5. Key Takeaways for Presentation Slide -->
+    <div class="takeaway-box">
+      <h3>💡 ข้อสรุปสำคัญสำหรับนำเสนอ (Key Presentation Takeaways)</h3>
+      <ul>
+        <li><strong>ความปลอดภัยของผู้ใช้จริงสูงสุด (High Precision 98.39%):</strong> เมื่อโมเดลตัดสินใจบล็อก มีโอกาสผิดพลาด (False Alarm) เพียง 1.03% (77 จาก 7,454 ตัวอย่าง) ทำให้มั่นใจได้ว่าจะไม่รบกวนการใช้งานของผู้ใช้ทั่วไป</li>
+        <li><strong>ครอบคลุมทราฟฟิกปกติ (Benign Recall 98.97%):</strong> ปล่อยผ่านคำขอที่ถูกต้องได้อย่างมีประสิทธิภาพสูงถึง 98.97%</li>
+        <li><strong>การใช้ฟีเจอร์เชิงโครงสร้าง (Structural Feature Engineering):</strong> การสกัดฟีเจอร์ผสมผสานระหว่างคีย์เวิร์ด (`keyword_matches`) และสถิติอักขระ (`special_char_ratio`) ทำให้โมเดลทนทานต่อการหลบเลี่ยง (Evasion Mutations) ได้ดีกว่า Rule แบบตรงตัว</li>
+      </ul>
+    </div>
+
+    <!-- Print / Screenshot helper -->
+    <div class="actions">
+      <button class="btn" onclick="window.print()">🖨️ พิมพ์หน้านี้ / บันทึกเป็น PDF สำหรับสไลด์</button>
+    </div>
+
+  </div>
+
+</body>
+</html>

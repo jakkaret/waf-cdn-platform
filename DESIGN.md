@@ -23,41 +23,51 @@ colors: {
 
   // Brand / Accent
   accent: {
-    DEFAULT:  '#667eea',   // primary purple-blue
-    dark:     '#764ba2',   // gradient end
-    light:    '#a5b4fc',   // active nav item
+    DEFAULT:  '#f97316',   // orange-500 (primary brand)
+    dark:     '#ea580c',   // orange-600
+    light:    '#fdba74',   // orange-300
     tg:       '#229ed9',   // Telegram blue
   },
 
-  // Semantic
-  success:  '#68d391',   // green — allowed, connected, ok
-  warning:  '#f6ad55',   // orange — high severity, warning
-  danger:   '#fc8181',   // red — critical, blocked, error
-  info:     '#76e4f7',   // cyan — info badge
+  // Semantic Contrast Rules (Dual Theme WCAG AA/AAA)
+  // Light Mode: text-*-600 / text-*-700 (คมชัดบนพื้นขาว)
+  // Dark Mode:  dark:text-*-400 (สว่างชัดบนพื้นมืด)
+  success:  { light: '#16a34a', dark: '#4ade80' },  // green — allowed, connected, ok
+  warning:  { light: '#d97706', dark: '#fbbf24' },  // amber — high severity, warning
+  danger:   { light: '#dc2626', dark: '#f87171' },  // red — critical, blocked, error
+  info:     { light: '#0284c7', dark: '#38bdf8' },  // sky/blue — info badge, telegram
 
-  // Text
+  // Text Contrast
   text: {
-    primary:  '#e4e8f0',
-    muted:    'rgba(255,255,255,0.4)',
-    subtle:   'rgba(255,255,255,0.2)',
+    primary:  'var(--text-primary)',    // #0f172a (light) / #f8fafc (dark)
+    secondary:'var(--text-secondary)',  // #475569 (light) / #94a3b8 (dark)
+    muted:    'var(--text-muted)',      // #64748b (light) / #64748b (dark)
+    dim:      'var(--text-dim)',        // #94a3b8 (light) / #475569 (dark)
   },
 
   // Severity (WAF rules & logs)
   severity: {
-    critical: { bg: '#fee', text: '#c53030' },
-    high:     { bg: '#fef5e7', text: '#dd6b20' },
-    medium:   { bg: '#fefce8', text: '#d69e2e' },
-    low:      { bg: '#e6fffa', text: '#38b2ac' },
+    critical: { lightBg: '#fef2f2', lightText: '#b91c1c', darkBg: 'rgba(239,68,68,0.1)', darkText: '#f87171' },
+    high:     { lightBg: '#fffbeb', lightText: '#b45309', darkBg: 'rgba(245,158,11,0.1)', darkText: '#fbbf24' },
+    medium:   { lightBg: '#fefce8', lightText: '#a16207', darkBg: 'rgba(234,179,8,0.1)', darkText: '#facc15' },
+    low:      { lightBg: '#f0fdf4', lightText: '#15803d', darkBg: 'rgba(34,197,94,0.1)', darkText: '#4ade80' },
   },
 
   // HTTP Status
   status: {
-    '2xx': { bg: '#e6f9f0', text: '#276749' },
-    '403': { bg: '#fff4e5', text: '#c05621' },
-    '5xx': { bg: '#fff5f5', text: '#c53030' },
+    '2xx': { lightText: '#15803d', darkText: '#4ade80' },
+    '403': { lightText: '#b91c1c', darkText: '#f87171' },
+    '429': { lightText: '#b45309', darkText: '#fbbf24' },
+    '5xx': { lightText: '#b91c1c', darkText: '#f87171' },
   },
 }
 ```
+
+### 1.1.1 Canonical Timezone Standard
+- **Timezone**: `Asia/Bangkok` (`UTC+7`, เวลาประเทศไทย)
+- **Formatting Function**: `formatThaiDateTime(timestamp)`
+- **Standard Output**: `YYYY-MM-DD HH:mm:ss` หรือ `DD/MM/YYYY, HH:mm:ss`
+- **Scope**: บังคับใช้ในทุกตาราง Traffic Logs, Alert Center, Security Event Modals, และ CSV Exports ทั้งหมด
 
 ### 1.2 Typography
 
@@ -102,14 +112,14 @@ Sidebar:         border-right: 1px solid rgba(255,255,255,0.06)
 ### 1.5 Gradient
 
 ```css
-/* Brand gradient — ใช้กับ sidebar, primary button */
-background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+/* Brand gradient — ใช้กับ primary button */
+background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
 
 /* Sidebar background */
-background: linear-gradient(160deg, #1a1f36 0%, #252b47 100%);
+background: var(--bg-surface); /* Solid dark surface */
 
 /* Card glow (login page) */
-background: radial-gradient(circle, rgba(102,126,234,0.15) 0%, transparent 70%);
+background: radial-gradient(circle, rgba(249,115,22,0.15) 0%, transparent 70%);
 ```
 
 ---
@@ -196,16 +206,25 @@ interface StatCardProps {
 │  ─────────────────────  │  ───────────────────── │
 │  [Brand Logo + Name]    │  [TopBar]               │
 │                         │  ─────────────────────  │
-│  [Nav Section: Main]    │                         │
-│  • Dashboard            │  <Page Content>         │
-│  • Attack Logs          │                         │
-│  • Custom Rules         │                         │
-│  • Alerts               │                         │
-│  • CDN Monitor          │                         │
+│  [Monitoring & Core]    │                         │
+│  • Security Dashboard   │  <Page Content>         │
+│  • Traffic Logs         │                         │
+│  • Origin Servers       │                         │
 │                         │                         │
-│  [Nav Section: Admin]   │                         │
-│  • Users & Roles        │                         │
-│  (admin only)           │                         │
+│  [Security & Access]    │                         │
+│  • WAF Rules            │                         │
+│  • IP Access List       │                         │
+│  • Rate Limiting        │                         │
+│  • ML Anomaly Rules     │                         │
+│  • AI Security Analyst  │                         │
+│  • Alert Center         │                         │
+│                         │                         │
+│  [Edge & Delivery]      │                         │
+│  • CDN Edge Nodes       │                         │
+│                         │                         │
+│  [Admin & System]       │                         │
+│  • Access Control       │                         │
+│  • System Settings      │                         │
 │                         │                         │
 │  ─────────────────────  │                         │
 │  [User Avatar + Name]   │                         │
@@ -219,25 +238,48 @@ interface StatCardProps {
 // src/components/layout/Sidebar.tsx
 
 // ความกว้าง: 240px (fixed, left-0, top-0, bottom-0)
-// Background: linear-gradient(160deg, #1a1f36 0%, #252b47 100%)
-// Border-right: 1px solid rgba(255,255,255,0.06)
+// Background: bg-[var(--bg-surface)]
+// Border-right: border-r border-[var(--bg-border)]
 
-// Nav Items
-const navItems = [
-  // Main section
-  { key: 'dashboard', href: '/',          icon: LayoutGrid,   label: 'Dashboard' },
-  { key: 'logs',      href: '/logs',      icon: ScrollText,   label: 'Attack Logs' },
-  { key: 'rules',     href: '/rules',     icon: ShieldCog,    label: 'Custom Rules' },
-  { key: 'alerts',    href: '/alerts',    icon: Bell,         label: 'Alerts' },
-  { key: 'cdn',       href: '/cdn',       icon: Globe,        label: 'CDN Monitor' },
-
-  // Admin section (แสดงเฉพาะ role === 'admin')
-  { key: 'users',     href: '/users',     icon: Users,        label: 'Users & Roles' },
+// Nav Sections & Items
+const sections = [
+  {
+    label: 'Monitoring & Core',
+    items: [
+      { label: 'Security Dashboard', path: '/', icon: LayoutDashboard },
+      { label: 'Traffic Logs', path: '/logs', icon: ListFilter },
+      { label: 'Origin Servers', path: '/origins', icon: Server },
+    ],
+  },
+  {
+    label: 'Security & Access Control',
+    items: [
+      { label: 'WAF Rules', path: '/rules', icon: ShieldAlert },
+      { label: 'IP Access List', path: '/ip-rules', icon: Ban },
+      { label: 'Rate Limiting', path: '/rate-limits', icon: Gauge },
+      { label: 'ML Anomaly Rules', path: '/ml-rules', icon: Sparkles },
+      { label: 'AI Security Analyst', path: '/ml-analyst', icon: Brain },
+      { label: 'Alert Center', path: '/alerts', icon: Bell },
+    ],
+  },
+  {
+    label: 'Edge & Delivery',
+    items: [
+      { label: 'CDN Edge Nodes', path: '/cdn', icon: Globe },
+    ],
+  },
+  {
+    label: 'Administration & System',
+    items: [
+      { label: 'Access Control', path: '/users', icon: Users, roles: ['admin'] },
+      { label: 'System Settings', path: '/settings', icon: SettingsIcon },
+    ],
+  },
 ]
 
-// Active state: bg-accent/18, color: accent.light, border-left: 2px solid accent.light
-// Hover state: bg-white/7, color: white/90
-// Inactive: color: white/55
+// Active state: bg-orange-500/10 text-orange-500 border border-orange-500/20
+// Hover state: bg-[var(--bg-hover)] text-[var(--text-primary)]
+// Inactive: text-[var(--text-muted)]
 ```
 
 ### 3.3 TopBar Spec
@@ -256,14 +298,21 @@ const navItems = [
 ```tsx
 // src/App.tsx
 const routes = [
-  { path: '/',        element: <Dashboard />,  protected: true  },
-  { path: '/logs',    element: <Logs />,       protected: true  },
-  { path: '/rules',   element: <Rules />,      protected: true  },
-  { path: '/alerts',  element: <Alerts />,     protected: true  },
-  { path: '/cdn',     element: <CDN />,        protected: true  },
-  { path: '/users',   element: <UserRoles />,  protected: true, adminOnly: true },
-  { path: '/login',   element: <Login />,      protected: false },
-  { path: '/register',element: <Register />,   protected: false },
+  { path: '/',            element: <Dashboard />,    protected: true  },
+  { path: '/logs',        element: <Logs />,         protected: true  },
+  { path: '/origins',     element: <Origins />,      protected: true  },
+  { path: '/origins/:id', element: <OriginDetail />, protected: true  },
+  { path: '/rules',       element: <Rules />,        protected: true  },
+  { path: '/ip-rules',    element: <IPRules />,      protected: true  },
+  { path: '/rate-limits', element: <RateLimiting />, protected: true  },
+  { path: '/ml-rules',    element: <MLRules />,      protected: true  },
+  { path: '/ml-analyst',  element: <MLAnalyst />,    protected: true  },
+  { path: '/alerts',      element: <Alerts />,       protected: true  },
+  { path: '/cdn',         element: <CDN />,          protected: true  },
+  { path: '/users',       element: <Users />,        protected: true, adminOnly: true },
+  { path: '/settings',    element: <Settings />,     protected: true  },
+  { path: '/login',       element: <Login />,        protected: false },
+  { path: '/register',    element: <Register />,     protected: false },
   { path: '/oauth-success', element: <OAuthSuccess />, protected: false },
 ]
 
@@ -801,6 +850,34 @@ PUT /api/auth/users/{user_id}/role         // update role
 
 ---
 
+### 5.7 Origin Servers Page (`/origins`)
+
+**วัตถุประสงค์:** จัดการและตรวจสอบ Origin Servers / Domains / SSL
+
+**Layout:** Table list ของ origin servers, ปุ่ม Add Origin
+**รายละเอียด:** ดูรายละเอียดแต่ละ Origin ได้ที่ `/origins/:id`
+
+### 5.8 IP Access List (`/ip-rules`)
+
+**วัตถุประสงค์:** จัดการ Block/Allow IP หรือ CIDR ranges
+**Layout:** Table ของ IP/CIDR ที่ถูกจัดการ พร้อมเหตุผล และวันที่สร้าง สามารถเพิ่ม/ลบได้
+
+### 5.9 Rate Limiting (`/rate-limits`)
+
+**วัตถุประสงค์:** ตั้งค่าการจำกัด Request per IP/Endpoint
+**Layout:** Form หรือ Card สำหรับตั้งค่า limit rules และดูสถานะ Redis rate limiting
+
+### 5.10 ML Anomaly Rules & AI Security Analyst (`/ml-rules`, `/ml-analyst`)
+
+**วัตถุประสงค์:** ดู anomaly scoring, rule suggestions ที่มาจาก Machine Learning model และพิจารณาอนุมัติ rules ที่ AI แนะนำ
+**Layout:** แสดงผลจาก ML Model, Pending Rules Table, AI Summary Dashboard
+
+### 5.11 System Settings (`/settings`)
+
+**วัตถุประสงค์:** ปรับแต่งระบบ, ค่าพารามิเตอร์ต่างๆ ของ Dashboard
+
+---
+
 ## 6. TypeScript Types
 
 ```ts
@@ -1038,6 +1115,18 @@ export const listUsers = () =>
   axios.get<{ users: User[] }>('/api/auth/users')
 export const updateUserRole = (user_id: string, role: UserRole) =>
   axios.put(`/api/auth/users/${user_id}/role`, { role })
+
+// src/api/origins.ts
+// Endpoints สำหรับ Origin/Domain management
+// export const getOrigins = ...
+
+// src/api/ml.ts
+// Endpoints สำหรับ ML models & suggestions
+// export const getPendingRules = ...
+
+// src/api/settings.ts
+// Endpoints สำหรับ System config
+// export const getSettings = ...
 ```
 
 ---
@@ -1098,19 +1187,20 @@ toast.error('Failed to delete rule')
 
 | Feature | Admin | Viewer |
 |---------|-------|--------|
-| ดู Dashboard | ✅ | ✅ |
-| ดู Attack Logs | ✅ | ✅ |
-| Export CSV Logs | ✅ | ✅ |
-| ดู Custom Rules | ✅ | ✅ |
-| เพิ่ม/แก้ไข/ลบ Rule | ✅ | ❌ |
-| ดู Alerts | ✅ | ✅ |
+| ดู Security Dashboard | ✅ | ✅ |
+| ดู Traffic Logs | ✅ | ✅ |
+| ดู Origin Servers | ✅ | ✅ |
+| ดู WAF Rules / IP Rules / Rate Limits | ✅ | ✅ |
+| เพิ่ม/แก้ไข/ลบ Rules & Limits | ✅ | ❌ |
+| ใช้งาน ML Anomaly / AI Analyst | ✅ | ✅ |
+| อนุมัติ ML Rules | ✅ | ❌ |
+| ดู/แก้ไข Alerts | ✅ | ✅ |
 | เชื่อมต่อ Telegram | ✅ | ✅ |
 | ดู CDN Monitor | ✅ | ✅ |
 | Purge Cache | ✅ | ❌ |
-| Global Block IP | ✅ | ❌ |
+| จัดการ System Settings | ✅ | ✅ |
 | ดู Users & Roles | ✅ | ❌ |
 | เปลี่ยน User Role | ✅ | ❌ |
-| Force Rule Sync | ✅ | ❌ |
 
 **Implementation:**
 - Route guard: `<AdminRoute>` wrapper → redirect `/` ถ้า viewer
@@ -1119,28 +1209,23 @@ toast.error('Failed to delete rule')
 
 ---
 
-## 11. Build & Deployment
+## 11. Build & Deployment Workflow
 
-### Development
-```bash
-cd dashboard/frontend
-npm run dev        # http://localhost:5173
-                   # /api/* → proxy → http://localhost:8000
-```
+### 11.1 Standard Verification & Deployment Rule
+1. **WSL Ubuntu First**: ทุกการแก้ไขโค้ด Frontend ต้องดำเนินการบน WSL Ubuntu (`/home/chirachot/seminar/waf_project/dashboard/frontend`)
+2. **Local Build Test**: ตรวจสอบการ Build ในเครื่องก่อนเสมอ:
+   ```bash
+   cd /home/chirachot/seminar/waf_project/dashboard/frontend && npm run build
+   ```
+3. **User Inspection & Approval**: อธิบายสรุปการเปลี่ยนแปลงให้ผู้ใช้ตรวจสอบ และรอคำสั่ง **"อนุมัติ"** ก่อนส่งขึ้น VPS
+4. **Deploy to VPS**:
+   ```bash
+   scp -o BatchMode=yes <file> root@178.104.53.123:/root/waf_project/dashboard/frontend/src/pages/
+   ssh -o BatchMode=yes root@178.104.53.123 'cd /root/waf_project/dashboard/frontend && npm run build'
+   ```
+5. **Strict Backend Guard**: ห้ามแก้ไขโค้ด Python/FastAPI Backend หรือ Database เด็ดขาด
 
-### Production Build
-```bash
-npm run build      # output: dashboard/frontend/dist/
-```
-
-### FastAPI Serve (Production)
-```python
-# dashboard/backend/main.py
-app.mount("/", StaticFiles(directory="../frontend/dist", html=True), name="static")
-# ต้องอยู่ท้ายสุด หลัง router ทุกตัว
-```
-
-### Environment Variables (Frontend)
+### 11.2 Environment Variables (Frontend)
 ```env
 # .env.production (ที่ dashboard/frontend/)
 VITE_API_BASE_URL=http://localhost:8000
@@ -1152,15 +1237,14 @@ VITE_API_BASE_URL=http://localhost:8000
 
 | Page | API Endpoints | Phase ที่เพิ่ม |
 |------|--------------|----------------|
-| Dashboard | `/api/logs/recent` | มีอยู่แล้ว |
-| Attack Logs | `/api/logs/recent` | มีอยู่แล้ว |
-| Custom Rules | `/api/rules/*` | มีอยู่แล้ว |
-| Alerts | `/api/alerts/*` | มีอยู่แล้ว |
-| CDN — Node Cards | `/api/cdn/nodes` | Phase 3A |
-| CDN — Stats Charts | `/api/cdn/stats` | Phase 4B |
-| CDN — Logs Table | `/api/cdn/logs` | Phase 4A |
-| CDN — Latency Chart | `/api/cdn/latency` | Phase 4C |
-| CDN — Cache Purge | `/api/cdn/purge` | Phase 1 |
-| CDN — Rule Sync | `/api/cdn/rule-sync-status` | Phase 5B |
-| CDN — Global Block | `/api/security/block` | Phase 5C |
-| Users & Roles | `/api/auth/users` | มีอยู่แล้ว |
+| Security Dashboard | `/api/logs/recent` | มีอยู่แล้ว |
+| Traffic Logs | `/api/logs/recent` | มีอยู่แล้ว |
+| Origin Servers | `/api/origins/*` | Update |
+| WAF Rules | `/api/rules/*` | มีอยู่แล้ว |
+| IP Access List | `/api/security/block` | Update |
+| Rate Limiting | `/api/rate-limits/*` | Update |
+| ML Rules & Analyst | `/api/ml/*` | ML Update |
+| Alert Center | `/api/alerts/*` | มีอยู่แล้ว |
+| CDN Edge Nodes | `/api/cdn/*` | Phase 3/4 |
+| Access Control | `/api/auth/users` | มีอยู่แล้ว |
+| System Settings | `/api/settings/*` | Update |

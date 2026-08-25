@@ -14,6 +14,15 @@ load_dotenv(find_dotenv())
 # Also try project root explicitly just in case
 load_dotenv(os.path.join(os.path.dirname(__file__), '../../../.env'))
 
+# In-Memory Cache for Alerts
+_alerts_cache: List[Dict] = []
+_alerts_cache_ts: float = 0.0
+ALERTS_CACHE_TTL = 5.0  # Cache for 5 seconds
+
+def invalidate_alerts_cache():
+    global _alerts_cache_ts
+    _alerts_cache_ts = 0.0
+
 class DynamoDBService:
     def __init__(self):
         self.region = os.getenv("AWS_REGION", "ap-southeast-1")
@@ -136,11 +145,37 @@ class DynamoDBService:
             if edge_node:
                 item["edge_node"] = edge_node
             self.alerts_table.put_item(Item=item)
+            # Update In-Memory Cache immediately
+            global _alerts_cache, _alerts_cache_ts
+            _alerts_cache = [item] + [x for x in _alerts_cache if x.get("alert_id") != alert_id]
+            _alerts_cache_ts = time.monotonic()
             print("Saved alert")
             return True
         except Exception as e:
             print("Failed to save alert:", e)
             return False
+
+    def get_all_alerts(self, max_items: int = 2000) -> List[Dict]:
+        """Fetch all alerts from DynamoDB with In-Memory Cache (TTL 5s) and full pagination"""
+        global _alerts_cache, _alerts_cache_ts
+        now = time.monotonic()
+        if _alerts_cache and (now - _alerts_cache_ts) < ALERTS_CACHE_TTL:
+            return _alerts_cache[:max_items]
+
+        try:
+            items = []
+            response = self.alerts_table.scan()
+            items.extend(response.get("Items", []))
+            while "LastEvaluatedKey" in response and len(items) < max_items:
+                response = self.alerts_table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+                items.extend(response.get("Items", []))
+            items.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+            _alerts_cache = items
+            _alerts_cache_ts = now
+            return items[:max_items]
+        except Exception as e:
+            print("Failed to fetch all alerts:", e)
+            return _alerts_cache[:max_items] if _alerts_cache else []
 
 
     def get_unalerted_403_logs(self):

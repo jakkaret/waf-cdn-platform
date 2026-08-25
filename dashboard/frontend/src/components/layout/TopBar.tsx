@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { ThemeToggle } from '../ui/ThemeToggle'
 import { NotificationCenter } from '../NotificationCenter'
 import { AISummaryModal } from '../AISummaryModal'
+import { OriginSelector } from './OriginSelector'
 import { Sparkles } from 'lucide-react'
 
 interface TopBarProps {
@@ -31,6 +32,9 @@ export const TopBar: React.FC<TopBarProps> = ({ title, subtitle, badge, action }
         )}
       </div>
       <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+        {/* Global Origin Scope Filter */}
+        <OriginSelector />
+
         {/* AI Threat Summary Button */}
         <button
           type="button"
@@ -39,7 +43,7 @@ export const TopBar: React.FC<TopBarProps> = ({ title, subtitle, badge, action }
           title="AI Threat Range Summary"
         >
           <Sparkles size={14} className="text-indigo-400" />
-          <span>AI Summary</span>
+          <span className="hidden sm:inline">AI Summary</span>
         </button>
 
         {/* Real-time Notification Center */}

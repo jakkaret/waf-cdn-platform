@@ -72,47 +72,6 @@ async def system_info(current_user: dict = Depends(require_viewer_or_above)):
     }
 
 
-# Logs Filter Options (scanned from real ClickHouse data)
-@app.get("/api/logs/filters")
-async def fetch_log_filters(current_user: dict = Depends(require_viewer_or_above)):
-    if ch.connected:
-        return ch.get_filter_options()
-    return {
-        "status_codes": [200, 403, 404, 500],
-        "methods": ["GET", "POST"],
-        "severities": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"]
-    }
-
-
-# Logs (protected - viewer+) - Routed to ClickHouse with pagination
-@app.get("/api/logs/recent")
-async def fetch_recent_logs(
-    limit: int = Query(20, description="Items per page"),
-    page: int = Query(1, description="Page number (1-indexed)"),
-    search: str = Query("", description="Search IP, URL, Rule ID"),
-    status_filter: str = Query("ALL", description="ALL, BLOCKED, ALLOWED, or specific status code like 500, 404"),
-    severity_filter: str = Query("ALL", description="ALL, CRITICAL, HIGH, MEDIUM, LOW, NONE"),
-    method_filter: str = Query("ALL", description="ALL, GET, POST, etc."),
-    current_user: dict = Depends(require_viewer_or_above),
-):
-    if ch.connected:
-        return ch.get_logs(
-            limit=limit,
-            page=page,
-            search=search,
-            status_filter=status_filter,
-            severity_filter=severity_filter,
-            method_filter=method_filter
-        )
-    else:
-        logs = get_recent_logs(limit)
-        return {
-            "logs": logs,
-            "total": len(logs),
-            "page": page,
-            "limit": limit,
-            "total_pages": 1
-        }
 
 
 # API Routers
@@ -122,7 +81,7 @@ app.include_router(limiter_api.router)
 app.include_router(logs_api.router)
 app.include_router(alerts.router)
 app.include_router(cdn.router)
-from api import ml, ml_rules, analytics, origins, domains, ip_rules, rate_limits, settings, ai_summary
+from api import ml, ml_rules, analytics, origins, domains, ip_rules, rate_limits, settings, ai_summary, tunnels, copilot
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
@@ -132,6 +91,8 @@ app.include_router(ip_rules.router)
 app.include_router(rate_limits.router)
 app.include_router(settings.router)
 app.include_router(ai_summary.router)
+app.include_router(tunnels.router)
+app.include_router(copilot.router)
 
 # Error Handlers
 from fastapi import Request

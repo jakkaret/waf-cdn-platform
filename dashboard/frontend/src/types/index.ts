@@ -54,11 +54,15 @@ export interface WafAlert {
 }
 
 export interface CdnNode {
-  region: 'SG' | 'JP' | 'TH'
+  region: string
   name?: string
   flag?: string
-  port: number
-  status: 'online' | 'offline' | 'degraded'
+  city?: string
+  ip?: string
+  port?: number
+  status?: string
+  online?: boolean
+  latency_ms?: number
   uptime_pct?: number
   cache_hit_ratio?: number
   avg_latency_ms?: number
