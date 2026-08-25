@@ -16,9 +16,9 @@ export interface LogFilterOptions {
 }
 
 export const logsApi = {
-  getRecentLogs: async (limit: number = 100): Promise<WafLog[]> => {
+  getRecentLogs: async (limit: number = 100, origin: string = 'ALL'): Promise<WafLog[]> => {
     const res = await api.get<{ logs: WafLog[] }>('/logs/recent', {
-      params: { limit, page: 1 }
+      params: { limit, origin, page: 1 }
     })
     return res.data.logs || []
   },
@@ -29,15 +29,17 @@ export const logsApi = {
     status_filter?: string
     severity_filter?: string
     method_filter?: string
+    origin?: string
   }): Promise<LogsResponse> => {
-    const res = await api.get<LogsResponse>('/logs/recent', {
+    const res = await api.get<LogsResponse>('/logs', {
       params: {
         limit: params?.limit || 20,
         page: params?.page || 1,
         search: params?.search || '',
-        status_filter: params?.status_filter || 'ALL',
-        severity_filter: params?.severity_filter || 'ALL',
-        method_filter: params?.method_filter || 'ALL'
+        status: params?.status_filter || 'ALL',
+        severity: params?.severity_filter || 'ALL',
+        method: params?.method_filter || 'ALL',
+        origin: params?.origin || 'ALL'
       }
     })
     return res.data

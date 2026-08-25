@@ -30,3 +30,9 @@ dist/
 
 # Legacy archive
 old/
+
+.impeccable/
+.agents/
+.claude/
+.codex/
+.github/

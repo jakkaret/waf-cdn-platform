@@ -132,15 +132,13 @@ async def get_notification_feed(
     try:
         if limit > 100:
             limit = 100
-        res = db.alerts_table.scan(Limit=limit)
-        items = res.get("Items", [])
-        # Sort newest first
-        items.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+        items = db.get_all_alerts(max_items=1000)
+        sliced = items[:limit]
         return {
             "success": True,
-            "count": len(items),
+            "count": len(sliced),
             "unread_count": sum(1 for x in items if not x.get("read", False)),
-            "notifications": items
+            "notifications": sliced
         }
     except Exception as e:
         logger.error(f"Error fetching notifications: {e}")

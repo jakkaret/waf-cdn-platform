@@ -1,11 +1,12 @@
 import asyncio
 import logging
 import os
+import secrets
 import time
 import httpx
 from datetime import datetime
 from dotenv import load_dotenv
-from services.dynamodb_service import DynamoDBService
+from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
 from services.gemini_service import gemini_service
 from boto3.dynamodb.conditions import Attr
 
@@ -65,7 +66,13 @@ async def dispatch_telegram_alert(data: dict):
 
         # 2. Save alert into AWS DynamoDB waf_alerts with AI analysis
         timestamp_int = int(data.get("timestamp") or time.time())
-        alert_id = f"{timestamp_int}-{ip}"
+        rand_suffix = secrets.token_hex(2).upper()
+        raw_alert_id = data.get("alert_id")
+        if raw_alert_id:
+            # Strip IP suffix if existing caller passed timestamp-ip format
+            alert_id = str(raw_alert_id)
+        else:
+            alert_id = f"ALT-{timestamp_int}-{rand_suffix}"
         try:
             db.alerts_table.put_item(
                 Item={
@@ -80,10 +87,11 @@ async def dispatch_telegram_alert(data: dict):
                     "edge_node": edge_node,
                     "ai_summary": ai_summary,
                     "message": f"{attack_type} (Rule: {rule_id})",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
                     "read": False
                 }
             )
+            invalidate_alerts_cache()
             print(f"✅ Alert saved to DynamoDB with AI summary: {alert_id}")
         except Exception as err:
             logger.error("Error saving alert to DynamoDB: %s", err)

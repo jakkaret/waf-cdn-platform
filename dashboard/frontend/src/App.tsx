@@ -22,6 +22,7 @@ import MLRules from './pages/MLRules'
 import Origins from './pages/Origins'
 import OriginDetail from './pages/OriginDetail'
 import MLAnalyst from './pages/MLAnalyst'
+import Tunnels from './pages/Tunnels'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -133,6 +134,14 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 <CDN />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/tunnels"
+            element={
+              <ProtectedRoute>
+                <Tunnels />
               </ProtectedRoute>
             }
           />

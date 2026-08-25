@@ -38,10 +38,16 @@ async def get_recent_alerts(
     try:
         if limit > 500:
             limit = 500
-        response = db.alerts_table.scan(Limit=limit)
-        alerts = response.get("Items", [])
-        alerts.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
-        return {"alerts": alerts}
+        user_id = current_user.get("user_id")
+        role = current_user.get("role", "viewer")
+
+        alerts = db.get_all_alerts(max_items=2000)
+
+        # Filter by tenant user if not admin
+        if role != "admin":
+            alerts = [a for a in alerts if a.get("user_id") == user_id]
+
+        return {"alerts": alerts[:limit]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
