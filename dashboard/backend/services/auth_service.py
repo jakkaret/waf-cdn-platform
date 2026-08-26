@@ -199,6 +199,9 @@ class AuthService:
             ExpressionAttributeValues={":r": role},
         )
 
+    def delete_user(self, user_id: str):
+        self.users_table.delete_item(Key={"user_id": user_id})
+
     def register_local(self, email: str, username: str, password: str, role: str = "viewer") -> Dict:
         existing = self.get_user_by_email(email)
         if existing:

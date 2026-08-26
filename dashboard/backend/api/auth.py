@@ -227,6 +227,17 @@ async def update_user_role(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    admin: dict = Depends(require_admin),
+):
+    if user_id == admin.get("user_id"):
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    auth_service.delete_user(user_id)
+    return {"message": "User deleted"}
+
+
 # Helpers
 
 def _safe_user(user: dict) -> dict:
