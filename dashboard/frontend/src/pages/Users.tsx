@@ -113,8 +113,8 @@ export const Users: React.FC = () => {
                           })
                         }
                       >
-                        <option value="viewer">Viewer (Read-Only)</option>
-                        <option value="admin">Admin (Full Control)</option>
+                        <option value="viewer">Standard User</option>
+                        <option value="admin">Platform Operator</option>
                       </select>
                     </td>
                     <td className="text-right">
