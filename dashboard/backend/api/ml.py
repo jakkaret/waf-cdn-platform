@@ -1,6 +1,7 @@
 import httpx
 from fastapi import APIRouter, HTTPException, Depends
 from services.rbac import require_viewer_or_above
+from services.gemini_service import gemini_service
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/ml", tags=["ML Analyst"])
@@ -12,6 +13,25 @@ class PredictRequest(BaseModel):
     method: str = "GET"
     body: str = ""
 
+
+async def _attach_explanation(req: PredictRequest, result: dict) -> dict:
+    """Add a Thai explanation of the model's per-feature attribution (T9's
+    `attribution`, T10 ruling R2) to a /predict result dict, shared by both
+    endpoints below so the Gemini-calling logic exists in exactly one place.
+
+    `attribution` may legitimately be absent from `result` (older ML service,
+    or T9 could not compute it) -- GeminiService.explain_attribution handles
+    that as a normal case and returns a static fallback with no network call.
+    A slow/dead Gemini cannot block a prediction: explain_attribution itself
+    never raises and bounds its own HTTP call to an 8s timeout, so it cannot
+    silently hang the request.
+    """
+    attribution = result.get("attribution")
+    request_context = {"url": req.url, "method": req.method}
+    result["explanation"] = await gemini_service.explain_attribution(request_context, attribution)
+    return result
+
+
 @router.post("/predict")
 async def predict_anomaly(req: PredictRequest, current_user: dict = Depends(require_viewer_or_above)):
     try:
@@ -22,7 +42,8 @@ async def predict_anomaly(req: PredictRequest, current_user: dict = Depends(requ
                 timeout=10.0
             )
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            return await _attach_explanation(req, result)
     except httpx.RequestError as e:
         raise HTTPException(status_code=503, detail=f"ML Service unavailable: {str(e)}")
     except httpx.HTTPStatusError as e:
@@ -39,7 +60,8 @@ async def predict_and_suggest(req: PredictRequest, current_user: dict = Depends(
             )
             response.raise_for_status()
             result = response.json()
-            
+            result = await _attach_explanation(req, result)
+
             # If anomaly detected, generate a pending rule
             pending_rule = None
             if result.get("is_anomaly"):
