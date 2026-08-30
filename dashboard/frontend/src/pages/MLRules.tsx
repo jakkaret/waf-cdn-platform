@@ -110,6 +110,10 @@ export const MLRules: React.FC = () => {
   }
 
   const handleCopySecRule = (rule: MLPendingRule) => {
+    if (!rule.secrule_template) {
+      toast.error('No SecRule template available for this rule')
+      return
+    }
     const text = rule.secrule_template.replace(
       '{RULE_ID}',
       rule.deployed_rule_id ? String(rule.deployed_rule_id) : 'PENDING_ID'
@@ -926,10 +930,12 @@ export const MLRules: React.FC = () => {
                       </div>
                       <div className="p-3 overflow-x-auto text-violet-300 leading-relaxed bg-slate-950">
                         <pre className="m-0">
-                          {rule.secrule_template.replace(
-                            '{RULE_ID}',
-                            rule.deployed_rule_id ? String(rule.deployed_rule_id) : 'PENDING_ID'
-                          )}
+                          {rule.secrule_template
+                            ? rule.secrule_template.replace(
+                                '{RULE_ID}',
+                                rule.deployed_rule_id ? String(rule.deployed_rule_id) : 'PENDING_ID'
+                              )
+                            : '// SecRule template unavailable for this rule'}
                         </pre>
                       </div>
                     </div>

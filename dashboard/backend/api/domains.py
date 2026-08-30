@@ -1,5 +1,6 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 import uuid
 from datetime import datetime
@@ -230,15 +231,41 @@ async def list_domains_by_origin(origin_id: str, current_user: dict = Depends(ge
     formatted = [format_domain(item) for item in items]
     return {"domains": formatted}
 
+# Ruling R7 (task-11-brief.md): domain_name flows into tenant_service's
+# ClickHouse LIKE patterns, so it is constrained to a hostname shape at the
+# point it enters the system. This does not fix the escaping in
+# tenant_service/analytics.py/clickhouse_service.py -- that is separate,
+# tracked work; it only stops obviously-malformed values from reaching it.
+_HOSTNAME_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+_HOSTNAME_RE = re.compile(rf"^{_HOSTNAME_LABEL}(?:\.{_HOSTNAME_LABEL})+$")
+
+
+def _validate_hostname(value: str) -> str:
+    normalized = value.strip().lower()
+    if len(normalized) > 253 or not _HOSTNAME_RE.match(normalized):
+        raise ValueError(
+            "domain_name must be a valid hostname: labels of letters, digits, "
+            "and hyphens (a label may not start or end with a hyphen), with "
+            "at least two labels (e.g. 'example.com'), and at most 253 "
+            "characters total."
+        )
+    return normalized
+
+
 class DomainCreatePayload(BaseModel):
     domain_name: str
+
+    @field_validator("domain_name")
+    @classmethod
+    def _domain_name_must_be_hostname(cls, v: str) -> str:
+        return _validate_hostname(v)
 
 @origins_domains_router.post("/{origin_id}/domains")
 async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayload, current_user: dict = Depends(get_current_user)):
     verify_origin_ownership(origin_id, current_user)
-    
-    domain_name = payload.domain_name.strip().lower()
-    
+
+    domain_name = payload.domain_name
+
     from boto3.dynamodb.conditions import Attr
     response = db.domains_table.scan(
         FilterExpression=Attr("domain_name").eq(domain_name)
