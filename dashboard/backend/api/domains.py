@@ -11,9 +11,51 @@ from services.dns_service import verify_domain_dns
 router = APIRouter(prefix="/api/domains", tags=["Domains"])
 db = DynamoDBService()
 
+# Ruling R7 (task-11-brief.md): domain_name flows into tenant_service's
+# ClickHouse LIKE patterns (services/tenant_service.py -> api/analytics.py's
+# _build_domain_pattern_sql -> raw f-string interpolation into ClickHouse),
+# so it is constrained to a hostname shape at the point it enters the
+# system, on *every* write path into domains_table -- not just the endpoint
+# newly mounted for T11. Per task-11-brief.md's review (Critical finding):
+# the legacy POST /api/domains below applied no validation at all and fed
+# the identical sink, so the same _validate_hostname is reused on both
+# DomainCreate and DomainCreatePayload rather than only the new one.
+#
+# This is entry validation as mitigation, not a fix for the underlying
+# vulnerability: services/tenant_service.py, api/analytics.py, and
+# services/clickhouse_service.py still build ClickHouse queries with
+# backslash-replacement escaping only, which a value shaped like
+# "x\' OR 1=1 --" already defeats once it reaches that sink (ClickHouse
+# reads the resulting "\\'" as one literal backslash followed by a
+# string-closing quote). That escaping is a separate, tracked
+# parameterization refactor across several call sites -- explicitly out of
+# scope here. Constraining domain_name to a hostname shape (no quotes,
+# backslashes, '%', or '_') at both entry points closes this specific
+# injection path without touching that sink.
+_HOSTNAME_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+_HOSTNAME_RE = re.compile(rf"^{_HOSTNAME_LABEL}(?:\.{_HOSTNAME_LABEL})+$")
+
+
+def _validate_hostname(value: str) -> str:
+    normalized = value.strip().lower()
+    if len(normalized) > 253 or not _HOSTNAME_RE.match(normalized):
+        raise ValueError(
+            "domain_name must be a valid hostname: labels of letters, digits, "
+            "and hyphens (a label may not start or end with a hyphen), each "
+            "label at most 63 characters, with at least two labels (e.g. "
+            "'example.com'), and at most 253 characters total."
+        )
+    return normalized
+
+
 class DomainCreate(BaseModel):
     origin_id: str
     domain_name: str
+
+    @field_validator("domain_name")
+    @classmethod
+    def _domain_name_must_be_hostname(cls, v: str) -> str:
+        return _validate_hostname(v)
 
 class DomainResponse(BaseModel):
     id: str
@@ -230,27 +272,6 @@ async def list_domains_by_origin(origin_id: str, current_user: dict = Depends(ge
         
     formatted = [format_domain(item) for item in items]
     return {"domains": formatted}
-
-# Ruling R7 (task-11-brief.md): domain_name flows into tenant_service's
-# ClickHouse LIKE patterns, so it is constrained to a hostname shape at the
-# point it enters the system. This does not fix the escaping in
-# tenant_service/analytics.py/clickhouse_service.py -- that is separate,
-# tracked work; it only stops obviously-malformed values from reaching it.
-_HOSTNAME_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
-_HOSTNAME_RE = re.compile(rf"^{_HOSTNAME_LABEL}(?:\.{_HOSTNAME_LABEL})+$")
-
-
-def _validate_hostname(value: str) -> str:
-    normalized = value.strip().lower()
-    if len(normalized) > 253 or not _HOSTNAME_RE.match(normalized):
-        raise ValueError(
-            "domain_name must be a valid hostname: labels of letters, digits, "
-            "and hyphens (a label may not start or end with a hyphen), with "
-            "at least two labels (e.g. 'example.com'), and at most 253 "
-            "characters total."
-        )
-    return normalized
-
 
 class DomainCreatePayload(BaseModel):
     domain_name: str
