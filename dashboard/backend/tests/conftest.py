@@ -77,6 +77,7 @@ from api import auth as auth_module  # noqa: E402
 from api import origins as origins_module  # noqa: E402
 from api import rules as rules_module  # noqa: E402
 from api import ai_summary as ai_summary_module  # noqa: E402
+from api import domains as domains_module  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +229,12 @@ def fake_infrastructure(monkeypatch, tmp_path):
     # DynamoDBService instance that shares no state with the fake store --
     # patch it the same way so no future test can silently hit it.
     monkeypatch.setattr(ai_summary_module, "db", FakeDynamoDBService())
+    # api/domains.py also does `db = DynamoDBService()` at import time (used
+    # by both its /api/domains router and the /api/origins/{id}/domains
+    # router mounted for T11) -- same reasoning as ai_summary above: patch it
+    # so its domains_table shares the same backing store as the fake used by
+    # origin_service.db and verify_origin_ownership's local construction.
+    monkeypatch.setattr(domains_module, "db", FakeDynamoDBService())
 
     # Auth: both api.auth's and services.rbac's AuthService singletons must
     # see the same users, so point both at the same backing list.
