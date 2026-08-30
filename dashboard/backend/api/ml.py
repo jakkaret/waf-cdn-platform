@@ -1,8 +1,11 @@
+import logging
 import httpx
 from fastapi import APIRouter, HTTPException, Depends
 from services.rbac import require_viewer_or_above
 from services.gemini_service import gemini_service
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ml", tags=["ML Analyst"])
 
@@ -23,12 +26,21 @@ async def _attach_explanation(req: PredictRequest, result: dict) -> dict:
     or T9 could not compute it) -- GeminiService.explain_attribution handles
     that as a normal case and returns a static fallback with no network call.
     A slow/dead Gemini cannot block a prediction: explain_attribution itself
-    never raises and bounds its own HTTP call to an 8s timeout, so it cannot
-    silently hang the request.
+    is designed to never raise and bounds its own HTTP call to an 8s timeout.
+
+    Binding project constraint: detection availability outranks explanation
+    availability, always. explain_attribution() is defense-in-depth against
+    ever raising, but this call site does not *trust* that -- if it raises
+    for any reason at all, the prediction must still return, just without an
+    "explanation" key, rather than turning a successful detection into a
+    500.
     """
     attribution = result.get("attribution")
     request_context = {"url": req.url, "method": req.method}
-    result["explanation"] = await gemini_service.explain_attribution(request_context, attribution)
+    try:
+        result["explanation"] = await gemini_service.explain_attribution(request_context, attribution)
+    except Exception as e:
+        logger.error(f"explain_attribution raised; returning prediction without explanation: {e}")
     return result
 
 

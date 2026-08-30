@@ -211,6 +211,122 @@ def test_fallback_never_raises_even_with_no_attribution(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Review finding (Critical, round 2): explain_attribution / the fallback path
+# could still raise on a malformed *item type* within `attribution` (a None
+# entry, a bare string entry, a dict missing "feature" or "contribution", or
+# `attribution` not being a list at all) even though _safe_float already
+# covered malformed *values*. Reproduced independently by the reviewer:
+#
+#   svc._fallback_attribution_explanation([None, {"feature": "x", "contribution": 0.5}])
+#   -> AttributeError: 'NoneType' object has no attribute 'get'
+#
+# Each of the following must produce a usable, non-empty string and never
+# raise -- this is what makes detection availability (a /predict response
+# always comes back) independent of explanation availability.
+# ---------------------------------------------------------------------------
+
+def test_fallback_direct_call_survives_none_entry_in_attribution():
+    """Locks in the exact crash reported in review."""
+    svc = GeminiService()
+
+    explanation = svc._fallback_attribution_explanation(
+        [None, {"feature": "keyword_matches", "value": 1.0, "contribution": 0.5}]
+    )
+
+    assert explanation
+    assert isinstance(explanation, str)
+    assert FEATURE_LABELS_TH["keyword_matches"] in explanation
+
+
+def test_full_path_survives_none_entry_in_attribution(monkeypatch):
+    """Same malformed list, exercised through the full async
+    explain_attribution() path (with httpx patched to raise, so a
+    successful fallback -- not a lucky Gemini round-trip -- is what's
+    actually being tested)."""
+    _patch_httpx(monkeypatch, gemini_raise=RuntimeError("network down"))
+    svc = GeminiService()
+    attribution = [None, {"feature": "keyword_matches", "value": 1.0, "contribution": 0.5}]
+
+    explanation = asyncio.run(
+        svc.explain_attribution({"url": "/x", "method": "GET"}, attribution)
+    )
+
+    assert explanation
+    assert isinstance(explanation, str)
+
+
+def test_fallback_survives_bare_string_entry_in_attribution():
+    svc = GeminiService()
+
+    explanation = svc._fallback_attribution_explanation(
+        ["not-a-dict", {"feature": "quote_unbalanced", "value": 1.0, "contribution": 0.2}]
+    )
+
+    assert explanation
+    assert isinstance(explanation, str)
+
+
+def test_fallback_survives_entry_missing_feature_key():
+    svc = GeminiService()
+
+    explanation = svc._fallback_attribution_explanation(
+        [{"value": 1.0, "contribution": 0.5}]  # no "feature" key at all
+    )
+
+    assert explanation
+    assert isinstance(explanation, str)
+
+
+def test_fallback_survives_entry_missing_contribution_key():
+    svc = GeminiService()
+
+    explanation = svc._fallback_attribution_explanation(
+        [{"feature": "keyword_matches", "value": 1.0}]  # no "contribution" key at all
+    )
+
+    assert explanation
+    assert isinstance(explanation, str)
+    assert FEATURE_LABELS_TH["keyword_matches"] in explanation
+
+
+def test_fallback_survives_feature_name_absent_from_labels():
+    svc = GeminiService()
+
+    explanation = svc._fallback_attribution_explanation(
+        [{"feature": "totally_unrecognised_feature_xyz", "value": 1.0, "contribution": 0.9}]
+    )
+
+    assert explanation
+    assert isinstance(explanation, str)
+    assert "totally_unrecognised_feature_xyz" in explanation  # falls back to the raw name
+
+
+def test_fallback_survives_attribution_not_a_list_at_all():
+    svc = GeminiService()
+
+    for bogus in ("just a string", {"feature": "keyword_matches"}, 42, True, object()):
+        explanation = svc._fallback_attribution_explanation(bogus)
+        assert explanation, f"empty explanation for bogus attribution {bogus!r}"
+        assert isinstance(explanation, str)
+
+
+def test_full_path_survives_attribution_not_a_list_at_all(monkeypatch):
+    """Through explain_attribution() itself: a non-list `attribution` is
+    treated as nothing-to-explain (no HTTP call attempted at all), not an
+    error."""
+    calls = _patch_httpx(monkeypatch, gemini_raise=AssertionError("must not be called"))
+    svc = GeminiService()
+
+    explanation = asyncio.run(
+        svc.explain_attribution({"url": "/x", "method": "GET"}, "not-a-list-at-all")
+    )
+
+    assert explanation
+    assert isinstance(explanation, str)
+    assert calls["gemini"] == []
+
+
+# ---------------------------------------------------------------------------
 # Feature labels
 # ---------------------------------------------------------------------------
 
@@ -341,6 +457,84 @@ def test_predict_and_suggest_returns_prediction_and_suggested_rule_keys(
     assert body["suggested_rule"] is None
     assert body["prediction"]["explanation"] == "อธิบายผลการวิเคราะห์"
     assert body["prediction"]["is_anomaly"] is False
+
+
+# ---------------------------------------------------------------------------
+# Review finding (Critical, round 2): the call site in api/ml.py must
+# survive explain_attribution() raising for *any* reason, not just rely on
+# explain_attribution()'s own internal guards -- detection availability
+# outranks explanation availability, always.
+# ---------------------------------------------------------------------------
+
+def test_predict_survives_explain_attribution_raising(
+    client: TestClient, register_user, auth_header, monkeypatch
+):
+    """If explain_attribution() raises for any reason at all, /predict must
+    still return 200 with its original fields -- just without an
+    "explanation" key -- rather than a 500."""
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("explain_attribution blew up")
+
+    monkeypatch.setattr(ml_module.gemini_service, "explain_attribution", _boom)
+    _patch_httpx(
+        monkeypatch,
+        ml_response=_FakeResponse(200, json_data={
+            "is_anomaly": True,
+            "score": 0.9,
+            "attribution": ATTRIBUTION,
+            "attribution_baseline": 0.5001,
+        }),
+    )
+
+    user = register_user(email="ml-user4@example.com", username="ml_user4")
+    resp = client.post(
+        "/api/ml/predict",
+        json={"url": "/vuln?id=1", "method": "GET", "body": ""},
+        headers=auth_header(user["access_token"]),
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "explanation" not in body
+    assert body["is_anomaly"] is True
+    assert body["attribution"] == ATTRIBUTION
+    assert body["attribution_baseline"] == 0.5001
+
+
+def test_predict_and_suggest_survives_explain_attribution_raising(
+    client: TestClient, register_user, auth_header, monkeypatch
+):
+    """Same guarantee for predict-and-suggest: the response keeps its
+    {"prediction": ..., "suggested_rule": ...} shape, and "prediction" keeps
+    its original fields, just without "explanation"."""
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("explain_attribution blew up")
+
+    monkeypatch.setattr(ml_module.gemini_service, "explain_attribution", _boom)
+    _patch_httpx(
+        monkeypatch,
+        ml_response=_FakeResponse(200, json_data={
+            "is_anomaly": False,  # avoids MLRuleService/DynamoDB entirely; out of this task's scope
+            "score": 0.2,
+            "attribution": ATTRIBUTION,
+        }),
+    )
+
+    user = register_user(email="ml-user5@example.com", username="ml_user5")
+    resp = client.post(
+        "/api/ml/predict-and-suggest",
+        json={"url": "/vuln?id=1", "method": "GET", "body": ""},
+        headers=auth_header(user["access_token"]),
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert set(body.keys()) == {"prediction", "suggested_rule"}
+    assert "explanation" not in body["prediction"]
+    assert body["prediction"]["is_anomaly"] is False
+    assert body["prediction"]["attribution"] == ATTRIBUTION
 
 
 # ---------------------------------------------------------------------------

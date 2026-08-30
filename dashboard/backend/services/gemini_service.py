@@ -5,7 +5,7 @@ import logging
 import httpx
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -143,15 +143,34 @@ class GeminiService:
         except (TypeError, ValueError):
             return default
 
-    def _top_contributors(self, attribution: List[Dict[str, Any]], limit: int = 5) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _as_attribution_items(attribution: Any) -> List[Dict[str, Any]]:
+        """Total, never-raising coercion of `attribution` into a list of
+        dict-shaped items.
+
+        This is the single choke point every other helper below routes
+        through, so a caller cannot bypass it by accident: `attribution`
+        not being a list at all (a string, a dict, an int, ...) yields [];
+        a list containing non-dict entries (None, a bare string, ...)
+        silently drops just those entries. This is the actual last line of
+        defence for the fallback path -- it must be total, not merely
+        likely-safe, because detection availability must never depend on
+        every element of `attribution` having the expected shape.
+        """
+        if not isinstance(attribution, list):
+            return []
+        return [item for item in attribution if isinstance(item, dict)]
+
+    def _top_contributors(self, attribution: Any, limit: int = 5) -> List[Dict[str, Any]]:
+        items = self._as_attribution_items(attribution)
         return sorted(
-            attribution,
+            items,
             key=lambda item: abs(self._safe_float(item.get("contribution"))),
             reverse=True,
         )[:limit]
 
     def _get_attribution_signature_key(self, request_context: Dict[str, Any],
-                                         attribution: List[Dict[str, Any]]) -> str:
+                                         attribution: Any) -> str:
         """Create a compact signature key for deduplication, mirroring
         _get_attack_signature_key's shape."""
         url = self._truncate(str(request_context.get("url") or "").split("?")[0], 120)
@@ -163,24 +182,42 @@ class GeminiService:
         )
         return f"{method}:{url}:{top_key}"
 
-    def _fallback_attribution_explanation(self, attribution: Optional[List[Dict[str, Any]]]) -> str:
+    @staticmethod
+    def _label_for_feature(feature_name: Any) -> str:
+        """Static Thai label for one feature name, tolerating a missing or
+        unrecognised name instead of raising or returning the string
+        "None"."""
+        if not feature_name:
+            return "ปัจจัยที่ไม่ระบุชื่อ"
+        return FEATURE_LABELS_TH.get(str(feature_name), str(feature_name))
+
+    def _fallback_attribution_explanation(self, attribution: Any) -> str:
         """Genuinely useful fallback (acceptance criterion 3): compose a Thai
         sentence from the top contributing features using their static Thai
         labels, so the operator still learns which signals drove the
-        decision even with Gemini fully unavailable."""
-        if not attribution:
+        decision even with Gemini fully unavailable.
+
+        Routes through _top_contributors()/_as_attribution_items(), so a
+        malformed `attribution` (wrong type entirely, or containing None /
+        bare strings / dicts missing "feature" or "contribution") degrades
+        gracefully instead of raising -- this is the guaranteed-safe path
+        and must be total.
+        """
+        top = self._top_contributors(attribution, limit=3)
+        if not top:
             return "ระบบไม่มีข้อมูลปัจจัย (attribution) ที่เพียงพอสำหรับอธิบายผลการวิเคราะห์นี้"
 
-        top = self._top_contributors(attribution, limit=3)
-        labels = [
-            FEATURE_LABELS_TH.get(str(item.get("feature")), str(item.get("feature")))
-            for item in top
-        ]
+        labels = [self._label_for_feature(item.get("feature")) for item in top]
         joined = ", ".join(labels)
         return f"ปัจจัยหลักที่ระบบใช้ในการวิเคราะห์คำขอนี้ ได้แก่ {joined} ซึ่งเป็นสัญญาณสำคัญที่ทำให้โมเดลให้คะแนนความผิดปกติดังกล่าว"
 
+    # Absolute last-resort string: used only if _fallback_attribution_explanation
+    # itself somehow raises. Pure string literal -- no attribute access, no
+    # formatting of caller-controlled data -- so it cannot itself fail.
+    _ULTIMATE_FALLBACK_TH = "ระบบไม่สามารถสร้างคำอธิบายผลการวิเคราะห์ได้ในขณะนี้"
+
     async def explain_attribution(self, request_context: Dict[str, Any],
-                                    attribution: Optional[List[Dict[str, Any]]]) -> str:
+                                    attribution: Any) -> str:
         """
         Explain the model's per-feature attribution (T9's `attribution` list)
         in 1-2 concise Thai sentences for the operator reading a /predict or
@@ -190,22 +227,40 @@ class GeminiService:
         criterion 2): in-memory cache keyed on a signature honouring
         self._cache_ttl, an httpx call to the same BASE_URL with ?key=, and
         on any non-200 response or exception, falls through to the static
-        fallback below -- never raises. The whole body below the initial
-        guard is inside one try/except so that a malformed `attribution`
-        entry (e.g. a non-numeric `contribution`) degrades to the fallback
-        the same way a network failure does, rather than escaping as an
-        unhandled exception -- acceptance criterion 2 says "never raise",
-        not "never raise once the HTTP call has started".
+        fallback below -- never raises.
 
-        `attribution` may legitimately be absent (T9 omits it rather than
-        failing); that is handled here as a normal case with no Gemini call
-        at all, not an error.
+        This is defended in depth, on purpose, so a single guard someone
+        later refactors away cannot reintroduce a 500 (binding project
+        constraint: detection availability outranks explanation
+        availability, always):
+          1. `attribution` is normalised once, up front, through
+             _as_attribution_items() -- not a list, or containing non-dict
+             entries (None, bare strings, ...), can never reach a bare
+             `.get()` call anywhere below.
+          2. Everything that builds the prompt and calls Gemini is inside
+             one try/except, so a malformed *value* within an otherwise
+             well-formed item (e.g. a non-numeric `contribution`, handled by
+             _safe_float) degrades to the fallback the same way a network
+             failure does.
+          3. The fallback call itself -- the thing that is supposed to be
+             the guaranteed-safe path -- is inside its *own* try/except, one
+             level further out, backstopped by a hardcoded string literal
+             that cannot itself raise. So even a defect inside the fallback
+             composer cannot escape this method.
+
+        `attribution` may legitimately be absent, or malformed, or simply
+        not a list at all (T9 omits it rather than failing; an older or
+        misbehaving ML service might send anything); all of that is handled
+        here as a normal case with no Gemini call at all when there is
+        nothing usable to explain, not as an error.
         """
-        if not attribution:
-            return self._fallback_attribution_explanation(attribution)
+        normalized = self._as_attribution_items(attribution)
 
         try:
-            sig_key = self._get_attribution_signature_key(request_context, attribution)
+            if not normalized:
+                return self._fallback_attribution_explanation(normalized)
+
+            sig_key = self._get_attribution_signature_key(request_context, normalized)
             now = time.time()
 
             if sig_key in self._attribution_cache:
@@ -219,7 +274,7 @@ class GeminiService:
             url = self._truncate(request_context.get("url") or request_context.get("request_uri") or "/", 200)
             method = self._truncate(request_context.get("method") or "GET", 10)
 
-            top_contributors = self._top_contributors(attribution, limit=5)
+            top_contributors = self._top_contributors(normalized, limit=5)
             contributor_lines = "\n".join(
                 f"- {self._truncate(item.get('feature', ''), 60)}: "
                 f"value={item.get('value')}, contribution={item.get('contribution')}"
@@ -268,7 +323,14 @@ class GeminiService:
         except Exception as e:
             logger.error(f"Failed to build/call Gemini API for attribution explanation: {e}")
 
-        return self._fallback_attribution_explanation(attribution)
+        # Guaranteed-safe path, guarded again: even if the fallback composer
+        # itself defects in the future, this method still returns a plain
+        # string rather than raising out to the caller.
+        try:
+            return self._fallback_attribution_explanation(normalized)
+        except Exception as e:
+            logger.error(f"Fallback attribution explanation itself failed: {e}")
+            return self._ULTIMATE_FALLBACK_TH
 
     async def parse_natural_time_range(self, query_text: str) -> Dict[str, Any]:
         """
