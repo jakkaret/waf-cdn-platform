@@ -82,6 +82,7 @@ app.include_router(logs_api.router)
 app.include_router(alerts.router)
 app.include_router(cdn.router)
 from api import ml, ml_rules, analytics, origins, domains, ip_rules, rate_limits, settings, ai_summary, tunnels, copilot
+from api import tunnel as tunnel_api
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
@@ -92,6 +93,7 @@ app.include_router(rate_limits.router)
 app.include_router(settings.router)
 app.include_router(ai_summary.router)
 app.include_router(tunnels.router)
+app.include_router(tunnel_api.router)
 app.include_router(copilot.router)
 
 # Error Handlers
