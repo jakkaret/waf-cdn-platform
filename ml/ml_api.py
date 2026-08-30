@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from ml.feature_engineering import extract_features_from_request, FEATURE_COLUMNS
 from ml.auto_rule_generator import generate_pending_rule
+from ml.attribution import build_attribution_response
 
 BASE_DIR = os.path.dirname(__file__)
 MODELS_DIR = os.path.join(BASE_DIR, "models")
@@ -96,7 +97,7 @@ def predict_anomaly(req: PredictionRequest):
 
     is_anomaly = bool(rf_pred == 1 or attack_prob > 0.5)
 
-    return {
+    response = {
         "is_anomaly": is_anomaly,
         "attack_probability": round(attack_prob, 4),
         "anomaly_score": round(iso_score, 4),
@@ -104,6 +105,16 @@ def predict_anomaly(req: PredictionRequest):
         "confidence": f"{max(attack_prob, 1 - attack_prob) * 100:.1f}%",
         "features": features
     }
+
+    # Attribution explains the prediction; it must never be able to take
+    # detection down with it. If it fails for any reason, log and return
+    # the original fields unchanged rather than failing the request.
+    try:
+        response.update(build_attribution_response(rf_model, df_feat))
+    except Exception as exc:
+        print(f"[!] Attribution failed, returning prediction without it: {exc}")
+
+    return response
 
 @app.post("/generate-rule")
 def generate_waf_rule(req: RuleGenerateRequest):
