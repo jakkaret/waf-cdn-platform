@@ -24,11 +24,11 @@ export const cdnApi = {
     return res.data.logs
   },
 
-  purgeCache: async (token: string, url_pattern: string = '/*') => {
-    const res = await api.post('/cdn/purge', { url_pattern }, {
-      headers: {
-        'Authorization': `Bearer ${token}` // Typically the CDN secret token
-      }
+  // The backend holds the purge token and attaches it upstream itself, so the
+  // caller only supplies what to purge. It reads url/region as query params.
+  purgeCache: async (url_pattern: string = '/*', region: string = 'ALL') => {
+    const res = await api.post('/cdn/purge', null, {
+      params: { url: url_pattern, region },
     })
     return res.data
   },

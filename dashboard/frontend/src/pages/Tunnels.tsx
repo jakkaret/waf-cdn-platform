@@ -35,8 +35,15 @@ export const Tunnels: React.FC = () => {
     refetchInterval: 6000,
   })
 
-  // Fetch generated commands
-  const { data: configData } = useQuery({
+  // Fetch generated commands. These carry the tunnel auth token, so the server
+  // builds them (admin only) — nothing here may fall back to a literal token,
+  // since this bundle is served to unauthenticated visitors.
+  const {
+    data: configData,
+    isLoading: configLoading,
+    isError: configError,
+    error: configErrorDetail,
+  } = useQuery({
     queryKey: ['tunnel-config', domain, localPort, localIp, activeTab],
     queryFn: () =>
       api
@@ -44,32 +51,34 @@ export const Tunnels: React.FC = () => {
           params: { domain, port: localPort, local_ip: localIp, platform: activeTab },
         })
         .then((r) => r.data),
+    retry: false,
   })
 
   const tunnels = data?.tunnels || []
   const activeCount = data?.active_count || (tunnels.length > 0 ? tunnels.length : 0)
 
   const handleCopy = (text: string, key: string) => {
+    if (!configData) {
+      toast.error('No command to copy yet')
+      return
+    }
     navigator.clipboard.writeText(text)
     setCopiedKey(key)
     toast.success('Copied command to clipboard!')
     setTimeout(() => setCopiedKey(null), 2500)
   }
 
-  const linuxCmd =
-    configData?.linux_command ||
-    configData?.commands?.linux_oneliner ||
-    `curl -sSL https://waf-it-kku.online/install-agent.sh | sudo bash -s -- --token WAF_SECURE_TUNNEL_2026_TOKEN --domain ${domain} --port ${localPort} --ip ${localIp}`
+  const configStatus = configLoading
+    ? '# Generating install command…'
+    : configError
+      ? (configErrorDetail as any)?.response?.status === 403
+        ? '# Administrator access is required to generate an agent command.'
+        : '# Could not reach the config generator. Try refreshing.'
+      : '# No command available.'
 
-  const dockerCmd =
-    configData?.docker_command ||
-    configData?.commands?.docker_command ||
-    `docker run -d --name waf-agent-${domain.replace('.', '-')} --restart=always --net=host snowdreamtech/frpc:0.61.1 -s main.waf-it-kku.online:7000 --proxy_type http --custom_domains ${domain} --local_port ${localPort}`
-
-  const rawToml =
-    configData?.toml_config ||
-    configData?.commands?.raw_toml ||
-    `# CloudWAF Private Tunnel Configuration\nserverAddr = "main.waf-it-kku.online"\nserverPort = 7000\n\nauth.method = "token"\nauth.token = "WAF_SECURE_TUNNEL_2026_TOKEN"\n\n[[proxies]]\nname = "${domain.replace('.', '-')}"\ntype = "http"\nlocalIP = "${localIp}"\nlocalPort = ${localPort}\ncustomDomains = ["${domain}"]`
+  const linuxCmd = configData?.linux_command || configStatus
+  const dockerCmd = configData?.docker_command || configStatus
+  const rawToml = configData?.toml_config || configStatus
 
   return (
     <div className="space-y-6 animate-fade-in">
