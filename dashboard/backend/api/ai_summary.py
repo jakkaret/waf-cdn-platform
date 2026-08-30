@@ -20,6 +20,33 @@ class SummarizeRangeRequest(BaseModel):
     start_time: Optional[str] = None
     end_time: Optional[str] = None
 
+# Accepted inbound time formats. Anything else is rejected before it can reach
+# the query layer.
+_TIME_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d")
+
+def _parse_time_bound(value: Any, field: str) -> datetime:
+    """Turn a caller-supplied time bound into a real datetime.
+
+    Both bounds reach this endpoint from untrusted sources: directly from the
+    request body, and indirectly from whatever Gemini returns for a natural
+    language range. Parsing them here means only a genuine datetime ever gets
+    as far as the ClickHouse queries below, which are parameterised as well.
+    """
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        raise HTTPException(status_code=422, detail=f"{field} must be a datetime string")
+    text = value.strip()
+    for fmt in _TIME_FORMATS:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    raise HTTPException(
+        status_code=422,
+        detail=f"{field} must match one of {', '.join(_TIME_FORMATS)}",
+    )
+
 @router.post("/summarize-range")
 async def summarize_threat_range(
     req: SummarizeRangeRequest,
@@ -32,18 +59,27 @@ async def summarize_threat_range(
         # 1. Resolve time range
         if req.query and req.query.strip():
             parsed_time = await gemini_service.parse_natural_time_range(req.query.strip())
-            start_time = parsed_time.get("start_time")
-            end_time = parsed_time.get("end_time")
+            start_dt = _parse_time_bound(parsed_time.get("start_time"), "start_time")
+            end_dt = _parse_time_bound(parsed_time.get("end_time"), "end_time")
             time_desc = parsed_time.get("description", req.query)
         elif req.start_time and req.end_time:
-            start_time = req.start_time
-            end_time = req.end_time
-            time_desc = f"{start_time} ถึง {end_time}"
+            start_dt = _parse_time_bound(req.start_time, "start_time")
+            end_dt = _parse_time_bound(req.end_time, "end_time")
+            time_desc = f"{req.start_time} ถึง {req.end_time}"
         else:
             now = datetime.now()
-            start_time = (now - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
-            end_time = now.strftime("%Y-%m-%d %H:%M:%S")
+            start_dt = now - timedelta(days=1)
+            end_dt = now
             time_desc = "24 ชั่วโมงล่าสุด"
+
+        if start_dt > end_dt:
+            raise HTTPException(status_code=422, detail="start_time must not be after end_time")
+
+        # Kept for the prompt and the response payload; the queries below bind
+        # the datetime objects rather than these strings.
+        start_time = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+        end_time = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+        time_params = {"start": start_dt, "end": end_dt}
 
         # 2. Query stats from ClickHouse
         stats = {
@@ -57,46 +93,46 @@ async def summarize_threat_range(
         if ch.connected and ch.client:
             try:
                 # Total & Blocked
-                count_query = f"""
-                    SELECT 
+                count_query = """
+                    SELECT
                         count() AS total,
                         countIf(alert = 1 OR status_code IN (403, 429)) AS blocked
                     FROM access_logs
-                    WHERE timestamp >= '{start_time}' AND timestamp <= '{end_time}'
+                    WHERE timestamp >= {start:DateTime} AND timestamp <= {end:DateTime}
                 """
-                count_res = ch.client.query(count_query)
+                count_res = ch.client.query(count_query, parameters=time_params)
                 if count_res.result_rows:
                     stats["total_requests"] = int(count_res.result_rows[0][0])
                     stats["blocked_attacks"] = int(count_res.result_rows[0][1])
 
                 # Top attack types
-                type_query = f"""
+                type_query = """
                     SELECT attack_type, count() AS cnt
                     FROM access_logs
-                    WHERE timestamp >= '{start_time}' AND timestamp <= '{end_time}' AND attack_type != ''
+                    WHERE timestamp >= {start:DateTime} AND timestamp <= {end:DateTime} AND attack_type != ''
                     GROUP BY attack_type ORDER BY cnt DESC LIMIT 5
                 """
-                type_res = ch.client.query(type_query)
+                type_res = ch.client.query(type_query, parameters=time_params)
                 stats["top_attack_types"] = [{"type": row[0], "count": int(row[1])} for row in type_res.result_rows]
 
                 # Top attacker IPs
-                ip_query = f"""
+                ip_query = """
                     SELECT client_ip, country, count() AS cnt
                     FROM access_logs
-                    WHERE timestamp >= '{start_time}' AND timestamp <= '{end_time}' AND (alert = 1 OR status_code IN (403, 429))
+                    WHERE timestamp >= {start:DateTime} AND timestamp <= {end:DateTime} AND (alert = 1 OR status_code IN (403, 429))
                     GROUP BY client_ip, country ORDER BY cnt DESC LIMIT 5
                 """
-                ip_res = ch.client.query(ip_query)
+                ip_res = ch.client.query(ip_query, parameters=time_params)
                 stats["top_attacker_ips"] = [{"ip": row[0], "country": row[1], "count": int(row[2])} for row in ip_res.result_rows]
 
                 # Top targeted URLs
-                url_query = f"""
+                url_query = """
                     SELECT url, count() AS cnt
                     FROM access_logs
-                    WHERE timestamp >= '{start_time}' AND timestamp <= '{end_time}' AND (alert = 1 OR status_code IN (403, 429))
+                    WHERE timestamp >= {start:DateTime} AND timestamp <= {end:DateTime} AND (alert = 1 OR status_code IN (403, 429))
                     GROUP BY url ORDER BY cnt DESC LIMIT 5
                 """
-                url_res = ch.client.query(url_query)
+                url_res = ch.client.query(url_query, parameters=time_params)
                 stats["top_targeted_urls"] = [{"url": row[0], "count": int(row[1])} for row in url_res.result_rows]
 
             except Exception as db_err:
@@ -116,9 +152,13 @@ async def summarize_threat_range(
             "ai_executive_summary": ai_analysis
         }
 
+    except HTTPException:
+        # Validation failures carry their own status and a safe message; the
+        # broad handler below would otherwise turn a 422 into a 500.
+        raise
     except Exception as e:
-        logger.error(f"Error in summarize_threat_range: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in summarize_threat_range: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to summarize the requested range")
 
 
 @router.get("/notifications/feed")
