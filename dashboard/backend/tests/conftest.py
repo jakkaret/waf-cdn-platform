@@ -21,7 +21,8 @@ Strategy
    every test.
 3. In an autouse fixture, monkeypatch the *already-imported* singletons
    (api.auth.auth_service, services.rbac.auth_service, services.origin_service.db,
-   api.rules.rule_manager) so their tables/paths point at the fakes, and
+   api.ai_summary.db, api.rules.rule_manager) so their tables/paths point at
+   the fakes, and
    monkeypatch services.dynamodb_service.DynamoDBService itself so that any
    fresh construction (e.g. services.rbac.verify_origin_ownership's local
    `from services.dynamodb_service import DynamoDBService`) also lands on
@@ -33,7 +34,6 @@ Strategy
    these five scenarios and would otherwise need faking too.
 """
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -221,6 +221,13 @@ def fake_infrastructure(monkeypatch, tmp_path):
     # on the fake and shares the same backing store as origin_service.db.
     monkeypatch.setattr(dynamodb_service_module, "DynamoDBService", FakeDynamoDBService)
     monkeypatch.setattr(origin_service_module, "db", FakeDynamoDBService())
+    # api/ai_summary.py also does `db = DynamoDBService()` at import time
+    # (used by /api/ai/notifications/feed and /mark-read); not exercised by
+    # any of the five required scenarios today, but left unpatched it is a
+    # real (if inert, thanks to the loopback DYNAMODB_ENDPOINT_URL above)
+    # DynamoDBService instance that shares no state with the fake store --
+    # patch it the same way so no future test can silently hit it.
+    monkeypatch.setattr(ai_summary_module, "db", FakeDynamoDBService())
 
     # Auth: both api.auth's and services.rbac's AuthService singletons must
     # see the same users, so point both at the same backing list.

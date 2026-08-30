@@ -44,10 +44,18 @@ def test_create_read_delete_rule(client: TestClient, register_user, auth_header)
     final_list = client.get("/api/rules/", headers=headers).json()["rules"]
     assert all(r["id"] != "custom-42017" for r in final_list)
 
-# Note: a "delete a rule that does not exist -> 404" test was written and
-# dropped again. api/rules.py's delete_rule() raises HTTPException(404) from
-# inside its own `try:` block, which its own `except Exception:` then
-# re-catches and turns into a 500 (HTTPException subclasses Exception). That
-# is a genuine pre-existing bug, out of scope here (constraints forbid
-# changing dashboard/backend/api/ to make a test pass) -- reported in
-# task-7-report.md instead of asserting the buggy 500 as "expected".
+
+def test_delete_unknown_rule_returns_404(client: TestClient, register_user, auth_header):
+    """Controller ruling R9: api/rules.py's delete_rule() used to raise
+    HTTPException(404) from inside its own `try:` block, which its own
+    `except Exception:` then re-caught and turned into a 500 (HTTPException
+    subclasses Exception). Fixed by catching HTTPException before the
+    generic Exception handler, matching update_rule's existing ordering
+    three lines below it. This test was written, observed failing for that
+    reason (500 instead of 404), removed per the original brief's
+    constraint against changing api/ code, and restored here now that the
+    fix is authorized and in place.
+    """
+    admin = register_user(email="rule-admin2@example.com", username="rule_admin2")
+    resp = client.delete("/api/rules/custom-does-not-exist", headers=auth_header(admin["access_token"]))
+    assert resp.status_code == 404

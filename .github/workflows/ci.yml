@@ -176,7 +176,7 @@ jobs:
       - name: Serve built frontend (background)
         run: npx vite preview --port 5173 &
         # Give preview server a moment to start
-
+      
       - name: Wait for frontend server
         run: |
           for i in {1..10}; do
