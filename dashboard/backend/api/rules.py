@@ -113,6 +113,8 @@ async def delete_rule(rule_id: str, current_user: dict = Depends(require_admin))
         if success:
             return {"message": "Rule deleted"}
         raise HTTPException(status_code=404, detail="Rule not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
