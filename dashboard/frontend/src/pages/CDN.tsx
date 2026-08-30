@@ -61,9 +61,10 @@ export const CDN: React.FC = () => {
   })
 
   const purgeMutation = useMutation({
-    mutationFn: (pattern: string) => cdnApi.purgeCache('cdn-secret-token', pattern),
+    mutationFn: (pattern: string) => cdnApi.purgeCache(pattern),
     onSuccess: () => toast.success(`Edge cache purged successfully for pattern: ${purgePattern}`),
-    onError: () => toast.error('Failed to purge edge cache'),
+    onError: (err: any) =>
+      toast.error(err?.response?.data?.detail || 'Failed to purge edge cache'),
   })
 
   // Safe data extraction (handles both Array and Object backend structures)

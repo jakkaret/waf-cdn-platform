@@ -1,10 +1,11 @@
 import os
+import re
 import time
 import httpx
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Dict, Any, Optional, Tuple
-from services.rbac import require_viewer_or_above, get_current_user
+from services.rbac import require_viewer_or_above, get_current_user, require_admin
 from services.tenant_service import get_user_origins_and_domains
 from services.dynamodb_service import DynamoDBService
 import services.origin_service as origin_service
@@ -16,6 +17,20 @@ db = DynamoDBService()
 FRP_DASHBOARD_URL = os.getenv("FRP_DASHBOARD_URL", "http://127.0.0.1:7500/api/proxy/http")
 FRP_ADMIN_USER = os.getenv("FRP_ADMIN_USER", "admin")
 FRP_ADMIN_PASS = os.getenv("FRP_ADMIN_PASS", "admin1234")
+
+# Agent-facing tunnel settings. The auth token is the only credential an agent
+# needs to register a proxy with the FRP server, so it is read from the
+# environment and only ever handed out through the admin-gated generator below.
+# It must never be compiled into the frontend bundle, which is served to
+# unauthenticated visitors.
+FRP_SERVER_HOST = os.getenv("FRP_SERVER_HOST", "main.waf-it-kku.online")
+FRP_SERVER_PORT = int(os.getenv("FRP_SERVER_PORT", "7000"))
+FRP_AUTH_TOKEN = os.getenv("FRP_AUTH_TOKEN", "")
+FRPC_IMAGE = os.getenv("FRPC_IMAGE", "snowdreamtech/frpc:0.61.1")
+AGENT_INSTALLER_URL = os.getenv("AGENT_INSTALLER_URL", "https://waf-it-kku.online/install-agent.sh")
+
+_DOMAIN_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$")
+_IPV4_RE = re.compile(r"^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$")
 
 _TUNNELS_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 CACHE_TTL = 4.0
@@ -32,6 +47,80 @@ def _match_proxy_to_origin(proxy_name: str, origin_label: str, origin_ip: str) -
         if len(part) >= 4 and part in p_norm:
             return True
     return False
+
+
+@router.get("/config-generator")
+async def tunnel_config_generator(
+    domain: str = Query(..., max_length=253, description="Public domain the tunnel will serve"),
+    port: int = Query(..., ge=1, le=65535, description="Port the origin listens on locally"),
+    local_ip: str = Query("127.0.0.1", max_length=45),
+    platform: str = Query("linux", pattern="^(linux|docker|toml)$"),
+    current_user: dict = Depends(require_admin),
+):
+    """Build the agent install commands for a private origin.
+
+    The FRP auth token lets any holder register a proxy on the tunnel server,
+    so it is served from here — behind admin auth — rather than shipped in the
+    frontend bundle. Inputs are validated because they are interpolated into
+    shell and TOML snippets the operator is expected to paste into a terminal.
+    """
+    if not _DOMAIN_RE.match(domain):
+        raise HTTPException(status_code=422, detail="domain must be a valid hostname")
+    if not _IPV4_RE.match(local_ip):
+        raise HTTPException(status_code=422, detail="local_ip must be a valid IPv4 address")
+    if not FRP_AUTH_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="Tunnel agent token is not configured on the server (FRP_AUTH_TOKEN)",
+        )
+
+    proxy_name = domain.replace(".", "-")
+    server = f"{FRP_SERVER_HOST}:{FRP_SERVER_PORT}"
+
+    linux_command = (
+        f"curl -sSL {AGENT_INSTALLER_URL} | sudo bash -s --"
+        f" --token {FRP_AUTH_TOKEN}"
+        f" --domain {domain}"
+        f" --port {port}"
+        f" --ip {local_ip}"
+    )
+    docker_command = (
+        f"docker run -d --name waf-agent-{proxy_name} --restart=always --net=host"
+        f" {FRPC_IMAGE}"
+        f" -s {server}"
+        f" -t {FRP_AUTH_TOKEN}"
+        f" --proxy_type http --custom_domains {domain}"
+        f" --local_ip {local_ip} --local_port {port}"
+    )
+    toml_config = (
+        "# CloudWAF Private Tunnel Configuration\n"
+        f'serverAddr = "{FRP_SERVER_HOST}"\n'
+        f"serverPort = {FRP_SERVER_PORT}\n\n"
+        'auth.method = "token"\n'
+        f'auth.token = "{FRP_AUTH_TOKEN}"\n\n'
+        "[[proxies]]\n"
+        f'name = "{proxy_name}"\n'
+        'type = "http"\n'
+        f'localIP = "{local_ip}"\n'
+        f"localPort = {port}\n"
+        f'customDomains = ["{domain}"]\n'
+    )
+
+    logger.info(
+        "Tunnel config generated for %s by %s",
+        domain,
+        current_user.get("email") or current_user.get("user_id"),
+    )
+
+    return {
+        "success": True,
+        "platform": platform,
+        "server": server,
+        "domain": domain,
+        "linux_command": linux_command,
+        "docker_command": docker_command,
+        "toml_config": toml_config,
+    }
 
 
 @router.get("/status")
