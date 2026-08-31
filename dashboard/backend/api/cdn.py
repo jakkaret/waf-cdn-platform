@@ -11,7 +11,7 @@ import pathlib as _pathlib
 
 from services.rbac import require_viewer_or_above, require_admin
 from services.dynamodb_service import DynamoDBService
-from services.clickhouse_service import ClickHouseService
+from services.clickhouse_service import ClickHouseService, escape_like_value
 from services.cdn_log_forward import normalize_cdn_access
 from services.telegram_listener import dispatch_telegram_alert
 from services.pii_masker import pii_masker
@@ -141,7 +141,7 @@ async def cdn_stats(current_user: dict = Depends(require_viewer_or_above)):
     if not is_admin and user_domains:
         domain_patterns = []
         for d in user_domains:
-            escaped = d.replace("'", "\\'")
+            escaped = escape_like_value(d)
             domain_patterns.append(f"url LIKE '%{escaped}%'")
         if domain_patterns:
             where_clauses.append(f"({' OR '.join(domain_patterns)})")

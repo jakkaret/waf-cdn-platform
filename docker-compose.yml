@@ -27,6 +27,16 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    healthcheck:
+      # Image's baked-in healthcheck probes https://localhost:${SSL_PORT}/healthz,
+      # but this template does not open an SSL listener (TLS terminates upstream
+      # at Caddy) -- it always fails with connection refused. Probe the real
+      # listener instead.
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - waf-net
 

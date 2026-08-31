@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import List, Dict, Any, Optional
-from services.clickhouse_service import ClickHouseService
+from services.clickhouse_service import ClickHouseService, escape_like_value
 from services.rbac import require_viewer_or_above
 from services.tenant_service import get_user_origins_and_domains
 import logging
@@ -25,7 +25,7 @@ def _build_domain_pattern_sql(domain_or_ip: str) -> str:
     elif "bwapp" in clean:
         return "(url LIKE '%bwapp%' OR url LIKE '%bWAPP%')"
     else:
-        escaped = clean.replace("'", "\\'")
+        escaped = escape_like_value(clean)
         return f"(url LIKE '%{escaped}%' OR client_ip LIKE '%{escaped}%')"
 
 

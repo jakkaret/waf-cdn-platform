@@ -4,6 +4,25 @@ import time
 import uuid
 from datetime import datetime
 
+
+def escape_like_value(value: str) -> str:
+    """Escape a value for safe embedding inside a ClickHouse single-quoted
+    string literal used as a LIKE/ILIKE pattern fragment.
+
+    ClickHouse treats backslash as an escape character inside string
+    literals (like MySQL). Escaping only the quote (the previous behaviour)
+    is unsound: a backslash already present in the input neutralises the
+    escaping of the character that follows it, letting an attacker-supplied
+    quote terminate the string early -- e.g. input "x\\' OR 1=1 --" survives
+    a naive .replace("'", "\\'") as "x\\\\'", where ClickHouse reads \\\\ as
+    one literal backslash and the bare ' that follows closes the string.
+    Escaping backslash first closes that gap: verified against a live
+    ClickHouse instance, the attack string round-trips as an inert literal
+    instead of breaking out of the string.
+    """
+    return str(value).replace("\\", "\\\\").replace("'", "\\'")
+
+
 class ClickHouseService:
     def __init__(self, host='localhost', port=8123, username='default', password='mysecurepassword'):
         self.host = host
@@ -200,13 +219,13 @@ class ClickHouseService:
                 elif "bwapp" in d_clean:
                     domain_clauses.append("(url LIKE '%bwapp%' OR url LIKE '%bWAPP%')")
                 else:
-                    escaped_d = d_clean.replace("'", "\\'")
+                    escaped_d = escape_like_value(d_clean)
                     domain_clauses.append(f"(url LIKE '%{escaped_d}%' OR client_ip LIKE '%{escaped_d}%')")
             if domain_clauses:
                 where_clauses.append(f"({' OR '.join(domain_clauses)})")
         
         if search:
-            escaped_search = search.replace("'", "\\'")
+            escaped_search = escape_like_value(search)
             where_clauses.append(f"(client_ip ILIKE '%{escaped_search}%' OR url ILIKE '%{escaped_search}%' OR rule_id ILIKE '%{escaped_search}%' OR user_agent ILIKE '%{escaped_search}%' OR attack_type ILIKE '%{escaped_search}%')")
             
         if status_filter and status_filter != "ALL":
@@ -218,7 +237,7 @@ class ClickHouseService:
                 where_clauses.append(f"status_code = {int(status_filter)}")
                 
         if method_filter and method_filter != "ALL":
-            escaped_m = method_filter.replace("'", "\\'")
+            escaped_m = escape_like_value(method_filter)
             where_clauses.append(f"method = '{escaped_m}'")
             
         if severity_filter and severity_filter != "ALL":

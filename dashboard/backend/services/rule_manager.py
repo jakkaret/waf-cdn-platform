@@ -6,6 +6,24 @@ from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
+
+def escape_secrule_string(value: str, quote_char: str) -> str:
+    """Escape a value for safe embedding inside a ModSecurity SecRule
+    quoted field (the operator's double-quoted string, or the msg action's
+    single-quoted string).
+
+    ModSecurity's config parser treats backslash as an escape character
+    inside quoted strings -- confirmed against the real engine (`nginx -t`
+    on waf-nginx, 2026-09-01): a rule written with the old
+    value.replace(quote_char, "\\" + quote_char) escaping and a value
+    ending "\\'" produced "Expecting an action, got: ..." because the
+    pre-existing backslash consumed the escaper's own quote, letting the
+    admin's quote close the field early. Escaping backslash first closes
+    that gap, the same fix as ClickHouse's escape_like_value().
+    """
+    return str(value).replace("\\", "\\\\").replace(quote_char, "\\" + quote_char)
+
+
 _ALLOWED_NGINX_COMMANDS = {
     ("nginx", "-s", "reload"),
     ("nginx", "-t"),
@@ -146,8 +164,8 @@ class RuleManager:
         filename = f"custom-{rule_id}.conf"
         filepath = os.path.join(self.rules_dir, filename)
 
-        safe_operator = str(rule_data['operator']).replace('"', '\\"')
-        safe_message = str(rule_data['message']).replace("'", "\\'")
+        safe_operator = escape_secrule_string(rule_data['operator'], '"')
+        safe_message = escape_secrule_string(rule_data['message'], "'")
         modsec_sev = SEVERITY_MAP.get(rule_data["severity"], "CRITICAL")
 
         rule_text = (
@@ -222,8 +240,8 @@ class RuleManager:
             raise FileNotFoundError(f"Rule {rule_id} ไม่พบในระบบ")
 
         rule["severity"] = rule["severity"].upper()
-        safe_operator = str(rule['operator']).replace('"', '\\"')
-        safe_message = str(rule['message']).replace("'", "\\'")
+        safe_operator = escape_secrule_string(rule['operator'], '"')
+        safe_message = escape_secrule_string(rule['message'], "'")
         modsec_sev = SEVERITY_MAP.get(rule["severity"], "CRITICAL")
 
         rule_text = (

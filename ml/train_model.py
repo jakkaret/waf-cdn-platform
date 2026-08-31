@@ -124,7 +124,8 @@ def train_and_evaluate():
     print("\n" + "="*65)
     print(" 🚀 HIGH-ACCURACY MULTI-DATASET EVALUATION REPORT (25% TEST DATA)")
     print("="*65)
-    print(f" ⭐ ACCURACY SCORE:  {accuracy * 100:.2f}%  (Target > 85% PASSED!)")
+    _target_verdict = "PASSED" if accuracy >= 0.85 else "BELOW TARGET"
+    print(f" ⭐ ACCURACY SCORE:  {accuracy * 100:.2f}%  (Target > 85% {_target_verdict})")
     print(f" ⭐ ROC-AUC SCORE:   {roc_auc:.4f}")
     print(f" Benign (Normal):   Precision={prec[0]:.4f}, Recall={rec[0]:.4f}, F1={f1[0]:.4f}")
     print(f" Malicious (Attack): Precision={prec[1]:.4f}, Recall={rec[1]:.4f}, F1={f1[1]:.4f}")
