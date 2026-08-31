@@ -175,9 +175,8 @@ async def explain_log_by_id(
     """Retrieve deep token attribution and explainability for a specific log by ID"""
     if ch.connected:
         try:
-            escaped_id = log_id.replace("'", "\\'")
-            query = f"SELECT toString(id) as log_id, url, method, status_code as status, rule_id, attack_type, matched_token, root_cause_explanation, remediation_hint, confidence_score, category FROM access_logs WHERE toString(id) = '{escaped_id}' LIMIT 1"
-            rows = ch.client.query(query).result_rows
+            query = "SELECT toString(id) as log_id, url, method, status_code as status, rule_id, attack_type, matched_token, root_cause_explanation, remediation_hint, confidence_score, category FROM access_logs WHERE toString(id) = {log_id:String} LIMIT 1"
+            rows = ch.client.query(query, parameters={"log_id": log_id}).result_rows
             if rows:
                 cols = ['log_id', 'url', 'method', 'status', 'rule_id', 'attack_type', 'matched_token', 'root_cause_explanation', 'remediation_hint', 'confidence_score', 'category']
                 log_data = dict(zip(cols, rows[0]))

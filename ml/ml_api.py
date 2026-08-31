@@ -14,6 +14,25 @@ from ml.feature_engineering import extract_features_from_request, FEATURE_COLUMN
 from ml.auto_rule_generator import generate_pending_rule
 from ml.attribution import build_attribution_response
 
+# Docs/12-Development-Guide.md T13: the project's stated accuracy target.
+ACCURACY_TARGET = 0.85
+
+
+def accuracy_meets_target(eval_results: dict, target: float = ACCURACY_TARGET) -> bool:
+    """Whether the real, measured evaluation accuracy reaches `target`.
+
+    Fails closed: no evaluation data is not evidence of passing. This
+    replaces a hardcoded `True` that /health returned regardless of the
+    actual eval_accuracy figure next to it -- verified live on Main,
+    2026-09-01, returning the self-contradicting pair
+    accuracy_target_passed: true, eval_accuracy: 0.8047 (0.8047 < 0.85).
+    """
+    accuracy = eval_results.get("metrics", {}).get("accuracy")
+    if accuracy is None:
+        return False
+    return accuracy >= target
+
+
 BASE_DIR = os.path.dirname(__file__)
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 RF_MODEL_PATH = os.path.join(MODELS_DIR, "random_forest_waf.joblib")
@@ -66,8 +85,8 @@ def health_check():
             "random_forest": rf_model is not None,
             "isolation_forest": iso_model is not None
         },
-        "accuracy_target_passed": True,
-        "eval_accuracy": eval_results.get("metrics", {}).get("accuracy", 0.934)
+        "accuracy_target_passed": accuracy_meets_target(eval_results),
+        "eval_accuracy": eval_results.get("metrics", {}).get("accuracy")
     }
 
 @app.get("/eval-results")

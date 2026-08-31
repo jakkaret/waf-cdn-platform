@@ -4,28 +4,48 @@ map $http_upgrade $connection_upgrade {
     default upgrade;
     '' close;
 }
+
 upstream dvwa_backend {
     server dvwa:80;
 }
+
+upstream frp_tunnel_router {
+    server 172.18.0.1:8085;
+}
+
+upstream cloudwaf_tunnel {
+    server 172.18.0.1:8060;
+    keepalive 32;
+}
+
+# 1. Default Fallback Server (Direct IP Access)
 server {
-    listen 8080;
+    listen 8080 default_server;
+    server_name _;
 
     access_log /var/log/nginx/access.json json_combined;
     error_log /var/log/nginx/error.log warn;
 
-    server_name _;
     set $always_redirect off;
     modsecurity on;
     modsecurity_transaction_id "$request_id";
-    modsecurity_rules '
-    SecAuditEngine On
-    SecAuditLogParts ABCIJDEFHZ
-    SecAuditLogRelevantStatus ".*"
-    SecRuleEngine On
-    SecRule REQUEST_HEADERS:X-Request-ID "@rx .*" "id:900001,phase:1,pass,nolog,setvar:tx.request_id=%{REQUEST_HEADERS.X-Request-ID}"';
+
     location = /healthz {
         access_log off;
+        return 200 "OK\n";
     }
+
+    # Static Assets bypass rate limiting
+    location ~* \.(?:css|js|jpg|jpeg|png|gif|ico|svg|webp|woff|woff2|ttf|json|map)$ {
+        proxy_pass http://dvwa_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+    }
+
     location / {
         auth_request /internal-rate-limit;
         auth_request_set $retry_after $upstream_http_retry_after;
@@ -51,6 +71,8 @@ server {
         proxy_set_header X-Original-URI $request_uri;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Host $host;
     }
 
     error_page 401 =429 @rate_limit_exceeded;
@@ -61,56 +83,240 @@ server {
     }
 
     error_page 403 /403.html; 
-    
-    location = /403.html { 
-        root /usr/share/nginx/html; internal; 
-    }
-
+    location = /403.html { root /usr/share/nginx/html; internal; }
     include includes/location_common.conf;
 }
 
+# 2. Juice Shop Target (via Self-Hosted FRP Private Tunnel)
 server {
-    listen 8443 ssl;
+    listen 8080;
+    server_name juice.waf-it-kku.online;
 
-    server_name _;
+    access_log /var/log/nginx/access.json json_combined;
+    error_log /var/log/nginx/error.log warn;
 
-    access_log /var/log/nginx/access_ssl.log;
-    error_log /var/log/nginx/error_ssl.log warn;
-    
-    ssl_certificate /etc/nginx/conf/server.crt;
-    ssl_certificate_key /etc/nginx/conf/server.key;
-    ssl_session_timeout 1d;
-    ssl_session_cache shared:MozSSL:10m;
-    ssl_session_tickets off;
-    ssl_dhparam /etc/ssl/certs/dhparam-2048.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
-    ssl_prefer_server_ciphers off;
-    ssl_stapling on;
-    ssl_stapling_verify on;
-    ssl_verify_client off;
-    ssl_verify_depth 1;
+    modsecurity on;
+    modsecurity_transaction_id "$request_id";
+
+    # Static Assets bypass rate limiting to prevent broken UI
+    location ~* \.(?:css|js|jpg|jpeg|png|gif|ico|svg|webp|woff|woff2|ttf|json|map)$ {
+        proxy_pass http://frp_tunnel_router;
+        proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+    }
 
     location / {
         auth_request /internal-rate-limit;
         auth_request_set $retry_after $upstream_http_retry_after;
 
-        proxy_pass http://dvwa_backend;
+        proxy_pass http://frp_tunnel_router;
         proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
+        proxy_set_header X-Request-ID $request_id;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_redirect off;
-        proxy_ssl_verify off;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+
+    location = /internal-rate-limit {
+        internal;
+        proxy_method GET;
+        proxy_pass http://host.docker.internal:8000/api/limiter/check;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Host $host;
+    }
+
+    error_page 401 =429 @rate_limit_exceeded;
+    location @rate_limit_exceeded {
+        add_header Retry-After $retry_after always;
+        add_header Content-Type text/plain always;
+        return 429 "Too Many Requests. Rate limit exceeded. Please try again later.";
     }
 
     error_page 403 /403.html;
+    location = /403.html { root /usr/share/nginx/html; internal; }
+}
 
-    location = /403.html {
-        root /usr/share/nginx/html; internal;
+# 3. DVWA Lab Target (via Self-Hosted FRP Private Tunnel)
+server {
+    listen 8080;
+    server_name dvwa.waf-it-kku.online;
+
+    access_log /var/log/nginx/access.json json_combined;
+    error_log /var/log/nginx/error.log warn;
+
+    modsecurity on;
+    modsecurity_transaction_id "$request_id";
+
+    # Static Assets bypass rate limiting
+    location ~* \.(?:css|js|jpg|jpeg|png|gif|ico|svg|webp|woff|woff2|ttf|json|map)$ {
+        proxy_pass http://frp_tunnel_router;
+        proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
     }
 
-    include includes/location_common.conf;
+    location / {
+        auth_request /internal-rate-limit;
+        auth_request_set $retry_after $upstream_http_retry_after;
+
+        proxy_pass http://frp_tunnel_router;
+        proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+
+    location = /internal-rate-limit {
+        internal;
+        proxy_method GET;
+        proxy_pass http://host.docker.internal:8000/api/limiter/check;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Host $host;
+    }
+
+    error_page 401 =429 @rate_limit_exceeded;
+    location @rate_limit_exceeded {
+        add_header Retry-After $retry_after always;
+        add_header Content-Type text/plain always;
+        return 429 "Too Many Requests. Rate limit exceeded. Please try again later.";
+    }
+
+    error_page 403 /403.html;
+    location = /403.html { root /usr/share/nginx/html; internal; }
+}
+
+
+# 4. VAmPI Lab Target (via CloudWAF self-hosted private tunnel)
+#    Same chain as the FRP-backed hosts above: ModSecurity inspects the request
+#    first, then it is handed to the tunnel server, which relays it down the
+#    agent's outbound connection. The origin never accepts an inbound port.
+server {
+    listen 8080;
+    server_name vampi.waf-it-kku.online;
+
+    access_log /var/log/nginx/access.json json_combined;
+    error_log /var/log/nginx/error.log warn;
+
+    modsecurity on;
+    modsecurity_transaction_id "$request_id";
+
+    error_page 403 /403.html;
+    location = /403.html {
+        root /usr/share/nginx/html;
+        internal;
+    }
+
+    location ~* \.(?:css|js|jpg|jpeg|png|gif|ico|svg|webp|woff|woff2|ttf|json|map)$ {
+        proxy_pass http://cloudwaf_tunnel;
+        proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+    }
+
+    location / {
+        proxy_pass http://cloudwaf_tunnel;
+        proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_read_timeout 60s;
+    }
+}
+
+# 5. bWAPP Lab Target (via Self-Hosted FRP Private Tunnel)
+server {
+    listen 8080;
+    server_name bwapp.waf-it-kku.online;
+
+    access_log /var/log/nginx/access.json json_combined;
+    error_log /var/log/nginx/error.log warn;
+
+    modsecurity on;
+    modsecurity_transaction_id "$request_id";
+
+    # Static Assets bypass rate limiting
+    location ~* \.(?:css|js|jpg|jpeg|png|gif|ico|svg|webp|woff|woff2|ttf|json|map)$ {
+        proxy_pass http://frp_tunnel_router;
+        proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+    }
+
+    location / {
+        auth_request /internal-rate-limit;
+        auth_request_set $retry_after $upstream_http_retry_after;
+
+        proxy_pass http://frp_tunnel_router;
+        proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+
+    location = /internal-rate-limit {
+        internal;
+        proxy_method GET;
+        proxy_pass http://host.docker.internal:8000/api/limiter/check;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Host $host;
+    }
+
+    error_page 401 =429 @rate_limit_exceeded;
+    location @rate_limit_exceeded {
+        add_header Retry-After $retry_after always;
+        add_header Content-Type text/plain always;
+        return 429 "Too Many Requests. Rate limit exceeded. Please try again later.";
+    }
+
+    error_page 403 /403.html;
+    location = /403.html { root /usr/share/nginx/html; internal; }
 }

@@ -28,7 +28,7 @@
 | WAF Engine | ModSecurity CRS + Nginx |
 | SSL Termination | Caddy (Auto-HTTPS, Let's Encrypt) |
 | CDN Edge Nodes | 3 regions: SG, JP, TH |
-| ML/AI | Random Forest + Isolation Forest (Accuracy 93.40%, ROC-AUC 0.9895) |
+| ML/AI | Random Forest + Isolation Forest (Accuracy 80.47%, ROC-AUC 0.8847) |
 | Auto Rule Generator | Python → สร้าง ModSecurity SecRule อัตโนมัติจาก ML detection |
 | Backend API | FastAPI (Python) — port 8000 |
 | Frontend Dashboard | React 18 + Vite + TailwindCSS (Glassmorphism theme) |
@@ -68,7 +68,7 @@
 |:---------|:----------:|:-------------:|:-----:|
 | OWASP Top 10 Protection (SQLi, XSS, RCE...) | ✅ Managed Rulesets อัปเดตอัตโนมัติ | ✅ ModSecurity CRS | ⚠️ CRS ต้อง manual update |
 | Custom Rules (GUI) | ✅ Expression Language | ✅ Dashboard GUI | ✅ เทียบเท่า |
-| ML-based Anomaly Detection | ✅ ML Score per request | ✅ RF + Isolation Forest (93.40%) | ✅ เทียบเท่า |
+| ML-based Anomaly Detection | ✅ ML Score per request | ✅ RF + Isolation Forest (80.47%, ใช้คู่กับ Rule Engine) | ⚠️ ยังต่ำกว่า target 85% |
 | **Auto Rule Generation จาก ML** | ❌ ไม่มี | ✅ Auto SecRule Generator | 🏆 **เหนือกว่า** |
 | Virtual Patching (CVE อัตโนมัติ) | ✅ ภายใน 24 ชม. | ❌ ไม่มี | 🔴 ขาด |
 | Content Scanning (Malware upload) | ✅ Inline Malware Gateway | ❌ ไม่มี | 🔴 ขาด |
@@ -428,7 +428,7 @@ WAF Auto:    เห็น Feature Engineering (14 ตัวแปร), Accuracy,
 - [DESIGN.md](file:///home/chirachot/seminar/waf_project/DESIGN.md) — สถาปัตยกรรม Frontend
 - [project_status.md](file:///home/chirachot/seminar/waf_project/project_status.md) — สถานะ infrastructure ปัจจุบัน
 - [NEXT_STEPS.md](file:///home/chirachot/seminar/waf_project/NEXT_STEPS.md) — แผนพัฒนาเดิม (Phase 1-5)
-- [ml_summary_and_guide.md](file:///home/chirachot/seminar/waf_project/ml_summary_and_guide.md) — รายงาน ML Accuracy 93.40%
+- [ml_summary_and_guide.md](file:///home/chirachot/seminar/waf_project/ml_summary_and_guide.md) — รายงาน ML Accuracy 80.47%
 - [ml_ai_proposal.md](file:///home/chirachot/seminar/waf_project/ml_ai_proposal.md) — แนวทาง AI Alert Hybrid
 
 ---

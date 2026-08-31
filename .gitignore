@@ -24,9 +24,10 @@ ml/dataset/*.csv
 *.session-journal
 
 # React files
-.node_modules/ 
-node_modules/ 
-dist/ 
+.node_modules/
+node_modules/
+dist/
+*.tsbuildinfo
 
 # Legacy archive
 old/
@@ -36,3 +37,4 @@ old/
 .claude/
 .codex/
 .github/
+.aider*

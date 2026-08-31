@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>WAF & CDN — แผนพัฒนาระบบ</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0a0e17;--bg2:#0f1520;--card:#161e30;--card2:#1a2340;--border:#1e2d4a;--border2:#243354;--blue:#3b82f6;--green:#22c55e;--yellow:#f59e0b;--red:#ef4444;--orange:#f97316;--purple:#a855f7;--cyan:#06b6d4;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--r:12px;--rs:8px}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans Thai',sans-serif;line-height:1.7;overflow-x:hidden}
+::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:var(--bg2)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
+
+/* NAV */
+nav{position:sticky;top:0;z-index:99;background:rgba(10,14,23,.93);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:0 1.5rem;display:flex;align-items:center;gap:1.5rem;height:58px}
+.brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:.95rem;color:var(--text);text-decoration:none}
+.brand-icon{width:28px;height:28px;background:linear-gradient(135deg,var(--blue),var(--purple));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px}
+.navlinks{display:flex;gap:.15rem;margin-left:auto}
+.navlinks a{padding:5px 12px;border-radius:6px;text-decoration:none;font-size:.8rem;color:var(--text2);font-weight:500;transition:all .2s}
+.navlinks a:hover{background:var(--border);color:var(--text)}
+
+/* HERO */
+.hero{padding:3.5rem 1.5rem 2.5rem;text-align:center;background:linear-gradient(180deg,rgba(59,130,246,.07) 0%,transparent 100%)}
+.badge{display:inline-flex;align-items:center;gap:7px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);color:var(--blue);padding:5px 14px;border-radius:99px;font-size:.75rem;font-weight:600;margin-bottom:1.2rem}
+.hero h1{font-size:clamp(1.7rem,4vw,2.6rem);font-weight:700;line-height:1.2;margin-bottom:.8rem}
+.hero h1 span{background:linear-gradient(135deg,var(--blue),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero p{font-size:1rem;color:var(--text2);max-width:560px;margin:0 auto 1.8rem}
+.stats{display:flex;gap:2rem;justify-content:center;flex-wrap:wrap}
+.stat .val{font-size:1.7rem;font-weight:700;background:linear-gradient(135deg,var(--green),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.stat .lbl{font-size:.72rem;color:var(--text3)}
+
+/* LAYOUT */
+.wrap{max-width:1240px;margin:0 auto;padding:0 1.5rem 4rem}
+.sep{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+.sh{margin-bottom:1.3rem}
+.sh h2{font-size:1.2rem;font-weight:700;display:flex;align-items:center;gap:9px}
+.sh p{font-size:.85rem;color:var(--text2);margin-top:.35rem}
+
+/* TAGS */
+.tag{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:99px;font-size:.7rem;font-weight:600}
+.tg{background:rgba(34,197,94,.12);color:var(--green);border:1px solid rgba(34,197,94,.25)}
+.ty{background:rgba(245,158,11,.12);color:var(--yellow);border:1px solid rgba(245,158,11,.25)}
+.tr{background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25)}
+.tb{background:rgba(59,130,246,.12);color:var(--blue);border:1px solid rgba(59,130,246,.25)}
+.tp{background:rgba(168,85,247,.12);color:var(--purple);border:1px solid rgba(168,85,247,.25)}
+.to{background:rgba(249,115,22,.12);color:var(--orange);border:1px solid rgba(249,115,22,.25)}
+
+/* PROGRESS */
+.prog-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:1.4rem;margin-bottom:1.3rem}
+.prog-title{font-weight:600;font-size:.88rem;margin-bottom:1rem;color:var(--text2)}
+.prog-list{display:flex;flex-direction:column;gap:.5rem}
+.prog-row{display:flex;align-items:center;gap:10px;font-size:.8rem}
+.prog-lbl{width:190px;flex-shrink:0;color:var(--text2)}
+.prog-bar{flex:1;height:7px;background:var(--bg2);border-radius:99px;overflow:hidden}
+.prog-fill{height:100%;border-radius:99px;transition:width .6s ease}
+.prog-pct{width:38px;text-align:right;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:.74rem}
+
+/* STATUS GRID */
+.legend{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:.9rem}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text2)}
+.legend-dot{width:9px;height:9px;border-radius:50%}
+.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:1rem}
+.scard{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:1.1rem;transition:all .2s}
+.scard:hover{border-color:var(--border2);background:var(--card2)}
+.sc-hdr{display:flex;align-items:flex-start;justify-content:space-between;gap:.8rem;margin-bottom:.65rem}
+.sc-title{font-weight:600;font-size:.9rem}
+.sc-desc{font-size:.79rem;color:var(--text2);line-height:1.5}
+.sc-loc{font-size:.67rem;color:var(--text3);font-family:'IBM Plex Mono',monospace;margin-top:5px}
+
+/* MACHINE CARDS */
+.mgrid{display:grid;grid-template-columns:1fr 1fr;gap:1.3rem}
+@media(max-width:860px){.mgrid{grid-template-columns:1fr}}
+.mcard{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:1.4rem;position:relative;overflow:hidden}
+.mcard::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.mcard.main::before{background:linear-gradient(90deg,var(--blue),var(--purple))}
+.mcard.edge::before{background:linear-gradient(90deg,var(--green),var(--cyan))}
+.mhdr{display:flex;align-items:center;gap:11px;margin-bottom:1.1rem}
+.micon{width:42px;height:42px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0}
+.micon.main{background:linear-gradient(135deg,rgba(59,130,246,.15),rgba(99,102,241,.15));border:1px solid rgba(59,130,246,.3)}
+.micon.edge{background:linear-gradient(135deg,rgba(34,197,94,.15),rgba(6,182,212,.15));border:1px solid rgba(34,197,94,.3)}
+.mtitle{font-weight:700;font-size:.95rem}
+.mip{font-size:.74rem;color:var(--text3);font-family:'IBM Plex Mono',monospace}
+.svclist{list-style:none;display:flex;flex-direction:column;gap:7px}
+.svcitem{display:flex;align-items:center;gap:9px;padding:7px 9px;background:var(--bg2);border-radius:var(--rs);font-size:.79rem}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.dot.g{background:var(--green);box-shadow:0 0 5px var(--green)}
+.dot.y{background:var(--yellow);box-shadow:0 0 5px var(--yellow)}
+.dot.r{background:var(--red);box-shadow:0 0 5px var(--red)}
+.svcname{flex:1;font-weight:500}
+.svcport{font-family:'IBM Plex Mono',monospace;font-size:.69rem;color:var(--text3)}
+
+/* NOTICE */
+.notice{display:flex;gap:10px;padding:10px 14px;border-radius:var(--rs);margin:.65rem 0;font-size:.82rem}
+.ni{flex-shrink:0;font-size:.95rem;margin-top:1px}
+.notice p{margin:0;color:var(--text2)}
+.notice strong{color:var(--text)}
+.n-info{background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.25)}
+.n-warn{background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25)}
+.n-ok{background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25)}
+.n-err{background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.25)}
+
+/* TABS */
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:1.3rem;overflow-x:auto}
+.tbtn{padding:9px 18px;border:none;background:none;color:var(--text3);font-family:inherit;font-size:.82rem;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap;margin-bottom:-1px}
+.tbtn:hover{color:var(--text)}
+.tbtn.on{color:var(--blue);border-bottom-color:var(--blue)}
+.tcontent{display:none}.tcontent.on{display:block}
+
+/* FLOW */
+.flow-box{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:1.5rem;overflow-x:auto}
+.frow{display:flex;align-items:center;justify-content:center;flex-wrap:nowrap;min-width:560px}
+.fb{padding:10px 13px;border-radius:var(--rs);text-align:center;font-size:.78rem;font-weight:600;min-width:100px}
+.fb.u{background:rgba(100,116,139,.12);border:1px solid var(--border2);color:var(--text2)}
+.fb.e{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);color:var(--green)}
+.fb.m{background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.3);color:var(--blue)}
+.fb.d{background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);color:var(--purple)}
+.farr{display:flex;flex-direction:column;align-items:center;padding:0 7px;gap:2px}
+.farr .a{font-size:1.1rem;color:var(--border2)}
+.farr .l{font-size:.62rem;color:var(--text3);white-space:nowrap}
+
+/* STEPS */
+.steps{display:flex;flex-direction:column;gap:.85rem}
+.phlabel{font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-top:.4rem}
+.step{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.step-hdr{display:flex;align-items:center;gap:10px;padding:.9rem 1.1rem;cursor:pointer;user-select:none;transition:background .2s}
+.step-hdr:hover{background:var(--card2)}
+.snum{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.82rem;flex-shrink:0}
+.step-hdr h3{font-size:.88rem;font-weight:600;flex:1}
+.smtags{display:flex;gap:5px;align-items:center}
+.chev{color:var(--text3);transition:transform .2s;font-size:.8rem}
+.step.open .chev{transform:rotate(180deg)}
+.step-body{display:none;padding:0 1.1rem 1.1rem}
+.step.open .step-body{display:block}
+.step-body p{font-size:.84rem;color:var(--text2);margin-bottom:.8rem}
+
+/* CODE */
+.cb{background:var(--bg);border:1px solid var(--border);border-radius:var(--rs);overflow:hidden;margin:.6rem 0}
+.cb-hdr{display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.cb-lbl{font-size:.68rem;font-weight:600;font-family:'IBM Plex Mono',monospace;color:var(--text3)}
+.cb-cp{background:none;border:1px solid var(--border);border-radius:4px;color:var(--text3);padding:2px 8px;font-size:.67rem;cursor:pointer;font-family:'IBM Plex Mono',monospace;transition:all .2s}
+.cb-cp:hover{background:var(--border);color:var(--text)}
+.cb pre{padding:.9rem 1.1rem;font-family:'IBM Plex Mono',monospace;font-size:.77rem;line-height:1.7;color:var(--text);overflow-x:auto}
+pre .c{color:var(--text3)}pre .k{color:#93c5fd}pre .s{color:#86efac}pre .v{color:#fde68a}pre .cmd{color:#67e8f9}
+
+/* DEP TABLE */
+.dtable{width:100%;border-collapse:collapse;font-size:.79rem}
+.dtable th{background:var(--bg2);padding:9px 12px;text-align:left;font-weight:600;border:1px solid var(--border);color:var(--text2);font-size:.74rem}
+.dtable td{padding:9px 12px;border:1px solid var(--border);vertical-align:top}
+.dtable tr:hover td{background:rgba(255,255,255,.015)}
+
+/* TIMELINE */
+.tl{position:relative;padding-left:1.8rem}
+.tl::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--border2)}
+.tli{position:relative;margin-bottom:1.3rem}
+.tldot{position:absolute;left:-1.8rem;top:5px;width:13px;height:13px;border-radius:50%;transform:translateX(-50%);border:2px solid var(--bg)}
+.tl-t{font-weight:600;font-size:.87rem;margin-bottom:3px}
+.tl-d{font-size:.79rem;color:var(--text2)}
+.tl-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+
+@media(max-width:680px){.navlinks{gap:0}.navlinks a{padding:5px 8px;font-size:.74rem}.wrap{padding:0 1rem 3rem}}
+</style>
+</head>
+<body>
+<nav>
+  <a class="brand" href="#"><div class="brand-icon">🛡️</div>WAF + CDN Devplan</a>
+  <div class="navlinks">
+    <a href="#status">สถานะ</a>
+    <a href="#machines">เครื่อง</a>
+    <a href="#flow">โฟลว์</a>
+    <a href="#plan">แผน</a>
+    <a href="#deps">Deps</a>
+    <a href="#roadmap">Roadmap</a>
+  </div>
+</nav>
+
+<div class="hero">
+  <div class="badge">📋 Development Blueprint v1.0 — อัปเดต 9 ส.ค. 2569</div>
+  <h1>WAF & CDN Platform<br/><span>แผนพัฒนาระบบฉบับสมบูรณ์</span></h1>
+  <p>วิเคราะห์สถานะปัจจุบัน โฟลว์การทำงานรายเครื่อง แผนพัฒนา และขั้นตอนปฏิบัติพร้อม deploy</p>
+  <div class="stats">
+    <div class="stat"><div class="val">2</div><div class="lbl">เครื่อง Server</div></div>
+    <div class="stat"><div class="val">8</div><div class="lbl">Services รัน</div></div>
+    <div class="stat"><div class="val">~75%</div><div class="lbl">ความสมบูรณ์</div></div>
+    <div class="stat"><div class="val">5</div><div class="lbl">Phase พัฒนา</div></div>
+  </div>
+</div>
+
+<div class="wrap">
+
+<!-- STATUS -->
+<hr class="sep" id="status"/>
+<div class="sh"><h2>📊 สถานะระบบปัจจุบัน</h2><p>วิเคราะห์จาก codebase + services ที่รันจริงบน Main Server (178.104.53.123) และ Edge Node (45.154.26.91)</p></div>
+
+<div class="prog-wrap">
+  <div class="prog-title">ความสมบูรณ์รายโมดูล</div>
+  <div class="prog-list">
+    <div class="prog-row"><div class="prog-lbl">🔐 Auth / JWT / RBAC</div><div class="prog-bar"><div class="prog-fill" style="width:90%;background:linear-gradient(90deg,#22c55e,#16a34a)"></div></div><div class="prog-pct" style="color:var(--green)">90%</div></div>
+    <div class="prog-row"><div class="prog-lbl">🌐 Origins & Domains API</div><div class="prog-bar"><div class="prog-fill" style="width:80%;background:linear-gradient(90deg,#22c55e,#16a34a)"></div></div><div class="prog-pct" style="color:var(--green)">80%</div></div>
+    <div class="prog-row"><div class="prog-lbl">🛡️ WAF Rules & Sync</div><div class="prog-bar"><div class="prog-fill" style="width:85%;background:linear-gradient(90deg,#22c55e,#16a34a)"></div></div><div class="prog-pct" style="color:var(--green)">85%</div></div>
+    <div class="prog-row"><div class="prog-lbl">📊 Analytics / ClickHouse</div><div class="prog-bar"><div class="prog-fill" style="width:70%;background:linear-gradient(90deg,#f59e0b,#d97706)"></div></div><div class="prog-pct" style="color:var(--yellow)">70%</div></div>
+    <div class="prog-row"><div class="prog-lbl">🚀 CDN Edge Cache</div><div class="prog-bar"><div class="prog-fill" style="width:80%;background:linear-gradient(90deg,#22c55e,#16a34a)"></div></div><div class="prog-pct" style="color:var(--green)">80%</div></div>
+    <div class="prog-row"><div class="prog-lbl">🔔 Telegram Alert Bot</div><div class="prog-bar"><div class="prog-fill" style="width:60%;background:linear-gradient(90deg,#f59e0b,#d97706)"></div></div><div class="prog-pct" style="color:var(--yellow)">60%</div></div>
+    <div class="prog-row"><div class="prog-lbl">💳 Billing / Quota</div><div class="prog-bar"><div class="prog-fill" style="width:40%;background:linear-gradient(90deg,#ef4444,#dc2626)"></div></div><div class="prog-pct" style="color:var(--red)">40%</div></div>
+    <div class="prog-row"><div class="prog-lbl">🔒 SSL Automation</div><div class="prog-bar"><div class="prog-fill" style="width:50%;background:linear-gradient(90deg,#f59e0b,#d97706)"></div></div><div class="prog-pct" style="color:var(--yellow)">50%</div></div>
+    <div class="prog-row"><div class="prog-lbl">🔥 Firewall / UFW</div><div class="prog-bar"><div class="prog-fill" style="width:20%;background:linear-gradient(90deg,#ef4444,#dc2626)"></div></div><div class="prog-pct" style="color:var(--red)">20%</div></div>
+    <div class="prog-row"><div class="prog-lbl">🌏 Multi-Edge (SG/JP)</div><div class="prog-bar"><div class="prog-fill" style="width:35%;background:linear-gradient(90deg,#ef4444,#dc2626)"></div></div><div class="prog-pct" style="color:var(--red)">35%</div></div>
+    <div class="prog-row"><div class="prog-lbl">📦 Control API Bundle</div><div class="prog-bar"><div class="prog-fill" style="width:75%;background:linear-gradient(90deg,#f59e0b,#d97706)"></div></div><div class="prog-pct" style="color:var(--yellow)">75%</div></div>
+    <div class="prog-row"><div class="prog-lbl">🗑️ Purge Cache API</div><div class="prog-bar"><div class="prog-fill" style="width:65%;background:linear-gradient(90deg,#f59e0b,#d97706)"></div></div><div class="prog-pct" style="color:var(--yellow)">65%</div></div>
+  </div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>ใช้งานได้ครบ</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div>ใช้ได้บางส่วน</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>ยังไม่มี/ต้องพัฒนา</div>
+</div>
+
+<div class="sgrid">
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">🔐 Auth & RBAC</div><span class="tag tg">✅ ครบ</span></div><div class="sc-desc">Login/Register, Google OAuth, JWT, Role (admin/viewer), Ownership Isolation</div><div class="sc-loc">📍 Main → api/auth.py, services/rbac.py</div></div>
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">🌐 Origins & Domains</div><span class="tag tg">✅ ครบ</span></div><div class="sc-desc">เพิ่ม/ลบ/แก้ไข Origin, ผูก Domain, Quota 5 Origins / 10 Domains ต่อบัญชี</div><div class="sc-loc">📍 Main → api/origins.py, api/domains.py</div></div>
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">🛡️ WAF Rules Management</div><span class="tag tg">✅ ครบ</span></div><div class="sc-desc">CRUD กฎ ModSecurity, เขียน .conf, reload Nginx ใน Container, ปุ่ม Sync ไป Edge</div><div class="sc-loc">📍 Main → api/rules.py, services/rule_manager.py</div></div>
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">📊 Analytics Dashboard</div><span class="tag ty">⚠️ บางส่วน</span></div><div class="sc-desc">Query ClickHouse ได้ (Total, Blocked, Attack Types, Top IPs, Countries) แต่ CDN Stats บาง Chart ยัง mock</div><div class="sc-loc">📍 Main → api/analytics.py, services/clickhouse_service.py</div></div>
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">🚀 CDN Edge Node (TH)</div><span class="tag tg">✅ ครบ</span></div><div class="sc-desc">Cache ทำงาน (MISS→HIT), WAF กรองทราฟฟิก, Rate Limit, Log ส่งกลับ Main real-time</div><div class="sc-loc">📍 Edge (45.154.26.91) → Docker Compose Stack</div></div>
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">📦 Control API (Rule Bundle)</div><span class="tag ty">⚠️ บางส่วน</span></div><div class="sc-desc">โค้ดพร้อมแล้ว แต่ยังไม่ Deploy บน Main — Edge Node ไม่ได้รับ Rule Bundle จึงกฎใหม่ไม่ถึง Edge</div><div class="sc-loc">📍 Main → cdn/control-api/main.py (❌ ยังไม่ Deploy)</div></div>
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">🗑️ Cache Purge API</div><span class="tag ty">⚠️ บางส่วน</span></div><div class="sc-desc">โค้ดพร้อมแล้ว แต่ยังไม่ Deploy และ Volume Cache ยังไม่ได้เชื่อม</div><div class="sc-loc">📍 Main → cdn/purge-api/main.py (❌ ยังไม่ Deploy)</div></div>
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">🔔 Telegram Alert Bot</div><span class="tag ty">⚠️ บางส่วน</span></div><div class="sc-desc">Worker พร้อมแล้ว แต่ขาด TELEGRAM_CHAT_ID ใน .env ทำให้ยังไม่ส่งการแจ้งเตือน</div><div class="sc-loc">📍 Main → services/telegram_listener.py</div></div>
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">🔒 HTTPS / SSL</div><span class="tag ty">⚠️ บางส่วน</span></div><div class="sc-desc">Caddy On-Demand TLS พร้อมแล้ว แต่ขาด Domain Name ชี้มา ทำให้ยังเป็น HTTP ผ่าน IP</div><div class="sc-loc">📍 Main + Edge → Caddy Container</div></div>
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">🔥 Firewall (UFW)</div><span class="tag tr">❌ ยังไม่มี</span></div><div class="sc-desc">ทุก Port เปิด Public — อันตราย! ยังไม่ได้ตั้งค่า UFW ล็อคให้รับเฉพาะ IP ที่จำเป็น</div><div class="sc-loc">📍 ต้องทำทั้ง Main และ Edge Node</div></div>
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">🌏 Multi-Region (SG/JP)</div><span class="tag tr">❌ ยังไม่มี</span></div><div class="sc-desc">โครงสร้างรองรับแล้ว แต่มีแค่ Edge TH (45.154.26.91) เท่านั้น ยังไม่มี SG/JP Node</div><div class="sc-loc">📍 ต้องการ Server ใหม่ในภูมิภาค SG / JP</div></div>
+  <div class="scard"><div class="sc-hdr"><div class="sc-title">💳 Billing / Stripe</div><span class="tag tr">❌ ยังไม่มี</span></div><div class="sc-desc">ไม่มีระบบชำระเงิน / Subscription / Quota ตาม Plan</div><div class="sc-loc">📍 ต้องสร้างใหม่บน Main Server</div></div>
+</div>
+
+<!-- MACHINES -->
+<hr class="sep" id="machines"/>
+<div class="sh"><h2>🖥️ ภาพย่อยรายเครื่อง</h2><p>Services ที่รันอยู่จริง พร้อมสถานะ</p></div>
+<div class="mgrid">
+  <div class="mcard main">
+    <div class="mhdr"><div class="micon main">🧠</div><div><div class="mtitle">Main Server — Control Plane</div><div class="mip">178.104.53.123 · Ubuntu · Docker</div></div></div>
+    <ul class="svclist">
+      <li class="svcitem"><div class="dot g"></div><div class="svcname">FastAPI Dashboard Backend</div><div class="svcport">:8000 systemd</div></li>
+      <li class="svcitem"><div class="dot g"></div><div class="svcname">React Dashboard Frontend</div><div class="svcport">served by FastAPI</div></li>
+      <li class="svcitem"><div class="dot g"></div><div class="svcname">Caddy Reverse Proxy</div><div class="svcport">:80 / :443 docker</div></li>
+      <li class="svcitem"><div class="dot g"></div><div class="svcname">WAF Engine (ModSecurity+Nginx)</div><div class="svcport">:8080 docker</div></li>
+      <li class="svcitem"><div class="dot g"></div><div class="svcname">ClickHouse Analytics DB</div><div class="svcport">:8123/:9000 docker</div></li>
+      <li class="svcitem"><div class="dot g"></div><div class="svcname">Redis Cache / Rate Limit</div><div class="svcport">:6379 docker</div></li>
+      <li class="svcitem"><div class="dot g"></div><div class="svcname">DVWA Origin App</div><div class="svcport">internal docker</div></li>
+      <li class="svcitem"><div class="dot y"></div><div class="svcname">Control API (Rule Bundle)</div><div class="svcport">:8070 ❌ ยังไม่ Deploy</div></li>
+      <li class="svcitem"><div class="dot y"></div><div class="svcname">Purge Cache API</div><div class="svcport">:8090 ❌ ยังไม่ Deploy</div></li>
+      <li class="svcitem"><div class="dot r"></div><div class="svcname">UFW Firewall</div><div class="svcport">inactive ❌</div></li>
+    </ul>
+  </div>
+  <div class="mcard edge">
+    <div class="mhdr"><div class="micon edge">🌐</div><div><div class="mtitle">Edge Node TH — Traffic Shield</div><div class="mip">45.154.26.91 · Ubuntu · Docker</div></div></div>
+    <ul class="svclist">
+      <li class="svcitem"><div class="dot g"></div><div class="svcname">Caddy SSL Proxy</div><div class="svcport">:80/:443 docker</div></li>
+      <li class="svcitem"><div class="dot g"></div><div class="svcname">Edge Nginx WAF + Cache</div><div class="svcport">:8080 internal docker</div></li>
+      <li class="svcitem"><div class="dot g"></div><div class="svcname">Log Forwarder (Python)</div><div class="svcport">push → Main:8000</div></li>
+      <li class="svcitem"><div class="dot y"></div><div class="svcname">Rule Sync (99-rulesync.sh)</div><div class="svcport">pull ← Main:8070 ❌ ไม่ได้รับ</div></li>
+      <li class="svcitem"><div class="dot r"></div><div class="svcname">UFW Firewall</div><div class="svcport">inactive ❌</div></li>
+    </ul>
+    <div class="notice n-err" style="margin-top:.9rem"><div class="ni">❌</div><p><strong>Rule Sync ยังไม่ทำงาน</strong> — พยายาม pull จาก Control API (:8070) แต่ยังไม่ได้รัน กฎ WAF จาก Dashboard จึงไม่ถึง Edge จริง</p></div>
+  </div>
+</div>
+
+<!-- FLOW -->
+<hr class="sep" id="flow"/>
+<div class="sh"><h2>🔄 โฟลว์การทำงานของระบบ</h2><p>ทราฟฟิกวิ่งยังไง ใครคุยกับใคร ผ่านอะไร</p></div>
+<div class="tabs">
+  <button class="tbtn on" onclick="tab('t1',this)">🌐 Traffic Flow</button>
+  <button class="tbtn" onclick="tab('t2',this)">⚙️ Control Flow</button>
+  <button class="tbtn" onclick="tab('t3',this)">📜 Log Flow</button>
+  <button class="tbtn" onclick="tab('t4',this)">🛡️ Rule Sync</button>
+</div>
+<div id="t1" class="tcontent on">
+  <div class="flow-box">
+    <div style="font-size:.82rem;font-weight:600;color:var(--text2);margin-bottom:1.2rem">🌐 ผู้ใช้งานเข้าชมเว็บ</div>
+    <div class="frow">
+      <div class="fb u">👤 User<br/><small>Browser</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">HTTP/HTTPS</div></div>
+      <div class="fb e">📡 Caddy<br/><small>Edge :80/443</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">internal</div></div>
+      <div class="fb e">🛡️ Nginx WAF<br/><small>Edge :8080</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">Cache Miss?</div></div>
+      <div class="fb m">🌐 WAF Main<br/><small>Main :8080</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">proxy pass</div></div>
+      <div class="fb m">🌍 Origin App<br/><small>DVWA</small></div>
+    </div>
+    <div style="margin-top:1rem;padding:10px 13px;background:var(--bg2);border-radius:var(--rs);border-left:3px solid var(--green);font-size:.79rem;color:var(--text2)"><strong style="color:var(--green)">Cache HIT:</strong> ถ้า Edge มีหน้าใน Cache → ตอบกลับทันที ไม่ต้องวิ่งถาม Main</div>
+    <div style="margin-top:.5rem;padding:10px 13px;background:var(--bg2);border-radius:var(--rs);border-left:3px solid var(--yellow);font-size:.79rem;color:var(--text2)"><strong style="color:var(--yellow)">WAF Block:</strong> Request ที่เป็นการโจมตี → ModSecurity ส่ง 403 ทันที ไม่ผ่านไป Origin</div>
+  </div>
+</div>
+<div id="t2" class="tcontent">
+  <div class="flow-box">
+    <div style="font-size:.82rem;font-weight:600;color:var(--text2);margin-bottom:1.2rem">⚙️ Admin จัดการ Dashboard</div>
+    <div class="frow">
+      <div class="fb u">👑 Admin<br/><small>Browser</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">HTTP :80</div></div>
+      <div class="fb m">🌐 Caddy<br/><small>Main :80</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">proxy pass</div></div>
+      <div class="fb m">🧠 FastAPI<br/><small>Main :8000</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">JWT + DB</div></div>
+      <div class="fb d">🗃️ DynamoDB<br/><small>AWS</small></div>
+    </div>
+    <div style="margin-top:1rem" class="frow">
+      <div class="fb u">👑 Admin<br/><small>กด Sync Rules</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">POST /api/rules/sync</div></div>
+      <div class="fb m">🧠 FastAPI<br/><small>write .conf</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">docker exec</div></div>
+      <div class="fb m">🛡️ waf-nginx<br/><small>nginx reload</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">bundle via :8070</div></div>
+      <div class="fb e">📡 Edge WAF<br/><small>apply rules</small></div>
+    </div>
+    <div class="notice n-warn" style="margin-top:.9rem"><div class="ni">⚠️</div><p>ขั้นตอน "bundle via :8070" ยังไม่ทำงานเพราะ <strong>Control API ยังไม่ Deploy</strong> — ต้องทำ Step 1 ก่อน</p></div>
+  </div>
+</div>
+<div id="t3" class="tcontent">
+  <div class="flow-box">
+    <div style="font-size:.82rem;font-weight:600;color:var(--text2);margin-bottom:1.2rem">📜 Log วิ่งจาก Edge กลับมา Main</div>
+    <div class="frow">
+      <div class="fb e">🛡️ Edge Nginx<br/><small>access.json</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">tail file</div></div>
+      <div class="fb e">🐍 Log Forwarder<br/><small>Python docker</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">POST batch</div></div>
+      <div class="fb m">🧠 FastAPI<br/><small>/api/cdn/logs/ingest</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">insert rows</div></div>
+      <div class="fb d">📊 ClickHouse<br/><small>Main :8123</small></div>
+    </div>
+    <div class="notice n-ok" style="margin-top:.9rem"><div class="ni">✅</div><p><strong>Log Flow ทำงานได้ครบแล้ว</strong> — ตรวจสอบจาก: "POST /api/cdn/logs/ingest HTTP/1.1" 200 OK ใน Main Server logs</p></div>
+  </div>
+</div>
+<div id="t4" class="tcontent">
+  <div class="flow-box">
+    <div style="font-size:.82rem;font-weight:600;color:var(--text2);margin-bottom:1.2rem">🛡️ Rule Sync — กฎ WAF วิ่งจาก Main ไป Edge</div>
+    <div class="frow">
+      <div class="fb e">🛡️ 99-rulesync.sh<br/><small>Edge (ทุก 5 วิ)</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">GET /api/sync/bundle</div></div>
+      <div class="fb m" style="border-color:rgba(239,68,68,.4);color:var(--red)">📦 Control API<br/><small>:8070 ❌ NOT RUNNING</small></div>
+      <div class="farr"><div class="a">→</div><div class="l">ส่ง .tgz bundle</div></div>
+      <div class="fb e">🛡️ Edge WAF<br/><small>apply + reload</small></div>
+    </div>
+    <div class="notice n-err" style="margin-top:.9rem"><div class="ni">❌</div><p><strong>Control API ยังไม่ Deploy บน Main Server</strong> — Edge พยายาม pull แต่ connection refused กฎ WAF ที่สร้างใน Dashboard จึงไม่ถึง Edge จริง → <strong>Fix เป็น Priority 1!</strong></p></div>
+  </div>
+</div>
+
+<!-- PLAN -->
+<hr class="sep" id="plan"/>
+<div class="sh"><h2>🗺️ แผนพัฒนาทีละขั้นตอน</h2><p>เรียงจากสำคัญที่สุด → Premium</p></div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>Phase 1: Critical</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div>Phase 2: Important</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div>Phase 3: Enhancement</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>Phase 4: Scale</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--purple)"></div>Phase 5: Premium</div>
+</div>
+
+<div class="steps">
+
+<div class="phlabel" style="color:var(--red)">🚨 Phase 1 — Critical Fix</div>
+
+<div class="step open" id="s1">
+  <div class="step-hdr" onclick="toggleStep('s1')">
+    <div class="snum" style="background:rgba(239,68,68,.12);color:var(--red)">1</div>
+    <h3>Deploy Control API บน Main Server (:8070)</h3>
+    <div class="smtags"><span class="tag tb">Main Server</span></div>
+    <div class="chev">▼</div>
+  </div>
+  <div class="step-body">
+    <p>Control API คือตัวแจก Rule Bundle ให้ Edge ดึงทุก 5 วิ ถ้าไม่รัน → กฎ WAF ที่สร้างใน Dashboard ไม่ถึง Edge เลย</p>
+    <div class="notice n-warn"><div class="ni">⚠️</div><p>SSH เข้า <strong>Main Server (178.104.53.123)</strong> ก่อน</p></div>
+    <div class="cb">
+      <div class="cb-hdr"><span class="cb-lbl">Main Server — เพิ่ม Control API ใน docker-compose.yml</span><button class="cb-cp" onclick="cp(this)">Copy</button></div>
+      <pre><span class="c"># เปิดไฟล์แก้ไข</span>
+<span class="k">nano</span> /root/waf_project/docker-compose.yml
+
+<span class="c"># เพิ่มใน section services: (ก่อนบรรทัด volumes:)</span>
+  control-api:
+    build: ./cdn/control-api
+    container_name: waf-control-api
+    ports:
+      - <span class="s">"8070:8070"</span>
+    volumes:
+      - ./modsecurity/custom-rules:/src/custom-rules:ro
+      - control_data:/data
+    environment:
+      CONTROL_TOKEN: <span class="v">"your-secret-control-token"</span>
+    restart: unless-stopped
+    networks:
+      - waf-net
+
+<span class="c"># เพิ่มใน section volumes: ด้วย</span>
+  control_data:
+
+<span class="c"># Build และ Start</span>
+<span class="cmd">cd /root/waf_project && docker compose up -d --build control-api</span>
+<span class="cmd">curl http://localhost:8070/healthz</span></pre>
+    </div>
+    <div class="notice n-info"><div class="ni">ℹ️</div><p>ต้องทำบน Edge Node ด้วย — แก้ <code>/root/edge_node/.env</code> เพิ่ม <code>CONTROL_API_URL=http://178.104.53.123:8070</code> และ <code>CONTROL_TOKEN=***REDACTED*** แล้ว <code>docker compose up -d --force-recreate edge-node</code></p></div>
+  </div>
+</div>
+
+<div class="step" id="s2">
+  <div class="step-hdr" onclick="toggleStep('s2')">
+    <div class="snum" style="background:rgba(239,68,68,.12);color:var(--red)">2</div>
+    <h3>ตั้งค่า Firewall (UFW) บนทั้งสองเครื่อง</h3>
+    <div class="smtags"><span class="tag tb">Main</span><span class="tag tg">Edge</span></div>
+    <div class="chev">▶</div>
+  </div>
+  <div class="step-body">
+    <p>ตอนนี้ทุก Port เปิด Public — อันตรายมาก ต้องล็อคให้รับเฉพาะ IP ที่จำเป็น</p>
+    <div class="notice n-warn"><div class="ni">⚠️</div><p>ทำ <strong>ufw allow 22 ก่อน</strong> เสมอ ไม่งั้นจะถูกล็อคออกจาก SSH!</p></div>
+    <div class="cb">
+      <div class="cb-hdr"><span class="cb-lbl">Main Server (178.104.53.123)</span><button class="cb-cp" onclick="cp(this)">Copy</button></div>
+      <pre><span class="cmd">ufw default deny incoming && ufw default allow outgoing</span>
+<span class="cmd">ufw allow 22/tcp</span>
+<span class="cmd">ufw allow 80/tcp && ufw allow 443/tcp</span>
+<span class="c"># อนุญาตเฉพาะ Edge Node เข้า WAF Port + Control API</span>
+<span class="cmd">ufw allow from 45.154.26.91 to any port 8080</span>
+<span class="cmd">ufw allow from 45.154.26.91 to any port 8070</span>
+<span class="cmd">ufw --force enable && ufw status numbered</span></pre>
+    </div>
+    <div class="cb">
+      <div class="cb-hdr"><span class="cb-lbl">Edge Node (45.154.26.91)</span><button class="cb-cp" onclick="cp(this)">Copy</button></div>
+      <pre><span class="cmd">ufw default deny incoming && ufw default allow outgoing</span>
+<span class="cmd">ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp</span>
+<span class="cmd">ufw --force enable && ufw status</span></pre>
+    </div>
+  </div>
+</div>
+
+<div class="step" id="s3">
+  <div class="step-hdr" onclick="toggleStep('s3')">
+    <div class="snum" style="background:rgba(239,68,68,.12);color:var(--red)">3</div>
+    <h3>เปิดใช้ Telegram Alert Bot</h3>
+    <div class="smtags"><span class="tag tb">Main</span></div>
+    <div class="chev">▶</div>
+  </div>
+  <div class="step-body">
+    <p>Worker พร้อมแล้ว แค่ขาด TELEGRAM_CHAT_ID — เพิ่ม 1 บรรทัดใน .env แล้ว restart</p>
+    <div class="cb">
+      <div class="cb-hdr"><span class="cb-lbl">Main Server — เปิด Telegram Bot</span><button class="cb-cp" onclick="cp(this)">Copy</button></div>
+      <pre><span class="c"># หา Chat ID: ส่งข้อความหา @userinfobot บน Telegram</span>
+<span class="c"># หรือเปิด: https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</span>
+
+<span class="k">nano</span> /root/waf_project/.env
+<span class="c"># แก้บรรทัด TELEGRAM_CHAT_ID="" เป็น:</span>
+<span class="v">TELEGRAM_CHAT_ID="123456789"</span>
+
+<span class="cmd">systemctl restart waf-dashboard.service</span>
+<span class="cmd">systemctl status waf-dashboard.service</span></pre>
+    </div>
+  </div>
+</div>
+
+<div class="phlabel" style="color:var(--orange);margin-top:1rem">🔧 Phase 2 — Important</div>
+
+<div class="step" id="s4">
+  <div class="step-hdr" onclick="toggleStep('s4')">
+    <div class="snum" style="background:rgba(249,115,22,.12);color:var(--orange)">4</div>
+    <h3>Deploy Purge API + เชื่อม Cache Volume</h3>
+    <div class="smtags"><span class="tag tb">Main</span><span class="tag tg">Edge</span></div>
+    <div class="chev">▶</div>
+  </div>
+  <div class="step-body">
+    <p>ให้ Admin กด "Purge Cache" ใน Dashboard แล้ว Edge เคลียร์ Cache ทันที</p>
+    <div class="cb">
+      <div class="cb-hdr"><span class="cb-lbl">Main Server — เพิ่ม Purge API ใน docker-compose.yml</span><button class="cb-cp" onclick="cp(this)">Copy</button></div>
+      <pre>  purge-api:
+    build: ./cdn/purge-api
+    container_name: waf-purge-api
+    ports:
+      - <span class="s">"8090:8090"</span>
+    environment:
+      PURGE_TOKEN: <span class="v">"your-purge-token"</span>
+    restart: unless-stopped
+    networks:
+      - waf-net
+
+<span class="cmd">cd /root/waf_project && docker compose up -d --build purge-api</span></pre>
+    </div>
+  </div>
+</div>
+
+<div class="step" id="s5">
+  <div class="step-hdr" onclick="toggleStep('s5')">
+    <div class="snum" style="background:rgba(249,115,22,.12);color:var(--orange)">5</div>
+    <h3>ผูก Domain Name + ตั้งค่า HTTPS จริง</h3>
+    <div class="smtags"><span class="tag tb">Main</span><span class="tag tg">Edge</span><span class="tag tp">DNS</span></div>
+    <div class="chev">▶</div>
+  </div>
+  <div class="step-body">
+    <p>เปลี่ยนจาก HTTP + IP ให้เป็น HTTPS + Domain เพื่อความปลอดภัยและรองรับ Google OAuth</p>
+    <div class="cb">
+      <div class="cb-hdr"><span class="cb-lbl">DNS Provider + Main Server</span><button class="cb-cp" onclick="cp(this)">Copy</button></div>
+      <pre><span class="c"># 1. ที่ DNS Provider เพิ่ม A Record:</span>
+dashboard.yourdomain.com  →  <span class="v">178.104.53.123</span>
+edge.yourdomain.com       →  <span class="v">45.154.26.91</span>
+
+<span class="c"># 2. แก้ Caddyfile บน Main Server</span>
+<span class="k">nano</span> /root/waf_project/nginx/Caddyfile
+<span class="c"># เปลี่ยนเนื้อหาเป็น:</span>
+dashboard.yourdomain.com {
+    reverse_proxy http://host.docker.internal:8000
+}
+<span class="cmd">cd /root/waf_project && docker compose restart caddy</span>
+
+<span class="c"># 3. แก้ .env ให้ชี้ไปที่ Domain ใหม่</span>
+<span class="v">GOOGLE_REDIRECT_URI=https://dashboard.yourdomain.com/api/auth/google/callback</span>
+<span class="cmd">systemctl restart waf-dashboard.service</span></pre>
+    </div>
+  </div>
+</div>
+
+<div class="step" id="s6">
+  <div class="step-hdr" onclick="toggleStep('s6')">
+    <div class="snum" style="background:rgba(249,115,22,.12);color:var(--orange)">6</div>
+    <h3>แก้ Dashboard CDN Stats จาก Mock → ข้อมูลจริง</h3>
+    <div class="smtags"><span class="tag tb">Main</span></div>
+    <div class="chev">▶</div>
+  </div>
+  <div class="step-body">
+    <p>Deploy cdn/stats/ Service เพื่อให้หน้า CDN Dashboard แสดงสถิติ Cache HIT/MISS จริงจาก ClickHouse แทน Mock Data</p>
+    <div class="cb">
+      <div class="cb-hdr"><span class="cb-lbl">Main Server — Deploy CDN Stats</span><button class="cb-cp" onclick="cp(this)">Copy</button></div>
+      <pre>  cdn-stats:
+    build: ./cdn/stats
+    container_name: waf-cdn-stats
+    ports:
+      - <span class="s">"9090:9090"</span>
+    environment:
+      CLICKHOUSE_HOST: <span class="s">"clickhouse"</span>
+      CLICKHOUSE_USER: <span class="s">"default"</span>
+      CLICKHOUSE_PASSWORD: <span class="v">"YourSecurePassword123!"</span>
+    restart: unless-stopped
+    networks:
+      - waf-net
+
+<span class="cmd">cd /root/waf_project && docker compose up -d --build cdn-stats</span></pre>
+    </div>
+  </div>
+</div>
+
+<div class="phlabel" style="color:var(--yellow);margin-top:1rem">✨ Phase 3 — Enhancement</div>
+
+<div class="step" id="s7">
+  <div class="step-hdr" onclick="toggleStep('s7')">
+    <div class="snum" style="background:rgba(245,158,11,.12);color:var(--yellow)">7</div>
+    <h3>Real-time Health Check ทุก Edge Node</h3>
+    <div class="smtags"><span class="tag tb">Main</span></div>
+    <div class="chev">▶</div>
+  </div>
+  <div class="step-body">
+    <p>ให้ Dashboard แสดงสถานะ Online/Offline ของ Edge Node ทุกตัวแบบ Real-time แทน Mock</p>
+    <div class="cb">
+      <div class="cb-hdr"><span class="cb-lbl">Main Server — เพิ่ม Health Check ใน api/cdn.py</span><button class="cb-cp" onclick="cp(this)">Copy</button></div>
+      <pre>EDGE_HEALTH_URLS = {
+    <span class="s">"TH"</span>: <span class="s">"http://45.154.26.91/healthz"</span>,
+    <span class="c"># "SG": "http://&lt;SG_IP&gt;/healthz",</span>
+}
+
+@router.get(<span class="s">"/nodes"</span>)
+async def get_nodes(current_user = Depends(require_viewer_or_above)):
+    results = {}
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        for region, url in EDGE_HEALTH_URLS.items():
+            try:
+                r = await client.get(url)
+                results[region] = {<span class="s">"status"</span>: <span class="s">"online"</span>, <span class="s">"latency_ms"</span>: r.elapsed.microseconds//1000}
+            except:
+                results[region] = {<span class="s">"status"</span>: <span class="s">"offline"</span>, <span class="s">"latency_ms"</span>: None}
+    return results</pre>
+    </div>
+  </div>
+</div>
+
+<div class="step" id="s8">
+  <div class="step-hdr" onclick="toggleStep('s8')">
+    <div class="snum" style="background:rgba(245,158,11,.12);color:var(--yellow)">8</div>
+    <h3>Block IP ด้วยคลิกเดียวจาก Security Logs</h3>
+    <div class="smtags"><span class="tag tb">Main</span><span class="tag tg">Edge (Auto)</span></div>
+    <div class="chev">▶</div>
+  </div>
+  <div class="step-body">
+    <p>Admin เห็น IP คนร้ายใน Security Log → คลิก "Block IP" → Control API เขียน blocklist → Edge ดึงมา apply อัตโนมัติใน 5 วิ</p>
+    <div class="notice n-info"><div class="ni">💡</div><p>Control API รองรับ <code>POST /api/blocklist</code> แล้ว แค่ต้องเพิ่มปุ่มใน Frontend Dashboard (Logs.tsx) และ connect API เท่านั้น</p></div>
+  </div>
+</div>
+
+<div class="phlabel" style="color:var(--green);margin-top:1rem">🚀 Phase 4 — Scale Out</div>
+
+<div class="step" id="s9">
+  <div class="step-hdr" onclick="toggleStep('s9')">
+    <div class="snum" style="background:rgba(34,197,94,.12);color:var(--green)">9</div>
+    <h3>เพิ่ม Edge Node SG / JP (Multi-Region)</h3>
+    <div class="smtags"><span class="tag tg">Server ใหม่</span><span class="tag tb">Main</span></div>
+    <div class="chev">▶</div>
+  </div>
+  <div class="step-body">
+    <p>ใช้ไฟล์เดียวกับ Edge TH ที่มีอยู่แล้ว Deploy ได้ทันที</p>
+    <div class="cb">
+      <div class="cb-hdr"><span class="cb-lbl">Server ใหม่ (เช่น SG) — Deploy Edge Node</span><button class="cb-cp" onclick="cp(this)">Copy</button></div>
+      <pre><span class="cmd">apt update && apt install -y docker.io docker-compose-v2</span>
+<span class="c"># Copy ไฟล์จาก Edge TH</span>
+<span class="cmd">scp -r root@45.154.26.91:/root/edge_node /root/edge_node</span>
+<span class="c"># แก้ .env</span>
+<span class="v">EDGE_REGION=SG</span>
+<span class="v">MAIN_SERVER_IP=178.104.53.123</span>
+<span class="cmd">cd /root/edge_node && docker compose up -d</span>
+
+<span class="c"># บน Main Server เพิ่ม IP ใหม่ใน EDGE_HEALTH_URLS และ UFW</span>
+<span class="cmd">ufw allow from &lt;SG_IP&gt; to any port 8080</span>
+<span class="cmd">ufw allow from &lt;SG_IP&gt; to any port 8070</span></pre>
+    </div>
+  </div>
+</div>
+
+<div class="phlabel" style="color:var(--purple);margin-top:1rem">💎 Phase 5 — Premium</div>
+
+<div class="step" id="s10">
+  <div class="step-hdr" onclick="toggleStep('s10')">
+    <div class="snum" style="background:rgba(168,85,247,.12);color:var(--purple)">10</div>
+    <h3>Billing / Stripe + Plan Management</h3>
+    <div class="smtags"><span class="tag tb">Main</span><span class="tag tp">Stripe API</span></div>
+    <div class="chev">▶</div>
+  </div>
+  <div class="step-body">
+    <p>ผู้ใช้สมัคร Plan (Free/Pro/Enterprise) → Quota ปรับอัตโนมัติ → Stripe Webhook จัดการ Subscription</p>
+    <div class="notice n-info"><div class="ni">💡</div><p>ต้องสร้าง API ใหม่: <code>POST /api/billing/subscribe</code>, <code>GET /api/billing/plan</code>, เชื่อม Stripe Webhook, และแก้ <code>origin_service.py</code> ให้ดึง Quota จาก Plan</p></div>
+  </div>
+</div>
+
+<div class="step" id="s11">
+  <div class="step-hdr" onclick="toggleStep('s11')">
+    <div class="snum" style="background:rgba(168,85,247,.12);color:var(--purple)">11</div>
+    <h3>ML-based Threat Detection (AI WAF)</h3>
+    <div class="smtags"><span class="tag tb">Main</span></div>
+    <div class="chev">▶</div>
+  </div>
+  <div class="step-body">
+    <p>ใช้ Log ใน ClickHouse เทรน Model ตรวจจับ Pattern การโจมตีที่ซับซ้อน Auto-block ได้</p>
+    <div class="notice n-info"><div class="ni">💡</div><p>Project มี <code>ml_ai_proposal.md</code> และ <code>ml_deployment_guide</code> วางแผนไว้แล้ว — ทำหลังจาก Core System สมบูรณ์ก่อน</p></div>
+  </div>
+</div>
+
+</div><!-- end steps -->
+
+<!-- DEPS -->
+<hr class="sep" id="deps"/>
+<div class="sh"><h2>🔗 Cross-Machine Dependencies</h2><p>ถ้าทำเครื่อง A → ต้องไปทำอะไรที่เครื่อง B ด้วย</p></div>
+<div style="overflow-x:auto">
+<table class="dtable">
+  <thead><tr><th>ทำบน Main Server</th><th>ผลต่อ Edge Node</th><th>ต้องทำที่ Edge ด้วย</th><th>Priority</th></tr></thead>
+  <tbody>
+    <tr><td>🚀 Deploy Control API (:8070)</td><td>Edge เริ่มรับ Rule Bundle ได้</td><td>แก้ <code>.env</code>: <code>CONTROL_API_URL</code> + <code>CONTROL_TOKEN</code> แล้ว <code>docker compose up -d --force-recreate edge-node</code></td><td><span class="tag tr">🚨 Critical</span></td></tr>
+    <tr><td>🔥 เปิด UFW + allow Edge IP</td><td>Edge เชื่อมต่อ Main ได้หลัง UFW active</td><td>ตั้ง UFW บน Edge ด้วย (allow :80/:443 เท่านั้น)</td><td><span class="tag tr">🚨 Critical</span></td></tr>
+    <tr><td>🌐 ผูก Domain Name ใหม่</td><td>Caddy บน Edge ต้องรู้จัก Domain ด้วย</td><td>แก้ <code>/root/edge_node/edge/Caddyfile</code> เพิ่ม Domain → <code>docker compose restart caddy-ssl</code></td><td><span class="tag to">🔧 Important</span></td></tr>
+    <tr><td>🛡️ เพิ่ม WAF Rule ใน Dashboard</td><td>กฎถูก push ผ่าน Control API → Edge auto reload</td><td>ไม่ต้องทำอะไร (อัตโนมัติ) <em>แต่ต้องทำ Step 1 ก่อน</em></td><td><span class="tag tg">✨ Auto</span></td></tr>
+    <tr><td>🔐 เปลี่ยน JWT_SECRET_KEY</td><td>Token เก่าทั้งหมด expire ทันที</td><td>ไม่ต้องทำที่ Edge แต่ User ทุกคนต้อง Login ใหม่</td><td><span class="tag tb">ℹ️ Info</span></td></tr>
+    <tr><td>🌏 เพิ่ม Edge Node ใหม่ (SG)</td><td>—</td><td>บน Main: เพิ่ม IP ใน <code>EDGE_HEALTH_URLS</code> + <code>ufw allow from &lt;SG_IP&gt;</code> Port 8080, 8070</td><td><span class="tag tg">🚀 Scale</span></td></tr>
+    <tr><td>🗑️ Deploy Purge API (:8090)</td><td>Admin purge Cache จาก Dashboard ได้</td><td>Edge ต้องเพิ่ม endpoint รับ purge signal หรือ mount volume เข้า Purge API</td><td><span class="tag to">🔧 Important</span></td></tr>
+    <tr><td>📊 Deploy CDN Stats (:9090)</td><td>Dashboard แสดงสถิติ Cache จริง</td><td>ไม่ต้องทำอะไร (Stats ดึงจาก ClickHouse ซึ่ง Edge ส่ง Log มาแล้ว)</td><td><span class="tag tg">✨ Auto</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ROADMAP -->
+<hr class="sep" id="roadmap"/>
+<div class="sh"><h2>📅 Roadmap</h2><p>ลำดับเวลาการพัฒนาที่แนะนำ</p></div>
+<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:1.4rem">
+<div class="tl">
+  <div class="tli"><div class="tldot" style="background:var(--red)"></div><div class="tl-t">สัปดาห์นี้ — Critical Fix</div><div class="tl-d">Deploy Control API, ตั้ง UFW ทั้งสองเครื่อง, เปิด Telegram Bot</div><div class="tl-tags"><span class="tag tr">Step 1</span><span class="tag tr">Step 2</span><span class="tag tr">Step 3</span></div></div>
+  <div class="tli"><div class="tldot" style="background:var(--orange)"></div><div class="tl-t">สัปดาห์หน้า — ระบบสมบูรณ์</div><div class="tl-d">Deploy Purge API, ผูก Domain + HTTPS, แก้ CDN Stats</div><div class="tl-tags"><span class="tag to">Step 4</span><span class="tag to">Step 5</span><span class="tag to">Step 6</span></div></div>
+  <div class="tli"><div class="tldot" style="background:var(--yellow)"></div><div class="tl-t">เดือนหน้า — Enhancement</div><div class="tl-d">Real-time Health Check Edge Nodes, Block IP ด้วยคลิกเดียว</div><div class="tl-tags"><span class="tag ty">Step 7</span><span class="tag ty">Step 8</span></div></div>
+  <div class="tli"><div class="tldot" style="background:var(--green)"></div><div class="tl-t">ไตรมาสหน้า — Scale Out</div><div class="tl-d">เพิ่ม Edge Node SG และ JP, Multi-Region CDN</div><div class="tl-tags"><span class="tag tg">Step 9</span></div></div>
+  <div class="tli"><div class="tldot" style="background:var(--purple)"></div><div class="tl-t">อนาคต — Premium</div><div class="tl-d">Billing/Stripe, ML-based Threat Detection, Customer Portal</div><div class="tl-tags"><span class="tag tp">Step 10</span><span class="tag tp">Step 11</span></div></div>
+</div>
+</div>
+
+<div style="text-align:center;padding:3rem 0 1rem;color:var(--text3);font-size:.76rem">
+  🛡️ WAF & CDN Platform · Dev Blueprint · Main: <code style="color:var(--blue)">178.104.53.123</code> · Edge TH: <code style="color:var(--green)">45.154.26.91</code>
+</div>
+
+</div><!-- end wrap -->
+
+<script>
+function tab(id,btn){
+  document.querySelectorAll('.tcontent').forEach(t=>t.classList.remove('on'));
+  document.querySelectorAll('.tbtn').forEach(b=>b.classList.remove('on'));
+  document.getElementById(id).classList.add('on');
+  btn.classList.add('on');
+}
+function toggleStep(id){
+  document.getElementById(id).classList.toggle('open');
+}
+function cp(btn){
+  const pre=btn.closest('.cb').querySelector('pre');
+  navigator.clipboard.writeText(pre.innerText).then(()=>{
+    const o=btn.textContent;btn.textContent='Copied!';btn.style.color='var(--green)';
+    setTimeout(()=>{btn.textContent=o;btn.style.color=''},2000);
+  });
+}
+window.addEventListener('load',()=>{
+  document.querySelectorAll('.prog-fill').forEach(el=>{
+    const w=el.style.width;el.style.width='0';
+    setTimeout(()=>{el.style.width=w},200);
+  });
+});
+</script>
+</body>
+</html>

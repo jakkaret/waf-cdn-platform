@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WAF & CDN Deployment Guide - Interactive VPS Tutorial</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Navigation -->
+        <header class="navbar">
+            <div class="nav-brand">
+                <div class="brand-logo">
+                    <i class="fa-solid fa-shield-halved"></i>
+                </div>
+                <div class="brand-text">
+                    <h1>WAF & CDN Cloud Deployment Hub</h1>
+                    <span class="sub">Zero-to-Hero VPS Step-by-Step Interactive Tutorial</span>
+                </div>
+            </div>
+            <div class="nav-actions">
+                <span class="status-badge live"><i class="fa-solid fa-circle-dot"></i> Single VPS & Dual Edge Supported</span>
+                <button class="btn btn-outline" onclick="openQuickAnswerModal()">
+                    <i class="fa-solid fa-circle-question"></i> ตอบคำถาม: ลง VPS เครื่องเดียวได้ไหม?
+                </button>
+            </div>
+        </header>
+
+        <!-- Hero Answer Card -->
+        <section class="hero-banner">
+            <div class="hero-content">
+                <div class="badge-pill pulse"><i class="fa-solid fa-terminal"></i> คู่มือสำหรับ VPS เครื่องเปล่า (root@ubuntu:~#)</div>
+                <h2>คู่มือจับมือทำทีละขั้นตอน <span>(Zero-to-Hero VPS Tutorial)</span></h2>
+                <p>สำหรับ VPS เครื่องใหม่เปล่าๆ เริ่มต้นก๊อปปี้คำสั่ง รันตามทีละขั้น พร้อมคำอธิบาย <strong>"เหตุผล"</strong> และ <strong>"คำสั่งเช็กผลลัพธ์ที่ถูกต้อง"</strong> อย่างละเอียด!</p>
+                
+                <div class="progress-bar-wrap">
+                    <div class="progress-info">
+                        <span><i class="fa-solid fa-tasks"></i> ความคืบหน้าการติดตั้ง VPS ของคุณ:</span>
+                        <span id="tutorial-progress-text" class="progress-percent">0 / 7 ขั้นตอน (0%)</span>
+                    </div>
+                    <div class="progress-track">
+                        <div id="tutorial-progress-fill" class="progress-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Interactive Architecture Method Selector -->
+        <section class="main-content">
+            <div class="section-header">
+                <h3><i class="fa-solid fa-layer-group"></i> เลือกโหมดการเรียนรู้และติดตั้งระบบ</h3>
+                <p>คลิกเลือกหัวข้อที่คุณต้องการดูรายละเอียด คัดลอกสคริปต์คำสั่ง และดูคำสั่งเช็กผลลัพธ์ที่ถูกต้อง</p>
+            </div>
+
+            <!-- Tabs selector -->
+            <div class="method-tabs">
+                <button class="tab-btn active" onclick="switchMethod('vps-tutorial')">
+                    <div class="tab-icon"><i class="fa-solid fa-graduation-cap"></i></div>
+                    <div class="tab-info">
+                        <span class="tab-title">🎓 โหมดสอนทำจากเครื่องเปล่า <span class="tag recommended">เริ่มตรงนี้!</span></span>
+                        <span class="tab-desc">ทำตามทีละขั้นจาก root@ubuntu:~# จนได้เว็บ Dashboard คุ้มครอง WAF พร้อมใช้งาน</span>
+                    </div>
+                </button>
+
+                <button class="tab-btn" onclick="switchMethod('verification-check')">
+                    <div class="tab-icon"><i class="fa-solid fa-square-check"></i></div>
+                    <div class="tab-info">
+                        <span class="tab-title">🔍 รวมคำสั่งเช็กระบบ & ผลลัพธ์ <span class="tag pro">Health Check</span></span>
+                        <span class="tab-desc">รวมคำสั่งเช็ก WAF, Backend, ClickHouse, Redis, UFW และผลลัพธ์ที่ถูกต้อง</span>
+                    </div>
+                </button>
+
+                <button class="tab-btn" onclick="switchMethod('single-vps')">
+                    <div class="tab-icon"><i class="fa-solid fa-cubes"></i></div>
+                    <div class="tab-info">
+                        <span class="tab-title">วิธีที่ 1: Single VPS All-in-One</span>
+                        <span class="tab-desc">ภาพรวมสถาปัตยกรรมและการรวม Service ทั้งหมดใน VPS 1 เครื่อง</span>
+                    </div>
+                </button>
+
+                <button class="tab-btn" onclick="switchMethod('dual-edge')">
+                    <div class="tab-icon"><i class="fa-solid fa-clone"></i></div>
+                    <div class="tab-info">
+                        <span class="tab-title">วิธีที่ 2: เจาะลึก 2 Edge Nodes <span class="tag special">Dual-Node Blueprint</span></span>
+                        <span class="tab-desc">กรณีขยายเป็น 2 Edge Nodes (การรวม/แยกระบบ 4 รูปแบบย่อย)</span>
+                    </div>
+                </button>
+            </div>
+
+            <!-- Method Content Display Container -->
+            <div id="method-details-container" class="method-details-panel">
+                <!-- Content generated via JavaScript -->
+            </div>
+        </section>
+
+        <!-- Interactive VPS Spec & Cost Calculator -->
+        <section class="calculator-section">
+            <div class="section-header">
+                <h3><i class="fa-solid fa-calculator"></i> VPS Estimator & Calculator (ประมาณการสเปกและราคา)</h3>
+                <p>ปรับเปลี่ยนการใช้งานของคุณเพื่อคำนวณสเปก VPS ที่ต้องใช้และราคาประเมินต่อเดือน</p>
+            </div>
+
+            <div class="calc-grid">
+                <div class="calc-inputs">
+                    <div class="form-group">
+                        <label><i class="fa-solid fa-users"></i> ปริมาณ Request/วัน (Estimated Traffic):</label>
+                        <select id="calc-traffic" onchange="calculateSpec()">
+                            <option value="low">ต่ำ (< 100,000 requests/วัน) - Dev / Testing</option>
+                            <option value="med" selected>ปานกลาง (100k - 1,000,000 requests/วัน) - Small Business</option>
+                            <option value="high">สูง (1M - 10M requests/วัน) - High Traffic Production</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label><i class="fa-solid fa-database"></i> ระยะเวลาเก็บ Log ใน ClickHouse:</label>
+                        <select id="calc-retention" onchange="calculateSpec()">
+                            <option value="7">7 วัน</option>
+                            <option value="30" selected>30 วัน (แนะนำ)</option>
+                            <option value="90">90 วัน (Compliance)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label><i class="fa-solid fa-cloud-arrow-up"></i> ผู้ให้บริการ Cloud VPS ที่สนใจ:</label>
+                        <select id="calc-provider" onchange="calculateSpec()">
+                            <option value="digitalocean">DigitalOcean (Droplet)</option>
+                            <option value="hetzner">Hetzner Cloud (ประหยัดสุด)</option>
+                            <option value="linode">Akamai / Linode</option>
+                            <option value="aws">AWS EC2 (t4g/t3 instances)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="calc-result-card">
+                    <h4><i class="fa-solid fa-microchip"></i> สเปกและราคาประเมินที่แนะนำ</h4>
+                    <div class="result-specs">
+                        <div class="res-item">
+                            <span class="res-label">CPU Cores</span>
+                            <span class="res-val" id="res-cpu">4 vCPU</span>
+                        </div>
+                        <div class="res-item">
+                            <span class="res-label">RAM</span>
+                            <span class="res-val" id="res-ram">8 GB RAM</span>
+                        </div>
+                        <div class="res-item">
+                            <span class="res-label">NVMe / SSD</span>
+                            <span class="res-val" id="res-disk">80 GB SSD</span>
+                        </div>
+                        <div class="res-item highlight">
+                            <span class="res-label">ราคาประเมินต่อเดือน</span>
+                            <span class="res-val price" id="res-price">~$24.00 / mo (ประมาณ 840 บาท)</span>
+                        </div>
+                    </div>
+                    <div class="vps-recommendation" id="res-notes">
+                        <i class="fa-solid fa-lightbulb"></i> <strong>คำแนะนำ:</strong> ClickHouse ใช้ RAM ในการคิวรี Analytics หากมี RAM 8GB จะช่วยให้ Dashboard ทำงานได้ลื่นไหลมาก
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Quick Answer Modal -->
+        <div id="quick-modal" class="modal-overlay" onclick="closeQuickAnswerModal(event)">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3><i class="fa-solid fa-circle-question"></i> ตอบคำถาม: "เอาทั้งโปรเจกต์ใส่ VPS เลยได้ไหม?"</h3>
+                    <button class="close-btn" onclick="closeQuickAnswerModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="answer-box">
+                        <div class="icon-wrap"><i class="fa-solid fa-circle-check"></i></div>
+                        <div>
+                            <h4>คำตอบ: ทำได้แน่นอน 100% ครับ! และเป็นวิธีที่แนะนำที่สุดในการเริ่มต้น</h4>
+                            <p>โปรเจกต์ WAF & CDN Management System นี้เขียนด้วย Docker Compose ไว้อย่างครบถ้วนแล้ว ประกอบไปด้วย:</p>
+                        </div>
+                    </div>
+                    <ul class="modal-list">
+                        <li><i class="fa-solid fa-shield-halved"></i> <strong>ModSecurity WAF (Nginx)</strong> - ทำหน้าที่คัดกรอง Request</li>
+                        <li><i class="fa-solid fa-lock"></i> <strong>Caddy Proxy</strong> - จัดการ HTTPS / SSL Certificate (Let's Encrypt) ให้อัตโนมัติ</li>
+                        <li><i class="fa-solid fa-chart-line"></i> <strong>FastAPI Backend + React Frontend</strong> - Dashboard สำหรับจัดการระบบ</li>
+                        <li><i class="fa-solid fa-database"></i> <strong>ClickHouse & Redis</strong> - ระบบจัดเก็บ Analytics และ Rate Limiting</li>
+                        <li><i class="fa-solid fa-globe"></i> <strong>CDN Edge Nodes (Mock Containers)</strong> - จำลองโหนด CDN ในตัว</li>
+                    </ul>
+                    <p class="modal-note">เพียงแค่สั่ง <code>docker-compose up -d</code> บน VPS เครื่องเดียว ทุก Service จะตื่นขึ้นมาทำงานร่วมกันทันทีโดยไม่จำเป็นต้องซื้อเซิร์ฟเวอร์หลายเครื่องครับ!</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" onclick="closeQuickAnswerModal(); switchMethod('vps-tutorial');">ดูขั้นตอนติดตั้งแบบ Step-by-Step ทันที</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>🛡️ WAF & CDN Interactive Deployment Blueprint | Created for <strong>waf_project</strong></p>
+        </footer>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast"><i class="fa-solid fa-check"></i> คัดลอกคำสั่งเรียบร้อยแล้ว!</div>
+
+    <script src="app.js"></script>
+</body>
+</html>

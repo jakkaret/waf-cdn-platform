@@ -132,8 +132,14 @@ if [ -n "$state" ]; then
   [ "${agents:-0}" -ge 1 ] && ok "server reports a connected agent" "count=$agents" \
                            || bad "server reports a connected agent" "count=${agents:-none}"
   dom="$(printf '%s' "$state" | python3 -c 'import sys,json;print(",".join(json.load(sys.stdin)["agents"][0]["domains"]))' 2>/dev/null)"
-  [ "$dom" = "$TUNNEL_HOST" ] && ok "registered domain matches" "$dom" \
-                              || bad "registered domain matches" "got=${dom:-none}"
+  # The agent may legitimately serve more than one hostname (it now also
+  # carries dvwa/juice/bwapp alongside vampi -- see Docs/15-Progress-Log.md,
+  # 2026-08-31). The invariant this test protects is narrower: TUNNEL_HOST
+  # must be *among* the registered domains, not the only one.
+  case ",$dom," in
+    *",$TUNNEL_HOST,"*) ok "registered domain matches" "$dom" ;;
+    *) bad "registered domain matches" "got=${dom:-none}" ;;
+  esac
   reqs="$(printf '%s' "$state" | python3 -c 'import sys,json;print(json.load(sys.stdin)["agents"][0]["requests"])' 2>/dev/null)"
   [ "${reqs:-0}" -ge 1 ] && ok "request counter advanced" "requests=$reqs" \
                          || bad "request counter advanced" "requests=${reqs:-0}"
