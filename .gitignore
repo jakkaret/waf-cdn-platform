@@ -1,10 +1,12 @@
 # Environment
-.env
+.env*
 AWSCLIV2.pkg
 logs/
 *.log
 *.session
 waf_alert_bot.session
+*.bak*
+*.bak
 
 # Virtual Environment
 .venv/
@@ -24,10 +26,9 @@ ml/dataset/*.csv
 *.session-journal
 
 # React files
-.node_modules/
-node_modules/
-dist/
-*.tsbuildinfo
+.node_modules/ 
+node_modules/ 
+dist/ 
 
 # Legacy archive
 old/
@@ -37,4 +38,3 @@ old/
 .claude/
 .codex/
 .github/
-.aider*

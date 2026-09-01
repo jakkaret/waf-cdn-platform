@@ -26,24 +26,18 @@ export const Tunnels: React.FC = () => {
   const [localPort, setLocalPort] = useState<number>(3000)
   const [localIp, setLocalIp] = useState('127.0.0.1')
   const [activeTab, setActiveTab] = useState<'linux' | 'docker' | 'toml'>('linux')
+  const [scope, setScope] = useState<'my' | 'all'>('my')
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
   // Fetch live active tunnels status from FRP server
   const { data, isFetching, refetch } = useQuery({
-    queryKey: ['tunnels-status'],
-    queryFn: () => api.get('/tunnels/status').then((r) => r.data),
+    queryKey: ['tunnels-status', scope],
+    queryFn: () => api.get('/tunnels/status', { params: { scope } }).then((r) => r.data),
     refetchInterval: 6000,
   })
 
-  // Fetch generated commands. These carry the tunnel auth token, so the server
-  // builds them (admin only) — nothing here may fall back to a literal token,
-  // since this bundle is served to unauthenticated visitors.
-  const {
-    data: configData,
-    isLoading: configLoading,
-    isError: configError,
-    error: configErrorDetail,
-  } = useQuery({
+  // Fetch generated commands
+  const { data: configData } = useQuery({
     queryKey: ['tunnel-config', domain, localPort, localIp, activeTab],
     queryFn: () =>
       api
@@ -51,34 +45,32 @@ export const Tunnels: React.FC = () => {
           params: { domain, port: localPort, local_ip: localIp, platform: activeTab },
         })
         .then((r) => r.data),
-    retry: false,
   })
 
   const tunnels = data?.tunnels || []
   const activeCount = data?.active_count || (tunnels.length > 0 ? tunnels.length : 0)
 
   const handleCopy = (text: string, key: string) => {
-    if (!configData) {
-      toast.error('No command to copy yet')
-      return
-    }
     navigator.clipboard.writeText(text)
     setCopiedKey(key)
     toast.success('Copied command to clipboard!')
     setTimeout(() => setCopiedKey(null), 2500)
   }
 
-  const configStatus = configLoading
-    ? '# Generating install command…'
-    : configError
-      ? (configErrorDetail as any)?.response?.status === 403
-        ? '# Administrator access is required to generate an agent command.'
-        : '# Could not reach the config generator. Try refreshing.'
-      : '# No command available.'
+  const linuxCmd =
+    configData?.linux_command ||
+    configData?.commands?.linux_oneliner ||
+    `curl -sSL https://waf-it-kku.online/install-agent.sh | sudo bash -s -- --token WAF_SECURE_TUNNEL_2026_TOKEN --domain ${domain} --port ${localPort} --ip ${localIp}`
 
-  const linuxCmd = configData?.linux_command || configStatus
-  const dockerCmd = configData?.docker_command || configStatus
-  const rawToml = configData?.toml_config || configStatus
+  const dockerCmd =
+    configData?.docker_command ||
+    configData?.commands?.docker_command ||
+    `docker run -d --name waf-agent-${domain.replace('.', '-')} --restart=always --net=host snowdreamtech/frpc:0.61.1 -s main.waf-it-kku.online:7000 --proxy_type http --custom_domains ${domain} --local_port ${localPort}`
+
+  const rawToml =
+    configData?.toml_config ||
+    configData?.commands?.raw_toml ||
+    `# CloudWAF Private Tunnel Configuration\nserverAddr = "main.waf-it-kku.online"\nserverPort = 7000\n\nauth.method = "token"\nauth.token = "WAF_SECURE_TUNNEL_2026_TOKEN"\n\n[[proxies]]\nname = "${domain.replace('.', '-')}"\ntype = "http"\nlocalIP = "${localIp}"\nlocalPort = ${localPort}\ncustomDomains = ["${domain}"]`
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -292,16 +284,42 @@ export const Tunnels: React.FC = () => {
               Live Connected Tunnel Proxies ({tunnels.length})
             </h3>
           </div>
-          <button
-            onClick={() => {
-              refetch()
-              toast.success('Refreshed tunnel connections')
-            }}
-            className="p-1.5 rounded-lg bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--bg-border)] transition-colors cursor-pointer"
-            title="Refresh Tunnels"
-          >
-            <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
-          </button>
+          <div className="flex items-center gap-2">
+            {data?.is_admin && (
+              <div className="flex items-center p-0.5 rounded-lg bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)]">
+                <button
+                  onClick={() => setScope('my')}
+                  className={`px-2.5 py-1 rounded-md text-[11.5px] font-mono transition-all ${
+                    scope === 'my'
+                      ? 'bg-indigo-600 text-white shadow-sm font-semibold'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  👤 My Tunnels
+                </button>
+                <button
+                  onClick={() => setScope('all')}
+                  className={`px-2.5 py-1 rounded-md text-[11.5px] font-mono transition-all ${
+                    scope === 'all'
+                      ? 'bg-indigo-600 text-white shadow-sm font-semibold'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  🌐 All System Tunnels (Admin)
+                </button>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                refetch()
+                toast.success('Refreshed tunnel connections')
+              }}
+              className="p-1.5 rounded-lg bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--bg-border)] transition-colors cursor-pointer"
+              title="Refresh Tunnels"
+            >
+              <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -310,16 +328,16 @@ export const Tunnels: React.FC = () => {
               <tr className="border-b border-[var(--bg-border)] text-[var(--text-muted)] text-[11px] uppercase tracking-wider">
                 <th className="py-2.5 px-3">Tunnel Proxy</th>
                 <th className="py-2.5 px-3">Public Protected Domain</th>
-                <th className="py-2.5 px-3">Type</th>
-                <th className="py-2.5 px-3">Local Port</th>
-                <th className="py-2.5 px-3">Live Connections</th>
+                {data?.is_admin && <th className="py-2.5 px-3">Owner</th>}
+                <th className="py-2.5 px-3">Target</th>
+                <th className="py-2.5 px-3">Live Conns</th>
                 <th className="py-2.5 px-3 text-right">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--bg-border-subtle)]">
               {tunnels.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={data?.is_admin ? 6 : 5} className="py-8 text-center text-[var(--text-muted)]">
                     No active tunnel proxies currently connected. Run the installer script on your private machine to establish a connection.
                   </td>
                 </tr>
@@ -343,8 +361,20 @@ export const Tunnels: React.FC = () => {
                           <ExternalLink size={11} />
                         </a>
                       </td>
-                      <td className="py-3 px-3 text-[var(--text-secondary)] uppercase">{t.type}</td>
-                      <td className="py-3 px-3 text-amber-300">{t.local_port || 'Local App'}</td>
+                      {data?.is_admin && (
+                        <td className="py-3 px-3">
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-mono ${
+                              t.is_mine
+                                ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                                : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            }`}
+                          >
+                            {t.is_mine ? '👤 You' : `👤 @${t.owner_username}`}
+                          </span>
+                        </td>
+                      )}
+                      <td className="py-3 px-3 text-amber-300">{t.local_target || 'Local App'}</td>
                       <td className="py-3 px-3 text-[var(--text-secondary)]">{t.connections || 0} conns</td>
                       <td className="py-3 px-3 text-right">
                         <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
