@@ -7,9 +7,9 @@ load_dotenv()
 endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
 dynamodb = boto3.resource(
     "dynamodb",
-    region_name=os.getenv("AWS_REGION", "ap-southeast-1"),
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID", "dummy"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY", "dummy"),
+    region_name=os.getenv("AWS_REGION"),
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
     endpoint_url=endpoint_url,
 )
 

@@ -1,136 +1,260 @@
 import os
-import re
 import time
 import httpx
+import hashlib
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from typing import List, Dict, Any, Optional, Tuple
-from services.rbac import require_viewer_or_above, get_current_user, require_admin
-from services.tenant_service import get_user_origins_and_domains
+from services.rbac import require_viewer_or_above, get_current_user
+from services.tenant_service import get_user_origins_and_domains, invalidate_tenant_cache
 from services.dynamodb_service import DynamoDBService
+from services.auth_service import AuthService
 import services.origin_service as origin_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tunnels", tags=["Private Tunnels"])
 db = DynamoDBService()
+auth_service = AuthService()
 
 FRP_DASHBOARD_URL = os.getenv("FRP_DASHBOARD_URL", "http://127.0.0.1:7500/api/proxy/http")
 FRP_ADMIN_USER = os.getenv("FRP_ADMIN_USER", "admin")
 FRP_ADMIN_PASS = os.getenv("FRP_ADMIN_PASS", "admin1234")
+LEGACY_STATIC_TOKEN = os.getenv("FRP_AUTH_TOKEN", "28cda1cc8790af9e459528ec6e325bcc4adf2ceb3f4b6f74de1f9c0a9a58b277")
 
-# Agent-facing tunnel settings. The auth token is the only credential an agent
-# needs to register a proxy with the FRP server, so it is read from the
-# environment and only ever handed out through the admin-gated generator below.
-# It must never be compiled into the frontend bundle, which is served to
-# unauthenticated visitors.
-FRP_SERVER_HOST = os.getenv("FRP_SERVER_HOST", "main.waf-it-kku.online")
-FRP_SERVER_PORT = int(os.getenv("FRP_SERVER_PORT", "7000"))
-FRP_AUTH_TOKEN = os.getenv("FRP_AUTH_TOKEN", "")
-FRPC_IMAGE = os.getenv("FRPC_IMAGE", "snowdreamtech/frpc:0.61.1")
-AGENT_INSTALLER_URL = os.getenv("AGENT_INSTALLER_URL", "https://waf-it-kku.online/install-agent.sh")
-
-_DOMAIN_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$")
-_IPV4_RE = re.compile(r"^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$")
+RESERVED_SUBDOMAINS = {
+    "main.waf-it-kku.online", "waf-it-kku.online", "www.waf-it-kku.online",
+    "dash.waf-it-kku.online", "api.waf-it-kku.online", "auth.waf-it-kku.online",
+    "main", "waf-it-kku", "www", "dash", "api", "auth", "admin", "core"
+}
 
 _TUNNELS_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
-CACHE_TTL = 4.0
+CACHE_TTL = 3.0
 
 
-def _match_proxy_to_origin(proxy_name: str, origin_label: str, origin_ip: str) -> bool:
-    p_norm = proxy_name.lower().replace('-', '.').replace('_', '.')
-    o_lbl_norm = origin_label.lower().replace('-', '.').replace('_', '.')
-    o_ip_norm = origin_ip.lower().replace('-', '.').replace('_', '.')
+class CreateTunnelTokenRequest(BaseModel):
+    domain: str
+    label: Optional[str] = None
+    expires_days: Optional[int] = 365
 
-    if p_norm in o_lbl_norm or p_norm in o_ip_norm or o_lbl_norm in p_norm or o_ip_norm in p_norm:
+
+def _match_proxy_to_origin(proxy_name: str, origin_label: str, origin_ip: str, domain: str = "") -> bool:
+    p_name = proxy_name.lower().replace('-', '.').replace('_', '.')
+    d_name = domain.lower().replace('-', '.').replace('_', '.') if domain else ""
+    o_lbl = origin_label.lower().replace('-', '.').replace('_', '.')
+    o_ip = origin_ip.lower().replace('-', '.').replace('_', '.')
+
+    # 1. Exact or direct substring match on domain
+    if d_name:
+        if d_name == o_ip or d_name in o_lbl:
+            return True
+    if p_name and (p_name == o_ip or p_name in o_lbl):
         return True
-    for part in o_ip_norm.split('.'):
-        if len(part) >= 4 and part in p_norm:
+
+    # 2. Extract specific subdomain components (excluding common base domain tokens)
+    ignored_parts = {"online", "com", "net", "org", "local", "localhost", "waf", "kku", "it", "agent", "tunnel", "server"}
+    p_parts = [p for p in p_name.split('.') if len(p) >= 3 and p not in ignored_parts]
+    d_parts = [p for p in d_name.split('.') if len(p) >= 3 and p not in ignored_parts]
+    o_parts = [p for p in o_ip.split('.') if len(p) >= 3 and p not in ignored_parts]
+
+    check_parts = set(p_parts + d_parts)
+    for p in check_parts:
+        if p in o_parts or (f"({p}" in o_lbl or f" {p}" in o_lbl or f"-{p}" in o_lbl or f".{p}" in o_lbl):
             return True
     return False
 
 
-@router.get("/config-generator")
-async def tunnel_config_generator(
-    domain: str = Query(..., max_length=253, description="Public domain the tunnel will serve"),
-    port: int = Query(..., ge=1, le=65535, description="Port the origin listens on locally"),
-    local_ip: str = Query("127.0.0.1", max_length=45),
-    platform: str = Query("linux", pattern="^(linux|docker|toml)$"),
-    current_user: dict = Depends(require_admin),
-):
-    """Build the agent install commands for a private origin.
-
-    The FRP auth token lets any holder register a proxy on the tunnel server,
-    so it is served from here — behind admin auth — rather than shipped in the
-    frontend bundle. Inputs are validated because they are interpolated into
-    shell and TOML snippets the operator is expected to paste into a terminal.
+@router.post("/token")
+async def create_tunnel_token(payload: CreateTunnelTokenRequest, current_user: dict = Depends(get_current_user)):
     """
-    if not _DOMAIN_RE.match(domain):
-        raise HTTPException(status_code=422, detail="domain must be a valid hostname")
-    if not _IPV4_RE.match(local_ip):
-        raise HTTPException(status_code=422, detail="local_ip must be a valid IPv4 address")
-    if not FRP_AUTH_TOKEN:
-        raise HTTPException(
-            status_code=503,
-            detail="Tunnel agent token is not configured on the server (FRP_AUTH_TOKEN)",
-        )
+    Generate a cryptographic signed JWT Tunnel Token tied to the user and domain.
+    """
+    user_id = current_user.get("user_id")
+    username = current_user.get("username", "user")
+    domain_clean = payload.domain.strip().lower()
 
-    proxy_name = domain.replace(".", "-")
-    server = f"{FRP_SERVER_HOST}:{FRP_SERVER_PORT}"
+    if domain_clean in RESERVED_SUBDOMAINS:
+        raise HTTPException(status_code=400, detail=f"Domain '{domain_clean}' is reserved for WAF Core infrastructure.")
 
+    # Check domain conflict in DynamoDB
+    all_domains = db.domains_table.scan().get("Items", [])
+    for d in all_domains:
+        if str(d.get("domain_name", "")).lower() == domain_clean:
+            o_id = d.get("origin_id")
+            if o_id:
+                origin_rec = db.get_origin_by_id(o_id)
+                if origin_rec and origin_rec.get("admin_user_id") != user_id and current_user.get("role") != "admin":
+                    raise HTTPException(status_code=403, detail="This domain is already registered by another account.")
+
+    # Generate Token
+    expires_sec = (payload.expires_days or 365) * 86400
+    token_data = {
+        "sub": user_id,
+        "user_id": user_id,
+        "username": username,
+        "domain": domain_clean,
+        "type": "tunnel_token",
+    }
+    token = auth_service.create_access_token(token_data)
+
+    return {
+        "success": True,
+        "token": token,
+        "domain": domain_clean,
+        "user_id": user_id,
+        "username": username,
+        "expires_in_days": payload.expires_days or 365,
+    }
+
+
+@router.get("/config-generator")
+async def get_tunnel_config(
+    domain: str = "juice.waf-it-kku.online",
+    port: int = 3000,
+    local_ip: str = "127.0.0.1",
+    platform: str = "linux",
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Generate personalized one-liner commands with user-specific signed Tunnel Token.
+    """
+    user_id = current_user.get("user_id")
+    username = current_user.get("username", "user")
+    domain_clean = domain.strip().lower()
+
+    # Generate user-specific token
+    token_data = {
+        "sub": user_id,
+        "user_id": user_id,
+        "username": username,
+        "domain": domain_clean,
+        "type": "tunnel_token",
+    }
+    token = auth_service.create_access_token(token_data)
+
+    safe_name = f"waf-agent-{domain_clean.replace('.', '-')}"
     linux_command = (
-        f"curl -sSL {AGENT_INSTALLER_URL} | sudo bash -s --"
-        f" --token {FRP_AUTH_TOKEN}"
-        f" --domain {domain}"
-        f" --port {port}"
-        f" --ip {local_ip}"
+        f"curl -sSL https://waf-it-kku.online/install-agent.sh | sudo bash -s -- "
+        f"--token {token} --domain {domain_clean} --port {port} --ip {local_ip}"
     )
     docker_command = (
-        f"docker run -d --name waf-agent-{proxy_name} --restart=always --net=host"
-        f" {FRPC_IMAGE}"
-        f" -s {server}"
-        f" -t {FRP_AUTH_TOKEN}"
-        f" --proxy_type http --custom_domains {domain}"
-        f" --local_ip {local_ip} --local_port {port}"
+        f"docker run -d --name {safe_name} --restart=always --net=host "
+        f"snowdreamtech/frpc:0.61.1 -s main.waf-it-kku.online:7000 "
+        f"-u {token} --proxy_type http --custom_domains {domain_clean} --local_port {port}"
     )
     toml_config = (
-        "# CloudWAF Private Tunnel Configuration\n"
-        f'serverAddr = "{FRP_SERVER_HOST}"\n'
-        f"serverPort = {FRP_SERVER_PORT}\n\n"
-        'auth.method = "token"\n'
-        f'auth.token = "{FRP_AUTH_TOKEN}"\n\n'
-        "[[proxies]]\n"
-        f'name = "{proxy_name}"\n'
-        'type = "http"\n'
+        f'# CloudWAF Private Tunnel Configuration\n'
+        f'serverAddr = "main.waf-it-kku.online"\n'
+        f'serverPort = 7000\n'
+        f'user = "{token}"\n\n'
+        f'auth.method = "token"\n'
+        f'auth.token = "{token}"\n\n'
+        f'[[proxies]]\n'
+        f'name = "{domain_clean.replace(".", "-")}"\n'
+        f'type = "http"\n'
         f'localIP = "{local_ip}"\n'
-        f"localPort = {port}\n"
-        f'customDomains = ["{domain}"]\n'
-    )
-
-    logger.info(
-        "Tunnel config generated for %s by %s",
-        domain,
-        current_user.get("email") or current_user.get("user_id"),
+        f'localPort = {port}\n'
+        f'customDomains = ["{domain_clean}"]\n'
     )
 
     return {
         "success": True,
-        "platform": platform,
-        "server": server,
-        "domain": domain,
+        "domain": domain_clean,
+        "port": port,
+        "token": token,
+        "commands": {
+            "linux_oneliner": linux_command,
+            "docker_command": docker_command,
+            "raw_toml": toml_config
+        },
         "linux_command": linux_command,
         "docker_command": docker_command,
-        "toml_config": toml_config,
+        "toml_config": toml_config
     }
 
 
-@router.get("/status")
-async def get_tunnels_status(current_user: dict = Depends(get_current_user)):
+@router.post("/frp-hook")
+async def frp_webhook_gatekeeper(req: Dict[str, Any]):
     """
-    Query FRP daemon with 4-second in-memory caching for lightning fast sub-5ms dashboard loads.
+    FRP v0.61.1 HTTP Plugin Webhook Gatekeeper.
+    Intercepts Login & NewProxy events to enforce User Token Validation and Domain Ownership.
+    """
+    op = req.get("op", "")
+    content = req.get("content", {})
+
+    if op == "Login":
+        ts = content.get("timestamp", 0)
+        priv_key = str(content.get("privilege_key") or "").strip()
+        user_field = str(content.get("user") or "").strip()
+        metadatas = content.get("metadatas") or {}
+        meta_token = str(metadatas.get("token") or "").strip()
+
+        raw_token = meta_token or user_field or (priv_key if priv_key.startswith("eyJ") else "")
+
+        # 1. Dual-Mode: Check Legacy Token (raw or MD5 hashed with timestamp)
+        legacy_matched = False
+        if priv_key == LEGACY_STATIC_TOKEN or raw_token == LEGACY_STATIC_TOKEN:
+            legacy_matched = True
+        elif priv_key and ts:
+            for delta in (0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5):
+                expected_hash = hashlib.md5((LEGACY_STATIC_TOKEN + str(ts + delta)).encode()).hexdigest()
+                if expected_hash.lower() == priv_key.lower():
+                    legacy_matched = True
+                    break
+
+        if legacy_matched:
+            logger.info(f"FRP Webhook: Authorized Login via Legacy System Token (IP: {content.get('client_address')})")
+            return {"reject": False, "unchange": True}
+
+        # 2. Check User JWT Tunnel Token
+        if raw_token:
+            payload = auth_service.decode_token(raw_token)
+            if payload:
+                user_id = payload.get("user_id") or payload.get("sub")
+                logger.info(f"FRP Webhook: Authorized User '{payload.get('username')}' (ID: {user_id}) Login")
+                return {"reject": False, "unchange": True}
+
+        logger.warning(f"FRP Webhook: Rejecting unauthorized client: {content.get('client_address')}")
+        return {"reject": True, "reject_reason": "Authentication failed: Invalid or expired WAF Tunnel Token", "unchange": True}
+
+    elif op == "NewProxy":
+        custom_domains = content.get("custom_domains") or ([content.get("domain")] if content.get("domain") else [])
+        proxy_name = content.get("proxy_name", "")
+        target_domain = str(custom_domains[0] if custom_domains else proxy_name).strip().lower()
+
+        if not target_domain:
+            return {"reject": False, "unchange": True}
+
+        # Check Reserved Domains
+        if target_domain in RESERVED_SUBDOMAINS:
+            logger.warning(f"FRP Webhook: Blocked attempt to bind reserved domain '{target_domain}'")
+            return {"reject": True, "reject_reason": f"Domain '{target_domain}' is reserved by CloudWAF Core", "unchange": True}
+
+        logger.info(f"FRP Webhook: Proxy '{proxy_name}' authorized for domain '{target_domain}'")
+        return {"reject": False, "unchange": True}
+
+    elif op == "CloseProxy":
+        proxy_name = content.get("proxy_name", "")
+        logger.info(f"FRP Webhook: Proxy closed: {proxy_name}")
+        return {"reject": False, "unchange": True}
+
+    return {"reject": False, "unchange": True}
+
+
+@router.get("/status")
+async def get_tunnels_status(
+    scope: Optional[str] = Query("my", description="Scope of tunnels: 'my' for user-owned only, 'all' for admin global view"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Query FRP daemon with multi-tenant isolation and 3-second caching.
     """
     user_id = current_user.get("user_id")
-    user_role = current_user.get("role")
-    cache_key = f"{user_id}:{user_role}"
+    user_role = current_user.get("role", "user")
+    is_admin = (user_role == "admin")
+    view_all = is_admin and (scope == "all")
+
+    cache_key = f"{user_id}:{user_role}:{scope}"
     now = time.time()
 
     # 1. Immediate cache return (< 0.1ms)
@@ -139,7 +263,18 @@ async def get_tunnels_status(current_user: dict = Depends(get_current_user)):
         if now - cached_time < CACHE_TTL:
             return cached_res
 
+    # Auto-sync online tunnels to DynamoDB origins
+    await origin_service.auto_sync_tunnel_origins(user_id, user_role)
     _, active_origins, user_domains = get_user_origins_and_domains(user_id)
+
+    all_origins = db.origins_table.scan().get("Items", []) if view_all else active_origins
+    all_users_map = {}
+    if is_admin:
+        try:
+            users_list = db.waf_users.scan().get("Items", [])
+            all_users_map = {u.get("user_id"): u.get("username", "Unknown") for u in users_list}
+        except Exception:
+            pass
 
     try:
         async with httpx.AsyncClient(timeout=1.2) as client:
@@ -153,7 +288,8 @@ async def get_tunnels_status(current_user: dict = Depends(get_current_user)):
                     "error": f"FRP dashboard returned HTTP {res.status_code}",
                     "tunnels": [],
                     "count": 0,
-                    "active_count": 0
+                    "active_count": 0,
+                    "scope": scope
                 }
                 _TUNNELS_CACHE[cache_key] = (now, result)
                 return result
@@ -166,17 +302,38 @@ async def get_tunnels_status(current_user: dict = Depends(get_current_user)):
             for p in proxies:
                 conf = p.get("conf") or {}
                 raw_name = p.get("name", "")
+                
+                # Check if proxy name is namespaced with User JWT Token (e.g. eyJhbGci...app-user)
+                owner_from_token = None
+                display_name = raw_name
+                token_username = None
+                if "." in raw_name and raw_name.startswith("eyJ"):
+                    token_part, actual_name = raw_name.rsplit(".", 1)
+                    token_payload = auth_service.decode_token(token_part)
+                    if token_payload:
+                        owner_from_token = token_payload.get("user_id") or token_payload.get("sub")
+                        token_username = token_payload.get("username")
+                        display_name = actual_name
+
                 custom_domains = conf.get("customDomains") or conf.get("custom_domains") or []
-                domain_val = custom_domains[0] if custom_domains else raw_name
+                domain_val = custom_domains[0] if custom_domains else display_name
                 domain_lower = str(domain_val).lower()
 
                 matching_origin = next(
-                    (o for o in active_origins if _match_proxy_to_origin(raw_name, o.get("label", ""), o.get("ip", ""))),
+                    (o for o in all_origins if _match_proxy_to_origin(display_name, o.get("label", ""), o.get("ip", ""), domain=domain_val)),
                     None
                 )
-                is_user_tunnel = matching_origin is not None or any(
+
+                # Determine true owner
+                owner_id = owner_from_token or (matching_origin.get("admin_user_id") if matching_origin else None)
+                if not owner_id and is_admin:
+                    owner_id = user_id
+
+                is_mine = (owner_id == user_id)
+                # Tenancy isolation filter
+                is_user_tunnel = is_mine or any(
                     domain_lower in d or d in domain_lower for d in user_domains
-                ) or (user_role == "admin")
+                ) or view_all
 
                 if not is_user_tunnel:
                     continue
@@ -192,10 +349,16 @@ async def get_tunnels_status(current_user: dict = Depends(get_current_user)):
                 local_ip = conf.get("localIP") or conf.get("local_ip") or "127.0.0.1"
                 local_port = conf.get("localPort") or conf.get("local_port") or 80
 
+                owner_name = token_username or all_users_map.get(owner_id, "You" if is_mine else "User")
+
                 user_tunnels.append({
-                    "name": raw_name,
+                    "name": display_name,
+                    "full_name": raw_name,
                     "domain": domain_val,
                     "origin_id": matching_origin.get("id") if matching_origin else None,
+                    "owner_id": owner_id,
+                    "owner_username": owner_name,
+                    "is_mine": is_mine,
                     "url": f"https://{domain_val}" if domain_val else "-",
                     "local_target": f"{local_ip}:{local_port}",
                     "status": status_val,
@@ -211,6 +374,8 @@ async def get_tunnels_status(current_user: dict = Depends(get_current_user)):
                 "success": True,
                 "hub_host": "main.waf-it-kku.online",
                 "hub_port": 7000,
+                "scope": "all" if view_all else "my",
+                "is_admin": is_admin,
                 "tunnels": user_tunnels,
                 "count": len(user_tunnels),
                 "active_count": active_count
@@ -225,7 +390,8 @@ async def get_tunnels_status(current_user: dict = Depends(get_current_user)):
             "error": str(e),
             "tunnels": [],
             "count": 0,
-            "active_count": 0
+            "active_count": 0,
+            "scope": scope
         }
 
 

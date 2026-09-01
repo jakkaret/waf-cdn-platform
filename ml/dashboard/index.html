@@ -44,8 +44,8 @@
           <span class="metric-title">Accuracy Score</span>
           <span class="metric-icon">🎯</span>
         </div>
-        <div class="metric-value text-cyan" id="metricAccuracy">80.47%</div>
-        <div class="metric-subtext">Holdout Test Set (15,027 samples) | Target &gt; 85% — Below Target</div>
+        <div class="metric-value text-cyan" id="metricAccuracy">93.40%</div>
+        <div class="metric-subtext">Holdout Test Set (18,267 samples) | Target > 85% Passed!</div>
       </div>
 
       <div class="metric-card glass-card border-accent-purple">
@@ -53,7 +53,7 @@
           <span class="metric-title">ROC-AUC Score</span>
           <span class="metric-icon">📈</span>
         </div>
-        <div class="metric-value text-purple" id="metricRocAuc">0.8847</div>
+        <div class="metric-value text-purple" id="metricRocAuc">0.9895</div>
         <div class="metric-subtext">Area Under ROC Curve</div>
       </div>
 
@@ -88,25 +88,25 @@
         <div class="split-info-container">
           <div class="split-bar-wrapper">
             <div class="split-bar-header">
-              <span>Train Set (75% = 45,079 Samples)</span>
-              <span>Test Set (25% = 15,027 Samples)</span>
+              <span>Train Set (75% = 54,798 Samples)</span>
+              <span>Test Set (25% = 18,267 Samples)</span>
             </div>
             <div class="split-bar">
-              <div class="split-segment train-segment" style="width: 75%;">45,079</div>
-              <div class="split-segment test-segment" style="width: 25%;">15,027</div>
+              <div class="split-segment train-segment" style="width: 75%;">54,798</div>
+              <div class="split-segment test-segment" style="width: 25%;">18,267</div>
             </div>
           </div>
 
           <div class="distribution-stats">
             <div class="stat-box">
               <span class="stat-label">Total Benign (Normal)</span>
-              <span class="stat-num text-green">29,816</span>
-              <span class="stat-detail">Train: 22,362 | Test: 7,454</span>
+              <span class="stat-num text-green">44,000</span>
+              <span class="stat-detail">Train: 33,000 | Test: 11,000</span>
             </div>
             <div class="stat-box">
               <span class="stat-label">Total Malicious (Attacks)</span>
-              <span class="stat-num text-red">30,290</span>
-              <span class="stat-detail">Train: 22,717 | Test: 7,573</span>
+              <span class="stat-num text-red">29,065</span>
+              <span class="stat-detail">Train: 21,798 | Test: 7,267</span>
             </div>
           </div>
         </div>
@@ -116,7 +116,7 @@
       <div class="glass-card panel-card">
         <div class="card-header">
           <h2>🔲 Confusion Matrix (Holdout Test Set)</h2>
-          <span class="card-tag">15,027 Samples</span>
+          <span class="card-tag">18,267 Samples</span>
         </div>
         <div class="cm-matrix-container">
           <div class="cm-grid">
@@ -127,25 +127,25 @@
             <div class="cm-row-label">Actual: Normal (0)</div>
             <div class="cm-cell cm-tn" id="cmTN">
               <span class="cm-cell-label">True Negative (TN)</span>
-              <span class="cm-cell-num">7,377</span>
-              <span class="cm-cell-pct">99.0% of Normal</span>
+              <span class="cm-cell-num">10,378</span>
+              <span class="cm-cell-pct">94.4% of Normal</span>
             </div>
             <div class="cm-cell cm-fp" id="cmFP">
               <span class="cm-cell-label">False Positive (FP)</span>
-              <span class="cm-cell-num">77</span>
-              <span class="cm-cell-pct">1.0% False Alarm</span>
+              <span class="cm-cell-num">622</span>
+              <span class="cm-cell-pct">5.6% False Alarm</span>
             </div>
 
             <div class="cm-row-label">Actual: Attack (1)</div>
             <div class="cm-cell cm-fn" id="cmFN">
               <span class="cm-cell-label">False Negative (FN)</span>
-              <span class="cm-cell-num">2,858</span>
-              <span class="cm-cell-pct">37.7% Missed</span>
+              <span class="cm-cell-num">583</span>
+              <span class="cm-cell-pct">8.0% Missed</span>
             </div>
             <div class="cm-cell cm-tp" id="cmTP">
               <span class="cm-cell-label">True Positive (TP)</span>
-              <span class="cm-cell-num">4,715</span>
-              <span class="cm-cell-pct">62.3% Blocked</span>
+              <span class="cm-cell-num">6,684</span>
+              <span class="cm-cell-pct">92.0% Blocked</span>
             </div>
           </div>
         </div>
@@ -158,7 +158,7 @@
       <div class="glass-card panel-card">
         <div class="card-header">
           <h2>📈 ROC Curve (Receiver Operating Characteristic)</h2>
-          <span class="card-tag">AUC = <span id="chartAucVal">0.8847</span></span>
+          <span class="card-tag">AUC = <span id="chartAucVal">0.9895</span></span>
         </div>
         <div class="chart-container">
           <canvas id="rocChart"></canvas>

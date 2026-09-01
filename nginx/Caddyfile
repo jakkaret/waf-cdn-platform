@@ -1,16 +1,65 @@
-# WAF & CDN SSL Termination Caddyfile
-# ----------------------------------
+# WAF & CDN SSL Termination Caddyfile (Multi-Domain & Subdomains)
+# ---------------------------------------------------------------
 
 {
-    auto_https off
+    email admin@waf-it-kku.online
+    auto_https disable_redirects
+    on_demand_tls {
+        ask http://172.18.0.1:8000/api/health
+    }
 }
 
-# IP Direct Access & Dashboard Reverse Proxy (Port 80)
-http://178.104.53.123, http://localhost, :80 {
+# 1. WAF Dashboard Web UI (HTTP & HTTPS)
+waf-it-kku.online, www.waf-it-kku.online, main.waf-it-kku.online, dash.waf-it-kku.online, http://waf-it-kku.online, http://www.waf-it-kku.online, http://main.waf-it-kku.online, http://dash.waf-it-kku.online {
     reverse_proxy http://host.docker.internal:8000 {
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+# 2. Protected Sites passing through WAF Engine (Port 8080)
+ryu.waf-it-kku.online, dvwa.waf-it-kku.online, vampi.waf-it-kku.online, juice.waf-it-kku.online, bwapp.waf-it-kku.online, http://ryu.waf-it-kku.online, http://dvwa.waf-it-kku.online, http://vampi.waf-it-kku.online, http://juice.waf-it-kku.online, http://bwapp.waf-it-kku.online {
+    reverse_proxy http://waf-nginx:8080 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+# 3. Dynamic On-Demand TLS for Any New Subdomain / Tunnel
+https:// {
+    tls {
+        on_demand
+    }
+    reverse_proxy http://waf-nginx:8080 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+# 4. Direct IP Access & HTTP Catch-All (Port 80)
+http://178.104.53.123, http://localhost, :80 {
+    @dashboard host 178.104.53.123 localhost
+    handle @dashboard {
+        reverse_proxy http://host.docker.internal:8000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    handle {
+        reverse_proxy http://waf-nginx:8080 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
     }
 }
