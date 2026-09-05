@@ -1,7 +1,7 @@
 # WAF Project Architecture
 
 Status: operational reference
-Last verified: 2026-08-26 via SSH
+Last verified: 2026-09-05 via SSH
 Owner: update this file after topology, IP, service, or routing changes
 
 ## Request and service topology
@@ -35,8 +35,29 @@ Internet
         +-- waf-dvwa-db
 ```
 
-The lab node has two exposure paths that bypass the WAF: the frp agent path and a
-Cloudflare Quick Tunnel to the raw DVWA origin. See `KNOWN_ISSUES.md`.
+## Origin connectivity: two tunnel mechanisms, both live in production
+
+Two independent tunnel implementations run in parallel on the Lab node, both
+legitimate — not redundant-by-accident:
+
+- **FRP** (`waf-agent.service` on Lab, `frps.service` on Main, port 7000) — originally
+  serves `dvwa` and `juice`, vhost-routed through Main's `waf-nginx` on port 8085.
+- **Custom zero-trust tunnel protocol** (`cloudwaf-agent.service` on Lab, the tunnel
+  server at `/opt/cloudwaf-tunnel/server.py` on Main, TLS port 8050 / vhost port 8060)
+  — originally built for `vampi`, extended 2026-08-31 to also serve `dvwa`, `juice`,
+  and `bwapp` as a resilience measure. Per-origin credential model
+  (`cwt_<origin_id>_<secret>`), hostname-based routing, no inbound port ever opened on
+  the origin.
+
+Check `/var/lib/cloudwaf-tunnel/state.json` on Main for the custom tunnel's live agent
+count and served hostnames before assuming either mechanism is currently up — Lab's
+network path to Main has been an intermittent point of failure (see
+`KNOWN_ISSUES.md` #5) for reasons that vary (KKU NAC session expiry, or a
+port-level egress restriction), not a repository config problem.
+
+The previously-noted Cloudflare Quick Tunnel bypass path (`dvwa-tunnel.service`,
+`waf-tunnel.service`) was closed 2026-08-31 — see `KNOWN_ISSUES.md` #6. It no longer
+exists as an exposure path.
 
 ## Rule synchronization
 

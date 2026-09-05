@@ -54,6 +54,28 @@ Before editing anything risky on the main node (large rule changes, nginx config
 migrations), make a simple copy first (`cp file file.bak.$(date +%s)` or similar) — doesn't need
 to be a full system snapshot, just enough to revert the specific file/config fast if it breaks.
 
+## ML-generated rules — human approval only (verified against implementation, 2026-09-05)
+
+The ML pipeline (`ml/auto_rule_generator.py`, `dashboard/backend/services/ml_rule_service.py`,
+`dashboard/backend/api/ml_rules.py`) only ever produces a rule with `status: "pending"` in the
+`waf_pending_rules` DynamoDB table. No code path deploys an ML-suggested rule without going
+through `POST /api/ml_rules/{rule_id}/approve`, which requires `require_admin`. Do not add an
+auto-apply/auto-deploy path for ML-suggested rules without an explicit request — measured attack
+recall (62.26%, accuracy 80.47%, see `ml/models/eval_results.json`) is not high enough on its own
+to justify unattended blocking decisions.
+
+This is unrelated to the WAF's own signature-based blocking (ModSecurity/CRS), which already
+blocks automatically and always has — don't conflate the two when reasoning about "auto-block."
+
+## Reported figures vs measured ground truth
+
+This repo has had at least one stale performance figure survive a retrain: README quoted 93.40%
+accuracy / 0.9895 ROC-AUC from an initial training run; the model was retrained on an expanded
+dataset two weeks later, measuring 80.47% / 0.8847, and the doc wasn't corrected until the
+mismatch was caught. Before quoting an accuracy/performance number anywhere (docs, dashboard
+copy, a report), check it against the artifact that actually produced it
+(`ml/models/eval_results.json`, a live query, a test run) rather than an existing doc.
+
 ## Security findings during unrelated work
 
 If you notice a security issue while working on something else (e.g. more open ports, another
@@ -73,6 +95,11 @@ Do not re-flag issues already documented unless their status or impact has chang
   service) — and when you do that, backport the change into the local repo afterward so a node
   never becomes its own untracked source of truth (this is exactly how Known Issue #1
   happened — don't repeat it).
+- **Cross-cutting changes:** before/after any change to a shared contract (an API shape spanning
+  frontend+backend, a function rename another service calls, a shared DB/ClickHouse schema),
+  run the full regression bracket — `scripts/smoke_test.sh` (22 invariants + 6 security gates)
+  and, if tunnel-adjacent, `tunnel/test_tunnel.sh` (28 tests) — and report the before/after
+  result. Don't consider the change done without it.
 - **Deploy trust:** allowed to SSH into any of the 3 nodes and run/reload for clearly-scoped,
   requested work (rule sync, service restart, config reload, log inspection) without asking
   permission each time.
