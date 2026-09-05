@@ -161,18 +161,84 @@ treated as a failure of this work.
 
 ## 7. Is `aad36af` (+ `6d0b441` + `e59be16`) ready for staging deployment?
 
-**Conditionally yes, pending your review of this report.** All code implemented this
-session is tested (230 total tests in the touched areas: 150 backend-suite pass + 1
-xfail, plus the 80 new tests counted within that total), the two CRITICAL cross-tenant
-vulnerabilities found in `dd614ac`'s merged features are fixed and proven fixed, the
-live smoke-test regression signal was investigated and traced to invocation flakiness
-rather than a real defect, and the tunnel-test failures are confirmed pre-existing and
-environmental rather than caused by this work. Nothing has been pushed, deployed,
-rebased, or force-pushed. `aad36af` remains rollback-safe (rollback would mean resetting
-to `2ce5be1` or `dd614ac` directly, both still reachable in history).
+**Superseded by §8 below.** After this report was first written, you approved a
+STAGING VERIFICATION GATE, which changed Main's actual live state (see §8) — the
+verdict here is kept for history; §8's is current.
 
-The only open item that should factor into a staging decision is the shadow-simulation
-gap in §6.1 — T12's proposals are evidence-backed but not backtested — which is a
-product-risk trade-off for you to weigh, not a code defect.
+## 8. Staging verification gate — attempted 2026-09-05, partially completed
 
-**Awaiting your explicit approval before any push or deploy.**
+You approved a scoped test-account pass directly on Main (no dedicated staging server
+exists in this project's real infra — only Edge/Main/Lab, all production/testbed
+machines — and DynamoDB table names are hardcoded with no environment separation, so
+this was the agreed approach), including an explicit deploy-for-test → verify →
+rollback cycle, with the outcome that `6d0b441` (security fix) should stay live on Main
+permanently while `e59be16` (T12) rolls back to not-deployed pending a separate
+go/no-live decision.
+
+**What was completed:**
+- **New finding, reported at the time**: Main's `.git/config` remote URL has a live
+  GitHub Personal Access Token embedded in plaintext
+  (`https://ryu-chirachot:ghp_...@github.com/jakkaret/waf_project.git`). Anyone with
+  read access to that file can push/modify the repo as that account. **Recommend
+  rotating this token** — not done here, this is your call.
+- DynamoDB backup of `waf_users` (54 rows), `waf_origins` (12), `waf_web_origins` (0),
+  `waf_domains` (8) exported to `/root/waf_project/backups/dynamo_backup_20260905.json`
+  on Main and integrity-verified (row counts match live scan).
+- The 3 files about to change snapshotted with md5 to
+  `/root/waf_project/backups/pre-staging-verify-20260905/*.orig` (rollback target).
+- **`6d0b441`'s two files (`api/tunnels.py`, `services/origin_service.py`) deployed to
+  Main via direct file copy** (not `git push` — sidesteps the exposed-PAT remote
+  entirely; Main's own git repo was never touched, still shows `dd614ac` as `HEAD` with
+  these two files as local modifications, exactly like the pre-existing uncommitted
+  Phase-2 hotfix already there). **md5-verified byte-identical** between the local
+  commit and what's live on Main. Service restarted, confirmed `active` +
+  `GET /api/health` → 200. **Re-ran `scripts/smoke_test.sh` against Main in this exact
+  state: 22/22 invariants, 6/6 security gates, 0 failed.**
+- Net effect: **the two CRITICAL cross-tenant vulnerabilities (FRP webhook domain
+  hijack, auto-sync cross-tenant origin claiming) that were live in production since
+  `dd614ac` was deployed are now closed on Main, right now**, independent of whether
+  T12 or the rest of this pass ever proceeds further.
+
+**What was blocked, and why:**
+- Creating the `waf_threshold_proposals` DynamoDB table (required for T12's
+  `/approve`/`/reject`/`/rollback` to work — `/generate` alone doesn't need it) was
+  refused by this session's auto-mode permission classifier as cloud-infrastructure
+  creation, even after you approved the written plan covering exactly this step.
+- Writing the E2E verification script (real `POST /api/auth/register` calls to create
+  disposable test users, plus one direct DynamoDB role promotion to get an admin test
+  identity) was refused for the same reason — content-based, not mode-based; approving
+  the plan did not lift it.
+- You were asked to switch this session out of auto-mode permission mode to clear both
+  blocks; **no confirmation of that switch has been received yet**, so none of the
+  actual test matrix (FRP webhook E2E, auto-sync E2E, rate-limiter E2E, T12 full
+  lifecycle, IDOR/privilege-escalation checks) has been executed against Main. Only the
+  deploy + smoke-test-regression portion above completed.
+- Because full verification did not complete, **T12 (`e59be16`) was rolled back off
+  Main** rather than left live untested: `main.py` restored from the `.orig` snapshot,
+  `api/threshold_proposals.py` and `services/threshold_proposal_service.py` deleted,
+  service restarted (confirmed `active`, `/api/health` → 200,
+  `GET /api/threshold-proposals/` → 404 — route gone). The empty
+  `waf_threshold_proposals` table was never created, so there's nothing to clean up
+  there. Final `git status` on Main shows exactly: the two `6d0b441` files modified,
+  plus the pre-existing Phase-2 hotfix — nothing else.
+
+**Current real state of Main, as of this report:**
+`dd614ac` + Phase-2 hotfix (pre-existing, unrelated) + `6d0b441`'s two security-fix
+files, live, confirmed via `scripts/smoke_test.sh` (22/22 + 6/6). T12 is back to
+**not deployed anywhere** — identical to before this pass started, except the security
+fix is now live where it wasn't.
+
+**Verdict:**
+- **Security fix**: already deployed and verified — no further action needed unless you
+  want it reflected in Main's git history (currently a file-level change, matching how
+  the Phase-2 hotfix already sits there).
+- **T12**: staging verification did not complete. Needs either (a) the permission-mode
+  switch, so the remaining test matrix (table creation + E2E script) can actually run
+  against Main, or (b) a different verification approach if you'd rather not permit
+  those action categories in this session. **Not ready to redeploy until that
+  verification actually runs** — the local 150-passed/1-xfailed suite and the code-level
+  reasoning in §3 are necessary but were always meant to be supplemented by this live
+  pass, not to substitute for it.
+
+**Awaiting your explicit approval / direction before any further deploy, push, or
+T12 redeploy.**
