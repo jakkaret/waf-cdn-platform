@@ -173,6 +173,41 @@ async def get_tunnel_config(
     }
 
 
+def _extract_raw_token(user_block: Dict[str, Any], priv_key: str = "") -> str:
+    """Pulls the client's token out of an FRP plugin event's identity block.
+    `user_block` is `content` itself for Login, or `content["user"]` for
+    NewProxy/CloseProxy -- FRP mirrors the same user/metas fields from the
+    original Login onto every later plugin event for that connection.
+    """
+    user_field = str(user_block.get("user") or "").strip()
+    metadatas = user_block.get("metadatas") or user_block.get("metas") or {}
+    meta_token = str(metadatas.get("token") or "").strip()
+    return meta_token or user_field or (priv_key if priv_key.startswith("eyJ") else "")
+
+
+def _resolve_frp_identity(raw_token: str, priv_key: str = "", ts: int = 0) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """Returns ("legacy", None), ("jwt", payload), or ("none", None).
+
+    Legacy check first (dual-mode: raw match or the MD5-hashed variant),
+    then a real JWT tunnel token. Shared between Login (which only needs to
+    know "is this someone", per the caller's existing behaviour) and
+    NewProxy (which additionally needs the decoded payload to check the
+    domain claim -- see the docstring on frp_webhook_gatekeeper).
+    """
+    if priv_key == LEGACY_STATIC_TOKEN or raw_token == LEGACY_STATIC_TOKEN:
+        return "legacy", None
+    if priv_key and ts:
+        for delta in (0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5):
+            expected_hash = hashlib.md5((LEGACY_STATIC_TOKEN + str(ts + delta)).encode()).hexdigest()
+            if expected_hash.lower() == priv_key.lower():
+                return "legacy", None
+    if raw_token:
+        payload = auth_service.decode_token(raw_token)
+        if payload:
+            return "jwt", payload
+    return "none", None
+
+
 @router.post("/frp-hook")
 async def frp_webhook_gatekeeper(req: Dict[str, Any]):
     """
@@ -185,34 +220,18 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
     if op == "Login":
         ts = content.get("timestamp", 0)
         priv_key = str(content.get("privilege_key") or "").strip()
-        user_field = str(content.get("user") or "").strip()
-        metadatas = content.get("metadatas") or {}
-        meta_token = str(metadatas.get("token") or "").strip()
+        raw_token = _extract_raw_token(content, priv_key)
 
-        raw_token = meta_token or user_field or (priv_key if priv_key.startswith("eyJ") else "")
+        kind, payload = _resolve_frp_identity(raw_token, priv_key, ts)
 
-        # 1. Dual-Mode: Check Legacy Token (raw or MD5 hashed with timestamp)
-        legacy_matched = False
-        if priv_key == LEGACY_STATIC_TOKEN or raw_token == LEGACY_STATIC_TOKEN:
-            legacy_matched = True
-        elif priv_key and ts:
-            for delta in (0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5):
-                expected_hash = hashlib.md5((LEGACY_STATIC_TOKEN + str(ts + delta)).encode()).hexdigest()
-                if expected_hash.lower() == priv_key.lower():
-                    legacy_matched = True
-                    break
-
-        if legacy_matched:
+        if kind == "legacy":
             logger.info(f"FRP Webhook: Authorized Login via Legacy System Token (IP: {content.get('client_address')})")
             return {"reject": False, "unchange": True}
 
-        # 2. Check User JWT Tunnel Token
-        if raw_token:
-            payload = auth_service.decode_token(raw_token)
-            if payload:
-                user_id = payload.get("user_id") or payload.get("sub")
-                logger.info(f"FRP Webhook: Authorized User '{payload.get('username')}' (ID: {user_id}) Login")
-                return {"reject": False, "unchange": True}
+        if kind == "jwt":
+            user_id = payload.get("user_id") or payload.get("sub")
+            logger.info(f"FRP Webhook: Authorized User '{payload.get('username')}' (ID: {user_id}) Login")
+            return {"reject": False, "unchange": True}
 
         logger.warning(f"FRP Webhook: Rejecting unauthorized client: {content.get('client_address')}")
         return {"reject": True, "reject_reason": "Authentication failed: Invalid or expired WAF Tunnel Token", "unchange": True}
@@ -230,15 +249,45 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
             logger.warning(f"FRP Webhook: Blocked attempt to bind reserved domain '{target_domain}'")
             return {"reject": True, "reject_reason": f"Domain '{target_domain}' is reserved by CloudWAF Core", "unchange": True}
 
-        logger.info(f"FRP Webhook: Proxy '{proxy_name}' authorized for domain '{target_domain}'")
-        return {"reject": False, "unchange": True}
+        # Domain ownership: mirror the identity check from Login. FRP's
+        # plugin protocol nests it under content["user"] for this op
+        # (content["user"]["user"] / content["user"]["metas"]), same shape
+        # as Login's top-level fields, so _extract_raw_token/_resolve_frp_identity
+        # are reused unchanged, just pointed at the nested block.
+        user_block = content.get("user") or {}
+        raw_token = _extract_raw_token(user_block)
+        kind, payload = _resolve_frp_identity(raw_token)
+
+        if kind == "legacy":
+            # Shared legacy token is not scoped to one domain -- preserves
+            # the already-deployed dvwa/juice/vampi/bwapp tunnels, which
+            # authenticate this way.
+            logger.info(f"FRP Webhook: Proxy '{proxy_name}' authorized for domain '{target_domain}' (legacy token)")
+            return {"reject": False, "unchange": True}
+
+        if kind == "jwt":
+            token_domain = str(payload.get("domain") or "").strip().lower()
+            if token_domain == target_domain:
+                logger.info(f"FRP Webhook: Proxy '{proxy_name}' authorized for domain '{target_domain}' (owned by token)")
+                return {"reject": False, "unchange": True}
+            logger.warning(
+                f"FRP Webhook: Blocked cross-domain proxy attempt -- token scoped to "
+                f"'{token_domain}' tried to register '{target_domain}'"
+            )
+            return {"reject": True, "reject_reason": "Token is not authorized for this domain", "unchange": True}
+
+        logger.warning(f"FRP Webhook: Blocked NewProxy with no valid identity for domain '{target_domain}'")
+        return {"reject": True, "reject_reason": "Authentication failed: Invalid or expired WAF Tunnel Token", "unchange": True}
 
     elif op == "CloseProxy":
         proxy_name = content.get("proxy_name", "")
         logger.info(f"FRP Webhook: Proxy closed: {proxy_name}")
         return {"reject": False, "unchange": True}
 
-    return {"reject": False, "unchange": True}
+    # Fail-closed: an operation this gatekeeper does not recognise must not
+    # default-allow (a future FRP protocol addition, or a malformed op).
+    logger.warning(f"FRP Webhook: Rejecting unrecognised operation '{op}'")
+    return {"reject": True, "reject_reason": f"Unrecognised operation '{op}'", "unchange": True}
 
 
 @router.get("/status")
