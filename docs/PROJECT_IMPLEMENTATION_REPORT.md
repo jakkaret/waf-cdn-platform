@@ -121,7 +121,11 @@ holds on live-shaped data, not only synthetic fixtures.
 - **`scripts/smoke_test.sh`** against the live deployed system: **22/22 invariants,
   6/6 security gates, 0 failed** (clean run; two earlier same-day invocations showed
   inconsistent 18/4 and 21/1 results, traced to rapid repeated invocation rather than a
-  code regression — a subsequent clean deterministic run confirms this).
+  code regression). Confirmed by two independent full-output captures (`smoke_full.txt`
+  11:14:20, `smoke_full3.txt` 11:14:57) that agree line-for-line except timestamp — both
+  22/0 + 6/0, no partial/truncated failure signal in either. The earlier 18/4 and 21/1
+  numbers came only from `tail`-piped/backgrounded invocations whose full output was
+  never actually captured; no reliable capture ever reproduced a failing invariant.
 - **`tunnel/test_tunnel.sh`**: 20 passed, 8 failed, 3 skipped. All 8 failures are
   origin/agent-dependent (private-origin reachability, connected-agent count,
   reconnect-after-restart) and trace to the pre-existing, already-documented
