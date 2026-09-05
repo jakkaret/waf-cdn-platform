@@ -42,7 +42,13 @@ async def get_quota(current_user: dict = Depends(get_current_user)):
 
 @router.get("")
 async def list_origins(current_user: dict = Depends(get_current_user)):
-    origins_list = origin_service.get_origins_for_user(current_user.get("user_id"))
+    user_id = current_user.get("user_id")
+    user_role = current_user.get("role", "user")
+    
+    # Auto-sync active tunnels as origins for seamless zero-touch experience
+    await origin_service.auto_sync_tunnel_origins(user_id, user_role)
+    
+    origins_list = origin_service.get_origins_for_user(user_id)
     formatted_origins = []
     for origin in origins_list:
         o = dict(origin)
