@@ -1,7 +1,7 @@
 # WAF Project Operations
 
 Status: operational reference
-Last reviewed: 2026-08-26
+Last reviewed: 2026-09-05
 Owner: update this file when deployment or rollback procedures change
 
 ## Deployment flow
@@ -19,19 +19,43 @@ rules without explicit confirmation.
 
 ## Testing
 
-The scripts under `scripts/test_*.py` are manual live-stack checks, not an automated
-pytest suite. They require the dashboard API, WAF, Redis, and ClickHouse to be
-running and may be stale. Run a script once against the current stack before relying
-on its result.
+An automated pytest suite exists and is CI-gated (`.github/workflows/ci.yml`, jobs
+`test-backend`/`test-ml`):
 
-The frontend has Playwright E2E tests:
+```text
+cd dashboard/backend && .venv/bin/python -m pytest tests/ ../../ml/tests/ -v
+```
+
+61 tests under `dashboard/backend/tests/` (auth, RBAC, tenant isolation, rule CRUD,
+domain validation, ML attribution explanation, ClickHouse/SecRule injection
+regression) plus tests under `ml/tests/` (feature-attribution correctness,
+accuracy-target computation). Every change to a shared contract must keep this suite
+green.
+
+Two live-system regression scripts (not pytest, but CI-independent and required
+before/after any cross-cutting change per `CLAUDE.md`):
+
+```text
+bash scripts/smoke_test.sh    # 22 invariants + 6 security gates
+bash tunnel/test_tunnel.sh    # 28 tests for the private tunnel protocol
+```
+
+The scripts under `scripts/test_*.py` (9 files) are older manual live-stack checks,
+separate from the pytest suite above, not CI-gated, and may be stale. Run one once
+against the current stack before relying on its result.
+
+The frontend has a Playwright E2E spec, but it is known-stale (selectors don't match
+the current DOM — deferred repair, tracked in
+`docs/E2E-USER-JOURNEY-MATRIX.md`):
 
 ```text
 cd dashboard/frontend
 npm run test:e2e
 ```
 
-These also require a meaningful running backend.
+For a real completion check on a user-facing change, prefer a live-browser run
+against the deployed system over this spec — see `docs/E2E-USER-JOURNEY-MATRIX.md`
+for the 13 journeys already verified this way.
 
 ## Repository hygiene
 
