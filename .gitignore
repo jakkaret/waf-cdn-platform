@@ -1,10 +1,12 @@
 # Environment
-.env
+.env*
 AWSCLIV2.pkg
 logs/
 *.log
 *.session
 waf_alert_bot.session
+*.bak*
+*.bak
 
 # Virtual Environment
 .venv/
@@ -37,4 +39,6 @@ old/
 .claude/
 .codex/
 .github/
+
+# AI tool scratch files
 .aider*

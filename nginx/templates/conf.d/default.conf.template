@@ -37,7 +37,7 @@ server {
 
     # Static Assets bypass rate limiting
     location ~* \.(?:css|js|jpg|jpeg|png|gif|ico|svg|webp|woff|woff2|ttf|json|map)$ {
-        proxy_pass http://dvwa_backend;
+        proxy_pass http://frp_tunnel_router;
         proxy_set_header Host $host;
         proxy_set_header X-Request-ID $request_id;
         proxy_set_header X-Real-IP $remote_addr;
@@ -50,7 +50,7 @@ server {
         auth_request /internal-rate-limit;
         auth_request_set $retry_after $upstream_http_retry_after;
         
-        proxy_pass http://dvwa_backend;
+        proxy_pass http://frp_tunnel_router;
         proxy_set_header Host $host;
         proxy_set_header X-Request-ID $request_id;
         proxy_set_header X-Real-IP $remote_addr;
