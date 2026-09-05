@@ -65,6 +65,11 @@ def normalize_access(data):
     status_code = int(data.get("status", 0))
     is_blocked = (status_code == 403)
 
+    try:
+        request_time_ms = float(data.get("request_time") or 0) * 1000
+    except (ValueError, TypeError):
+        request_time_ms = 0.0
+
     return {
         "request_id": data.get("request_id"),
         "ip": data.get("remote_addr"),
@@ -75,6 +80,12 @@ def normalize_access(data):
 
         "body_bytes_sent": int(data.get("body_bytes_sent", 0)),
         "http_referer": data.get("http_referer"),
+        "request_time_ms": request_time_ms,
+        # Main is presently the only node that ingests via this path (reading its
+        # own nginx log rather than receiving a push from an Edge node) -- see
+        # cdn_log_forward.py for the multi-region equivalent. Revisit if a second
+        # such node is ever added; don't silently overload this constant.
+        "edge_node": "edge-th",
 
         "timestamp": int(time.time()),
         "datetime": datetime.utcnow().isoformat() + "Z",
@@ -148,6 +159,12 @@ def normalize_modsec(data):
 
         "body_bytes_sent": len(res.get("body", "")),
         "http_referer": headers.get("Referer") or headers.get("referer"),
+        # Same rationale as normalize_access(): edge_node is a known constant for
+        # this whole ingestion pipeline and must not be lost when this entry is
+        # used alone (flush_old_logs()'s merge-timeout fallback picks modsec OR
+        # access, never both) -- confirmed live 2026-09-05 that this fallback
+        # fires under normal traffic.
+        "edge_node": "edge-th",
 
         "timestamp": int(time.time()),
         "datetime": datetime.utcnow().isoformat() + "Z",
