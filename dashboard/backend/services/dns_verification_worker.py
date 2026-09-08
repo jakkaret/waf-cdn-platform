@@ -49,8 +49,9 @@ async def dns_verification_worker():
         except Exception as e:
             print(f"[DNS Worker] Error in check loop: {e}")
             
-        # Wait 10 seconds before next scan
-        await asyncio.sleep(10)
+        # Wait before the next scan. Each tick is a full DynamoDB table scan, so
+        # keep this well above the DNS-propagation timescale to bound AWS cost.
+        await asyncio.sleep(60)
 
 if __name__ == "__main__":
     # If run directly, run the worker loop

@@ -256,6 +256,13 @@ async def startup_event():
     if not hasattr(app.state, "cleanup_pending_task"):
         from api.alerts import _cleanup_expired_codes
         app.state.cleanup_pending_task = asyncio.create_task(_cleanup_expired_codes())
+    # DNS verification worker: was fully written but never imported, so domains
+    # only got verified on a manual POST /api/domains/{id}/verify. create_task
+    # keeps a worker crash from taking down the API; the loop has its own
+    # try/except so one bad check does not stop the rest.
+    if not hasattr(app.state, "dns_verification_task"):
+        from services.dns_verification_worker import dns_verification_worker
+        app.state.dns_verification_task = asyncio.create_task(dns_verification_worker())
 
 
 @app.on_event("shutdown")
