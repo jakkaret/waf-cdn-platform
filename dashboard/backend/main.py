@@ -31,13 +31,40 @@ from slowapi import _rate_limit_exceeded_handler
 app = FastAPI(
     title="WAF Security Dashboard",
     description="Dashboard for WAF management and monitoring",
-    version="1.0.0"
+    version="1.0.0",
+    # Web assessment 2026-09-08 (F2): /docs, /redoc and /openapi.json were
+    # reachable with no token and enumerated every endpoint. Turn them off.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 ch = ClickHouseService()
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    # Web assessment 2026-09-08 (F1): responses carried no protective headers.
+    # These four are safe for the SPA + API; a Content-Security-Policy needs a
+    # tuning pass and is deliberately not added here yet.
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault(
+            "Referrer-Policy", "strict-origin-when-cross-origin"
+        )
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
