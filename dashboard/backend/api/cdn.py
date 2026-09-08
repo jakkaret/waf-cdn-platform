@@ -29,7 +29,7 @@ CDN_CACHE_TTL = 5.0
 CDN_PURGE_API_URL = os.getenv("CDN_PURGE_API_URL", "http://localhost:8080")
 CDN_PURGE_TOKEN = os.getenv("CDN_PURGE_TOKEN", "cdn-secret-token")
 
-# Configured POPs (Thailand Edge POP + Central Core)
+# Configured POPs (Thailand Edge POP + Asia Edge POP + Central Core)
 REGIONS_META = {
     "TH": {
         "name": "Thailand Edge Node",
@@ -41,6 +41,17 @@ REGIONS_META = {
         "health_url": "http://45.154.26.91/healthz",
         "port": 443,
         "db_keys": ["edge-th", "th", "bangkok"]
+    },
+    "ASIA": {
+        "name": "Asia Edge Node",
+        "flag": "🇭🇰",
+        "city": "Hong Kong (Azure East Asia)",
+        "ip": "57.158.25.236",
+        "lat": 22.267,
+        "lng": 114.188,
+        "health_url": "http://57.158.25.236/healthz",
+        "port": 443,
+        "db_keys": ["edge-asia", "asia", "hongkong"]
     },
     "MAIN": {
         "name": "Central WAF Core",

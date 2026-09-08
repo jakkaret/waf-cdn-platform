@@ -60,7 +60,7 @@ export const Tunnels: React.FC = () => {
   const linuxCmd =
     configData?.linux_command ||
     configData?.commands?.linux_oneliner ||
-    `curl -sSL https://waf-it-kku.online/install-agent.sh | sudo bash -s -- --token WAF_SECURE_TUNNEL_2026_TOKEN --domain ${domain} --port ${localPort} --ip ${localIp}`
+    `curl -sSL https://waf-it-kku.online/install-agent.sh | sudo bash -s -- --token YOUR_TUNNEL_TOKEN --domain ${domain} --port ${localPort} --ip ${localIp}`
 
   const dockerCmd =
     configData?.docker_command ||
@@ -70,7 +70,7 @@ export const Tunnels: React.FC = () => {
   const rawToml =
     configData?.toml_config ||
     configData?.commands?.raw_toml ||
-    `# CloudWAF Private Tunnel Configuration\nserverAddr = "main.waf-it-kku.online"\nserverPort = 7000\n\nauth.method = "token"\nauth.token = "WAF_SECURE_TUNNEL_2026_TOKEN"\n\n[[proxies]]\nname = "${domain.replace('.', '-')}"\ntype = "http"\nlocalIP = "${localIp}"\nlocalPort = ${localPort}\ncustomDomains = ["${domain}"]`
+    `# CloudWAF Private Tunnel Configuration\nserverAddr = "main.waf-it-kku.online"\nserverPort = 7000\n\nauth.method = "token"\nauth.token = "YOUR_TUNNEL_TOKEN"\n\n[[proxies]]\nname = "${domain.replace('.', '-')}"\ntype = "http"\nlocalIP = "${localIp}"\nlocalPort = ${localPort}\ncustomDomains = ["${domain}"]`
 
   return (
     <div className="space-y-6 animate-fade-in">
