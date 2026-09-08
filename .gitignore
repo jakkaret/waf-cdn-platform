@@ -40,3 +40,6 @@ old/
 .github/
 # Local DB/config backups (large; contain data dumps) -- never commit
 backups/
+
+# vuln-scan report output (generated)
+reports/vuln-scan/

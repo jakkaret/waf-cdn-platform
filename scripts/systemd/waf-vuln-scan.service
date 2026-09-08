@@ -1,0 +1,10 @@
+[Unit]
+Description=WAF backend dependency vulnerability scan (OSV, report-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/waf_project/dashboard/backend
+ExecStart=/root/waf_project/dashboard/backend/.venv/bin/python /root/waf_project/scripts/vuln_scan.py --quiet
+Nice=10
