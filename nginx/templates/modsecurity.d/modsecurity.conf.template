@@ -19,8 +19,8 @@ SecTmpDir /tmp/modsecurity/tmp
 SecDataDir /tmp/modsecurity/data
 
 # Audit Log Configuration (Serial Mode)
-SecAuditEngine On
-SecAuditLogRelevantStatus ".*"
+SecAuditEngine RelevantOnly
+SecAuditLogRelevantStatus "^(?:4|5)"
 SecAuditLogParts ABIJDEFHZ
 SecAuditLogType Serial
 SecAuditLog /var/log/modsecurity/audit.json
