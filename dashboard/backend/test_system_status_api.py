@@ -8,14 +8,29 @@ sys.path.insert(0, os.path.dirname(__file__))
 from services.auth_service import AuthService
 
 def generate_test_token():
-    # Use AuthService to generate a valid JWT token
+    """Mint a token for an admin account that actually exists.
+
+    This used to hard-code the user id of a `test01` account that has since been
+    deleted, so the request came back 401 "User not found" and the endpoint was
+    never reached. Resolving an admin at run time keeps the test pointed at the
+    application rather than at stale fixture data.
+    """
+    from services.dynamodb_service import DynamoDBService
+
+    users = DynamoDBService().waf_users.scan().get("Items", [])
+    admins = [u for u in users if str(u.get("role", "")).lower() == "admin"]
+    if not admins:
+        raise SystemExit("no admin account exists to authenticate as")
+    admin = admins[0]
     auth = AuthService()
-    token = auth.create_access_token({
-        "sub": "3755f84a-3941-4f22-a9e9-bdb0c7f5436b", # test01 user_id
+    return auth.create_access_token({
+        "sub": admin["user_id"],
+        "user_id": admin["user_id"],
+        "username": admin.get("username", "admin"),
         "role": "admin",
-        "email": "test01@gmail.com"
+        "email": admin.get("email", ""),
     })
-    return token
+
 
 def test_api():
     token = generate_test_token()

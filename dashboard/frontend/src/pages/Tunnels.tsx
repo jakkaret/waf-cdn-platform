@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { buildTunnelCommands } from '../lib/tunnelCommands'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/axios'
 import { TopBar } from '../components/layout/TopBar'
@@ -22,7 +23,10 @@ import {
 } from 'lucide-react'
 
 export const Tunnels: React.FC = () => {
-  const [domain, setDomain] = useState('juice.waf-it-kku.online')
+  // Empty by default: a tunnel token is scoped to one domain and the backend
+  // only issues it to that domain's owner, so pre-filling another tenant's
+  // hostname here would just produce a 403 on page load.
+  const [domain, setDomain] = useState('')
   const [localPort, setLocalPort] = useState<number>(3000)
   const [localIp, setLocalIp] = useState('127.0.0.1')
   const [activeTab, setActiveTab] = useState<'linux' | 'docker' | 'toml'>('linux')
@@ -45,6 +49,7 @@ export const Tunnels: React.FC = () => {
           params: { domain, port: localPort, local_ip: localIp, platform: activeTab },
         })
         .then((r) => r.data),
+    enabled: domain.trim().length > 0,
   })
 
   const tunnels = data?.tunnels || []
@@ -57,20 +62,17 @@ export const Tunnels: React.FC = () => {
     setTimeout(() => setCopiedKey(null), 2500)
   }
 
-  const linuxCmd =
-    configData?.linux_command ||
-    configData?.commands?.linux_oneliner ||
-    `curl -sSL https://waf-it-kku.online/install-agent.sh | sudo bash -s -- --token WAF_SECURE_TUNNEL_2026_TOKEN --domain ${domain} --port ${localPort} --ip ${localIp}`
-
-  const dockerCmd =
-    configData?.docker_command ||
-    configData?.commands?.docker_command ||
-    `docker run -d --name waf-agent-${domain.replace('.', '-')} --restart=always --net=host snowdreamtech/frpc:0.61.1 -s main.waf-it-kku.online:7000 --proxy_type http --custom_domains ${domain} --local_port ${localPort}`
-
-  const rawToml =
-    configData?.toml_config ||
-    configData?.commands?.raw_toml ||
-    `# CloudWAF Private Tunnel Configuration\nserverAddr = "main.waf-it-kku.online"\nserverPort = 7000\n\nauth.method = "token"\nauth.token = "WAF_SECURE_TUNNEL_2026_TOKEN"\n\n[[proxies]]\nname = "${domain.replace('.', '-')}"\ntype = "http"\nlocalIP = "${localIp}"\nlocalPort = ${localPort}\ncustomDomains = ["${domain}"]`
+  // The install command carries a domain-scoped JWT that only the backend can
+  // mint. Show only what it returned; never fabricate a command client-side
+  // (the old fallback here printed a hardcoded placeholder token and an
+  // unscoped frpc config). buildTunnelCommands returns null until the backend
+  // has minted a config for a domain the user owns.
+  const cmds = buildTunnelCommands(configData)
+  const PLACEHOLDER =
+    '# Enter a domain you own above to generate a signed install command.'
+  const linuxCmd = cmds?.linux || PLACEHOLDER
+  const dockerCmd = cmds?.docker || PLACEHOLDER
+  const rawToml = cmds?.toml || PLACEHOLDER
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -164,7 +166,7 @@ export const Tunnels: React.FC = () => {
               type="text"
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
-              placeholder="juice.waf-it-kku.online"
+              placeholder="your-domain.example.com (a domain you own)"
               className="w-full px-3 py-2 bg-[var(--bg-surface)] border border-[var(--bg-border)] rounded-lg text-[13px] font-mono text-[var(--text-primary)] focus:outline-none focus:border-indigo-500"
             />
           </div>
@@ -255,6 +257,7 @@ export const Tunnels: React.FC = () => {
           {/* Copy Button */}
           <button
             onClick={() =>
+              cmds &&
               handleCopy(
                 activeTab === 'linux' ? linuxCmd : activeTab === 'docker' ? dockerCmd : rawToml,
                 activeTab

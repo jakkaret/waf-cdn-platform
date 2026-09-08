@@ -76,11 +76,20 @@ def require_viewer_or_above(current_user: dict = Depends(get_current_user)):
         )
     return current_user
 
-def verify_origin_ownership(origin_id: str, current_user: dict = Depends(get_current_user)):
+# Soft-deleted origins carry status "archived" (origin_service), and older rows
+# may carry "deleted". Both mean gone as far as every route except restore.
+ARCHIVED_ORIGIN_STATUSES = ("archived", "deleted")
+
+
+def verify_origin_ownership(
+    origin_id: str,
+    current_user: dict = Depends(get_current_user),
+    allow_archived: bool = False,
+):
     from services.dynamodb_service import DynamoDBService
     db = DynamoDBService()
     origin = db.get_origin_by_id(origin_id)
-    if not origin or origin.get("status") == "deleted":
+    if not origin or (not allow_archived and origin.get("status") in ARCHIVED_ORIGIN_STATUSES):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Origin not found")
     
     if origin.get("admin_user_id") != current_user.get("user_id"):
