@@ -76,7 +76,7 @@ class DynamoDBService:
             event["timestamp"] = event.get("timestamp", int(time.time()))
             event["alert"] = event.get("alert", False)
             self.logs_table.put_item(Item=event)
-            print("Saved log")
+            # (success is silent; failures are logged in the except below)
 
         except Exception as e:
             print("Failed to save log:", e)
@@ -154,7 +154,7 @@ class DynamoDBService:
             global _alerts_cache, _alerts_cache_ts
             _alerts_cache = [item] + [x for x in _alerts_cache if x.get("alert_id") != alert_id]
             _alerts_cache_ts = time.monotonic()
-            print("Saved alert")
+            # (success is silent; failures are logged in the except below)
             return True
         except Exception as e:
             print("Failed to save alert:", e)

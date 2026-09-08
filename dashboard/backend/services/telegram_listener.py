@@ -92,7 +92,6 @@ async def dispatch_telegram_alert(data: dict):
                 }
             )
             invalidate_alerts_cache()
-            print(f"✅ Alert saved to DynamoDB with AI summary: {alert_id}")
         except Exception as err:
             logger.error("Error saving alert to DynamoDB: %s", err)
 
@@ -134,7 +133,6 @@ async def dispatch_telegram_alert(data: dict):
                                 "parse_mode": "HTML"
                             }
                         )
-                        print(f"✅ Telegram Alert sent to chat_id: {chat_id}, status: {res.status_code}")
                     except Exception as e:
                         print(f"❌ Failed to send Telegram alert to {chat_id}: {e}")
 
