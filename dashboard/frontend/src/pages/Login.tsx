@@ -202,7 +202,7 @@ export const Login: React.FC = () => {
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
                         aria-label={showPassword ? 'Hide password' : 'Show password'}
-                        className="absolute right-2.5 top-2 p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] focus:outline-none focus:ring-2 focus:ring-orange-500/40 transition-colors cursor-pointer"
+                        className="absolute right-0.5 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] focus:outline-none focus:ring-2 focus:ring-orange-500/40 transition-colors cursor-pointer"
                       >
                         {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>

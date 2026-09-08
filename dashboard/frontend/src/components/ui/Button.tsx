@@ -28,7 +28,9 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       primary:
         'bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white shadow-sm border border-transparent active:scale-[0.98]',
       brand:
-        'bg-orange-500 hover:bg-orange-600 text-white shadow-sm border border-transparent active:scale-[0.98]',
+        // orange-500/600 measured 2.8:1 / 3.56:1 with white text -- fails WCAG AA (4.5:1).
+        // orange-700/800 give 5.18:1 / 7.31:1.
+        'bg-orange-700 hover:bg-orange-800 text-white shadow-sm border border-transparent active:scale-[0.98]',
       secondary:
         'bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] hover:bg-[var(--bg-hover)] shadow-sm active:scale-[0.98]',
       danger:

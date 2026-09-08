@@ -1,9 +1,11 @@
+import bisect
+import csv
 import ipaddress
 import os
 import threading
 import time
 import json
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import http.client
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -14,43 +16,76 @@ from dnslib.server import BaseResolver, DNSServer
 DOMAIN = os.getenv("GEODNS_DOMAIN", "cdn.local.").lower().rstrip(".") + "."
 TTL = int(os.getenv("GEODNS_TTL", "20"))
 
+# Real 2-edge deployment: edge-th (Nonthaburi, Thailand) and edge-asia
+# (Microsoft Azure East Asia / Hong Kong). This is a binary GeoIP split, not
+# general multi-region logic -- a query from a Thailand-registered IP goes to
+# edge-th, everything else goes to edge-asia. Extending past 2 real edges
+# needs the region-selection logic reworked, not just a new EDGES entry.
+# These names match each edge's own EDGE_REGION env var (see
+# /opt/edge_node/.env and /root/edge_node/.env on each box) deliberately --
+# keep them in sync so the healthz "region" field and this server's region
+# keys always mean the same node.
 EDGES: Dict[str, str] = {
-    "SG": os.getenv("EDGE_SG_IP", "172.28.0.11"),
-    "JP": os.getenv("EDGE_JP_IP", "172.28.0.12"),
-    "TH": os.getenv("EDGE_TH_IP", "172.28.0.13"),
+    "edge-th": os.getenv("EDGE_TH_IP", "45.154.26.91"),
+    "edge-asia": os.getenv("EDGE_ASIA_IP", "57.158.25.236"),
 }
 
-REGION_CIDRS: Dict[str, List[ipaddress._BaseNetwork]] = {
-    "SG": [ipaddress.ip_network("172.28.11.0/24")],
-    "JP": [ipaddress.ip_network("172.28.22.0/24")],
-    "TH": [ipaddress.ip_network("172.28.33.0/24")],
-}
-
-DEFAULT_REGION = os.getenv("GEODNS_DEFAULT_REGION", "TH").upper()
+_default_env = os.getenv("GEODNS_DEFAULT_REGION", "edge-th")
+DEFAULT_REGION = _default_env if _default_env in EDGES else "edge-th"
 EDGE_INTERNAL_PORT = int(os.getenv("EDGE_INTERNAL_PORT", "80"))
 
-NODE_STATUS: Dict[str, bool] = {
-    "SG": True,
-    "JP": True,
-    "TH": True,
-}
+NODE_STATUS: Dict[str, bool] = {name: True for name in EDGES}
 
-FAILOVER_PRIORITY = {
-    "SG": "TH",
-    "JP": "TH",
-    "TH": "SG"
-}
+FAILOVER_PRIORITY = {"edge-th": "edge-asia", "edge-asia": "edge-th"}
+
+# --- Real GeoIP: Thailand IP ranges only (binary TH / not-TH split) -------
+# Data source: DB-IP Lite country database via sapics/ip-location-db
+# (https://github.com/sapics/ip-location-db), filtered to country=TH at
+# container build time -- see Dockerfile. Licensed CC-BY 4.0 by DB-IP.com;
+# attribution: https://db-ip.com
+TH_RANGES_FILE = os.getenv("TH_RANGES_FILE", "/app/th_ranges.csv")
+_TH_STARTS: List[int] = []
+_TH_ENDS: List[int] = []
+
+
+def _load_th_ranges() -> None:
+    global _TH_STARTS, _TH_ENDS
+    starts: List[int] = []
+    ends: List[int] = []
+    try:
+        with open(TH_RANGES_FILE, newline="") as f:
+            for row in csv.reader(f):
+                if len(row) != 2:
+                    continue
+                start_ip, end_ip = row
+                starts.append(int(ipaddress.ip_address(start_ip)))
+                ends.append(int(ipaddress.ip_address(end_ip)))
+    except FileNotFoundError:
+        print(f"[GeoIP] {TH_RANGES_FILE} not found -- all traffic will default to {DEFAULT_REGION}", flush=True)
+        return
+    # Sort by range start so is_thailand_ip() can bisect.
+    paired = sorted(zip(starts, ends))
+    _TH_STARTS = [p[0] for p in paired]
+    _TH_ENDS = [p[1] for p in paired]
+    print(f"[GeoIP] loaded {len(_TH_STARTS)} Thailand IP ranges from {TH_RANGES_FILE}", flush=True)
+
+
+def is_thailand_ip(ip_int: int) -> bool:
+    if not _TH_STARTS:
+        return False
+    i = bisect.bisect_right(_TH_STARTS, ip_int) - 1
+    return i >= 0 and ip_int <= _TH_ENDS[i]
+
 
 def choose_region_for_ip(client_ip: str) -> str:
     try:
         ip = ipaddress.ip_address(client_ip)
     except ValueError:
         return DEFAULT_REGION
-
-    for region, networks in REGION_CIDRS.items():
-        if any(ip in net for net in networks):
-            return region
-    return DEFAULT_REGION
+    if ip.version != 4:
+        # No IPv6 ranges loaded -- fall back rather than misclassify.
+        return DEFAULT_REGION
+    return "edge-th" if is_thailand_ip(int(ip)) else "edge-asia"
 
 def check_node_health(ip: str) -> bool:
     try:
@@ -147,6 +182,8 @@ def start_server(tcp: bool = False):
 
 
 if __name__ == "__main__":
+    _load_th_ranges()
+
     hc_thread = threading.Thread(target=health_check_loop, daemon=True)
     hc_thread.start()
 

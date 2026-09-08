@@ -26,7 +26,7 @@ html.dark {
 
   --text-primary: #f1f5f9;
   --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-muted: #7d8ba3;        /* was #64748b -- 4.11:1 on --bg-app, failed WCAG AA; now 5.68:1 */
   --text-dim: #475569;
 
   --accent: #f38020;            /* Cloudflare Signature Security Orange */
@@ -64,7 +64,7 @@ html.light {
 
   --text-primary: #0f172a;
   --text-secondary: #475569;
-  --text-muted: #64748b;
+  --text-muted: #5b6b82;        /* was #64748b -- 4.34:1 on --bg-app, failed WCAG AA; now 4.95:1 */
   --text-dim: #94a3b8;
 
   --accent: #ea580c;

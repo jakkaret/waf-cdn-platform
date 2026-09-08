@@ -11,7 +11,7 @@ ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.st
 
 from services.fetch_logs import get_recent_logs
 from services.clickhouse_service import ClickHouseService
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi import FastAPI, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -151,6 +151,26 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     print("WAF Dashboard API Shutting down...")
+
+# Registered ahead of the SPA catch-all below -- Starlette matches routes in
+# registration order, so without these two, requests for /robots.txt and
+# /llms.txt fell through to serve_react_app() and got index.html back
+# (caught by a Lighthouse a11y/SEO audit, 2026-09-08).
+@app.get("/robots.txt", include_in_schema=False)
+async def robots_txt():
+    # This is a private, login-gated admin dashboard -- nothing on it should
+    # be indexed.
+    return PlainTextResponse("User-agent: *\nDisallow: /\n")
+
+@app.get("/llms.txt", include_in_schema=False)
+async def llms_txt():
+    return PlainTextResponse(
+        "# WAF + CDN Security Dashboard\n\n"
+        "> Real-time monitoring and management console for an intelligent "
+        "WAF (ModSecurity/CRS + ML anomaly detection) and CDN edge network. "
+        "Login-gated -- most content requires an authenticated session.\n\n"
+        "- [Project documentation](https://jakkaret.github.io/Docs-for-WAF-project/)\n"
+    )
 
 @app.get("/{full_path:path}")
 async def serve_react_app(full_path: str):

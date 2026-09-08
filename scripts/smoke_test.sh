@@ -94,12 +94,12 @@ check inv "Edge healthz"                    200 "$(code "https://$SITE_HOST/heal
 # directives from `location /`. The region is in its JSON body instead.
 health_region="$("$CURL" -sk -m "$TIMEOUT" "https://$SITE_HOST/healthz" 2>/dev/null \
   | sed -n 's/.*"region"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-check inv "Edge healthz reports its region" TH "${health_region:-missing}"
+check inv "Edge healthz reports its region" edge-th "${health_region:-missing}"
 
 # Normal paths do go through `location /`, which sets the edge headers.
 edge_hdrs="$("$CURL" -sk -m "$TIMEOUT" -D - -o /dev/null "https://$SITE_HOST/latest" 2>/dev/null)"
 region="$(printf '%s' "$edge_hdrs" | grep -i '^x-edge-region:' | tr -d '\r' | awk '{print $2}')"
-check inv "Edge sets X-Edge-Region header"  TH "${region:-missing}"
+check inv "Edge sets X-Edge-Region header"  edge-th "${region:-missing}"
 cache_hdr="$(printf '%s' "$edge_hdrs" | grep -ic '^x-cache-status:' || true)"
 check inv "Edge sets X-Cache-Status header" 1 "$cache_hdr"
 
