@@ -11,7 +11,7 @@ ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.st
 
 from services.fetch_logs import get_recent_logs
 from services.clickhouse_service import ClickHouseService
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi import FastAPI, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -59,6 +59,89 @@ if assets_dir.exists():
     app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
 
+# System status (protected) -- see frontend/src/api/system.ts for the contract
+@app.get("/api/system/status")
+async def system_status(current_user: dict = Depends(require_viewer_or_above)):
+    import os
+    import shutil
+    import socket
+
+    def _port_open(port: int, host: str = "127.0.0.1") -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            return sock.connect_ex((host, port)) == 0
+
+    # (port, description) for the services this control plane depends on.
+    SERVICES = {
+        "dashboard_api": (8000, "FastAPI control plane"),
+        "waf_nginx": (8080, "nginx + ModSecurity CRS"),
+        "redis": (6379, "rate-limit and cache store"),
+        "clickhouse": (8123, "traffic log warehouse"),
+        "frps": (7000, "FRP tunnel server"),
+        "control_api": (8070, "WAF control API"),
+    }
+    services = {
+        name: {
+            "status": "online" if _port_open(port) else "offline",
+            "port": port,
+            "desc": desc,
+        }
+        for name, (port, desc) in SERVICES.items()
+    }
+
+    db_status, db_detail = "offline", "unreachable"
+    try:
+        from services.dynamodb_service import DynamoDBService
+        DynamoDBService().domains_table.table_status
+        db_status, db_detail = "online", "DynamoDB reachable"
+    except Exception as exc:
+        db_detail = f"DynamoDB error: {exc}"[:200]
+
+    cdn_nodes = []
+    try:
+        from api.cdn import cdn_nodes as _cdn_nodes_handler
+        raw_nodes = await _cdn_nodes_handler(current_user=current_user)
+        for n in (raw_nodes if isinstance(raw_nodes, list) else raw_nodes.get("nodes", [])):
+            cdn_nodes.append({
+                "region": n.get("region") or n.get("name") or "unknown",
+                "status": n.get("status", "offline"),
+                "port": n.get("port", 443),
+                "latency_ms": n.get("latency_ms", 0),
+                "health": n.get("health", {}),
+            })
+    except Exception as exc:
+        print(f"system/status: CDN node lookup failed: {exc}")
+
+    workers = {
+        "tunnel_gatekeeper": {
+            "status": "running" if services["frps"]["status"] == "online" else "stopped",
+            "desc": "FRP webhook gatekeeper (per-domain tunnel authorization)",
+        },
+        "log_pipeline": {
+            "status": "running" if services["clickhouse"]["status"] == "online" else "stopped",
+            "desc": "access log ingestion into ClickHouse",
+        },
+    }
+
+    total, used, free = shutil.disk_usage("/")
+    gb = 1024 ** 3
+    load1, load5, load15 = os.getloadavg()
+
+    return {
+        "db": {"status": db_status, "detail": db_detail},
+        "services": services,
+        "cdn_nodes": cdn_nodes,
+        "workers": workers,
+        "system": {
+            "disk_total_gb": round(total / gb, 1),
+            "disk_used_gb": round(used / gb, 1),
+            "disk_free_gb": round(free / gb, 1),
+            "disk_used_percent": round(used / total * 100, 1),
+            "load_average": [round(load1, 2), round(load5, 2), round(load15, 2)],
+        },
+    }
+
+
 # System info (protected)
 @app.get("/api/system/info")
 async def system_info(current_user: dict = Depends(require_viewer_or_above)):
@@ -81,7 +164,7 @@ app.include_router(limiter_api.router)
 app.include_router(logs_api.router)
 app.include_router(alerts.router)
 app.include_router(cdn.router)
-from api import ml, ml_rules, analytics, origins, domains, ip_rules, rate_limits, settings, ai_summary, tunnels, copilot
+from api import ml, ml_rules, analytics, origins, domains, ip_rules, rate_limits, settings, ai_summary, tunnels, copilot, threshold_proposals
 from api import tunnel as tunnel_api
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
@@ -96,6 +179,7 @@ app.include_router(ai_summary.router)
 app.include_router(tunnels.router)
 app.include_router(tunnel_api.router)
 app.include_router(copilot.router)
+app.include_router(threshold_proposals.router)
 
 # Error Handlers
 from fastapi import Request
@@ -150,6 +234,26 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     print("WAF Dashboard API Shutting down...")
+
+# Registered ahead of the SPA catch-all below -- Starlette matches routes in
+# registration order, so without these two, requests for /robots.txt and
+# /llms.txt fell through to serve_react_app() and got index.html back
+# (caught by a Lighthouse a11y/SEO audit, 2026-09-08).
+@app.get("/robots.txt", include_in_schema=False)
+async def robots_txt():
+    # This is a private, login-gated admin dashboard -- nothing on it should
+    # be indexed.
+    return PlainTextResponse("User-agent: *\nDisallow: /\n")
+
+@app.get("/llms.txt", include_in_schema=False)
+async def llms_txt():
+    return PlainTextResponse(
+        "# WAF + CDN Security Dashboard\n\n"
+        "> Real-time monitoring and management console for an intelligent "
+        "WAF (ModSecurity/CRS + ML anomaly detection) and CDN edge network. "
+        "Login-gated -- most content requires an authenticated session.\n\n"
+        "- [Project documentation](https://jakkaret.github.io/Docs-for-WAF-project/)\n"
+    )
 
 @app.get("/{full_path:path}")
 async def serve_react_app(full_path: str):

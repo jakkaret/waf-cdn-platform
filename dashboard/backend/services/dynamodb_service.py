@@ -7,6 +7,7 @@ from typing import List, Dict, Any
 from datetime import datetime
 from decimal import Decimal
 from boto3.dynamodb.conditions import Attr
+from botocore.config import Config
 
 from dotenv import load_dotenv, find_dotenv
 
@@ -38,6 +39,10 @@ class DynamoDBService:
             aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
             endpoint_url=endpoint_url,
+            # Fix 2026-09-07: no timeout meant a single stalled DynamoDB call
+            # (e.g. a half-closed TCP connection) could hang this client
+            # forever with no exception ever raised. Bound worst-case latency.
+            config=Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 2}),
         )
 
         # Initialize tables

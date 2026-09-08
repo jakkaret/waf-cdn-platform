@@ -156,7 +156,14 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
         all_domains_items = db.domains_table.scan().get("Items", [])
     except Exception:
         all_domains_items = []
-    
+    try:
+        all_origins_global = db.origins_table.scan().get("Items", [])
+    except Exception:
+        # Fail closed on this specific check: if we can't verify global
+        # ownership, do not auto-create anything this cycle rather than
+        # risk claiming a tunnel someone else already owns.
+        return []
+
     created_origins = []
     need_cache_invalidation = False
 
@@ -194,6 +201,27 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
             if matched_origin.get("status") == "archived":
                 db.update_origin(matched_origin.get("id"), {"status": "active", "updated_at": datetime.now().isoformat() + "Z"})
                 need_cache_invalidation = True
+            continue
+
+        # Cross-tenant guard: this tunnel isn't in the CALLING user's own
+        # origins, but it may already be claimed by someone else -- the FRP
+        # daemon's proxy list is shared across every tenant, not scoped to
+        # user_id. Without this check, a second user calling this function
+        # for the same still-unclaimed-by-them tunnel would get their own,
+        # independent origin record for it. Skip silently (don't create,
+        # don't reassign) rather than let two accounts both "own" one tunnel.
+        already_claimed_by_someone_else = any(
+            o.get("admin_user_id") != user_id and (
+                domain_val in str(o.get("label", "")).lower() or
+                domain_val in str(o.get("ip", "")).lower() or
+                domain_val == str(o.get("ip", "")).lower() or
+                raw_name.lower() in str(o.get("tunnel_name", "")).lower() or
+                raw_name.lower() in str(o.get("label", "")).lower() or
+                raw_name.lower() in str(o.get("ip", "")).lower()
+            )
+            for o in all_origins_global
+        )
+        if already_claimed_by_someone_else:
             continue
 
         # Create new origin for this tunnel

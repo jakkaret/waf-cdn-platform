@@ -38,3 +38,5 @@ old/
 .claude/
 .codex/
 .github/
+# Local DB/config backups (large; contain data dumps) -- never commit
+backups/

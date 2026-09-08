@@ -1,8 +1,30 @@
 import clickhouse_connect
 from clickhouse_connect.driver.exceptions import ClickHouseError
+import logging
 import time
 import uuid
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_edge_node(value) -> str:
+    """Resolve an edge_node value for storage, never fabricating one.
+
+    The previous behaviour defaulted a missing/blank value to the literal
+    string "sg" -- a value that reads as real (a Singapore edge node) but was
+    fabricated: no such node has ever been deployed (confirmed: 71.9% of all
+    access_logs rows carried this fabricated tag, purely because one ingestion
+    path never set the field -- see docs/PROJECT-DISCOVERY.md, Phase 2). A
+    missing categorical value must resolve to something that visibly means
+    "not set" so a downstream breakdown-by-edge-node query can't mistake it
+    for real data.
+    """
+    v = (value or "").strip()
+    if not v:
+        logger.warning("access_logs insert missing edge_node; recording as 'unknown'")
+        return "unknown"
+    return v
 
 
 def escape_like_value(value: str) -> str:
@@ -138,14 +160,18 @@ class ClickHouseService:
                     float(data.get('latency_ms') or data.get('request_time_ms') or 0.0),
                     data.get('user_agent') or '',
                     data.get('country') or 'TH',
-                    data.get('edge_node') or 'sg',
+                    resolve_edge_node(data.get('edge_node')),
                     is_alert,
                     data.get('attack_type') or '',
-                    str(data.get('rule_id') or '')
+                    str(data.get('rule_id') or ''),
+                    str(data.get('request_id') or ''),
+                    data.get('http_referer') or '',
+                    int(data.get('body_bytes_sent') or 0),
                 ]
                 self.client.insert(table_name, [row], column_names=[
                     'id', 'timestamp', 'client_ip', 'method', 'url', 'status_code',
-                    'request_time_ms', 'user_agent', 'country', 'edge_node', 'alert', 'attack_type', 'rule_id'
+                    'request_time_ms', 'user_agent', 'country', 'edge_node', 'alert', 'attack_type', 'rule_id',
+                    'request_id', 'http_referer', 'body_bytes_sent',
                 ])
                 return True
                 
