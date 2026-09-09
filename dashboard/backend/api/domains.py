@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 from services.rbac import get_current_user, verify_origin_ownership
 from services.dynamodb_service import DynamoDBService
+from services.captcha_config import sync_domain_config
 from services.dns_service import verify_domain_dns
 
 router = APIRouter(prefix="/api/domains", tags=["Domains"])
@@ -187,6 +188,7 @@ async def verify_domain_now(domain_id: str, current_user: dict = Depends(get_cur
                 ":ssl": "pending"
             }
         )
+        sync_domain_config(domain["origin_id"], domain_name)
         invalidate_ssl_allowed_snapshot()
         return {
             "status": "success",
@@ -388,6 +390,7 @@ async def verify_domain_now_under_origin(origin_id: str, domain_id: str, current
                 ":ssl": "pending"
             }
         )
+        sync_domain_config(domain["origin_id"], domain_name)
         return {
             "status": "verified",
             "message": "Domain successfully verified!"
