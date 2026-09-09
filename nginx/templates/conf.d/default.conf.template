@@ -25,6 +25,7 @@ server {
 
     access_log /var/log/nginx/access.json json_combined;
     error_log /var/log/nginx/error.log warn;
+    include /etc/nginx/includes/captcha_server.conf;
 
     set $always_redirect off;
     modsecurity on;
@@ -47,7 +48,8 @@ server {
     }
 
     location / {
-        auth_request /internal-rate-limit;
+
+        auth_request /internal-captcha-check;
         auth_request_set $retry_after $upstream_http_retry_after;
         
         proxy_pass http://frp_tunnel_router;
@@ -94,6 +96,7 @@ server {
 
     access_log /var/log/nginx/access.json json_combined;
     error_log /var/log/nginx/error.log warn;
+    include /etc/nginx/includes/captcha_server.conf;
 
     modsecurity on;
     modsecurity_transaction_id "$request_id";
@@ -111,7 +114,8 @@ server {
     }
 
     location / {
-        auth_request /internal-rate-limit;
+
+        auth_request /internal-captcha-check;
         auth_request_set $retry_after $upstream_http_retry_after;
 
         proxy_pass http://frp_tunnel_router;
@@ -157,6 +161,7 @@ server {
 
     access_log /var/log/nginx/access.json json_combined;
     error_log /var/log/nginx/error.log warn;
+    include /etc/nginx/includes/captcha_server.conf;
 
     modsecurity on;
     modsecurity_transaction_id "$request_id";
@@ -174,7 +179,8 @@ server {
     }
 
     location / {
-        auth_request /internal-rate-limit;
+
+        auth_request /internal-captcha-check;
         auth_request_set $retry_after $upstream_http_retry_after;
 
         proxy_pass http://frp_tunnel_router;
@@ -224,6 +230,7 @@ server {
 
     access_log /var/log/nginx/access.json json_combined;
     error_log /var/log/nginx/error.log warn;
+    include /etc/nginx/includes/captcha_server.conf;
 
     modsecurity on;
     modsecurity_transaction_id "$request_id";
@@ -246,6 +253,7 @@ server {
     }
 
     location / {
+
         proxy_pass http://cloudwaf_tunnel;
         proxy_set_header Host $host;
         proxy_set_header Accept-Encoding "";
@@ -265,6 +273,7 @@ server {
 
     access_log /var/log/nginx/access.json json_combined;
     error_log /var/log/nginx/error.log warn;
+    include /etc/nginx/includes/captcha_server.conf;
 
     modsecurity on;
     modsecurity_transaction_id "$request_id";
@@ -282,7 +291,8 @@ server {
     }
 
     location / {
-        auth_request /internal-rate-limit;
+
+        auth_request /internal-captcha-check;
         auth_request_set $retry_after $upstream_http_retry_after;
 
         proxy_pass http://frp_tunnel_router;

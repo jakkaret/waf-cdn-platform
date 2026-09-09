@@ -6,8 +6,9 @@ import tarfile
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel
+from captcha_engine import captcha_access, issue_challenge, verify_challenge, ChallengeVerifyRequest
 
 app = FastAPI(title="CDN Control API", version="1.0.0")
 
@@ -45,6 +46,18 @@ def _block_rule_content() -> str:
         "\"id:1000000,phase:1,deny,status:403,log,msg:'Global blocklist (synced)'\"\n"
     )
 
+
+@app.api_route("/api/captcha/access", methods=["GET", "POST"], include_in_schema=False)
+async def captcha_access_route(request: Request):
+    return await captcha_access(request)
+
+@app.get("/cdn-cgi/challenge", include_in_schema=False)
+async def captcha_challenge_route(request: Request):
+    return await issue_challenge(request)
+
+@app.post("/cdn-cgi/challenge/verify", include_in_schema=False)
+async def captcha_verify_route(request: Request, payload: ChallengeVerifyRequest):
+    return await verify_challenge(request, payload)
 
 @app.get("/healthz")
 def healthz():

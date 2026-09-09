@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
-from typing import List, Optional
+import ipaddress
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Literal, Optional
 from services.rbac import get_current_user, verify_origin_ownership
 import services.origin_service as origin_service
+from services.captcha_config import DEFAULT_CONFIG, get_origin_config, save_origin_config
 
 router = APIRouter(prefix="/api/origins", tags=["Origins"])
 
@@ -15,6 +17,34 @@ class OriginUpdate(BaseModel):
     label: Optional[str] = None
     ip: Optional[str] = None
     port: Optional[int] = Field(None, ge=1, le=65535)
+class CaptchaShieldConfig(BaseModel):
+    enabled: bool = False
+    engine: Literal["native", "turnstile"] = "native"
+    login_paths: List[str] = Field(default_factory=lambda: list(DEFAULT_CONFIG["login_paths"]))
+    clearance_ttl: int = Field(default=3600, ge=900, le=43200)
+    bypass_ips: List[str] = Field(default_factory=list)
+    pow_difficulty: int = Field(default=3, ge=1, le=5)
+
+    @field_validator("login_paths")
+    @classmethod
+    def validate_login_paths(cls, values):
+        if not values or len(values) > 20:
+            raise ValueError("login_paths must contain between 1 and 20 paths")
+        for value in values:
+            if not isinstance(value, str) or not value.startswith("/") or len(value) > 200:
+                raise ValueError("login_paths must be absolute paths")
+        return [value.strip() for value in values]
+
+    @field_validator("bypass_ips")
+    @classmethod
+    def validate_bypass_ips(cls, values):
+        for value in values:
+            try:
+                ipaddress.ip_network(value, strict=False)
+            except ValueError as exc:
+                raise ValueError(f"Invalid bypass IP or CIDR: {value}") from exc
+        return values
+
 
 @router.post("")
 async def create_origin(origin: OriginCreate, current_user: dict = Depends(get_current_user)):
@@ -99,3 +129,32 @@ async def restore_origin(origin_id: str, current_user: dict = Depends(get_curren
     if success:
         return {"status": "success", "message": "Origin restored successfully"}
     raise HTTPException(status_code=500, detail="Failed to restore origin")
+@router.get("/{origin_id}/captcha")
+async def get_captcha_config(origin: dict = Depends(verify_origin_ownership)):
+    try:
+        config = get_origin_config(origin.get("id"))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"origin_id": origin.get("id"), "captcha_shield": config}
+
+@router.put("/{origin_id}/captcha")
+async def update_captcha_config(
+    payload: CaptchaShieldConfig,
+    origin: dict = Depends(verify_origin_ownership),
+):
+    try:
+        from boto3.dynamodb.conditions import Attr
+        domains_response = origin_service.db.domains_table.scan(
+            FilterExpression=Attr("origin_id").eq(origin.get("id"))
+        )
+        domains = [
+            str(item.get("domain_name", ""))
+            for item in domains_response.get("Items", [])
+            if item.get("domain_name") and item.get("dns_verified", False)
+        ]
+        config = save_origin_config(origin.get("id"), payload.model_dump(), domains)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save CAPTCHA configuration: {exc}")
+    return {"origin_id": origin.get("id"), "captcha_shield": config}
