@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getOrigin, deleteOrigin, restoreOrigin } from '../api/origins'
 import { getDomains, deleteDomain, verifyDomain } from '../api/domains'
+import { getCaptchaConfig, updateCaptchaConfig } from '../api/captcha'
 import { rulesApi } from '../api/rules'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -11,7 +12,8 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState } from '../components/ui/EmptyState'
 import { DomainSetupWizard } from '../components/DomainSetupWizard'
 import { toast } from 'react-hot-toast'
-import { WafRule, Domain } from '../types'
+import { WafRule, Domain, CaptchaShieldConfig } from '../types'
+import { parseListInput, formatListInput } from '../lib/captchaForm'
 import {
   ArrowLeft,
   Server,
@@ -25,12 +27,13 @@ import {
   AlertTriangle,
   RefreshCw,
   Code,
+  Bot,
 } from 'lucide-react'
 
 export const OriginDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState<'overview' | 'domains' | 'waf' | 'ssl'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'domains' | 'waf' | 'ssl' | 'shield'>('overview')
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false)
   const [isDomainWizardOpen, setIsDomainWizardOpen] = useState(false)
@@ -83,8 +86,73 @@ export const OriginDetail: React.FC = () => {
     onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to create rule'),
   })
 
+  const { data: captchaData, isLoading: captchaLoading } = useQuery({
+    queryKey: ['captcha-shield', id],
+    queryFn: () => getCaptchaConfig(id!),
+    enabled: !!id,
+  })
+
+  const [shieldForm, setShieldForm] = useState<{
+    enabled: boolean
+    engine: 'native' | 'turnstile'
+    loginPathsText: string
+    bypassIpsText: string
+    powDifficulty: number
+    clearanceTtl: number
+  } | null>(null)
+  const shieldLoadedFor = React.useRef<string | null>(null)
+
+  const remoteShieldConfig = captchaData?.data?.captcha_shield
+
+  // Sync once per origin, not on every refetch, so it never clobbers an
+  // in-progress edit with server state (e.g. after a background refetch).
+  React.useEffect(() => {
+    if (!remoteShieldConfig || shieldLoadedFor.current === id) return
+    shieldLoadedFor.current = id!
+    setShieldForm({
+      enabled: remoteShieldConfig.enabled,
+      engine: remoteShieldConfig.engine,
+      loginPathsText: formatListInput(remoteShieldConfig.login_paths),
+      bypassIpsText: formatListInput(remoteShieldConfig.bypass_ips),
+      powDifficulty: remoteShieldConfig.pow_difficulty,
+      clearanceTtl: remoteShieldConfig.clearance_ttl,
+    })
+  }, [remoteShieldConfig, id])
+
+  const saveShieldMutation = useMutation({
+    mutationFn: (config: CaptchaShieldConfig) => updateCaptchaConfig(id!, config),
+    onSuccess: () => {
+      toast.success('Bot & Login Shield settings saved')
+      queryClient.invalidateQueries({ queryKey: ['captcha-shield', id] })
+    },
+    onError: (e: any) =>
+      toast.error(e.response?.data?.detail || 'Failed to save Bot & Login Shield settings'),
+  })
+
+  const handleSaveShield = () => {
+    if (!shieldForm) return
+    const login_paths = parseListInput(shieldForm.loginPathsText)
+    if (login_paths.length === 0) {
+      toast.error('Add at least one login path to protect')
+      return
+    }
+    if (login_paths.some((p) => !p.startsWith('/'))) {
+      toast.error('Every login path must start with /')
+      return
+    }
+    saveShieldMutation.mutate({
+      enabled: shieldForm.enabled,
+      engine: shieldForm.engine,
+      login_paths,
+      bypass_ips: parseListInput(shieldForm.bypassIpsText),
+      pow_difficulty: shieldForm.powDifficulty,
+      clearance_ttl: shieldForm.clearanceTtl,
+    })
+  }
+
   const origin = data?.data || null
   const domains = domainsData?.data?.domains || []
+  const verifiedDomainCount = domains.filter((d: Domain) => d.verification_status === 'verified').length
 
   const handleDelete = async () => {
     const isPending = origin?.status === 'pending'
@@ -232,6 +300,7 @@ export const OriginDetail: React.FC = () => {
           { id: 'domains', label: 'Domains & DNS', icon: <Globe size={14} /> },
           { id: 'waf', label: 'WAF Policies', icon: <Shield size={14} /> },
           { id: 'ssl', label: 'SSL Certificates', icon: <Lock size={14} /> },
+          { id: 'shield', label: 'Bot & Login Shield', icon: <Bot size={14} /> },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -624,6 +693,185 @@ export const OriginDetail: React.FC = () => {
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'shield' && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">
+                Bot & Login Shield
+              </h2>
+              <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
+                Proof-of-work challenge in front of login-shaped paths, for origins you can&apos;t
+                patch directly
+              </p>
+            </div>
+
+            {captchaLoading || !shieldForm ? (
+              <div className="dash-card p-12 text-center text-[var(--text-muted)] font-mono text-[12px]">
+                <RefreshCw size={18} className="animate-spin inline mr-2 text-orange-500" />
+                Loading shield configuration...
+              </div>
+            ) : (
+              <>
+                <div className="dash-card p-5 flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
+                        shieldForm.enabled
+                          ? 'bg-orange-500/10 text-orange-500'
+                          : 'bg-[var(--bg-surface-elevated)] text-[var(--text-muted)]'
+                      }`}
+                    >
+                      <Bot size={18} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-[13.5px] text-[var(--text-primary)] font-mono m-0">
+                        {shieldForm.enabled ? 'Shield is active' : 'Shield is off'}
+                      </p>
+                      <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
+                        {shieldForm.enabled
+                          ? 'Visitors solve a challenge before reaching the paths below'
+                          : 'Every request passes straight through, unchanged'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={shieldForm.enabled}
+                    onClick={() =>
+                      setShieldForm((f) => (f ? { ...f, enabled: !f.enabled } : f))
+                    }
+                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                      shieldForm.enabled ? 'bg-orange-500' : 'bg-[var(--bg-border)]'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                        shieldForm.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {shieldForm.enabled && verifiedDomainCount === 0 && (
+                  <div className="dash-card p-4 border-l-2 border-l-amber-500 bg-amber-500/[0.04] flex items-start gap-3">
+                    <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-[12px] font-mono text-[var(--text-secondary)] m-0">
+                      No domain on this pool is DNS-verified yet, so this config has nowhere to
+                      sync to. Verify a domain under Domains &amp; DNS and save here again.
+                    </p>
+                  </div>
+                )}
+
+                <div className="dash-card p-5 space-y-4">
+                  <h3 className="text-[13px] font-bold text-[var(--text-primary)] font-mono m-0">
+                    Protected paths
+                  </h3>
+                  <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0 -mt-2">
+                    One path pattern per line. Everything else on the domain is left alone.
+                  </p>
+                  <textarea
+                    className="w-full dash-input font-mono text-[12px] min-h-[110px] resize-y"
+                    placeholder="/login*"
+                    value={shieldForm.loginPathsText}
+                    onChange={(e) =>
+                      setShieldForm((f) => (f ? { ...f, loginPathsText: e.target.value } : f))
+                    }
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="dash-card p-5 space-y-4">
+                    <h3 className="text-[13px] font-bold text-[var(--text-primary)] font-mono m-0">
+                      Challenge difficulty
+                    </h3>
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="range"
+                        min={1}
+                        max={5}
+                        step={1}
+                        value={shieldForm.powDifficulty}
+                        onChange={(e) =>
+                          setShieldForm((f) =>
+                            f ? { ...f, powDifficulty: Number(e.target.value) } : f
+                          )
+                        }
+                        className="flex-1 accent-orange-500 cursor-pointer"
+                      />
+                      <Badge color="brand">{shieldForm.powDifficulty} / 5</Badge>
+                    </div>
+                    <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0">
+                      Higher takes a visitor's browser longer to solve — 3 is a fraction of a
+                      second, 5 is closer to two.
+                    </p>
+                  </div>
+
+                  <div className="dash-card p-5 space-y-4">
+                    <h3 className="text-[13px] font-bold text-[var(--text-primary)] font-mono m-0">
+                      Clearance lifetime
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={15}
+                        max={720}
+                        className="w-24 dash-input font-mono text-[12px]"
+                        value={Math.round(shieldForm.clearanceTtl / 60)}
+                        onChange={(e) =>
+                          setShieldForm((f) =>
+                            f
+                              ? {
+                                  ...f,
+                                  clearanceTtl: Math.min(
+                                    43200,
+                                    Math.max(900, Number(e.target.value) * 60 || 0)
+                                  ),
+                                }
+                              : f
+                          )
+                        }
+                      />
+                      <span className="text-[12px] font-mono text-[var(--text-muted)]">
+                        minutes before a solved visitor is challenged again
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="dash-card p-5 space-y-4">
+                  <h3 className="text-[13px] font-bold text-[var(--text-primary)] font-mono m-0">
+                    Skip the challenge from these addresses
+                  </h3>
+                  <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0 -mt-2">
+                    IPs or CIDR ranges, one per line — your office, monitoring, or CI. Leave empty
+                    to challenge everyone.
+                  </p>
+                  <textarea
+                    className="w-full dash-input font-mono text-[12px] min-h-[80px] resize-y"
+                    placeholder="203.0.113.4/32"
+                    value={shieldForm.bypassIpsText}
+                    onChange={(e) =>
+                      setShieldForm((f) => (f ? { ...f, bypassIpsText: e.target.value } : f))
+                    }
+                  />
+                </div>
+
+                <div className="flex justify-end">
+                  <Button
+                    variant="brand"
+                    onClick={handleSaveShield}
+                    disabled={saveShieldMutation.isPending}
+                    isLoading={saveShieldMutation.isPending}
+                  >
+                    Save Shield Settings
+                  </Button>
+                </div>
+              </>
             )}
           </div>
         )}
