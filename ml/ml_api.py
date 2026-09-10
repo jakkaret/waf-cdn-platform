@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from ml.feature_engineering import extract_features_from_request, FEATURE_COLUMNS
 from ml.auto_rule_generator import generate_pending_rule
 from ml.attribution import build_attribution_response
+from ml.onnx_inference import OnnxWafInference
 
 # Docs/12-Development-Guide.md T13: the project's stated accuracy target.
 ACCURACY_TARGET = 0.85
@@ -37,6 +38,7 @@ BASE_DIR = os.path.dirname(__file__)
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 RF_MODEL_PATH = os.path.join(MODELS_DIR, "random_forest_waf.joblib")
 ISO_MODEL_PATH = os.path.join(MODELS_DIR, "isolation_forest_waf.joblib")
+RF_ONNX_MODEL_PATH = os.path.join(MODELS_DIR, "random_forest_waf.onnx")
 EVAL_RESULTS_PATH = os.path.join(MODELS_DIR, "eval_results.json")
 DASHBOARD_DIR = os.path.join(BASE_DIR, "dashboard")
 
@@ -48,11 +50,13 @@ app = FastAPI(
 
 rf_model = None
 iso_model = None
+fast_engine = None
+fast_engine_error = None
 eval_results = {}
 
 @app.on_event("startup")
 def startup_event():
-    global rf_model, iso_model, eval_results
+    global rf_model, iso_model, fast_engine, fast_engine_error, eval_results
     if os.path.exists(RF_MODEL_PATH):
         rf_model = joblib.load(RF_MODEL_PATH)
         print(f"[+] Loaded Random Forest Model from {RF_MODEL_PATH}")
@@ -60,6 +64,16 @@ def startup_event():
     if os.path.exists(ISO_MODEL_PATH):
         iso_model = joblib.load(ISO_MODEL_PATH)
         print(f"[+] Loaded Isolation Forest Model from {ISO_MODEL_PATH}")
+
+    if os.path.exists(RF_ONNX_MODEL_PATH):
+        try:
+            fast_engine = OnnxWafInference(MODELS_DIR)
+            print(f"[+] Loaded ONNX inline engine from {RF_ONNX_MODEL_PATH}")
+        except Exception as exc:
+            fast_engine_error = str(exc)
+            print(f"[!] ONNX inline engine unavailable: {exc}")
+    else:
+        fast_engine_error = "ONNX model artifact is missing"
 
     if os.path.exists(EVAL_RESULTS_PATH):
         with open(EVAL_RESULTS_PATH, "r", encoding="utf-8") as f:
@@ -85,6 +99,10 @@ def health_check():
             "random_forest": rf_model is not None,
             "isolation_forest": iso_model is not None
         },
+        "onnx_inline": {
+            "loaded": fast_engine is not None,
+            "error": fast_engine_error
+        },
         "accuracy_target_passed": accuracy_meets_target(eval_results),
         "eval_accuracy": eval_results.get("metrics", {}).get("accuracy")
     }
@@ -97,6 +115,14 @@ def get_eval_results():
     if not eval_results:
         raise HTTPException(status_code=404, detail="Evaluation results not found.")
     return eval_results
+
+@app.post("/predict-fast")
+def predict_fast(req: PredictionRequest):
+    """Low-latency RF/ONNX prediction without attribution or Isolation Forest."""
+    if fast_engine is None:
+        raise HTTPException(503, detail="ONNX inline engine is not available")
+    return fast_engine.predict(url=req.url, method=req.method, body=req.body)
+
 
 @app.post("/predict")
 def predict_anomaly(req: PredictionRequest):
