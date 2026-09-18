@@ -1,6 +1,7 @@
+import ipaddress
 import logging
 import httpx
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from services.rbac import require_viewer_or_above
 from services.gemini_service import gemini_service
 from pydantic import BaseModel
@@ -10,6 +11,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ml", tags=["ML Analyst"])
 
 ML_SERVICE_URL = "http://127.0.0.1:5000"
+INTERNAL_RELAY_HEADER = "X-Internal-ML-Relay"
+INTERNAL_RELAY_VALUE = "nginx-shadow-v1"
+INTERNAL_RELAY_NETWORK = ipaddress.ip_network("172.16.0.0/12")
 
 class PredictRequest(BaseModel):
     url: str
@@ -43,6 +47,82 @@ async def _attach_explanation(req: PredictRequest, result: dict) -> dict:
         logger.error(f"explain_attribution raised; returning prediction without explanation: {e}")
     return result
 
+
+
+def _is_internal_relay_request(request: Request) -> bool:
+    if request.headers.get(INTERNAL_RELAY_HEADER) != INTERNAL_RELAY_VALUE:
+        return False
+    client_host = request.client.host if request.client else ""
+    try:
+        return ipaddress.ip_address(client_host) in INTERNAL_RELAY_NETWORK
+    except ValueError:
+        return False
+
+
+@router.get("/shadow/decision", include_in_schema=False)
+async def shadow_decision(request: Request):
+    """Internal Docker-to-loopback relay for the Nginx shadow hook."""
+    if not _is_internal_relay_request(request):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    payload = {
+        "url": request.headers.get("X-Original-URI", "/"),
+        "method": request.headers.get("X-Original-Method", "GET"),
+        "body": "",
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            upstream = await client.post(
+                f"{ML_SERVICE_URL}/predict-fast",
+                json=payload,
+                timeout=0.5,
+            )
+        if upstream.status_code != 200:
+            return Response(
+                status_code=204,
+                headers={"X-WAF-ML-Decision": "unavailable"},
+            )
+        result = upstream.json()
+        decision = "anomaly" if result.get("is_anomaly") else "pass"
+        return Response(
+            status_code=204,
+            headers={
+                "X-WAF-ML-Decision": decision,
+                "X-WAF-ML-Score": str(result.get("attack_probability", "")),
+            },
+        )
+    except Exception as exc:
+        logger.warning("ML shadow relay failed open: %s", exc)
+        return Response(
+            status_code=204,
+            headers={"X-WAF-ML-Decision": "error"},
+        )
+
+
+@router.post("/capture", include_in_schema=False)
+async def capture_telemetry_relay(request: Request):
+    """Docker-to-loopback relay for privacy-scoped lab telemetry."""
+    if not _is_internal_relay_request(request):
+        raise HTTPException(status_code=404, detail="Not found")
+    body = await request.body()
+    headers = {
+        "X-Original-Host": request.headers.get("X-Original-Host", ""),
+        "X-Original-URI": request.headers.get("X-Original-URI", "/"),
+        "X-Original-Method": request.headers.get("X-Original-Method", "GET"),
+        "X-Original-Request-ID": request.headers.get("X-Original-Request-ID", ""),
+        "Content-Type": request.headers.get("Content-Type", ""),
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{ML_SERVICE_URL}/capture",
+                content=body,
+                headers=headers,
+                timeout=0.5,
+            )
+    except Exception as exc:
+        logger.warning("ML capture relay failed open: %s", exc)
+    return Response(status_code=204)
 
 @router.post("/predict")
 async def predict_anomaly(req: PredictRequest, current_user: dict = Depends(require_viewer_or_above)):
