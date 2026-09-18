@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from captcha_engine import captcha_access, issue_challenge, verify_challenge, ChallengeVerifyRequest
-from otp_engine import otp_access, shield_access, issue_challenge_page, request_code, verify_code, OtpRequestPayload, OtpVerifyPayload
+from otp_engine import otp_access, shield_access, issue_challenge_page, issue_ml_challenge, request_code, verify_code, OtpRequestPayload, OtpVerifyPayload
 
 app = FastAPI(title="CDN Control API", version="1.0.0")
 
@@ -54,8 +54,9 @@ async def captcha_access_route(request: Request):
 
 @app.api_route("/api/shield/access", methods=["GET", "POST"], include_in_schema=False)
 async def shield_access_route(request: Request):
-    # Combined captcha+OTP auth_request target -- see otp_engine.shield_access
-    # for why nginx needs one endpoint deciding both, instead of two.
+    # Combined captcha+OTP+ML auth_request target -- see
+    # otp_engine.shield_access for why nginx needs one endpoint deciding
+    # all three instead of separate hooks.
     return await shield_access(request)
 
 @app.get("/cdn-cgi/challenge", include_in_schema=False)
@@ -63,8 +64,11 @@ async def captcha_challenge_route(request: Request):
     # nginx forwards the failing gate's kind on X-Shield-Type (set from the
     # shield_access response header via auth_request_set); default to
     # captcha for direct/manual hits that carry no such header.
-    if request.headers.get("x-shield-type") == "otp":
+    shield_type = request.headers.get("x-shield-type")
+    if shield_type == "otp":
         return await issue_challenge_page(request)
+    if shield_type == "ml":
+        return await issue_ml_challenge(request)
     return await issue_challenge(request)
 
 @app.post("/cdn-cgi/challenge/verify", include_in_schema=False)

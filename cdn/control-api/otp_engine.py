@@ -9,15 +9,15 @@ own user database (Zero-Touch Origin Principle), so this only establishes
 "a human reachable at this address requested access", the same trust level
 class as the existing CAPTCHA gate, just via a different proof.
 
-Uses a distinct cookie name and a distinct failure status (418, vs
-captcha's 401) so both gates can be enabled on the same origin
-independently -- one does not clear the other, and nginx can route each
-failure to its own challenge page (see nginx/includes/otp_server.conf).
-418 was picked deliberately over the more obvious 403: ModSecurity's own
-blocking action already returns 403 on this stack (`deny,status:403`), so
-reusing 403 here would make `error_page 403` silently rewrite real WAF
-blocks into the OTP challenge page instead of the WAF's own 403 response --
-a real security/correctness regression, not just a style choice.
+Uses a distinct cookie name (waf_otp_clearance) so it can be enabled
+alongside CAPTCHA on the same origin independently -- solving one does not
+clear the other. Both gates share HTTP 401 as their nginx auth_request
+failure status (see shield_access below for why: nginx's auth_request
+module only recognizes 401/403 as valid deny statuses eligible for
+error_page mapping, an earlier attempt at a distinct 418 for OTP made nginx
+log "auth request unexpected status" and 500 instead of redirecting) and
+are told apart via an X-Shield-Type response header nginx forwards to a
+single challenge-page route.
 """
 import hashlib
 import hmac
@@ -38,6 +38,9 @@ from pydantic import BaseModel, EmailStr, Field
 
 from captcha_engine import _redis, normalize_host, client_ip, subnet_identity, user_agent
 from captcha_engine import access_decision as captcha_access_decision
+from captcha_engine import _new_challenge
+from captcha_engine import _challenge_html as _captcha_challenge_html
+from ml_policy import ml_access_decision
 from email_sender import send_otp_email
 
 logger = logging.getLogger(__name__)
@@ -199,7 +202,52 @@ async def shield_access(request: Request) -> Response:
             status_code=401,
             headers={"X-Shield-Type": "otp", "Cache-Control": "no-store"},
         )
+    # Gen3 roadmap 1.3: third branch, ML-driven. No-op ("pass" always,
+    # immediately, no HTTP call) unless a human has enabled enforcement in
+    # Settings -- see ml_policy.py's module docstring. "block" reuses 403,
+    # which already falls straight through to the existing static
+    # /403.html at the nginx layer (no route needed here). "challenge"
+    # reuses the same native PoW form as captcha (roadmap's own spec: "ส่ง
+    # เข้า Native Proof-of-Work Challenge") via issue_ml_challenge() below --
+    # NOT captcha_engine.issue_challenge() directly, because that function
+    # 404s unless *that origin's own* CAPTCHA toggle is enabled, and ML
+    # enforcement is a global policy independent of any origin's captcha
+    # opt-in (see main.py's /cdn-cgi/challenge dispatch).
+    ml_decision = await ml_access_decision(request)
+    if ml_decision == "block":
+        return Response(
+            status_code=403,
+            headers={"X-Shield-Type": "ml-block", "Cache-Control": "no-store"},
+        )
+    if ml_decision == "challenge":
+        return Response(
+            status_code=401,
+            headers={"X-Shield-Type": "ml", "Cache-Control": "no-store"},
+        )
     return Response(status_code=204)
+
+
+async def issue_ml_challenge(request: Request) -> Response:
+    """Same PoW form as captcha_engine.issue_challenge(), minus its
+    per-origin `config.get("enabled")` gate -- ML enforcement is a global
+    settings flag, not an origin-level opt-in, so an origin with CAPTCHA off
+    must still be able to reach this page when ML flags a request. Solving
+    it sets the same waf_clearance cookie via the existing, unmodified
+    captcha_engine.verify_challenge() (POST /cdn-cgi/challenge/verify),
+    which never gated on config.enabled in the first place -- only issuance
+    did, so that's the only piece this function needs to reimplement.
+    """
+    client = _redis()
+    if client is None:
+        return Response(status_code=503, content="Challenge service temporarily unavailable")
+    try:
+        return HTMLResponse(
+            _captcha_challenge_html(_new_challenge(request, {"pow_difficulty": 3}, client)),
+            headers={"Cache-Control": "no-store, no-cache", "Pragma": "no-cache"},
+        )
+    except Exception:
+        logger.exception("ml challenge issuance failed")
+        return Response(status_code=503, content="Challenge service temporarily unavailable")
 
 
 def _request_rate_limited(client, address: str, email: str) -> bool:
