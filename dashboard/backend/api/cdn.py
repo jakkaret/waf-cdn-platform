@@ -338,26 +338,39 @@ class CdnLogIngestPayload(BaseModel):
     logs: List[Dict[str, Any]]
 
 
-def _store_one_cdn_log(entry: dict, region: str) -> bool:
-    """Runs in a worker thread (see below) -- ch.save_log/_db.save_log are
-    synchronous (boto3, clickhouse-connect), and measured ~5.9s for a single
-    entry in production (likely real AWS DynamoDB round-trip latency, not
-    diagnosed further here -- out of scope for this fix). Calling them
-    directly in the async route blocked the event loop long enough that the
-    edge forwarder's own 5s client timeout fired before a response arrived,
-    which looked identical to the request never being handled at all. This
-    project has hit exactly this class of bug before (event-loop-blocking
-    sync I/O in a FastAPI handler) -- see WORKING_RULES.md / Trello history.
+def _store_cdn_log_batch(entries: list, region: str) -> int:
+    """Runs as ONE unit in a single worker thread (see below) -- ch.save_log/
+    _db.save_log are synchronous (boto3, clickhouse-connect) and measured
+    ~5.9s for a single entry in production (likely real AWS DynamoDB
+    round-trip latency, not diagnosed further here -- out of scope for this
+    fix). Calling them directly in the async route blocked the event loop
+    long enough that the edge forwarder's own 5s client timeout fired
+    before a response arrived, which looked identical to the request never
+    being handled at all. This project has hit exactly this class of bug
+    before (event-loop-blocking sync I/O in a FastAPI handler).
+
+    First attempt ran one asyncio.to_thread() PER entry via asyncio.gather,
+    which fixed the timeout but broke correctness: ch.client and
+    _db.logs_table are each a single shared object, not documented
+    thread-safe, and concurrent calls from multiple OS threads silently
+    dropped entries with no exception raised (confirmed live: a 5-entry
+    batch had 3 vanish from ClickHouse, forwarder still saw 200 OK and
+    dequeued them as delivered -- the loss was invisible from both sides).
+    Processing the whole batch serially inside ONE to_thread call keeps
+    the event loop free (the fix that mattered) without concurrent access
+    to either shared client (the correctness this needs).
     """
-    try:
-        data = normalize_cdn_access(entry, region)
-        if ch.connected:
-            ch.save_log("access_logs", data)
-        _db.save_log(data)
-        return True
-    except Exception:
-        logger.exception("cdn log ingest: failed to store one entry from region=%s", region)
-        return False
+    stored = 0
+    for entry in entries:
+        try:
+            data = normalize_cdn_access(entry, region)
+            if ch.connected:
+                ch.save_log("access_logs", data)
+            _db.save_log(data)
+            stored += 1
+        except Exception:
+            logger.exception("cdn log ingest: failed to store one entry from region=%s", region)
+    return stored
 
 
 @router.post("/logs/ingest", include_in_schema=False)
@@ -367,9 +380,6 @@ async def ingest_cdn_logs(payload: CdnLogIngestPayload, request: _Request):
         raise HTTPException(status_code=404, detail="Not found")
 
     entries = [e for e in payload.logs if isinstance(e, dict)]
-    results = await asyncio.gather(
-        *(asyncio.to_thread(_store_one_cdn_log, e, payload.region) for e in entries)
-    )
-    stored = sum(1 for r in results if r)
+    stored = await asyncio.to_thread(_store_cdn_log_batch, entries, payload.region)
 
     return {"received": len(payload.logs), "stored": stored}
