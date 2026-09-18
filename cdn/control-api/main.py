@@ -6,8 +6,10 @@ import tarfile
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel
+from captcha_engine import captcha_access, issue_challenge, verify_challenge, ChallengeVerifyRequest
+from otp_engine import otp_access, shield_access, issue_challenge_page, request_code, verify_code, OtpRequestPayload, OtpVerifyPayload
 
 app = FastAPI(title="CDN Control API", version="1.0.0")
 
@@ -45,6 +47,46 @@ def _block_rule_content() -> str:
         "\"id:1000000,phase:1,deny,status:403,log,msg:'Global blocklist (synced)'\"\n"
     )
 
+
+@app.api_route("/api/captcha/access", methods=["GET", "POST"], include_in_schema=False)
+async def captcha_access_route(request: Request):
+    return await captcha_access(request)
+
+@app.api_route("/api/shield/access", methods=["GET", "POST"], include_in_schema=False)
+async def shield_access_route(request: Request):
+    # Combined captcha+OTP auth_request target -- see otp_engine.shield_access
+    # for why nginx needs one endpoint deciding both, instead of two.
+    return await shield_access(request)
+
+@app.get("/cdn-cgi/challenge", include_in_schema=False)
+async def captcha_challenge_route(request: Request):
+    # nginx forwards the failing gate's kind on X-Shield-Type (set from the
+    # shield_access response header via auth_request_set); default to
+    # captcha for direct/manual hits that carry no such header.
+    if request.headers.get("x-shield-type") == "otp":
+        return await issue_challenge_page(request)
+    return await issue_challenge(request)
+
+@app.post("/cdn-cgi/challenge/verify", include_in_schema=False)
+async def captcha_verify_route(request: Request, payload: ChallengeVerifyRequest):
+    return await verify_challenge(request, payload)
+
+@app.api_route("/api/otp/access", methods=["GET", "POST"], include_in_schema=False)
+async def otp_access_route(request: Request):
+    # Standalone/manual use only -- not wired into nginx (see shield_access).
+    return await otp_access(request)
+
+@app.get("/cdn-cgi/otp-challenge", include_in_schema=False)
+async def otp_challenge_route(request: Request):
+    return await issue_challenge_page(request)
+
+@app.post("/cdn-cgi/otp/request", include_in_schema=False)
+async def otp_request_route(request: Request, payload: OtpRequestPayload):
+    return await request_code(request, payload)
+
+@app.post("/cdn-cgi/otp/verify", include_in_schema=False)
+async def otp_verify_route(request: Request, payload: OtpVerifyPayload):
+    return await verify_code(request, payload)
 
 @app.get("/healthz")
 def healthz():
