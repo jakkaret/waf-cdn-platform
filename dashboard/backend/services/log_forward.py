@@ -14,25 +14,39 @@ db = DynamoDBService()
 ch = ClickHouseService()
 log_buffer = {}
 
-# 172.18.0.2 (dvwa's own container IP) stays: that's a request the dvwa
-# container made back to itself/nginx (asset loads, healthchecks), not real
-# traffic, and is correctly excluded from analytics regardless of which
-# pipeline is live.
+# 172.18.0.2 (dvwa's own container IP): a request the dvwa container made
+# back to itself/nginx (asset loads, healthchecks), not real traffic --
+# correctly excluded regardless of which edge pipeline is live.
 #
-# 45.154.26.91 (edge-th) was removed 18/09/2026. It existed to avoid double-
-# counting: cdn_log_forward.py (services/cdn_log_forward.py, tailing
-# logs/cdn/<region>/access.json) was meant to report edge-originated traffic
-# separately, so this file's own process_access_log() skipped anything
-# arriving with the edge's IP as remote_addr to not count it twice. That
-# sibling pipeline is dead -- its last real data is from 25/08/2026, and it
-# is not even imported by main.py's startup anymore (only log_forward_worker
-# is) -- so the skip was silently dropping virtually all real lab-domain
-# traffic instead of avoiding a duplicate, since nearly everything reaching
-# Main's nginx for the public domains arrives via the edge tunnel with this
-# exact remote_addr. Confirmed via a live 20-request mixed benign/attack
-# probe against all 4 lab domains: 0 of them appeared in ClickHouse before
-# this fix.
-KNOWN_EDGE_IPS = {"172.18.0.2"}
+# 45.154.26.91 (edge-th): removed 18/09/2026, restored same day once the
+# real bug was found and fixed. Full story, in order:
+#   1. This skip existed from the start to avoid double-counting: the edge
+#      node's own forwarder (cdn-log-forwarder container on edge-th,
+#      POSTing to dashboard/backend/api/cdn.py's /api/cdn/logs/ingest) was
+#      always meant to report edge-originated traffic with its own richer,
+#      edge-sanitized view (PII masking, country, cache_status) -- so this
+#      file's own process_access_log() skipped anything arriving with the
+#      edge's IP as remote_addr, to let the edge's report be authoritative
+#      instead of double-recording the same request from Main's side too.
+#   2. That receiving endpoint (POST /api/cdn/logs/ingest) never actually
+#      existed in this codebase -- dashboard/backend/api/cdn.py had
+#      normalize_cdn_access imported for it but no route was ever wired.
+#      Every batch the forwarder sent got a 405, so the edge pipeline had
+#      been silently producing nothing since deployment; its last real
+#      output anywhere was 25/08/2026. With the "authoritative other side"
+#      dead, this skip was quietly discarding virtually all real
+#      lab-domain traffic instead of avoiding a duplicate (confirmed via a
+#      live probe: 0 of a 20-request mixed benign/attack batch appeared in
+#      ClickHouse). Removing 45.154.26.91 here was the fix at the time.
+#   3. The real fix was building the missing endpoint (see cdn.py), not
+#      removing this skip -- once the endpoint existed and edge-th's
+#      backlog drained, a follow-up probe showed the SAME request now
+#      landing twice (different request_id, same URL/timestamp): once via
+#      edge-th's forwarder, once via this file's own nginx-log tail. The
+#      original design was correct all along; it just needed its other
+#      half to actually work. Restoring the skip here is what "as it
+#      should be" means once both sides are alive.
+KNOWN_EDGE_IPS = {"172.18.0.2", "45.154.26.91"}
 
 SEVERITY_NUM_MAP = {
     "0": "CRITICAL",
