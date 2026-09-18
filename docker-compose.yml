@@ -121,6 +121,12 @@ services:
       SMTP_PASS: "${SMTP_PASS:-}"
       SMTP_FROM: "${SMTP_FROM:-}"
     restart: unless-stopped
+    extra_hosts:
+      # Gen3 1.3: ml_policy.py relays to dashboard-backend's existing
+      # shadow-decision endpoint (runs on the host via systemd, not in this
+      # compose network) at host.docker.internal:8000 -- same target nginx's
+      # own (currently unwired) ML mirror hook uses.
+      - "host.docker.internal:host-gateway"
     networks:
       - waf-net
 

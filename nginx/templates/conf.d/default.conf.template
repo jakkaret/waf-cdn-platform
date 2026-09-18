@@ -49,6 +49,12 @@ server {
     }
 
     location / {
+        # Gen3 roadmap 3.1-A: lab-only telemetry mirror (fire-and-forget,
+        # never affects the real response). Scope/redaction enforced
+        # server-side in ml/capture_telemetry.py (allowlist, secret
+        # redaction, size cap, retention) -- unchanged by this line.
+        mirror /internal-ml-capture;
+        mirror_request_body on;
 
         # Single auth_request per location is a real nginx constraint (not
         # multi-value). nginx's auth_request module only treats 401/403 as
@@ -124,6 +130,12 @@ server {
     }
 
     location / {
+        # Gen3 roadmap 3.1-A: lab-only telemetry mirror (fire-and-forget,
+        # never affects the real response). Scope/redaction enforced
+        # server-side in ml/capture_telemetry.py (allowlist, secret
+        # redaction, size cap, retention) -- unchanged by this line.
+        mirror /internal-ml-capture;
+        mirror_request_body on;
 
         # Single auth_request per location is a real nginx constraint (not
         # multi-value). nginx's auth_request module only treats 401/403 as
@@ -198,6 +210,12 @@ server {
     }
 
     location / {
+        # Gen3 roadmap 3.1-A: lab-only telemetry mirror (fire-and-forget,
+        # never affects the real response). Scope/redaction enforced
+        # server-side in ml/capture_telemetry.py (allowlist, secret
+        # redaction, size cap, retention) -- unchanged by this line.
+        mirror /internal-ml-capture;
+        mirror_request_body on;
 
         # Single auth_request per location is a real nginx constraint (not
         # multi-value). nginx's auth_request module only treats 401/403 as
@@ -281,6 +299,12 @@ server {
     }
 
     location / {
+        # Gen3 roadmap 3.1-A: lab-only telemetry mirror (fire-and-forget,
+        # never affects the real response). Scope/redaction enforced
+        # server-side in ml/capture_telemetry.py (allowlist, secret
+        # redaction, size cap, retention) -- unchanged by this line.
+        mirror /internal-ml-capture;
+        mirror_request_body on;
 
         proxy_pass http://cloudwaf_tunnel;
         proxy_set_header Host $host;
@@ -320,6 +344,12 @@ server {
     }
 
     location / {
+        # Gen3 roadmap 3.1-A: lab-only telemetry mirror (fire-and-forget,
+        # never affects the real response). Scope/redaction enforced
+        # server-side in ml/capture_telemetry.py (allowlist, secret
+        # redaction, size cap, retention) -- unchanged by this line.
+        mirror /internal-ml-capture;
+        mirror_request_body on;
 
         # Single auth_request per location is a real nginx constraint (not
         # multi-value). nginx's auth_request module only treats 401/403 as
