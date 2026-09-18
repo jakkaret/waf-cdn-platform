@@ -25,6 +25,8 @@ server {
 
     access_log /var/log/nginx/access.json json_combined;
     error_log /var/log/nginx/error.log warn;
+    include /etc/nginx/includes/captcha_server.conf;
+    include /etc/nginx/includes/otp_server.conf;
 
     set $always_redirect off;
     modsecurity on;
@@ -47,8 +49,17 @@ server {
     }
 
     location / {
-        auth_request /internal-rate-limit;
+
+        # Single auth_request per location is a real nginx constraint (not
+        # multi-value). nginx's auth_request module only treats 401/403 as
+        # valid "deny" statuses eligible for error_page mapping (other codes,
+        # e.g. 418, make it log "unexpected status" and 500 instead) -- 403 is
+        # ModSecurity's own block status here, so captcha and OTP share 401
+        # via one combined check (nginx/includes/otp_server.conf) that tags
+        # which gate failed on a header for the challenge page to read.
+        auth_request /internal-shield-check;
         auth_request_set $retry_after $upstream_http_retry_after;
+        auth_request_set $shield_type $upstream_http_x_shield_type;
         
         proxy_pass http://frp_tunnel_router;
         proxy_set_header Host $host;
@@ -94,6 +105,8 @@ server {
 
     access_log /var/log/nginx/access.json json_combined;
     error_log /var/log/nginx/error.log warn;
+    include /etc/nginx/includes/captcha_server.conf;
+    include /etc/nginx/includes/otp_server.conf;
 
     modsecurity on;
     modsecurity_transaction_id "$request_id";
@@ -111,8 +124,17 @@ server {
     }
 
     location / {
-        auth_request /internal-rate-limit;
+
+        # Single auth_request per location is a real nginx constraint (not
+        # multi-value). nginx's auth_request module only treats 401/403 as
+        # valid "deny" statuses eligible for error_page mapping (other codes,
+        # e.g. 418, make it log "unexpected status" and 500 instead) -- 403 is
+        # ModSecurity's own block status here, so captcha and OTP share 401
+        # via one combined check (nginx/includes/otp_server.conf) that tags
+        # which gate failed on a header for the challenge page to read.
+        auth_request /internal-shield-check;
         auth_request_set $retry_after $upstream_http_retry_after;
+        auth_request_set $shield_type $upstream_http_x_shield_type;
 
         proxy_pass http://frp_tunnel_router;
         proxy_set_header Host $host;
@@ -157,6 +179,8 @@ server {
 
     access_log /var/log/nginx/access.json json_combined;
     error_log /var/log/nginx/error.log warn;
+    include /etc/nginx/includes/captcha_server.conf;
+    include /etc/nginx/includes/otp_server.conf;
 
     modsecurity on;
     modsecurity_transaction_id "$request_id";
@@ -174,8 +198,17 @@ server {
     }
 
     location / {
-        auth_request /internal-rate-limit;
+
+        # Single auth_request per location is a real nginx constraint (not
+        # multi-value). nginx's auth_request module only treats 401/403 as
+        # valid "deny" statuses eligible for error_page mapping (other codes,
+        # e.g. 418, make it log "unexpected status" and 500 instead) -- 403 is
+        # ModSecurity's own block status here, so captcha and OTP share 401
+        # via one combined check (nginx/includes/otp_server.conf) that tags
+        # which gate failed on a header for the challenge page to read.
+        auth_request /internal-shield-check;
         auth_request_set $retry_after $upstream_http_retry_after;
+        auth_request_set $shield_type $upstream_http_x_shield_type;
 
         proxy_pass http://frp_tunnel_router;
         proxy_set_header Host $host;
@@ -224,6 +257,8 @@ server {
 
     access_log /var/log/nginx/access.json json_combined;
     error_log /var/log/nginx/error.log warn;
+    include /etc/nginx/includes/captcha_server.conf;
+    include /etc/nginx/includes/otp_server.conf;
 
     modsecurity on;
     modsecurity_transaction_id "$request_id";
@@ -246,6 +281,7 @@ server {
     }
 
     location / {
+
         proxy_pass http://cloudwaf_tunnel;
         proxy_set_header Host $host;
         proxy_set_header Accept-Encoding "";
@@ -265,6 +301,8 @@ server {
 
     access_log /var/log/nginx/access.json json_combined;
     error_log /var/log/nginx/error.log warn;
+    include /etc/nginx/includes/captcha_server.conf;
+    include /etc/nginx/includes/otp_server.conf;
 
     modsecurity on;
     modsecurity_transaction_id "$request_id";
@@ -282,8 +320,17 @@ server {
     }
 
     location / {
-        auth_request /internal-rate-limit;
+
+        # Single auth_request per location is a real nginx constraint (not
+        # multi-value). nginx's auth_request module only treats 401/403 as
+        # valid "deny" statuses eligible for error_page mapping (other codes,
+        # e.g. 418, make it log "unexpected status" and 500 instead) -- 403 is
+        # ModSecurity's own block status here, so captcha and OTP share 401
+        # via one combined check (nginx/includes/otp_server.conf) that tags
+        # which gate failed on a header for the challenge page to read.
+        auth_request /internal-shield-check;
         auth_request_set $retry_after $upstream_http_retry_after;
+        auth_request_set $shield_type $upstream_http_x_shield_type;
 
         proxy_pass http://frp_tunnel_router;
         proxy_set_header Host $host;

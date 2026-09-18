@@ -14,6 +14,8 @@ services:
       - ./modsecurity/custom-rules:/opt/custom-rules:ro
       - ./logs/modsecurity:/var/log/modsecurity
       - ./logs/nginx:/var/log/nginx
+      - ./nginx/includes/captcha_server.conf:/etc/nginx/includes/captcha_server.conf:ro
+      - ./nginx/includes/otp_server.conf:/etc/nginx/includes/otp_server.conf:ro
       - ./html/403.html:/usr/share/nginx/html/403.html:ro
       - ./nginx/templates/conf/server.key:/etc/nginx/conf/server.key
       - ./nginx/templates/conf/server.crt:/etc/nginx/conf/server.crt
@@ -104,8 +106,20 @@ services:
     volumes:
       - ./modsecurity/custom-rules:/src/custom-rules:ro
       - control_data:/data
+    depends_on:
+      - redis
     environment:
       CONTROL_TOKEN: "***REDACTED***"
+      REDIS_URL: "redis://redis:6379/0"
+      # OTP Shield email delivery -- unset by default (see
+      # cdn/control-api/email_sender.py: send_otp_email() fails loud and
+      # logs, rather than pretending an email went out, until real SMTP
+      # credentials are supplied here).
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASS: "${SMTP_PASS:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
     restart: unless-stopped
     networks:
       - waf-net

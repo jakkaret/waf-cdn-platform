@@ -154,6 +154,30 @@ export interface DnsInstructions {
   txt_record: { type: 'TXT'; name: string; value: string }
 }
 
+export interface CaptchaShieldConfig {
+  origin_id?: string
+  enabled: boolean
+  engine: 'native' | 'turnstile'
+  login_paths: string[]
+  clearance_ttl: number
+  bypass_ips: string[]
+  pow_difficulty: number
+  updated_at?: string
+}
+
+export interface OtpShieldConfig {
+  origin_id?: string
+  enabled: boolean
+  login_paths: string[]
+  clearance_ttl: number
+  bypass_ips: string[]
+  code_length: number
+  code_ttl: number
+  // Only "email" is implemented server-side today (cdn/control-api/email_sender.py).
+  channel: 'email'
+  updated_at?: string
+}
+
 export type ProvisioningStep =
   | 'dns_verify'
   | 'ssl_provision'
