@@ -141,7 +141,14 @@ async def get_analytics_summary(
         # 4. Latency
         lat_cond = f"{where_sql} AND request_time_ms > 0" if where_sql else "WHERE request_time_ms > 0"
         latency_rows = ch.query_stats(f"SELECT avg(request_time_ms) FROM access_logs {lat_cond}")
-        avg_latency = int(latency_rows[0][0]) if latency_rows and latency_rows[0][0] else 12
+        # avg() over an empty/near-empty set returns NaN (which is truthy), so a
+        # bare int(latency_rows[0][0]) crashed the whole summary when there was
+        # little data. Guard NaN (x != x is true only for NaN) and None.
+        avg_latency = 12
+        if latency_rows and latency_rows[0][0] is not None:
+            _lat = latency_rows[0][0]
+            if not (isinstance(_lat, float) and _lat != _lat):
+                avg_latency = int(_lat)
 
         # 5. Attack Type Breakdown
         atk_cond = f"{where_sql} AND attack_type != '' AND attack_type != 'NONE'" if where_sql else "WHERE attack_type != '' AND attack_type != 'NONE'"

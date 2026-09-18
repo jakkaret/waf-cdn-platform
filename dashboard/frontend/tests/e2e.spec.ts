@@ -1,7 +1,7 @@
 import { test, expect, Page } from '@playwright/test'
 
 // ── Test Credentials ──────────────────────────────────────────────────────
-const TEST_EMAIL    = `e2e_test_${Date.now()}@test.local`
+const TEST_EMAIL    = `e2e_test_${Date.now()}@e2e-test.example.com`
 const TEST_USERNAME = `e2e_user_${Date.now()}`
 const TEST_PASSWORD = 'E2eTestP@ss123!'
 const API_BASE      = 'http://localhost:8000'
@@ -46,7 +46,7 @@ test.describe('Auth Flow', () => {
 
   test('Login with wrong password shows error', async ({ page }) => {
     await page.goto('/login')
-    await page.getByPlaceholder(/email/i).fill('nonexistent@test.local')
+    await page.getByPlaceholder(/email/i).fill('nonexistent@e2e-test.example.com')
     await page.getByPlaceholder(/password/i).fill('WrongPass!')
     await page.getByRole('button', { name: /login|sign in/i }).click()
 

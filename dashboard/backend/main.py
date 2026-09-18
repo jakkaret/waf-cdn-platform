@@ -31,13 +31,40 @@ from slowapi import _rate_limit_exceeded_handler
 app = FastAPI(
     title="WAF Security Dashboard",
     description="Dashboard for WAF management and monitoring",
-    version="1.0.0"
+    version="1.0.0",
+    # Web assessment 2026-09-08 (F2): /docs, /redoc and /openapi.json were
+    # reachable with no token and enumerated every endpoint. Turn them off.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 ch = ClickHouseService()
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    # Web assessment 2026-09-08 (F1): responses carried no protective headers.
+    # These four are safe for the SPA + API; a Content-Security-Policy needs a
+    # tuning pass and is deliberately not added here yet.
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault(
+            "Referrer-Policy", "strict-origin-when-cross-origin"
+        )
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,6 +84,89 @@ FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 assets_dir = FRONTEND_DIST / "assets" if FRONTEND_DIST.exists() else BASE_DIR / "frontend" / "assets"
 if assets_dir.exists():
     app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+
+# System status (protected) -- see frontend/src/api/system.ts for the contract
+@app.get("/api/system/status")
+async def system_status(current_user: dict = Depends(require_viewer_or_above)):
+    import os
+    import shutil
+    import socket
+
+    def _port_open(port: int, host: str = "127.0.0.1") -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            return sock.connect_ex((host, port)) == 0
+
+    # (port, description) for the services this control plane depends on.
+    SERVICES = {
+        "dashboard_api": (8000, "FastAPI control plane"),
+        "waf_nginx": (8080, "nginx + ModSecurity CRS"),
+        "redis": (6379, "rate-limit and cache store"),
+        "clickhouse": (8123, "traffic log warehouse"),
+        "frps": (7000, "FRP tunnel server"),
+        "control_api": (8070, "WAF control API"),
+    }
+    services = {
+        name: {
+            "status": "online" if _port_open(port) else "offline",
+            "port": port,
+            "desc": desc,
+        }
+        for name, (port, desc) in SERVICES.items()
+    }
+
+    db_status, db_detail = "offline", "unreachable"
+    try:
+        from services.dynamodb_service import DynamoDBService
+        DynamoDBService().domains_table.table_status
+        db_status, db_detail = "online", "DynamoDB reachable"
+    except Exception as exc:
+        db_detail = f"DynamoDB error: {exc}"[:200]
+
+    cdn_nodes = []
+    try:
+        from api.cdn import cdn_nodes as _cdn_nodes_handler
+        raw_nodes = await _cdn_nodes_handler(current_user=current_user)
+        for n in (raw_nodes if isinstance(raw_nodes, list) else raw_nodes.get("nodes", [])):
+            cdn_nodes.append({
+                "region": n.get("region") or n.get("name") or "unknown",
+                "status": n.get("status", "offline"),
+                "port": n.get("port", 443),
+                "latency_ms": n.get("latency_ms", 0),
+                "health": n.get("health", {}),
+            })
+    except Exception as exc:
+        print(f"system/status: CDN node lookup failed: {exc}")
+
+    workers = {
+        "tunnel_gatekeeper": {
+            "status": "running" if services["frps"]["status"] == "online" else "stopped",
+            "desc": "FRP webhook gatekeeper (per-domain tunnel authorization)",
+        },
+        "log_pipeline": {
+            "status": "running" if services["clickhouse"]["status"] == "online" else "stopped",
+            "desc": "access log ingestion into ClickHouse",
+        },
+    }
+
+    total, used, free = shutil.disk_usage("/")
+    gb = 1024 ** 3
+    load1, load5, load15 = os.getloadavg()
+
+    return {
+        "db": {"status": db_status, "detail": db_detail},
+        "services": services,
+        "cdn_nodes": cdn_nodes,
+        "workers": workers,
+        "system": {
+            "disk_total_gb": round(total / gb, 1),
+            "disk_used_gb": round(used / gb, 1),
+            "disk_free_gb": round(free / gb, 1),
+            "disk_used_percent": round(used / total * 100, 1),
+            "load_average": [round(load1, 2), round(load5, 2), round(load15, 2)],
+        },
+    }
 
 
 # System info (protected)
@@ -146,6 +256,13 @@ async def startup_event():
     if not hasattr(app.state, "cleanup_pending_task"):
         from api.alerts import _cleanup_expired_codes
         app.state.cleanup_pending_task = asyncio.create_task(_cleanup_expired_codes())
+    # DNS verification worker: was fully written but never imported, so domains
+    # only got verified on a manual POST /api/domains/{id}/verify. create_task
+    # keeps a worker crash from taking down the API; the loop has its own
+    # try/except so one bad check does not stop the rest.
+    if not hasattr(app.state, "dns_verification_task"):
+        from services.dns_verification_worker import dns_verification_worker
+        app.state.dns_verification_task = asyncio.create_task(dns_verification_worker())
 
 
 @app.on_event("shutdown")

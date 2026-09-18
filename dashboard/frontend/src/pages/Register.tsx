@@ -86,13 +86,8 @@ export const Register: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)] relative overflow-hidden flex flex-col justify-between">
-      <div className="pointer-events-none absolute inset-0 opacity-70">
-        <div className="absolute left-[-12rem] top-[-14rem] h-[28rem] w-[28rem] rounded-full bg-orange-500/10 blur-3xl" />
-        <div className="absolute bottom-[-16rem] right-[-10rem] h-[30rem] w-[30rem] rounded-full bg-cyan-500/10 blur-3xl" />
-      </div>
-
-      <header className="relative z-10 border-b border-[var(--bg-border-subtle)] bg-[var(--bg-app)]/85 backdrop-blur">
+    <div className="min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)] flex flex-col">
+      <header className="border-b border-[var(--bg-border-subtle)] bg-[var(--bg-app)]/85 backdrop-blur">
         <div className="max-w-7xl mx-auto flex justify-between items-center px-4 sm:px-8 py-4">
           <Link to="/" className="flex items-center gap-2.5 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500/50">
             <img src="/firewall.png" alt="Firewall WAF" className="w-8 h-8 object-contain rounded-lg drop-shadow-sm" />
@@ -109,25 +104,22 @@ export const Register: React.FC = () => {
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 lg:py-12 flex-1 flex items-center justify-center w-full">
-        <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
-          
-          {/* Left Brand / Features Section */}
-          <section className="hidden lg:flex lg:col-span-7 xl:col-span-7 flex-col justify-between space-y-8 pr-4">
+      <main className="flex-1 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10 lg:py-14 w-full">
+        <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-start">
+
+          {/* Left: what you're getting access to */}
+          <section className="hidden lg:flex lg:col-span-7 xl:col-span-7 flex-col gap-8 pr-4">
             <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/20 bg-orange-500/10 px-3 py-1 text-[11px] font-mono font-semibold uppercase tracking-[0.1em] text-orange-600 dark:text-orange-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.65)]" />
-                Secure Workspace Enrollment
-              </div>
-              <h1 className="mt-6 max-w-xl text-[34px] font-bold leading-tight tracking-tight text-[var(--text-primary)] font-mono">
+              <h1 className="max-w-xl text-[32px] font-bold leading-tight tracking-tight text-[var(--text-primary)] font-mono">
                 Create access for the WAF operations workspace.
               </h1>
-              <p className="mt-4 max-w-xl text-[13.5px] leading-6 text-[var(--text-secondary)]">
-                The first local account becomes admin. Later local accounts begin as viewer until an admin changes the role.
+              <p className="mt-3 max-w-lg text-[13.5px] leading-6 text-[var(--text-secondary)]">
+                The first local account becomes admin. Later local accounts begin as viewer until
+                an admin changes the role.
               </p>
             </div>
 
-            <div className="grid max-w-2xl grid-cols-3 gap-3">
+            <div className="grid max-w-lg grid-cols-3 gap-3.5">
               {[
                 { icon: ShieldCheck, label: 'Bootstrap', value: 'First admin' },
                 { icon: UsersRound, label: 'Default role', value: 'Viewer' },
@@ -135,7 +127,7 @@ export const Register: React.FC = () => {
               ].map((item) => {
                 const Icon = item.icon
                 return (
-                  <div key={item.label} className="rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)]/80 p-4">
+                  <div key={item.label} className="dash-card p-4">
                     <Icon size={16} className="text-orange-600 dark:text-orange-400" />
                     <p className="mt-3 mb-0 text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)] font-mono">
                       {item.label}
@@ -147,18 +139,35 @@ export const Register: React.FC = () => {
                 )
               })}
             </div>
+
+            <div className="dash-card p-5 max-w-lg">
+              <h3 className="text-[13px] font-bold text-[var(--text-primary)] font-mono m-0 mb-3">
+                What an operator account can do
+              </h3>
+              <ul className="m-0 p-0 list-none space-y-2.5 text-[12.5px] text-[var(--text-secondary)]">
+                {[
+                  'Review blocked and allowed traffic across every protected origin',
+                  'Attach domains, issue tunnel tokens, and manage WAF policy',
+                  'Approve or reject ML-suggested rules before they take effect',
+                ].map((line) => (
+                  <li key={line} className="flex items-start gap-2.5">
+                    <CheckCircle2 size={14} className="text-emerald-500 shrink-0 mt-0.5" />
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </section>
 
-          {/* Right Auth Card Section */}
-          <section className="col-span-1 lg:col-span-5 xl:col-span-5 flex items-center justify-center lg:justify-end">
-            <div className="w-full max-w-[440px]">
-              
-              {/* Mobile badge */}
-              <div className="mb-5 lg:hidden text-center">
-                <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/20 bg-orange-500/10 px-3 py-1 text-[11px] font-mono font-semibold uppercase tracking-[0.1em] text-orange-600 dark:text-orange-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                  Secure Workspace Enrollment
-                </div>
+          {/* Right: the actual form */}
+          <section className="col-span-1 lg:col-span-5 xl:col-span-5 flex justify-center lg:justify-end">
+            <div className="w-full max-w-[420px]">
+
+              {/* Mobile heading */}
+              <div className="mb-5 lg:hidden">
+                <h1 className="text-[24px] font-bold leading-tight tracking-tight text-[var(--text-primary)] font-mono">
+                  Create workspace access
+                </h1>
               </div>
 
               {/* Segmented Auth Switcher Group */}

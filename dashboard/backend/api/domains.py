@@ -1,4 +1,6 @@
 import re
+import time
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
@@ -6,6 +8,7 @@ import uuid
 from datetime import datetime
 from services.rbac import get_current_user, verify_origin_ownership
 from services.dynamodb_service import DynamoDBService
+from services.captcha_config import sync_domain_config
 from services.dns_service import verify_domain_dns
 
 router = APIRouter(prefix="/api/domains", tags=["Domains"])
@@ -154,6 +157,7 @@ async def delete_domain(domain_id: str, current_user: dict = Depends(get_current
     # 3. Delete domain
     try:
         db.domains_table.delete_item(Key={"id": domain_id})
+        invalidate_ssl_allowed_snapshot()
         return {"status": "success", "message": f"Domain {domain['domain_name']} deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -184,6 +188,8 @@ async def verify_domain_now(domain_id: str, current_user: dict = Depends(get_cur
                 ":ssl": "pending"
             }
         )
+        sync_domain_config(domain["origin_id"], domain_name)
+        invalidate_ssl_allowed_snapshot()
         return {
             "status": "success",
             "dns_verified": True,
@@ -197,42 +203,65 @@ async def verify_domain_now(domain_id: str, current_user: dict = Depends(get_cur
             "message": "DNS records check failed. CNAME or TXT verification not found."
         }
 
+# --- on-demand TLS ask endpoint -------------------------------------------
+# Snapshot of the domains allowed to obtain a certificate, refreshed lazily.
+_SSL_ALLOWED_SNAPSHOT: set = set()
+_SSL_SNAPSHOT_AT: float = 0.0
+_SSL_SNAPSHOT_LOCK = asyncio.Lock()
+SSL_SNAPSHOT_REFRESH_SECONDS = 30.0
+MAX_HOSTNAME_LENGTH = 253
+
+
+def _load_ssl_allowed() -> set:
+    """Every DNS-verified domain name, lowercased. One scan of a small table."""
+    items = db.domains_table.scan().get("Items", [])
+    return {
+        str(i.get("domain_name", "")).strip().lower()
+        for i in items
+        if i.get("dns_verified", False) and i.get("domain_name")
+    }
+
+
+async def _ssl_allowed_set() -> set:
+    global _SSL_ALLOWED_SNAPSHOT, _SSL_SNAPSHOT_AT
+    now = time.monotonic()
+    if _SSL_ALLOWED_SNAPSHOT and (now - _SSL_SNAPSHOT_AT) < SSL_SNAPSHOT_REFRESH_SECONDS:
+        return _SSL_ALLOWED_SNAPSHOT
+    async with _SSL_SNAPSHOT_LOCK:
+        # Another request may have refreshed it while this one waited.
+        now = time.monotonic()
+        if _SSL_ALLOWED_SNAPSHOT and (now - _SSL_SNAPSHOT_AT) < SSL_SNAPSHOT_REFRESH_SECONDS:
+            return _SSL_ALLOWED_SNAPSHOT
+        try:
+            _SSL_ALLOWED_SNAPSHOT = await asyncio.to_thread(_load_ssl_allowed)
+            _SSL_SNAPSHOT_AT = now
+        except Exception as exc:
+            # Keep serving the previous snapshot rather than failing open or
+            # failing every handshake because the database hiccuped.
+            print(f"check-ssl-allowed: snapshot refresh failed, serving stale set: {exc}")
+    return _SSL_ALLOWED_SNAPSHOT
+
+
 @router.get("/check-ssl-allowed")
-async def check_ssl_allowed(domain: str):
-    if not domain:
+async def check_ssl_allowed(domain: str = ""):
+    candidate = (domain or "").strip().lower()
+    if not candidate:
         raise HTTPException(status_code=400, detail="domain parameter is required")
-        
-    try:
-        import boto3
-        # Query using the domain_name-index GSI
-        response = db.domains_table.query(
-            IndexName="domain_name-index",
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain_name").eq(domain)
-        )
-        items = response.get("Items", [])
-        
-        # If GSI query fails or returns empty, fallback to scan
-        if not items:
-            from boto3.dynamodb.conditions import Attr
-            response = db.domains_table.scan(
-                FilterExpression=Attr("domain_name").eq(domain)
-            )
-            items = response.get("Items", [])
-            
-        if not items:
-            raise HTTPException(status_code=400, detail="Domain not registered")
-            
-        domain_item = items[0]
-        if not domain_item.get("dns_verified", False):
-            raise HTTPException(status_code=400, detail="Domain DNS not verified")
-            
-        # Return 200 OK to Caddy indicating that it is allowed to request SSL cert
-        return {"status": "allowed", "domain": domain}
-        
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Reject implausible hostnames before touching any shared state.
+    if len(candidate) > MAX_HOSTNAME_LENGTH or not _HOSTNAME_RE.match(candidate):
+        raise HTTPException(status_code=400, detail="Domain not registered")
+
+    allowed = await _ssl_allowed_set()
+    if candidate not in allowed:
+        raise HTTPException(status_code=400, detail="Domain not registered")
+
+    return {"status": "allowed", "domain": candidate}
+
+
+def invalidate_ssl_allowed_snapshot() -> None:
+    """Force the next ask to reload -- call after a domain is verified or removed."""
+    global _SSL_SNAPSHOT_AT
+    _SSL_SNAPSHOT_AT = 0.0
 
 
 import os
@@ -361,6 +390,7 @@ async def verify_domain_now_under_origin(origin_id: str, domain_id: str, current
                 ":ssl": "pending"
             }
         )
+        sync_domain_config(domain["origin_id"], domain_name)
         return {
             "status": "verified",
             "message": "Domain successfully verified!"
@@ -382,6 +412,7 @@ async def delete_domain_under_origin(origin_id: str, domain_id: str, current_use
         
     try:
         db.domains_table.delete_item(Key={"id": domain_id})
+        invalidate_ssl_allowed_snapshot()
         return {"status": "success", "message": f"Domain {domain['domain_name']} deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
