@@ -11,6 +11,9 @@ waf_alert_bot.session
 # Virtual Environment
 .venv/
 
+# TypeScript incremental build cache (generated)
+*.tsbuildinfo
+
 # Python
 __pycache__/
 *.pyc
@@ -42,3 +45,9 @@ old/
 
 # AI tool scratch files
 .aider*
+
+# Local DB/config backups (large; contain data dumps) -- never commit
+backups/
+
+# vuln-scan report output (generated)
+reports/vuln-scan/

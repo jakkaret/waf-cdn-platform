@@ -6,6 +6,7 @@ import { analyticsApi } from '../api/analytics'
 import { useOriginFilterStore } from '../store/originFilterStore'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
+import { selectNode } from '../lib/systemStatus'
 import { useThemeStore } from '../store/themeStore'
 import {
   AreaChart,
@@ -65,6 +66,14 @@ export const Dashboard: React.FC = () => {
     refetchInterval: 5000,
     enabled: activeTab === 'infrastructure',
   })
+
+  // Edge/hub health for the infrastructure cards, from /api/system/status.
+  // (These cards used to hardcode a permanent green 'ONLINE (Healthy)'.)
+  const thNode = selectNode(systemStatus?.cdn_nodes as any, 'TH')
+  const mainNode = selectNode(systemStatus?.cdn_nodes as any, 'MAIN')
+  const nodeBadgeColor = (v: { online: boolean; statusLabel: string }) =>
+    v.online ? 'success' : v.statusLabel === 'DEGRADED' ? 'warning'
+    : v.statusLabel === 'OFFLINE' ? 'danger' : 'gray'
 
   const handleRefresh = () => {
     if (activeTab === 'security') {
@@ -672,15 +681,15 @@ export const Dashboard: React.FC = () => {
                     </p>
                   </div>
                 </div>
-                <Badge color="success" dot>
-                  ONLINE (Healthy)
+                <Badge color={nodeBadgeColor(thNode)} dot>
+                  {thNode.statusLabel}
                 </Badge>
               </div>
 
               <div className="grid grid-cols-2 gap-2 pt-3 border-t border-[var(--bg-border-subtle)] text-[11px] font-mono">
                 <div>
                   <span className="text-[var(--text-dim)] block text-[10px] uppercase">Latency</span>
-                  <span className="font-bold text-emerald-400">~12 ms</span>
+                  <span className="font-bold text-emerald-400">{thNode.latencyLabel}</span>
                 </div>
                 <div>
                   <span className="text-[var(--text-dim)] block text-[10px] uppercase">WAF Engine</span>
@@ -702,8 +711,8 @@ export const Dashboard: React.FC = () => {
                     </p>
                   </div>
                 </div>
-                <Badge color="success" dot>
-                  ONLINE (Healthy)
+                <Badge color={nodeBadgeColor(mainNode)} dot>
+                  {mainNode.statusLabel}
                 </Badge>
               </div>
 

@@ -1,0 +1,30 @@
+{
+  "feature_columns": [
+    "special_char_count",
+    "special_char_ratio",
+    "keyword_matches",
+    "html_tag_matches",
+    "path_traversal_depth",
+    "quote_unbalanced",
+    "has_sql_operator",
+    "has_ssrf_token",
+    "has_ssti_nosql",
+    "is_oversized_payload",
+    "is_clean_structure",
+    "has_excessive_params",
+    "method_is_post"
+  ],
+  "random_forest": {
+    "path": "/tmp/waf-gen3-models/random_forest_waf.onnx",
+    "bytes": 1480411,
+    "input": "features",
+    "outputs": [
+      "label",
+      "probabilities"
+    ]
+  },
+  "isolation_forest": {
+    "status": "async_only",
+    "artifact": "isolation_forest_waf.joblib"
+  }
+}

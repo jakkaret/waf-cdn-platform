@@ -1,0 +1,7 @@
+# Isolated Gen 3 inference toolchain.
+# Install in a dedicated virtual environment first; do not modify the production
+# dashboard/backend/.venv until the ONNX path passes validation.
+onnx>=1.16
+onnxruntime>=1.18
+skl2onnx>=1.17
+pandas>=2.2

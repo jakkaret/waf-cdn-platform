@@ -2,8 +2,8 @@
 
 > **เอกสารอ้างอิงหลัก:** [18 · WAF Generation Assessment (Docs)](https://jakkaret.github.io/Docs-for-WAF-project/18-waf-generation-assessment.html)  
 > **วิสัยทัศน์:** ยกระดับจาก Gen 1 (Signature) + Gen 2 (Bot Shield) สู่ **WAF Gen 3 (Next-Gen ML-Driven WAF)** โดยรักษาความแม่นยำสูง ไม่ส่งผลกระทบต่อทราฟฟิกปกติ และไม่แตะต้องโค้ด Origin  
-> **สถานะปัจจุบัน:** 🟡 In Progress (เฟส 2: Extended Features & Model Calibration; candidate ยังไม่ถูก promote)
-> **อัปเดตล่าสุด:** 13 กันยายน 2026
+> **สถานะปัจจุบัน:** 🟡 In Progress (เฟส 1.3 mechanism สร้างเสร็จ ปิดไว้; เฟส 2 ติดเพดานจริงที่ ~65% attack recall; เฟส 3.1-A ยืนยันแล้ว)
+> **อัปเดตล่าสุด:** 18 กันยายน 2026
 
 ---
 
@@ -20,7 +20,7 @@
 
 อ้างอิงจากเกณฑ์ในเอกสาร `18-waf-generation-assessment.html`:
 
-| มิติการประเมิน | สถานะเดิมในเอกสาร | สถานะปัจจุบัน (13 ก.ย. 2026) | เป้าหมายสู่ Gen 3 ที่แท้จริง |
+| มิติการประเมิน | สถานะเดิมในเอกสาร | สถานะปัจจุบัน (18 ก.ย. 2026) | เป้าหมายสู่ Gen 3 ที่แท้จริง |
 | :--- | :---: | :---: | :--- |
 | **Gen 1: Signature WAF** | ✅ 100% | ✅ 100% | ModSecurity + OWASP CRS ทำงานตรวจจับ Known Attacks |
 | **Gen 2: Bot & Session Risk** | ❌ 0% | 🟡 **50% (เพิ่งทำเสร็จ)** | มี Native PoW Challenge & Pre-Login Gate แล้ว (Commit `a3edfab`/`abff403`) รอเพิ่ม Session Risk Scoring |
@@ -267,6 +267,7 @@ flowchart TD
 - หากไม่ผ่าน gate ให้หยุดที่ experiment และบันทึกเหตุผล ห้ามใช้ synthetic data หรือ data leakage เพื่อปรับ metrics
 
 ---
+
 ## 🔍 คำสั่งสำหรับตรวจสอบความสมบูรณ์ของระบบ (Verification Commands)
 
 เมื่อแก้ไขโค้ดแต่ละส่วน ให้รันคำสั่งเหล่านี้เพื่อตรวจสอบว่าระบบไม่พัง:

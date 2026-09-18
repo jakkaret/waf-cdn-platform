@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the WAF dependency vulnerability scan weekly
+
+[Timer]
+OnCalendar=Mon 03:30
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
