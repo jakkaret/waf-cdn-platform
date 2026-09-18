@@ -6,6 +6,7 @@ import logging
 import asyncio
 from typing import Optional, List, Dict, Any, Tuple
 from fastapi import APIRouter, HTTPException, Depends, Query, Request as _Request
+from pydantic import BaseModel
 import json as _json
 import pathlib as _pathlib
 
@@ -310,3 +311,65 @@ async def cdn_logs(
 
     logs = _db.get_cdn_logs(limit=limit, region=region or "ALL")
     return {"logs": logs}
+
+
+# cdn/scripts (Edge nodes' own log_forwarder.py) POSTs batches here. That
+# script already exists and has been running for weeks (container
+# "cdn-log-forwarder" on each edge), but this endpoint never did -- every
+# batch it sent got a 405, backed off, and piled up in its in-memory ring
+# buffer (observed on edge-th: ~4700 entries queued, oldest silently
+# dropped once the 5000-entry cap was hit). normalize_cdn_access was
+# already imported above for exactly this, just never wired to a route.
+#
+# Edge nodes are trusted infra, not end users -- there is no per-request
+# auth token today (the forwarder script sends none), so this is gated by
+# source IP against the known edge nodes' addresses instead, the same
+# pattern services/log_forward.py's KNOWN_EDGE_IPS and
+# dashboard/backend/api/ml.py's _is_internal_relay_request already use for
+# comparable trusted-internal-caller checks. Port 8000 is reachable from
+# the public internet (confirmed via `ufw status`), so this can't be left
+# unauthenticated -- anyone would otherwise be able to inject arbitrary
+# rows into the analytics ClickHouse/DynamoDB store.
+_KNOWN_EDGE_FORWARDER_IPS = {"45.154.26.91"}
+
+
+class CdnLogIngestPayload(BaseModel):
+    region: str
+    logs: List[Dict[str, Any]]
+
+
+def _store_one_cdn_log(entry: dict, region: str) -> bool:
+    """Runs in a worker thread (see below) -- ch.save_log/_db.save_log are
+    synchronous (boto3, clickhouse-connect), and measured ~5.9s for a single
+    entry in production (likely real AWS DynamoDB round-trip latency, not
+    diagnosed further here -- out of scope for this fix). Calling them
+    directly in the async route blocked the event loop long enough that the
+    edge forwarder's own 5s client timeout fired before a response arrived,
+    which looked identical to the request never being handled at all. This
+    project has hit exactly this class of bug before (event-loop-blocking
+    sync I/O in a FastAPI handler) -- see WORKING_RULES.md / Trello history.
+    """
+    try:
+        data = normalize_cdn_access(entry, region)
+        if ch.connected:
+            ch.save_log("access_logs", data)
+        _db.save_log(data)
+        return True
+    except Exception:
+        logger.exception("cdn log ingest: failed to store one entry from region=%s", region)
+        return False
+
+
+@router.post("/logs/ingest", include_in_schema=False)
+async def ingest_cdn_logs(payload: CdnLogIngestPayload, request: _Request):
+    client_host = request.client.host if request.client else ""
+    if client_host not in _KNOWN_EDGE_FORWARDER_IPS:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    entries = [e for e in payload.logs if isinstance(e, dict)]
+    results = await asyncio.gather(
+        *(asyncio.to_thread(_store_one_cdn_log, e, payload.region) for e in entries)
+    )
+    stored = sum(1 for r in results if r)
+
+    return {"received": len(payload.logs), "stored": stored}
