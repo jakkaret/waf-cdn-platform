@@ -14,7 +14,25 @@ db = DynamoDBService()
 ch = ClickHouseService()
 log_buffer = {}
 
-KNOWN_EDGE_IPS = {"45.154.26.91", "172.18.0.2"}
+# 172.18.0.2 (dvwa's own container IP) stays: that's a request the dvwa
+# container made back to itself/nginx (asset loads, healthchecks), not real
+# traffic, and is correctly excluded from analytics regardless of which
+# pipeline is live.
+#
+# 45.154.26.91 (edge-th) was removed 18/09/2026. It existed to avoid double-
+# counting: cdn_log_forward.py (services/cdn_log_forward.py, tailing
+# logs/cdn/<region>/access.json) was meant to report edge-originated traffic
+# separately, so this file's own process_access_log() skipped anything
+# arriving with the edge's IP as remote_addr to not count it twice. That
+# sibling pipeline is dead -- its last real data is from 25/08/2026, and it
+# is not even imported by main.py's startup anymore (only log_forward_worker
+# is) -- so the skip was silently dropping virtually all real lab-domain
+# traffic instead of avoiding a duplicate, since nearly everything reaching
+# Main's nginx for the public domains arrives via the edge tunnel with this
+# exact remote_addr. Confirmed via a live 20-request mixed benign/attack
+# probe against all 4 lab domains: 0 of them appeared in ClickHouse before
+# this fix.
+KNOWN_EDGE_IPS = {"172.18.0.2"}
 
 SEVERITY_NUM_MAP = {
     "0": "CRITICAL",
