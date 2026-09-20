@@ -71,6 +71,7 @@ from services.rate_limiter import limiter  # noqa: E402
 from services.dynamodb_service import DynamoDBService  # noqa: E402
 import services.dynamodb_service as dynamodb_service_module  # noqa: E402
 import services.origin_service as origin_service_module  # noqa: E402
+import services.tenant_service as tenant_service_module  # noqa: E402
 import services.rbac as rbac_module  # noqa: E402
 
 from api import auth as auth_module  # noqa: E402
@@ -78,6 +79,7 @@ from api import origins as origins_module  # noqa: E402
 from api import rules as rules_module  # noqa: E402
 from api import ai_summary as ai_summary_module  # noqa: E402
 from api import domains as domains_module  # noqa: E402
+from api import alerts as alerts_module  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -101,18 +103,32 @@ def _eval_condition(cond, item):
     raise NotImplementedError(f"Unsupported fake-table condition: {type(cond)!r}")
 
 
+def _split_update_clauses(expr: str) -> dict:
+    """DynamoDB UpdateExpression can carry up to one each of SET/ADD/DELETE/
+    REMOVE, in any order, each introduced by its own keyword and running
+    until the next one. Splits `expr` into {keyword: body}; production code
+    in this repo only ever uses one or two of these at once (SET alone,
+    SET+REMOVE, ADD alone, DELETE alone -- verified against every
+    UpdateExpression string in services/dynamodb_service.py), but this
+    parses generally rather than hard-coding those combinations.
+    """
+    import re
+    parts = re.split(r"\s+(SET|ADD|DELETE|REMOVE)\s+", " " + expr.strip())
+    # parts[0] is empty (nothing before the first keyword); then alternating
+    # keyword, body, keyword, body, ...
+    clauses: dict = {}
+    for i in range(1, len(parts), 2):
+        clauses[parts[i]] = parts[i + 1].strip()
+    return clauses
+
+
 def _apply_update_expression(item, expr, attr_values=None, attr_names=None):
     attr_values = attr_values or {}
     attr_names = attr_names or {}
+    clauses = _split_update_clauses(expr)
 
-    set_part, remove_part = expr, None
-    if " REMOVE " in expr:
-        set_part, remove_part = expr.split(" REMOVE ", 1)
-    set_part = set_part.strip()
-    if set_part.startswith("SET "):
-        set_part = set_part[len("SET "):]
-
-    if set_part.strip():
+    set_part = clauses.get("SET", "")
+    if set_part:
         for assignment in set_part.split(","):
             assignment = assignment.strip()
             if not assignment:
@@ -122,12 +138,49 @@ def _apply_update_expression(item, expr, attr_values=None, attr_names=None):
             value = attr_values.get(val_tok, val_tok)
             item[name] = value
 
+    remove_part = clauses.get("REMOVE", "")
     if remove_part:
         for name_tok in remove_part.split(","):
             name_tok = name_tok.strip()
             if not name_tok:
                 continue
             item.pop(attr_names.get(name_tok, name_tok), None)
+
+    # ADD/DELETE on a Set-typed attribute: real DynamoDB creates the set on
+    # first ADD if it doesn't exist yet, and a DELETE against a set that
+    # doesn't contain the value (or doesn't exist) is a no-op, never an
+    # error -- both mirrored here.
+    add_part = clauses.get("ADD", "")
+    if add_part:
+        for assignment in add_part.split(","):
+            assignment = assignment.strip()
+            if not assignment:
+                continue
+            name_tok, val_tok = assignment.split(None, 1)
+            name = attr_names.get(name_tok, name_tok)
+            value = attr_values.get(val_tok.strip(), val_tok.strip())
+            existing = item.get(name)
+            if not isinstance(existing, set):
+                existing = set(existing) if existing else set()
+            existing |= set(value) if isinstance(value, (set, frozenset)) else {value}
+            item[name] = existing
+
+    delete_part = clauses.get("DELETE", "")
+    if delete_part:
+        for assignment in delete_part.split(","):
+            assignment = assignment.strip()
+            if not assignment:
+                continue
+            name_tok, val_tok = assignment.split(None, 1)
+            name = attr_names.get(name_tok, name_tok)
+            value = attr_values.get(val_tok.strip(), val_tok.strip())
+            existing = item.get(name)
+            if isinstance(existing, set):
+                existing -= set(value) if isinstance(value, (set, frozenset)) else {value}
+                if existing:
+                    item[name] = existing
+                else:
+                    item.pop(name, None)
 
     return item
 
@@ -222,6 +275,16 @@ def fake_infrastructure(monkeypatch, tmp_path):
     # on the fake and shares the same backing store as origin_service.db.
     monkeypatch.setattr(dynamodb_service_module, "DynamoDBService", FakeDynamoDBService)
     monkeypatch.setattr(origin_service_module, "db", FakeDynamoDBService())
+    # origin_service also keeps process-wide, in-memory caches (live FRP
+    # proxy list; origins_table.scan() result; per-user get_origins_by_user
+    # result) alongside the db singleton above -- a fresh fake db per test
+    # is worthless if a prior test's cached result survives into it. Reset
+    # all three here, at the same place db itself is reset, so any future
+    # test using any of them gets this for free instead of needing its own
+    # setup_function boilerplate.
+    monkeypatch.setattr(origin_service_module, "_LIVE_PROXIES_CACHE", None)
+    monkeypatch.setattr(origin_service_module, "_ORIGINS_SCAN_CACHE", None)
+    monkeypatch.setattr(origin_service_module, "_USER_ORIGINS_CACHE", {})
     # api/ai_summary.py also does `db = DynamoDBService()` at import time
     # (used by /api/ai/notifications/feed and /mark-read); not exercised by
     # any of the five required scenarios today, but left unpatched it is a
@@ -235,11 +298,34 @@ def fake_infrastructure(monkeypatch, tmp_path):
     # so its domains_table shares the same backing store as the fake used by
     # origin_service.db and verify_origin_ownership's local construction.
     monkeypatch.setattr(domains_module, "db", FakeDynamoDBService())
+    # api/alerts.py also does `db = DynamoDBService()` at import time (used
+    # by /api/alerts/recent's get_all_alerts and connect/poll's
+    # waf_users.update_item chat-id save) -- same reasoning as ai_summary
+    # and domains above: caught live by a real test (connect/poll's save
+    # tried a real network connection to the loopback DYNAMODB_ENDPOINT_URL
+    # and failed with a 500 instead of writing to the fake store).
+    monkeypatch.setattr(alerts_module, "db", FakeDynamoDBService())
+    # services/tenant_service.py's `db = DynamoDBService()` (used by
+    # get_user_origins_and_domains, called from api/analytics.py,
+    # api/copilot.py, api/ai_summary.py and api/tunnels.py's
+    # get_tunnels_status) was the one singleton in this list that had never
+    # been patched -- every caller silently saw "this user owns nothing" in
+    # every test, since the function's own try/except swallows the
+    # unpatched instance's connection failure and returns ([], [], [])
+    # rather than raising. FakeDynamoDBService() always shares state through
+    # the module-level _STORE regardless of how many instances are
+    # constructed, so this needs nothing beyond the same one-line pattern.
+    monkeypatch.setattr(tenant_service_module, "db", FakeDynamoDBService())
 
     # Auth: both api.auth's and services.rbac's AuthService singletons must
     # see the same users, so point both at the same backing list.
     monkeypatch.setattr(auth_module.auth_service, "users_table", _table("waf_users"))
     monkeypatch.setattr(rbac_module.auth_service, "users_table", _table("waf_users"))
+    # services/origin_service.py's own AuthService() instance (used by
+    # list_origin_viewers and the viewer-grant endpoints' get_user_by_email
+    # lookup) must see the same registered users as api.auth's, or a real
+    # registered user looks like "no account found" to those calls.
+    monkeypatch.setattr(origin_service_module.auth_service, "users_table", _table("waf_users"))
 
     # Rule files/nginx: rule_manager is instantiated at import time against
     # the *real* modsecurity/custom-rules directory, and reload/test shell

@@ -94,5 +94,29 @@ def verify_origin_ownership(
     
     if origin.get("admin_user_id") != current_user.get("user_id"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. You do not own this origin.")
-    
+
+    return origin
+
+
+def verify_origin_access(
+    origin_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Read-only counterpart to verify_origin_ownership: the owner, or a
+    user explicitly granted viewer access via /origins/{id}/viewers, may
+    read this origin. Every write/management endpoint (update, delete,
+    restore, captcha, otp, viewer management itself) stays on
+    verify_origin_ownership unchanged -- a viewer grant is read-only,
+    matching what its name says."""
+    from services.dynamodb_service import DynamoDBService
+    db = DynamoDBService()
+    origin = db.get_origin_by_id(origin_id)
+    if not origin or origin.get("status") in ARCHIVED_ORIGIN_STATUSES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Origin not found")
+
+    user_id = current_user.get("user_id")
+    viewer_ids = origin.get("viewer_user_ids") or set()
+    if origin.get("admin_user_id") != user_id and user_id not in viewer_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. You do not have access to this origin.")
+
     return origin

@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 import ipaddress
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Literal, Optional
-from services.rbac import get_current_user, verify_origin_ownership
+from services.rbac import get_current_user, verify_origin_ownership, verify_origin_access
 import services.origin_service as origin_service
 from services.captcha_config import DEFAULT_CONFIG, get_origin_config, save_origin_config
 from services.otp_config import (
@@ -22,6 +22,9 @@ class OriginUpdate(BaseModel):
     label: Optional[str] = None
     ip: Optional[str] = None
     port: Optional[int] = Field(None, ge=1, le=65535)
+
+class OriginViewerGrant(BaseModel):
+    email: str
 class CaptchaShieldConfig(BaseModel):
     enabled: bool = False
     engine: Literal["native", "turnstile"] = "native"
@@ -107,30 +110,64 @@ async def get_quota(current_user: dict = Depends(get_current_user)):
     info = origin_service.get_quota_info(current_user.get("user_id"))
     return info
 
-@router.get("")
-async def list_origins(current_user: dict = Depends(get_current_user)):
-    user_id = current_user.get("user_id")
-    user_role = current_user.get("role", "user")
-    
-    # Auto-sync active tunnels as origins for seamless zero-touch experience
-    await origin_service.auto_sync_tunnel_origins(user_id, user_role)
-    
-    origins_list = origin_service.get_origins_for_user(user_id)
-    formatted_origins = []
-    for origin in origins_list:
+def _tunnel_is_online(tunnel_name: str, online_names: set) -> bool:
+    """FRP namespaces a proxy's live name with the connection's identity for
+    shared/legacy-token clients (e.g. "<legacy-token>.dvwa-waf-it-kku-online"),
+    but origin records created at different points in this system's history
+    stored `tunnel_name` both with and without that prefix (verified against
+    real data: bwapp/dvwa/juice have the bare name, newer records have the
+    full prefixed one) -- exact equality silently reported real, online
+    tunnels as disconnected. Match tolerantly: exact, or either string is a
+    suffix of the other.
+    """
+    if not tunnel_name:
+        return False
+    return any(
+        tunnel_name == n or n.endswith(tunnel_name) or tunnel_name.endswith(n)
+        for n in online_names
+    )
+
+
+def _attach_live_status(origins: list, online_names: set) -> list:
+    """`status` is CRUD lifecycle state (active/archived/pending) and is
+    never touched here. `live_connected` is a separately computed, read-time
+    field for tunnel-backed origins only: is the underlying FRP proxy
+    actually online right now. Non-tunnel origins get None (the question
+    doesn't apply to them)."""
+    out = []
+    for origin in origins:
         o = dict(origin)
         o["origin_id"] = o.get("id")
         o["health"] = o.get("health", "unknown")
-        formatted_origins.append(o)
+        if o.get("is_tunnel"):
+            o["live_connected"] = _tunnel_is_online(o.get("tunnel_name") or "", online_names)
+        else:
+            o["live_connected"] = None
+        out.append(o)
+    return out
+
+@router.get("")
+async def list_origins(
+    current_user: dict = Depends(get_current_user),
+    refresh_status: bool = Query(False, description="Bypass the 60s live-connectivity cache and poll FRP now"),
+):
+    user_id = current_user.get("user_id")
+    user_role = current_user.get("role", "user")
+
+    # Auto-sync active tunnels as origins for seamless zero-touch experience
+    await origin_service.auto_sync_tunnel_origins(user_id, user_role)
+
+    origins_list = origin_service.get_origins_visible_to_user(user_id)
+    online_names = await origin_service.get_live_online_proxy_names(force=refresh_status)
+    formatted_origins = _attach_live_status(origins_list, online_names)
     # Sort by created_at descending (newest first)
     formatted_origins.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return {"origins": formatted_origins}
 
 @router.get("/{origin_id}")
-async def get_origin(origin: dict = Depends(verify_origin_ownership)):
-    o = dict(origin)
-    o["origin_id"] = o.get("id")
-    o["health"] = o.get("health", "unknown")
+async def get_origin(origin: dict = Depends(verify_origin_access)):
+    online_names = await origin_service.get_live_online_proxy_names()
+    o = _attach_live_status([origin], online_names)[0]
     return o
 
 @router.put("/{origin_id}")
@@ -166,6 +203,40 @@ async def restore_origin(origin_id: str, current_user: dict = Depends(get_curren
     if success:
         return {"status": "success", "message": "Origin restored successfully"}
     raise HTTPException(status_code=500, detail="Failed to restore origin")
+
+@router.get("/{origin_id}/viewers")
+async def get_origin_viewers(origin: dict = Depends(verify_origin_ownership)):
+    return {"viewers": origin_service.list_origin_viewers(origin.get("id"))}
+
+@router.post("/{origin_id}/viewers")
+async def add_origin_viewer(
+    payload: OriginViewerGrant,
+    origin: dict = Depends(verify_origin_ownership),
+):
+    # Reuse origin_service's own AuthService instance rather than
+    # constructing a fresh one per request.
+    target = origin_service.auth_service.get_user_by_email(payload.email.strip().lower())
+    if not target:
+        raise HTTPException(status_code=404, detail="No account found with that email")
+    target_id = target.get("user_id")
+    if target_id == origin.get("admin_user_id"):
+        raise HTTPException(status_code=400, detail="You already own this origin")
+    success = origin_service.db.add_origin_viewer(origin.get("id"), target_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to add viewer")
+    from services.tenant_service import invalidate_tenant_cache
+    invalidate_tenant_cache(target_id)
+    return {"status": "success", "viewer": {"user_id": target_id, "username": target.get("username", ""), "email": target.get("email", "")}}
+
+@router.delete("/{origin_id}/viewers/{viewer_user_id}")
+async def remove_origin_viewer(viewer_user_id: str, origin: dict = Depends(verify_origin_ownership)):
+    success = origin_service.db.remove_origin_viewer(origin.get("id"), viewer_user_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to remove viewer")
+    from services.tenant_service import invalidate_tenant_cache
+    invalidate_tenant_cache(viewer_user_id)
+    return {"status": "success", "message": "Viewer removed"}
+
 @router.get("/{origin_id}/captcha")
 async def get_captcha_config(origin: dict = Depends(verify_origin_ownership)):
     try:
