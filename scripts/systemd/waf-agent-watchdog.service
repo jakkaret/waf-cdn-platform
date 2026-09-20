@@ -1,0 +1,10 @@
+[Unit]
+Description=Tunnel agent (waf-agent/frpc) health check + auto-recover
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/waf_project/scripts
+ExecStart=/usr/bin/python3 /root/waf_project/scripts/tunnel_agent_watchdog.py
+Nice=5
