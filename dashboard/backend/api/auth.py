@@ -250,6 +250,7 @@ def _safe_user(user: dict) -> dict:
         "avatar_url": user.get("avatar_url", ""),
         "created_at": user.get("created_at"),
         "last_login": user.get("last_login"),
+        "share_threat_intel": bool(user.get("share_threat_intel", False)),
     }
 
 

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { settingsApi, SystemSettings } from '../api/settings'
+import { threatIntelApi, TrendingPattern } from '../api/threatIntel'
+import { authApi } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
@@ -25,14 +27,16 @@ import {
   Check,
   Cpu,
   Layers,
+  Share2,
+  Users,
 } from 'lucide-react'
 
 export const Settings: React.FC = () => {
-  const { user } = useAuthStore()
+  const { user, updateUser } = useAuthStore()
   const isAdmin = user?.role === 'admin'
   const queryClient = useQueryClient()
 
-  const [activeTab, setActiveTab] = useState<'waf' | 'alerts' | 'edge' | 'system'>('waf')
+  const [activeTab, setActiveTab] = useState<'waf' | 'alerts' | 'edge' | 'system' | 'threat-intel'>('waf')
 
   // Settings State Form
   const [form, setForm] = useState<Partial<SystemSettings>>({
@@ -88,6 +92,35 @@ export const Settings: React.FC = () => {
     e.preventDefault()
     saveMutation.mutate(form)
   }
+
+  // Cross-tenant threat intel (services/threat_intel.py) -- opt-in toggle +
+  // trending feed. The feed query is only enabled once the current user is
+  // known to be opted in (the backend 403s otherwise -- reciprocity, same
+  // as CrowdSec's community wall).
+  const isSharingThreatIntel = !!user?.share_threat_intel
+
+  const optInMutation = useMutation({
+    mutationFn: threatIntelApi.setOptIn,
+    onSuccess: async (res) => {
+      if (user) updateUser({ ...user, share_threat_intel: res.share_threat_intel })
+      toast.success(
+        res.share_threat_intel
+          ? 'เปิดแชร์ threat intel แล้ว -- pattern การโจมตี (ไม่มี IP/URL) จะถูกแชร์แบบไม่ระบุตัวตน'
+          : 'ปิดแชร์ threat intel แล้ว มีผลทันทีกับการโจมตีครั้งถัดไป'
+      )
+      queryClient.invalidateQueries({ queryKey: ['threat-intel-trending'] })
+    },
+    onError: () => toast.error('เปลี่ยนการตั้งค่าแชร์ threat intel ไม่สำเร็จ'),
+  })
+
+  const { data: trendingPatterns, isLoading: trendingLoading, error: trendingError } = useQuery<
+    TrendingPattern[]
+  >({
+    queryKey: ['threat-intel-trending'],
+    queryFn: threatIntelApi.getTrending,
+    enabled: activeTab === 'threat-intel' && isSharingThreatIntel,
+    retry: false,
+  })
 
   if (isLoading) {
     return (
@@ -183,6 +216,18 @@ export const Settings: React.FC = () => {
             >
               <Server size={14} />
               <span>Stack Diagnostics</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('threat-intel')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'threat-intel'
+                  ? 'bg-orange-500 text-white shadow-sm'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+              }`}
+            >
+              <Share2 size={14} />
+              <span>Threat Intel (Community)</span>
             </button>
           </div>
 
@@ -544,6 +589,99 @@ export const Settings: React.FC = () => {
                   <span className="mono-chip text-emerald-600 dark:text-emerald-400 font-bold">ONLINE</span>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ═══ Tab 5: Threat Intel (Community, opt-in, pattern-only) ═══ */}
+          {activeTab === 'threat-intel' && (
+            <div className="dash-card p-5 sm:p-6 space-y-5 animate-fade-in">
+              <div>
+                <h3 className="text-[14.5px] font-bold text-[var(--text-primary)] font-mono m-0 mb-1 flex items-center gap-2">
+                  <Share2 size={16} className="text-orange-600 dark:text-orange-400" />
+                  Cross-Tenant Threat Intel (Opt-in)
+                </h3>
+                <p className="text-[12px] text-[var(--text-muted)] m-0">
+                  แชร์เฉพาะ <strong>pattern การโจมตี</strong> (rule ID + attack type) แบบไม่ระบุตัวตนข้าม tenant
+                  ไม่มีการแชร์ IP, URL, หรือ payload ใดๆ ทั้งสิ้น
+                </p>
+              </div>
+
+              <div className="p-4 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="font-mono font-bold text-[13px] text-[var(--text-primary)] flex items-center gap-2">
+                    <Users size={14} className="text-orange-500" />
+                    แชร์ threat intel กับผู้ใช้รายอื่น
+                  </div>
+                  <p className="text-[11px] text-[var(--text-muted)] font-mono m-0 leading-relaxed max-w-md">
+                    เมื่อเปิด: rule ID + attack type ของการโจมตีที่บล็อกจริงบน origin ของคุณจะถูกส่งเป็น hash
+                    ที่ไม่สามารถย้อนกลับไปหาบัญชีคุณได้ (ไม่มี salt = เดาไม่ได้) เข้ากลุ่มกลาง และคุณจะเห็น
+                    pattern ที่กำลัง trend ข้าม tenant อื่นที่เปิดด้วยกัน ปิดเมื่อไหร่ มีผลทันทีกับการโจมตีครั้งถัดไป
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => optInMutation.mutate(!isSharingThreatIntel)}
+                  disabled={optInMutation.isPending}
+                  className={`shrink-0 px-3.5 py-1.5 rounded-md text-[11.5px] font-mono font-bold transition-colors cursor-pointer ${
+                    isSharingThreatIntel
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                      : 'bg-[var(--bg-surface-elevated)] text-[var(--text-secondary)] border border-[var(--bg-border)]'
+                  }`}
+                >
+                  {isSharingThreatIntel ? 'เปิดอยู่ -- คลิกเพื่อปิด' : 'ปิดอยู่ -- คลิกเพื่อเปิด'}
+                </button>
+              </div>
+
+              {!isSharingThreatIntel ? (
+                <div className="dash-card p-8 text-center space-y-2 border-dashed">
+                  <Share2 size={32} className="mx-auto text-[var(--text-muted)] opacity-40" />
+                  <p className="text-[12px] text-[var(--text-muted)] m-0 font-mono">
+                    เปิดแชร์ก่อนเพื่อดู pattern การโจมตีที่ trend อยู่ข้าม tenant อื่น (ต้องแชร์ก่อนถึงจะเห็น)
+                  </p>
+                </div>
+              ) : trendingLoading ? (
+                <div className="flex items-center gap-2 text-[12px] text-[var(--text-muted)] font-mono py-6 justify-center">
+                  <RotateCw size={14} className="animate-spin text-orange-500" />
+                  <span>กำลังโหลด pattern การโจมตีที่ trend อยู่...</span>
+                </div>
+              ) : trendingError ? (
+                <div className="dash-card p-6 text-center text-[12px] text-[var(--text-muted)] font-mono border-dashed">
+                  โหลด pattern ไม่สำเร็จ ลองใหม่อีกครั้ง
+                </div>
+              ) : !trendingPatterns || trendingPatterns.length === 0 ? (
+                <div className="dash-card p-8 text-center space-y-2 border-dashed">
+                  <CheckCircle2 size={32} className="mx-auto text-emerald-500/60" />
+                  <p className="text-[12px] text-[var(--text-muted)] m-0 font-mono">
+                    ยังไม่มี pattern ที่ tenant ตั้งแต่ 2 รายขึ้นไปเจอร่วมกันในช่วง 24 ชม.ที่ผ่านมา
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {trendingPatterns.map((p) => (
+                    <div
+                      key={p.rule_id}
+                      className="p-3.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-mono font-bold text-[12.5px] text-[var(--text-primary)] truncate">
+                          {p.attack_type || 'Unknown attack type'}
+                        </div>
+                        <div className="text-[10.5px] text-[var(--text-muted)] font-mono">
+                          Rule {p.rule_id} • {p.window_hours}h window
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="mono-chip text-orange-600 dark:text-orange-400 font-bold">
+                          {p.total_hits} hits
+                        </span>
+                        <span className="mono-chip text-sky-600 dark:text-sky-400 font-bold">
+                          {p.distinct_tenants} tenants
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
