@@ -1,3 +1,4 @@
+import os
 import clickhouse_connect
 from clickhouse_connect.driver.exceptions import ClickHouseError
 import logging
@@ -6,6 +7,12 @@ import uuid
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# access_logs had no retention at all -- grew to 1.1M rows in 19 days
+# (~58k/day) before being manually cleared once, with nothing stopping it
+# from growing right back to the same size. 30 days is enough for demo +
+# short-term trend analysis; override via env if that assumption changes.
+ACCESS_LOGS_RETENTION_DAYS = int(os.getenv("ACCESS_LOGS_RETENTION_DAYS", "30"))
 
 
 def resolve_edge_node(value) -> str:
@@ -76,7 +83,7 @@ class ClickHouseService:
             
         try:
             # Create access_logs table
-            self.client.command('''
+            self.client.command(f'''
                 CREATE TABLE IF NOT EXISTS access_logs (
                     id UUID,
                     timestamp DateTime,
@@ -93,8 +100,23 @@ class ClickHouseService:
                     rule_id String
                 ) ENGINE = MergeTree()
                 ORDER BY (timestamp, client_ip)
+                TTL timestamp + INTERVAL {ACCESS_LOGS_RETENTION_DAYS} DAY
             ''')
-            
+            # 2026-09-20: access_logs had no retention at all -- grew to
+            # 1.1M rows in 19 days (~58k/day) before being manually cleared
+            # once, with nothing stopping it from growing right back. The
+            # TTL clause above only takes effect on a fresh CREATE TABLE
+            # (this whole block is a no-op against Main's existing table,
+            # which predates this fix); MODIFY TTL below applies it to a
+            # table that already exists, idempotently -- safe to run on
+            # every startup. Rows are still whatever age they were before
+            # this ran; nothing is deleted immediately unless a row is
+            # already older than the retention window at the time this
+            # executes.
+            self.client.command(
+                f"ALTER TABLE access_logs MODIFY TTL timestamp + INTERVAL {ACCESS_LOGS_RETENTION_DAYS} DAY"
+            )
+
             # Create security_audit_logs table
             self.client.command('''
                 CREATE TABLE IF NOT EXISTS security_audit_logs (
