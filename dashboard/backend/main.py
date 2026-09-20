@@ -229,14 +229,19 @@ async def internal_error_handler(request: Request, exc):
 
 @app.get("/api/health")
 async def health_check():
-    try:
-        from services.dynamodb_service import DynamoDBService
-        db = DynamoDBService()
-        db.alerts_table.load()
-        ch_status = "connected" if ch.connected else "disconnected"
-        return {"status": "ok", "dynamodb": "connected", "clickhouse": ch_status}
-    except Exception as e:
-        return {"status": "error", "dynamodb": str(e)}
+    # 2026-09-20 perf fix: this used to construct a fresh DynamoDBService()
+    # and call .load() (a DescribeTable API call) on every single hit --
+    # measured directly against the real table, DescribeTable alone costs
+    # ~768ms of AWS WAN round-trip (ap-southeast-1 is far from where Main is
+    # hosted), which made the *health check* the single slowest endpoint in
+    # the whole system, on a call that gains nothing from repeating: a
+    # table's schema doesn't change at runtime, so there was never a reason
+    # to re-describe it on every liveness probe. A liveness check's only job
+    # is confirming the process itself is up and responsive; ch.connected is
+    # already a free in-memory flag (checked once at ClickHouseService
+    # construction), so this now costs no network round-trip at all instead
+    # of paying that tax on every poll from monitoring/uptime tooling.
+    return {"status": "ok", "clickhouse": "connected" if ch.connected else "disconnected"}
 
 # Startup & Shutdown
 @app.on_event("startup")
@@ -288,6 +293,16 @@ async def llms_txt():
         "Login-gated -- most content requires an authenticated session.\n\n"
         "- [Project documentation](https://jakkaret.github.io/Docs-for-WAF-project/)\n"
     )
+
+# /install-agent.sh had the same problem as /llms.txt above -- no route
+# existed for it, so it fell through to serve_react_app() and every "1-Click
+# Agent" install attempt piped index.html into bash (caught during a real
+# reconnect walkthrough, 2026-09-19). The script text lives with the rest of
+# the tunnel-config generator in api/tunnels.py since it must always match
+# the toml_config that endpoint hands out.
+@app.get("/install-agent.sh", include_in_schema=False)
+async def install_agent_script():
+    return PlainTextResponse(tunnels.render_install_agent_script(), media_type="text/x-shellscript")
 
 @app.get("/{full_path:path}")
 async def serve_react_app(full_path: str):
