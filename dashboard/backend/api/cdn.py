@@ -68,6 +68,75 @@ REGIONS_META = {
 }
 
 
+async def _check_tls_port(ip: str, port: int = 443, timeout: float = 1.5) -> bool:
+    """Real TCP-level probe of the TLS port -- this is deliberately NOT a
+    full certificate-chain validation. Caddy's on-demand TLS on these edges
+    issues certs per verified HOSTNAME (SNI-gated, see
+    api/domains.py's check-ssl-allowed), not per bare IP -- connecting to
+    the IP directly with no matching SNI never gets a usable cert back
+    (confirmed live: openssl s_client / curl --resolve to a real routed
+    hostname DOES complete and validate; the bare IP does not). Rather than
+    hardcode a per-edge "known test domain" that will silently rot the
+    moment that domain's tunnel is reconfigured, this only asserts the one
+    thing that's cheap and durable to check without that fragility: is
+    something actually listening and willing to start a TLS handshake on
+    443 right now. Replaces a literal `"ssl_status": "active"` that was
+    never checked at all before this."""
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, port), timeout=timeout
+        )
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+async def _check_node(region: str, meta: dict, client: httpx.AsyncClient) -> Dict[str, Any]:
+    health_url = meta.get("health_url")
+    online = False
+    rtt_ms = 0
+    start_t = time.time()
+
+    try:
+        res = await client.get(health_url)
+        rtt_ms = max(1, int((time.time() - start_t) * 1000))
+        online = res.status_code == 200
+    except Exception:
+        online = False
+        rtt_ms = 0
+
+    if not online and region == "MAIN":
+        online = True
+        rtt_ms = 2
+
+    if region == "MAIN":
+        # health_url is a loopback http:// call -- there is no TLS hop to
+        # probe here at all, so "active"/"unreachable" would both be a lie.
+        ssl_status = "not_applicable"
+    else:
+        ssl_status = "port_open" if await _check_tls_port(meta["ip"], meta.get("port", 443)) else "unreachable"
+
+    return {
+        "region": region,
+        "name": meta["name"],
+        "flag": meta["flag"],
+        "city": meta["city"],
+        "ip": meta["ip"],
+        "lat": meta["lat"],
+        "lng": meta["lng"],
+        "status": "healthy" if online else "degraded",
+        "online": online,
+        "latency_ms": rtt_ms,
+        "ssl_status": ssl_status,
+        "cache_engine": "nginx_edge_zone"
+    }
+
+
 @router.get("/nodes")
 async def cdn_nodes(current_user: dict = Depends(require_viewer_or_above)):
     """Check live operational health status of configured CDN POPs"""
@@ -76,39 +145,6 @@ async def cdn_nodes(current_user: dict = Depends(require_viewer_or_above)):
     cached_time, cached_results = _CDN_NODES_CACHE
     if now - cached_time < CDN_CACHE_TTL and cached_results:
         return cached_results
-
-    async def _check_node(region: str, meta: dict, client: httpx.AsyncClient):
-        health_url = meta.get("health_url")
-        online = False
-        rtt_ms = 0
-        start_t = time.time()
-
-        try:
-            res = await client.get(health_url)
-            rtt_ms = max(1, int((time.time() - start_t) * 1000))
-            online = res.status_code == 200
-        except Exception:
-            online = False
-            rtt_ms = 0
-
-        if not online and region == "MAIN":
-            online = True
-            rtt_ms = 2
-
-        return {
-            "region": region,
-            "name": meta["name"],
-            "flag": meta["flag"],
-            "city": meta["city"],
-            "ip": meta["ip"],
-            "lat": meta["lat"],
-            "lng": meta["lng"],
-            "status": "healthy" if online else "degraded",
-            "online": online,
-            "latency_ms": rtt_ms,
-            "ssl_status": "active",
-            "cache_engine": "nginx_edge_zone"
-        }
 
     try:
         async with httpx.AsyncClient(timeout=1.2) as client:
@@ -119,6 +155,56 @@ async def cdn_nodes(current_user: dict = Depends(require_viewer_or_above)):
     except Exception as e:
         logger.error(f"Error checking CDN nodes: {e}")
         return cached_results or []
+
+
+def _empty_cdn_stats() -> Dict[str, Any]:
+    # No fake TH/MAIN placeholder rows -- a region only appears in
+    # regional_breakdown once real access_logs rows exist for it. An empty
+    # dict here is honest; a dict with invented zero-filled regions was the
+    # thing this replaced.
+    return {
+        "cache_hit_ratio": 0.0,
+        "bandwidth_saved_pct": 0.0,
+        "bandwidth_saved_bytes": 0,
+        "bandwidth_saved_formatted": "0.0 B",
+        "avg_ttfb_ms": 0,
+        "total_requests": 0,
+        "cached_requests": 0,
+        "uncached_requests": 0,
+        "regional_breakdown": {},
+    }
+
+
+def _format_bytes(n: int) -> str:
+    if n > 1024 * 1024 * 1024:
+        return f"{n / (1024*1024*1024):.1f} GB"
+    if n > 1024 * 1024:
+        return f"{n / (1024*1024):.1f} MB"
+    return f"{n / 1024:.1f} KB"
+
+
+# Reverse lookup from a raw ClickHouse edge_node value (e.g. "edge-th") to
+# the display region code ("TH") -- reuses REGIONS_META's own db_keys
+# instead of a second hand-maintained mapping.
+_REGION_BY_DB_KEY = {
+    key: region for region, meta in REGIONS_META.items() for key in meta["db_keys"]
+}
+
+
+def _region_label_for(edge_node_value: Optional[str]) -> str:
+    return _REGION_BY_DB_KEY.get((edge_node_value or "").strip().lower(), edge_node_value or "unknown")
+
+
+def _nan_to_zero(v) -> float:
+    # ClickHouse's avgIf() returns NaN (not NULL) when zero rows match the
+    # condition -- request_time_ms is ~73% zero right now (known, tracked
+    # separately), so this branch is hit often, not an edge case.
+    if v is None:
+        return 0.0
+    try:
+        return 0.0 if v != v else float(v)
+    except TypeError:
+        return 0.0
 
 
 @router.get("/stats")
@@ -134,20 +220,7 @@ async def cdn_stats(current_user: dict = Depends(require_viewer_or_above)):
 
     # If non-admin user has NO registered origins: return clean empty stats
     if not is_admin and not active_origins and not user_domains:
-        return {
-            "cache_hit_ratio": 0.0,
-            "bandwidth_saved_pct": 0.0,
-            "bandwidth_saved_bytes": 0,
-            "bandwidth_saved_formatted": "0.0 B",
-            "avg_ttfb_ms": 0,
-            "total_requests": 0,
-            "cached_requests": 0,
-            "uncached_requests": 0,
-            "regional_breakdown": {
-                "TH": {"requests": 0, "hit_ratio": 0.0, "bandwidth_saved": "0.0 B", "status": "operational", "avg_latency_ms": 14},
-                "MAIN": {"requests": 0, "hit_ratio": 0.0, "bandwidth_saved": "0.0 B", "status": "standby", "avg_latency_ms": 4}
-            }
-        }
+        return _empty_cdn_stats()
 
     where_clauses = ["timestamp >= now() - INTERVAL 24 HOUR"]
     if not is_admin and user_domains:
@@ -161,88 +234,62 @@ async def cdn_stats(current_user: dict = Depends(require_viewer_or_above)):
     where_sql = f"WHERE {' AND '.join(where_clauses)}"
 
     if not ch.connected:
-        return {
-            "cache_hit_ratio": 0.0,
-            "bandwidth_saved_pct": 0.0,
-            "bandwidth_saved_bytes": 0,
-            "bandwidth_saved_formatted": "0.0 B",
-            "avg_ttfb_ms": 0,
-            "total_requests": 0,
-            "cached_requests": 0,
-            "uncached_requests": 0,
-            "regional_breakdown": {
-                "TH": {"requests": 0, "hit_ratio": 0.0, "bandwidth_saved": "0.0 B", "status": "operational", "avg_latency_ms": 14},
-                "MAIN": {"requests": 0, "hit_ratio": 0.0, "bandwidth_saved": "0.0 B", "status": "standby", "avg_latency_ms": 4}
-            }
-        }
+        return _empty_cdn_stats()
 
     try:
         query = f"""
         SELECT
+            edge_node,
             count() as total_reqs,
             countIf(status_code IN (200, 304) AND (url LIKE '%.js' OR url LIKE '%.css' OR url LIKE '%.png' OR url LIKE '%.jpg' OR url LIKE '%.ico' OR url LIKE '%.woff%')) as cache_hits,
-            countIf(url NOT LIKE '%.js' AND url NOT LIKE '%.css' AND url NOT LIKE '%.png' AND url NOT LIKE '%.jpg' AND url NOT LIKE '%.ico' AND url NOT LIKE '%.woff%') as cache_misses
+            avgIf(request_time_ms, request_time_ms > 0) as avg_lat_ms
         FROM access_logs
         {where_sql}
+        GROUP BY edge_node
         """
-        rows = ch.query_stats(query)
-        if rows and len(rows) > 0:
-            total, hits, misses = rows[0]
-            if total > 0:
-                hit_ratio = round((hits / total) * 100, 1)
-                saved_bytes = hits * 128000
-                if saved_bytes > 1024 * 1024 * 1024:
-                    saved_str = f"{saved_bytes / (1024*1024*1024):.1f} GB"
-                elif saved_bytes > 1024 * 1024:
-                    saved_str = f"{saved_bytes / (1024*1024):.1f} MB"
-                else:
-                    saved_str = f"{saved_bytes / 1024:.1f} KB"
+        rows = ch.query_stats(query) or []
+        total = sum(r[1] for r in rows)
+        hits = sum(r[2] for r in rows)
 
-                return {
-                    "cache_hit_ratio": hit_ratio,
-                    "bandwidth_saved_pct": min(95.0, round(hit_ratio * 0.9, 1)),
-                    "bandwidth_saved_bytes": saved_bytes,
-                    "bandwidth_saved_formatted": saved_str,
-                    "avg_ttfb_ms": 26,
-                    "total_requests": total,
-                    "cached_requests": hits,
-                    "uncached_requests": misses,
-                    "regional_breakdown": {
-                        "TH": {"requests": total, "hit_ratio": hit_ratio, "bandwidth_saved": saved_str, "status": "operational", "avg_latency_ms": 14},
-                        "MAIN": {"requests": 0, "hit_ratio": 100.0, "bandwidth_saved": "0.0 B", "status": "standby", "avg_latency_ms": 4}
-                    }
-                }
+        if total == 0:
+            return _empty_cdn_stats()
+
+        misses = total - hits
+        hit_ratio = round((hits / total) * 100, 1)
+        saved_bytes = hits * 128000
+        saved_str = _format_bytes(saved_bytes)
+
+        ttfb_rows = ch.query_stats(
+            f"SELECT avgIf(request_time_ms, request_time_ms > 0) FROM access_logs {where_sql}"
+        )
+        avg_ttfb_ms = round(_nan_to_zero(ttfb_rows[0][0])) if ttfb_rows else 0
+
+        regional_breakdown: Dict[str, Any] = {}
+        for edge_node_val, reqs, region_hits, avg_lat in rows:
+            region_hit_ratio = round((region_hits / reqs) * 100, 1) if reqs else 0.0
+            label = _region_label_for(edge_node_val)
+            regional_breakdown[label] = {
+                "requests": reqs,
+                "hit_ratio": region_hit_ratio,
+                "bandwidth_saved": _format_bytes(region_hits * 128000),
+                "status": "operational" if reqs > 0 else "standby",
+                "avg_latency_ms": round(_nan_to_zero(avg_lat)),
+            }
 
         return {
-            "cache_hit_ratio": 0.0,
-            "bandwidth_saved_pct": 0.0,
-            "bandwidth_saved_bytes": 0,
-            "bandwidth_saved_formatted": "0.0 B",
-            "avg_ttfb_ms": 0,
-            "total_requests": 0,
-            "cached_requests": 0,
-            "uncached_requests": 0,
-            "regional_breakdown": {
-                "TH": {"requests": 0, "hit_ratio": 0.0, "bandwidth_saved": "0.0 B", "status": "operational", "avg_latency_ms": 14},
-                "MAIN": {"requests": 0, "hit_ratio": 0.0, "bandwidth_saved": "0.0 B", "status": "standby", "avg_latency_ms": 4}
-            }
+            "cache_hit_ratio": hit_ratio,
+            "bandwidth_saved_pct": min(95.0, round(hit_ratio * 0.9, 1)),
+            "bandwidth_saved_bytes": saved_bytes,
+            "bandwidth_saved_formatted": saved_str,
+            "avg_ttfb_ms": avg_ttfb_ms,
+            "total_requests": total,
+            "cached_requests": hits,
+            "uncached_requests": misses,
+            "regional_breakdown": regional_breakdown,
         }
     except Exception as e:
         logger.error(f"Error querying CDN stats from ClickHouse: {e}")
-        return {
-            "cache_hit_ratio": 0.0,
-            "bandwidth_saved_pct": 0.0,
-            "bandwidth_saved_bytes": 0,
-            "bandwidth_saved_formatted": "0.0 B",
-            "avg_ttfb_ms": 0,
-            "total_requests": 0,
-            "cached_requests": 0,
-            "uncached_requests": 0,
-            "regional_breakdown": {
-                "TH": {"requests": 0, "hit_ratio": 0.0, "bandwidth_saved": "0.0 B", "status": "operational", "avg_latency_ms": 14},
-                "MAIN": {"requests": 0, "hit_ratio": 0.0, "bandwidth_saved": "0.0 B", "status": "standby", "avg_latency_ms": 4}
-            }
-        }
+        return _empty_cdn_stats()
 
 
 @router.get("/latency")
@@ -260,13 +307,31 @@ async def cdn_latency(
         if not active_origins and not user_domains:
             return []
 
-    return [
-        {"client_region": "Bangkok, TH (Local)", "edge_ms": 14, "origin_ms": 185, "savings_pct": 92.4, "status": "optimal"},
-        {"client_region": "Chiang Mai, TH", "edge_ms": 22, "origin_ms": 210, "savings_pct": 89.5, "status": "optimal"},
-        {"client_region": "Singapore (ASEAN)", "edge_ms": 35, "origin_ms": 195, "savings_pct": 82.0, "status": "optimal"},
-        {"client_region": "Tokyo, JP", "edge_ms": 68, "origin_ms": 240, "savings_pct": 71.6, "status": "good"},
-        {"client_region": "Frankfurt, DE", "edge_ms": 140, "origin_ms": 20, "savings_pct": 0, "status": "direct_origin"}
-    ]
+    # 2026-09-20: this used to return a fully fabricated array -- fixed
+    # "client_region" rows for Singapore and Tokyo that have never existed
+    # as real edges (only TH and Azure/"ASIA" are real, see REGIONS_META),
+    # with edge_ms/origin_ms/savings_pct numbers that were never measured.
+    # We do not have real client-side RUM (no browser beacon reports actual
+    # visitor latency back), so "latency experienced by a user in city X"
+    # is not a real, honest thing to claim right now. What IS real and
+    # measurable: round-trip time from this backend to each edge, using the
+    # exact same health probe as /nodes. That is a genuinely useful signal
+    # (network path health to each real edge) even though it answers a
+    # different, narrower question than the old fake per-city rows did.
+    async with httpx.AsyncClient(timeout=1.2) as client:
+        main_node = await _check_node("MAIN", REGIONS_META["MAIN"], client)
+        results = []
+        for region in ("TH", "ASIA"):
+            meta = REGIONS_META[region]
+            node = await _check_node(region, meta, client)
+            results.append({
+                "client_region": meta["name"],
+                "edge_ms": node["latency_ms"] if node["online"] else None,
+                "origin_ms": main_node["latency_ms"],
+                "online": node["online"],
+                "status": "measured" if node["online"] else "unreachable",
+            })
+        return results
 
 
 @router.post("/purge")
@@ -330,7 +395,15 @@ async def cdn_logs(
 # the public internet (confirmed via `ufw status`), so this can't be left
 # unauthenticated -- anyone would otherwise be able to inject arbitrary
 # rows into the analytics ClickHouse/DynamoDB store.
-_KNOWN_EDGE_FORWARDER_IPS = {"45.154.26.91"}
+#
+# 2026-09-20: this only ever listed edge-th's IP -- a second real edge
+# (edge-asia, 57.158.25.236) exists and GeoDNS already routes real
+# non-Thailand traffic to it (confirmed live), but its log forwarder, if
+# and when it runs, would hit the exact same 404-forever failure mode
+# edge-th's did before that endpoint existed at all. Derived from
+# REGIONS_META instead of a second hardcoded literal, so a third real edge
+# only needs adding there, not here too.
+_KNOWN_EDGE_FORWARDER_IPS = {meta["ip"] for region, meta in REGIONS_META.items() if region != "MAIN"}
 
 
 class CdnLogIngestPayload(BaseModel):
