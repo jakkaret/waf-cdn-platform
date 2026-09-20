@@ -1,0 +1,68 @@
+import React from 'react'
+import { useNavigate } from 'react-router-dom'
+import { TopBar } from '../../components/layout/TopBar'
+import { ConceptBanner } from '../../components/concepts/ConceptBanner'
+import { Sparkles, Users, FileText, ArrowRight } from 'lucide-react'
+
+const CONCEPTS = [
+  {
+    path: '/concepts/ai-rules',
+    icon: Sparkles,
+    title: 'AI Rule Composer',
+    tagline: 'ให้ AI เสนอ rule ที่ควรเพิ่มได้เลย ไม่ใช่แค่อธิบาย attack',
+    from: 'ต่อยอดจุดแข็งที่มีอยู่จริง (AI Copilot + Feature Attribution)',
+  },
+  {
+    path: '/concepts/team',
+    icon: Users,
+    title: 'Team Workspace',
+    tagline: 'หลายคนดูแล origin เดียวกันได้ พร้อม audit log ว่าใครแก้อะไร',
+    from: 'เอาจุดแข็งของ Cloudflare Enterprise (multi-seat, audit trail) มาปรับให้เบากว่า',
+  },
+  {
+    path: '/concepts/postmortem',
+    icon: FileText,
+    title: 'AI Incident Postmortem',
+    tagline: 'พอมี incident จริง (attack spike / downtime) ให้ AI ร่างรายงานสรุปให้อัตโนมัติ',
+    from: 'ไม่มีคู่แข่งเจ้าไหนทำ -- ต่อยอด AI Copilot ที่มีอยู่แล้วให้ไปไกลกว่าการอธิบาย log',
+  },
+]
+
+export const ConceptsIndex: React.FC = () => {
+  const navigate = useNavigate()
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <TopBar title="Concepts" subtitle="ไอเดียฟีเจอร์ใหม่ที่ยังไม่สร้างจริง -- ดูภาพคร่าวๆ ก่อนตัดสินใจ" />
+      <ConceptBanner title="หน้ารวม Concept ทั้งหมด" />
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {CONCEPTS.map((c) => {
+          const Icon = c.icon
+          return (
+            <button
+              key={c.path}
+              onClick={() => navigate(c.path)}
+              className="dash-card p-5 text-left space-y-3 hover:border-purple-400/50 hover:shadow-card-hover transition-all cursor-pointer group"
+            >
+              <div className="w-10 h-10 rounded-lg bg-purple-500/10 text-purple-500 flex items-center justify-center">
+                <Icon size={18} />
+              </div>
+              <div>
+                <h3 className="font-bold text-[14px] font-mono m-0 group-hover:text-purple-500 transition-colors">
+                  {c.title}
+                </h3>
+                <p className="text-[11.5px] text-[var(--text-muted)] font-mono m-0 mt-1">{c.tagline}</p>
+              </div>
+              <p className="text-[10px] text-[var(--text-muted)] font-mono m-0 italic">{c.from}</p>
+              <div className="flex items-center gap-1 text-[11px] font-mono font-bold text-purple-500">
+                ดูตัวอย่าง <ArrowRight size={12} />
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+export default ConceptsIndex

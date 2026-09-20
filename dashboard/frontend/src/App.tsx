@@ -25,6 +25,10 @@ import MLAnalyst from './pages/MLAnalyst'
 import Tunnels from './pages/Tunnels'
 import StatusPage from './pages/StatusPage'
 import Onboarding from './pages/Onboarding'
+import ConceptsIndex from './pages/concepts/ConceptsIndex'
+import AiRuleComposer from './pages/concepts/AiRuleComposer'
+import TeamWorkspace from './pages/concepts/TeamWorkspace'
+import IncidentPostmortem from './pages/concepts/IncidentPostmortem'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -161,6 +165,38 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 <Onboarding />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts"
+            element={
+              <ProtectedRoute>
+                <ConceptsIndex />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/ai-rules"
+            element={
+              <ProtectedRoute>
+                <AiRuleComposer />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/team"
+            element={
+              <ProtectedRoute>
+                <TeamWorkspace />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/postmortem"
+            element={
+              <ProtectedRoute>
+                <IncidentPostmortem />
               </ProtectedRoute>
             }
           />
