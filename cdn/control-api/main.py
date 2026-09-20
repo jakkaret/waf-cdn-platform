@@ -11,7 +11,29 @@ from pydantic import BaseModel
 from captcha_engine import captcha_access, issue_challenge, verify_challenge, ChallengeVerifyRequest
 from otp_engine import otp_access, shield_access, issue_challenge_page, issue_ml_challenge, request_code, verify_code, OtpRequestPayload, OtpVerifyPayload
 
-app = FastAPI(title="CDN Control API", version="1.0.0")
+# 2026-09-22 (overnight session): this service is bound 0.0.0.0:8070 (see
+# docker-compose.yml) because edge nodes may need to reach /api/sync/bundle
+# over the public internet -- confirmed this is a real architectural
+# question (the edges' own sync script defaults CONTROL_API_URL to an
+# internal docker hostname, "cdn-control-api", which only resolves if each
+# edge runs its own local copy of this service; whether the real deployed
+# edge-th/edge-asia machines override that to Main's public IP could not be
+# verified without SSH access to those machines, which this session did not
+# have). That question -- and whatever token/IP-allowlist fix
+# /api/blocklist and /api/sync/bundle need -- is deliberately left
+# untouched here rather than guessed at overnight with no way to verify the
+# edges kept syncing. /docs, /redoc and /openapi.json have no such
+# constraint: nothing functional depends on them, and disabling them is the
+# same safe, already-proven pattern dashboard/backend/main.py's own
+# FastAPI app uses for the identical reason (F2, 2026-09-08 web assessment:
+# an unauthenticated docs page enumerates every endpoint on the service).
+app = FastAPI(
+    title="CDN Control API",
+    version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 DATA_DIR = Path(os.getenv("CONTROL_DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
