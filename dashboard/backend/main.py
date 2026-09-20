@@ -194,6 +194,7 @@ app.include_router(cdn.router)
 from api import ml, ml_rules, analytics, origins, domains, ip_rules, rate_limits, settings, ai_summary, tunnels, copilot, threshold_proposals
 from api import tunnel as tunnel_api
 from api import threat_intel as threat_intel_api
+from api import public_status as public_status_api
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
@@ -209,6 +210,7 @@ app.include_router(tunnel_api.router)
 app.include_router(copilot.router)
 app.include_router(threshold_proposals.router)
 app.include_router(threat_intel_api.router)
+app.include_router(public_status_api.router)
 
 # Error Handlers
 from fastapi import Request
@@ -279,6 +281,13 @@ async def startup_event():
     if not hasattr(app.state, "ssl_cert_monitor_task"):
         from services.ssl_cert_monitor import ssl_cert_monitor_worker
         app.state.ssl_cert_monitor_task = asyncio.create_task(ssl_cert_monitor_worker())
+    # Public status page (overnight session, 2026-09-22): samples the same
+    # live edge-health check every 5 min into a daily uptime counter per
+    # component, so GET /api/status/public/history has real data to show
+    # instead of nothing -- starts sparse tonight and grows from here.
+    if not hasattr(app.state, "public_status_history_task"):
+        from services.public_status import public_status_history_worker
+        app.state.public_status_history_task = asyncio.create_task(public_status_history_worker())
 
 
 @app.on_event("shutdown")

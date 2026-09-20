@@ -83,6 +83,7 @@ from api import alerts as alerts_module  # noqa: E402
 from api import tunnels as tunnels_module  # noqa: E402
 from api import threat_intel as threat_intel_api_module  # noqa: E402
 import services.threat_intel as threat_intel_module  # noqa: E402
+import services.public_status as public_status_module  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +292,7 @@ class FakeDynamoDBService(DynamoDBService):
         self.ssl_certs_table = _table("waf_ssl_certs")
         self.pending_rules_table = _table("waf_pending_rules")
         self.threat_patterns_table = _table("waf_threat_patterns")
+        self.status_history_table = _table("waf_status_history")
 
 
 @pytest.fixture(autouse=True)
@@ -352,6 +354,10 @@ def fake_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(threat_intel_module, "db", FakeDynamoDBService())
     monkeypatch.setattr(threat_intel_module.auth_service, "users_table", _table("waf_users"))
     monkeypatch.setattr(threat_intel_api_module.auth_service, "users_table", _table("waf_users"))
+    # services/public_status.py's `db = DynamoDBService()` (used by
+    # get_uptime_history/_record_history_sample) -- same gap class as every
+    # other module in this list.
+    monkeypatch.setattr(public_status_module, "db", FakeDynamoDBService())
     # services/tenant_service.py's `db = DynamoDBService()` (used by
     # get_user_origins_and_domains, called from api/analytics.py,
     # api/copilot.py, api/ai_summary.py and api/tunnels.py's
