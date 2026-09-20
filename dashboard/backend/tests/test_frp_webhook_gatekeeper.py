@@ -156,16 +156,51 @@ def test_newproxy_rejects_reserved_domain():
     assert result["reject"] is True
 
 
-def test_newproxy_legacy_token_client_may_register_any_non_reserved_domain():
-    """Preserves current production behaviour: the shared legacy token (used
-    by the already-deployed dvwa/juice/vampi/bwapp tunnels) is not scoped to
-    a single domain, so it must keep working for any non-reserved domain.
-    """
+def test_newproxy_bare_legacy_token_is_rejected_not_scoped_to_any_domain():
+    """2026-09-20: this test previously asserted the OLD, since-deliberately-
+    closed contract ("the shared legacy token may register any non-reserved
+    domain") -- see api/tunnels.py's own comment at this exact reject path,
+    dated 2026-09-07: "The shared static token carries no domain claim, so
+    it cannot establish that this client owns `target_domain`... every proxy
+    now ships a domain-scoped token in its frpc.toml `metadatas.token`."
+    That hardening shipped in production (confirmed live: this exact request
+    shape gets reject=True today) but this test was never updated to match,
+    so it had been silently red since 7 Sept, masking the real, current
+    contract instead of locking it in. A proxy connection using ONLY the
+    bare shared token (no per-proxy metas.token) must be rejected -- see the
+    test right below this one for the now-required alternative: the same
+    legacy-authenticated connection presenting its own domain-scoped
+    metas.token on NewProxy, which is what every real deployed proxy
+    (dvwa/juice/vampi/bwapp) actually sends today."""
     req = {
         "op": "NewProxy",
         "content": {
             "custom_domains": ["dvwa.waf-it-kku.online"],
             "proxy_name": "dvwa-waf-it-kku-online",
+            "user": {"user": LEGACY_STATIC_TOKEN, "metas": {}},
+        },
+    }
+    result = _run(frp_webhook_gatekeeper(req))
+    assert result["reject"] is True
+    assert "not scoped to a domain" in result["reject_reason"]
+
+
+def test_newproxy_legacy_login_with_per_proxy_domain_token_is_accepted():
+    """The real, current path a legacy-authenticated client (dvwa/juice/
+    vampi/bwapp) must use: the connection logs in with the shared
+    LEGACY_STATIC_TOKEN (still valid for Login, per _resolve_frp_identity),
+    but each individual proxy's NewProxy carries its OWN domain-scoped JWT
+    in content.metas.token (FRP's per-proxy metadatas, mirrored to the top
+    level of content -- see the 2026-09-07 comment in frp_webhook_gatekeeper
+    about content["metas"] vs content["user"]). This is what actually
+    authorizes the domain binding now, not the shared token."""
+    token = _tunnel_token("dvwa.waf-it-kku.online", user_id="user-legacy-migrated")
+    req = {
+        "op": "NewProxy",
+        "content": {
+            "custom_domains": ["dvwa.waf-it-kku.online"],
+            "proxy_name": "dvwa-waf-it-kku-online",
+            "metas": {"token": token},
             "user": {"user": LEGACY_STATIC_TOKEN, "metas": {}},
         },
     }
