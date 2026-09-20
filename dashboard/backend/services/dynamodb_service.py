@@ -280,6 +280,30 @@ class DynamoDBService:
             print("Failed to update origin:", e)
             return False
 
+    def add_origin_viewer(self, origin_id: str, viewer_user_id: str) -> bool:
+        try:
+            self.origins_table.update_item(
+                Key={"id": origin_id},
+                UpdateExpression="ADD viewer_user_ids :v",
+                ExpressionAttributeValues={":v": {viewer_user_id}},
+            )
+            return True
+        except Exception as e:
+            print("Failed to add origin viewer:", e)
+            return False
+
+    def remove_origin_viewer(self, origin_id: str, viewer_user_id: str) -> bool:
+        try:
+            self.origins_table.update_item(
+                Key={"id": origin_id},
+                UpdateExpression="DELETE viewer_user_ids :v",
+                ExpressionAttributeValues={":v": {viewer_user_id}},
+            )
+            return True
+        except Exception as e:
+            print("Failed to remove origin viewer:", e)
+            return False
+
     def delete_origin(self, origin_id: str) -> bool:
         try:
             self.origins_table.update_item(

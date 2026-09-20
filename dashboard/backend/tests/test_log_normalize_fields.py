@@ -65,6 +65,47 @@ def test_normalize_access_request_time_ms_survives_missing_field():
     assert result["request_time_ms"] == 0.0
 
 
+def test_normalize_access_labels_edge_asia_traffic_correctly():
+    """2026-09-20: normalize_access() used to hardcode edge_node="edge-th"
+    unconditionally -- true only while edge-th was the sole edge tunneling
+    through Main's own nginx. A second real edge (edge-asia) now exists and
+    GeoDNS actively routes real non-Thailand traffic to it (confirmed live
+    2026-09-20, see cdn/geodns/server.py). A request that tunneled through
+    edge-asia must be labeled as such, not silently folded into edge-th's
+    numbers the same way "sg" used to be fabricated."""
+    nginx_row = {
+        "request": "GET / HTTP/1.1",
+        "status": "200",
+        "request_time": "0.05",
+        "remote_addr": "57.158.25.236",
+    }
+    result = normalize_access(nginx_row)
+    assert result["edge_node"] == "edge-asia"
+
+
+def test_normalize_access_still_defaults_to_edge_th_for_unknown_remote_addr():
+    """Direct/dev traffic (not tunneled through either known edge) keeps
+    the original default -- this must not regress into mislabeling
+    ordinary local traffic as either specific edge."""
+    nginx_row = {
+        "request": "GET / HTTP/1.1",
+        "status": "200",
+        "remote_addr": "127.0.0.1",
+    }
+    result = normalize_access(nginx_row)
+    assert result["edge_node"] == "edge-th"
+
+
+def test_known_edge_ips_includes_both_real_edges():
+    """2026-09-20: this skip-list only ever listed edge-th -- extended to
+    include edge-asia so the same double-count bug documented above for
+    edge-th (see module docstring point #3) doesn't quietly resurface the
+    day edge-asia's own forwarder starts sending real batches."""
+    from services.log_forward import KNOWN_EDGE_IPS
+    assert "45.154.26.91" in KNOWN_EDGE_IPS  # edge-th
+    assert "57.158.25.236" in KNOWN_EDGE_IPS  # edge-asia
+
+
 def test_normalize_modsec_sets_edge_node():
     """normalize_modsec() feeds try_merge()'s fallback path (flush_old_logs(),
     triggered when no matching access-log entry arrives within MERGE_TIMEOUT) --

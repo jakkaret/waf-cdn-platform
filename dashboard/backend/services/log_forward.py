@@ -46,7 +46,14 @@ log_buffer = {}
 #      original design was correct all along; it just needed its other
 #      half to actually work. Restoring the skip here is what "as it
 #      should be" means once both sides are alive.
-KNOWN_EDGE_IPS = {"172.18.0.2", "45.154.26.91"}
+#
+# 57.158.25.236 (edge-asia): added 2026-09-20, same reasoning as edge-th
+# above, applied proactively instead of waiting to rediscover it the same
+# way -- api/cdn.py's ingest endpoint was just opened to this IP too (it
+# only accepted edge-th's forwarder until now), so the exact double-count
+# failure mode described in #3 is now reachable for edge-asia as soon as
+# its own forwarder container is live, not just a theoretical future risk.
+KNOWN_EDGE_IPS = {"172.18.0.2", "45.154.26.91", "57.158.25.236"}
 
 SEVERITY_NUM_MAP = {
     "0": "CRITICAL",
@@ -84,6 +91,17 @@ MERGE_TIMEOUT = 5
 # -----------------------------
 # ACCESS LOG NORMALIZE
 # -----------------------------
+# remote_addr (as this file's own nginx sees the tunneled connection) ->
+# edge_node label. Kept local to this file rather than imported from
+# api/cdn.py's REGIONS_META (services/ must not depend on api/) -- that
+# dict remains the source of truth for the reverse direction (edge_node ->
+# display metadata); this is the forward direction needed at ingestion.
+_EDGE_IP_TO_NODE = {
+    "45.154.26.91": "edge-th",
+    "57.158.25.236": "edge-asia",
+}
+
+
 def normalize_access(data):
     req = data.get("request", "")
     method, url = None, None
@@ -102,6 +120,17 @@ def normalize_access(data):
     except (ValueError, TypeError):
         request_time_ms = 0.0
 
+    # 2026-09-20: this used to hardcode "edge-th" unconditionally -- true
+    # only as long as edge-th was the sole edge tunneling traffic through
+    # Main's own nginx. A second real edge (edge-asia) exists now; this
+    # file's own KNOWN_EDGE_IPS skip-list above already anticipates its
+    # traffic arriving here too, so a request that actually tunneled
+    # through edge-asia must not be mislabeled as edge-th. Anything not a
+    # known edge IP (e.g. direct/dev traffic) still defaults to "edge-th",
+    # matching this path's original, narrower assumption.
+    remote_addr = str(data.get("remote_addr", "")).strip()
+    edge_node = _EDGE_IP_TO_NODE.get(remote_addr, "edge-th")
+
     return {
         "request_id": data.get("request_id"),
         "ip": data.get("remote_addr"),
@@ -113,11 +142,7 @@ def normalize_access(data):
         "body_bytes_sent": int(data.get("body_bytes_sent", 0)),
         "http_referer": data.get("http_referer"),
         "request_time_ms": request_time_ms,
-        # Main is presently the only node that ingests via this path (reading its
-        # own nginx log rather than receiving a push from an Edge node) -- see
-        # cdn_log_forward.py for the multi-region equivalent. Revisit if a second
-        # such node is ever added; don't silently overload this constant.
-        "edge_node": "edge-th",
+        "edge_node": edge_node,
 
         "timestamp": int(time.time()),
         "datetime": datetime.utcnow().isoformat() + "Z",
