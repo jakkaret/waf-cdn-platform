@@ -126,6 +126,17 @@ export interface Origin {
   health: 'up' | 'down' | 'unknown'
   created_at: string
   updated_at: string
+  is_tunnel?: boolean
+  // Read-time computed field, separate from `status` (CRUD lifecycle
+  // state): whether the underlying FRP tunnel is connected right now. null
+  // for non-tunnel origins, where the question doesn't apply.
+  live_connected?: boolean | null
+}
+
+export interface OriginViewer {
+  user_id: string
+  username: string
+  email: string
 }
 
 export interface Domain {
