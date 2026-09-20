@@ -5,7 +5,7 @@
     email admin@waf-it-kku.online
     auto_https disable_redirects
     on_demand_tls {
-        ask http://172.18.0.1:8000/api/health
+        ask http://172.18.0.1:8000/api/domains/check-ssl-allowed
     }
 }
 

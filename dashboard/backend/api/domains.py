@@ -212,14 +212,56 @@ SSL_SNAPSHOT_REFRESH_SECONDS = 30.0
 MAX_HOSTNAME_LENGTH = 253
 
 
-def _load_ssl_allowed() -> set:
-    """Every DNS-verified domain name, lowercased. One scan of a small table."""
-    items = db.domains_table.scan().get("Items", [])
-    return {
+def _load_ssl_allowed_from_db() -> set:
+    """Domains allowed via persisted DB records:
+    1. DNS-verified external domains -- the "bring your own domain" CNAME+TXT
+       flow this endpoint originally covered.
+    2. cloudwaf tunnel domains (origins_table.tunnel_domains, written by
+       api/tunnel.py's issue_agent_token) -- a *different* table from #1;
+       this endpoint never checked it at all before 2026-09-21, so a
+       cloudwaf-tunneled subdomain could never get a cert issued even once
+       the Caddy wiring for this endpoint was fixed.
+    """
+    allowed = set()
+
+    domain_items = db.domains_table.scan().get("Items", [])
+    allowed |= {
         str(i.get("domain_name", "")).strip().lower()
-        for i in items
+        for i in domain_items
         if i.get("dns_verified", False) and i.get("domain_name")
     }
+
+    origin_items = db.origins_table.scan().get("Items", [])
+    for o in origin_items:
+        for d in (o.get("tunnel_domains") or []):
+            if d:
+                allowed.add(str(d).strip().lower())
+
+    return allowed
+
+
+async def _load_ssl_allowed_from_frp() -> set:
+    """FRP-issued tunnel domains (api/tunnels.py's config-generator /
+    create_tunnel_token) have no persisted "verified" DB record at all --
+    they only mint a JWT and rely on frp_webhook_gatekeeper's real-time
+    check. A currently-live proxy on FRP's own dashboard (the same signal
+    origin_service.py's auto-sync already trusts) is the only real
+    evidence that a domain has an active, legitimately-issued tunnel."""
+    try:
+        import services.origin_service as origin_service
+        proxies = await origin_service.get_live_proxies()
+    except Exception:
+        return set()
+
+    allowed = set()
+    for p in proxies:
+        if p.get("status") != "online":
+            continue
+        conf = p.get("conf") or {}
+        for d in (conf.get("customDomains") or conf.get("custom_domains") or []):
+            if d:
+                allowed.add(str(d).strip().lower())
+    return allowed
 
 
 async def _ssl_allowed_set() -> set:
@@ -233,7 +275,9 @@ async def _ssl_allowed_set() -> set:
         if _SSL_ALLOWED_SNAPSHOT and (now - _SSL_SNAPSHOT_AT) < SSL_SNAPSHOT_REFRESH_SECONDS:
             return _SSL_ALLOWED_SNAPSHOT
         try:
-            _SSL_ALLOWED_SNAPSHOT = await asyncio.to_thread(_load_ssl_allowed)
+            db_allowed = await asyncio.to_thread(_load_ssl_allowed_from_db)
+            frp_allowed = await _load_ssl_allowed_from_frp()
+            _SSL_ALLOWED_SNAPSHOT = db_allowed | frp_allowed
             _SSL_SNAPSHOT_AT = now
         except Exception as exc:
             # Keep serving the previous snapshot rather than failing open or
