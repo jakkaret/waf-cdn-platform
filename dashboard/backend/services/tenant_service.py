@@ -2,6 +2,7 @@ import time
 import logging
 from typing import List, Dict, Tuple, Optional
 from services.dynamodb_service import DynamoDBService
+from services.clickhouse_service import escape_like_value
 
 logger = logging.getLogger(__name__)
 db = DynamoDBService()
@@ -16,6 +17,61 @@ def invalidate_tenant_cache(user_id: Optional[str] = None):
         _TENANT_CACHE.pop(user_id, None)
     else:
         _TENANT_CACHE.clear()
+
+
+# 2026-09-20 fix: moved here from api/analytics.py (the only router that had
+# them) so api/copilot.py and api/ai_summary.py can share the exact same
+# tenant-isolation logic instead of querying ClickHouse's access_logs table
+# with no WHERE clause at all -- confirmed live: a brand-new account with
+# zero registered origins asking the AI Copilot "which IPs are attacking me"
+# got back real attacker IPs, real attack payloads and real timestamps
+# belonging to other tenants' traffic, because the ClickHouse queries feeding
+# its prompt context had no tenant filter whatsoever (unlike this file's own
+# get_user_origins_and_domains, which every one of these three routers
+# already called correctly for the *domain list* -- only the log queries
+# themselves were unscoped).
+def build_domain_pattern_sql(domain_or_ip: str) -> str:
+    """Build ClickHouse SQL fragment for a domain or IP pattern."""
+    clean = str(domain_or_ip).strip().lower()
+    if not clean or clean == "all":
+        return ""
+    if "juice" in clean or "3000" in clean:
+        return "(url LIKE '%juice%' OR url LIKE '%rest%' OR url LIKE '%socket.io%' OR url LIKE '%assets/public%' OR url LIKE '%main.js%' OR url LIKE '%polyfills.js%' OR url LIKE '%scripts.js%')"
+    elif "dvwa" in clean or "8080" in clean or ".php" in clean:
+        return "(url LIKE '%dvwa%' OR url LIKE '%.php%' OR url LIKE '%vulnerabilities%')"
+    elif "vampi" in clean or "5000" in clean:
+        return "(url LIKE '%vampi%' OR url LIKE '%/api/v1/%')"
+    elif "bwapp" in clean:
+        return "(url LIKE '%bwapp%' OR url LIKE '%bWAPP%')"
+    else:
+        escaped = escape_like_value(clean)
+        return f"(url LIKE '%{escaped}%' OR client_ip LIKE '%{escaped}%')"
+
+
+def build_tenant_origin_filter(origin: Optional[str], user_domains: List[str], is_admin: bool) -> str:
+    """Build a strictly isolated ClickHouse SQL WHERE filter for the current
+    tenant/user. Returns "1=0" (matches nothing) rather than "" (matches
+    everything) whenever scoping can't be established for a non-admin --
+    fail closed, never open."""
+    # 1. If a specific origin was requested
+    if origin and str(origin).strip().upper() not in ["ALL", ""]:
+        req_clean = str(origin).strip()
+        if not is_admin and user_domains:
+            if not any(req_clean.lower() in d.lower() or d.lower() in req_clean.lower() for d in user_domains):
+                return "1=0"  # Forbidden / not this user's domain
+        return build_domain_pattern_sql(req_clean)
+
+    # 2. "ALL" (or no origin specified)
+    if is_admin:
+        return ""  # Admins may see everything when no specific origin is named
+
+    # 3. Standard tenant users: strictly their own registered domains/origins
+    if not user_domains:
+        return "1=0"  # No registered origins -> no logs, ever
+
+    clauses = [build_domain_pattern_sql(d) for d in user_domains]
+    clauses = [c for c in clauses if c]
+    return f"({' OR '.join(clauses)})" if clauses else "1=0"
 
 
 def get_user_origins_and_domains(user_id: str) -> Tuple[List[str], List[Dict], List[str]]:
@@ -33,7 +89,15 @@ def get_user_origins_and_domains(user_id: str) -> Tuple[List[str], List[Dict], L
             return cached_val
 
     try:
-        user_origins = db.get_origins_by_user(user_id)
+        # Deferred import: origin_service imports invalidate_tenant_cache
+        # from this module, so a module-level import here would be circular.
+        # get_origins_visible_to_user() = owned origins UNION origins this
+        # user was explicitly granted viewer access to -- a viewer grant
+        # extends into logs/analytics isolation too, not just the Origins
+        # list, matching the intended "owner decides who else can see it"
+        # design.
+        from services.origin_service import get_origins_visible_to_user
+        user_origins = get_origins_visible_to_user(user_id)
         if not user_origins:
             result = ([], [], [])
             _TENANT_CACHE[user_id] = (now, result)

@@ -6,6 +6,7 @@ from services.gemini_service import gemini_service
 from services.clickhouse_service import ClickHouseService
 from services.dynamodb_service import DynamoDBService
 from services.rbac import get_current_user
+from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter
 import logging
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,30 @@ async def summarize_threat_range(
         end_time = end_dt.strftime("%Y-%m-%d %H:%M:%S")
         time_params = {"start": start_dt, "end": end_dt}
 
+        # 1b. Tenant scope -- 2026-09-20 fix: every query below used to have
+        # no tenant filter at all (only a time range), so this endpoint (fed
+        # to Gemini as "สถิติเหตุการณ์จากระบบ" -- this account's own system
+        # events) actually summarized every tenant's traffic. Scoped the same
+        # way GET /api/analytics/summary and POST /api/copilot/chat now are.
+        user_id = current_user.get("user_id")
+        is_admin = current_user.get("role") == "admin"
+        _origin_ids, _active_origins, user_domains = get_user_origins_and_domains(user_id)
+        has_scope = is_admin or bool(user_domains)
+
+        if not has_scope:
+            return {
+                "success": True,
+                "time_range": {"start": start_time, "end": end_time, "description": time_desc},
+                "stats": {
+                    "total_requests": 0, "blocked_attacks": 0,
+                    "top_attack_types": [], "top_attacker_ips": [], "top_targeted_urls": [],
+                },
+                "ai_executive_summary": (
+                    "ℹ️ บัญชีนี้ยังไม่มี Origin Server ผูกไว้ จึงยังไม่มีข้อมูลทราฟฟิกให้สรุป "
+                    "กรุณาเพิ่ม Origin Server ในหน้า Origin Servers เพื่อเริ่มมอนิเตอร์"
+                ),
+            }
+
         # 2. Query stats from ClickHouse
         stats = {
             "total_requests": 0,
@@ -92,13 +117,16 @@ async def summarize_threat_range(
 
         if ch.connected and ch.client:
             try:
+                origin_clause = build_tenant_origin_filter("ALL", user_domains, is_admin)
+                scope_sql = f"AND {origin_clause}" if origin_clause else ""
+
                 # Total & Blocked
-                count_query = """
+                count_query = f"""
                     SELECT
                         count() AS total,
                         countIf(alert = 1 OR status_code IN (403, 429)) AS blocked
                     FROM access_logs
-                    WHERE timestamp >= {start:DateTime} AND timestamp <= {end:DateTime}
+                    WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} {scope_sql}
                 """
                 count_res = ch.client.query(count_query, parameters=time_params)
                 if count_res.result_rows:
@@ -106,30 +134,30 @@ async def summarize_threat_range(
                     stats["blocked_attacks"] = int(count_res.result_rows[0][1])
 
                 # Top attack types
-                type_query = """
+                type_query = f"""
                     SELECT attack_type, count() AS cnt
                     FROM access_logs
-                    WHERE timestamp >= {start:DateTime} AND timestamp <= {end:DateTime} AND attack_type != ''
+                    WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} AND attack_type != '' {scope_sql}
                     GROUP BY attack_type ORDER BY cnt DESC LIMIT 5
                 """
                 type_res = ch.client.query(type_query, parameters=time_params)
                 stats["top_attack_types"] = [{"type": row[0], "count": int(row[1])} for row in type_res.result_rows]
 
                 # Top attacker IPs
-                ip_query = """
+                ip_query = f"""
                     SELECT client_ip, country, count() AS cnt
                     FROM access_logs
-                    WHERE timestamp >= {start:DateTime} AND timestamp <= {end:DateTime} AND (alert = 1 OR status_code IN (403, 429))
+                    WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} AND (alert = 1 OR status_code IN (403, 429)) {scope_sql}
                     GROUP BY client_ip, country ORDER BY cnt DESC LIMIT 5
                 """
                 ip_res = ch.client.query(ip_query, parameters=time_params)
                 stats["top_attacker_ips"] = [{"ip": row[0], "country": row[1], "count": int(row[2])} for row in ip_res.result_rows]
 
                 # Top targeted URLs
-                url_query = """
+                url_query = f"""
                     SELECT url, count() AS cnt
                     FROM access_logs
-                    WHERE timestamp >= {start:DateTime} AND timestamp <= {end:DateTime} AND (alert = 1 OR status_code IN (403, 429))
+                    WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} AND (alert = 1 OR status_code IN (403, 429)) {scope_sql}
                     GROUP BY url ORDER BY cnt DESC LIMIT 5
                 """
                 url_res = ch.client.query(url_query, parameters=time_params)

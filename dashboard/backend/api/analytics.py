@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import List, Dict, Any, Optional
 from services.clickhouse_service import ClickHouseService, escape_like_value
 from services.rbac import require_viewer_or_above
-from services.tenant_service import get_user_origins_and_domains
+from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter
 import logging
 
 logger = logging.getLogger(__name__)
@@ -10,51 +10,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
 ch = ClickHouseService()
 
-
-def _build_domain_pattern_sql(domain_or_ip: str) -> str:
-    """Build ClickHouse SQL fragment for a domain or IP pattern"""
-    clean = str(domain_or_ip).strip().lower()
-    if not clean or clean == "all":
-        return ""
-    if "juice" in clean or "3000" in clean:
-        return "(url LIKE '%juice%' OR url LIKE '%rest%' OR url LIKE '%socket.io%' OR url LIKE '%assets/public%' OR url LIKE '%main.js%' OR url LIKE '%polyfills.js%' OR url LIKE '%scripts.js%')"
-    elif "dvwa" in clean or "8080" in clean or ".php" in clean:
-        return "(url LIKE '%dvwa%' OR url LIKE '%.php%' OR url LIKE '%vulnerabilities%')"
-    elif "vampi" in clean or "5000" in clean:
-        return "(url LIKE '%vampi%' OR url LIKE '%/api/v1/%')"
-    elif "bwapp" in clean:
-        return "(url LIKE '%bwapp%' OR url LIKE '%bWAPP%')"
-    else:
-        escaped = escape_like_value(clean)
-        return f"(url LIKE '%{escaped}%' OR client_ip LIKE '%{escaped}%')"
-
-
-def _build_tenant_origin_filter(origin: Optional[str], user_domains: List[str], is_admin: bool) -> str:
-    """Build strictly isolated ClickHouse SQL WHERE filter for the current tenant/user"""
-    # 1. If specific origin selected
-    if origin and str(origin).strip().upper() not in ["ALL", ""]:
-        req_clean = str(origin).strip()
-        # Non-admins can only view their own domains
-        if not is_admin and user_domains:
-            if not any(req_clean.lower() in d.lower() or d.lower() in req_clean.lower() for d in user_domains):
-                return "1=0"  # Forbidden / Not user's domain
-        return _build_domain_pattern_sql(req_clean)
-
-    # 2. If 'ALL' is selected
-    if is_admin:
-        return ""  # Admins can view all global logs when 'ALL' is selected
-
-    # 3. For standard tenant users: filter strictly by their registered domains/origins
-    if not user_domains:
-        return "1=0"  # No registered origins -> 0 logs
-
-    clauses = []
-    for d in user_domains:
-        frag = _build_domain_pattern_sql(d)
-        if frag:
-            clauses.append(frag)
-
-    return f"({' OR '.join(clauses)})" if clauses else "1=0"
+# build_tenant_origin_filter / its domain-pattern-matching helper used to
+# live here as module-private functions; moved to services/tenant_service.py
+# (2026-09-20) so api/copilot.py and api/ai_summary.py can reuse the exact
+# same tenant-isolation logic instead of re-deriving it (or, as found live,
+# not deriving it at all).
 
 
 @router.get("/summary")
@@ -104,7 +64,7 @@ async def get_analytics_summary(
         }
 
     try:
-        origin_clause = _build_tenant_origin_filter(origin, user_domains, is_admin)
+        origin_clause = build_tenant_origin_filter(origin, user_domains, is_admin)
         where_sql = f"WHERE {origin_clause}" if origin_clause else ""
 
         # 1. Total Requests
