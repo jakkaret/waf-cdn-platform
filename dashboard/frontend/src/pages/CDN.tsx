@@ -84,6 +84,13 @@ export const CDN: React.FC = () => {
 
   const safeNodes: CdnNode[] = Array.isArray(nodes) ? nodes : []
 
+  // 2026-09-20: /cdn/latency now returns real measured round-trips only
+  // (see api/cdn.py) -- no more fixed "14 ms avg" / "92.4% Faster" text
+  // regardless of what was actually measured.
+  const latencyList = Array.isArray(latencyData) ? latencyData : []
+  const thEdgeLatency = latencyList.find((r: any) => r.client_region?.includes('Thailand'))
+  const mainNodeLatencyMs = safeNodes.find((n) => n.region === 'MAIN')?.latency_ms ?? null
+
   // Calculations
   const statsObj = stats && !Array.isArray(stats) ? (stats as any) : null
   const totalRequests = statsObj?.total_requests ?? statsList.reduce((sum, s) => sum + (s.request_count || 0), 0)
@@ -352,14 +359,14 @@ export const CDN: React.FC = () => {
             <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
               <div className="flex justify-between items-center mb-1">
                 <span className="font-mono font-bold text-[12px] text-[var(--text-primary)]">Thailand Edge Node</span>
-                <Badge color={Array.isArray(latencyData) && latencyData.length > 0 ? 'success' : 'gray'}>
-                  {Array.isArray(latencyData) && latencyData.length > 0 ? '14 ms avg' : 'Standby'}
+                <Badge color={thEdgeLatency?.online ? 'success' : 'gray'}>
+                  {thEdgeLatency?.online ? `${thEdgeLatency.edge_ms} ms measured` : 'Unreachable'}
                 </Badge>
               </div>
               <div className="flex justify-between text-[11px] font-mono text-[var(--text-muted)] mt-1.5">
-                <span>Cache Acceleration:</span>
-                <span className={`font-bold ${Array.isArray(latencyData) && latencyData.length > 0 ? 'text-emerald-500' : 'text-[var(--text-dim)]'}`}>
-                  {Array.isArray(latencyData) && latencyData.length > 0 ? '92.4% Faster' : '—'}
+                <span>Round-trip from Core:</span>
+                <span className={`font-bold ${thEdgeLatency?.online ? 'text-emerald-500' : 'text-[var(--text-dim)]'}`}>
+                  {thEdgeLatency?.online ? `${thEdgeLatency.edge_ms} ms` : '—'}
                 </span>
               </div>
             </div>
@@ -367,11 +374,11 @@ export const CDN: React.FC = () => {
             <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
               <div className="flex justify-between items-center mb-1">
                 <span className="font-mono font-bold text-[12px] text-[var(--text-primary)]">Central Core Hub</span>
-                <Badge color="info">~4 ms internal</Badge>
+                <Badge color="info">{mainNodeLatencyMs != null ? `${mainNodeLatencyMs} ms internal` : '— ms internal'}</Badge>
               </div>
               <div className="flex justify-between text-[11px] font-mono text-[var(--text-muted)] mt-1.5">
-                <span>Backbone Routing:</span>
-                <span className="font-bold text-[var(--text-primary)]">WireGuard Mesh</span>
+                <span>Tunnel Transport:</span>
+                <span className="font-bold text-[var(--text-primary)]">FRP / TLS Tunnel</span>
               </div>
             </div>
           </div>
