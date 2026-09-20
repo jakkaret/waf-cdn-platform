@@ -314,14 +314,52 @@ origins_domains_router = APIRouter(prefix="/api/origins", tags=["Domains"])
 
 def format_domain(domain_data: dict) -> dict:
     dns_verified = domain_data.get("dns_verified", False)
+    domain_name = domain_data.get("domain_name")
+
+    # 2026-09-21: was `domain_data.get("ssl_status", "none")` only -- that
+    # field is never written anywhere in the codebase, so the frontend's
+    # `ssl_status || 'ACTIVE'` fallback made every single domain read as a
+    # hardcoded, unverified "ACTIVE". services/ssl_cert_monitor.py now
+    # writes a real, periodically-probed record per domain into
+    # waf_ssl_certs; surface that here instead when one exists.
+    cert = None
+    if domain_name:
+        try:
+            # waf_ssl_certs' real key schema is HASH="id" -- see
+            # services/ssl_cert_monitor.py's _persist_cert_record for why
+            # it's keyed by the domain string itself under "id".
+            cert = db.ssl_certs_table.get_item(Key={"id": domain_name}).get("Item")
+        except Exception:
+            cert = None
+
+    if cert:
+        ssl_status = "active" if cert.get("status") == "ok" else "error"
+        ssl_expires_at = cert.get("not_after")
+        ssl_issuer = cert.get("issuer")
+        ssl_days_remaining = cert.get("days_remaining")
+        ssl_checked_at = cert.get("checked_at")
+    else:
+        # No probe result yet (worker hasn't reached this domain this cycle,
+        # or it isn't in the allowed-set the worker scans) -- "pending" is
+        # honest about not knowing, unlike the old silent "ACTIVE" default.
+        ssl_status = "pending"
+        ssl_expires_at = None
+        ssl_issuer = None
+        ssl_days_remaining = None
+        ssl_checked_at = None
+
     return {
         "domain_id": domain_data.get("id"),
         "origin_id": domain_data.get("origin_id"),
-        "domain_name": domain_data.get("domain_name"),
+        "domain_name": domain_name,
         "verification_status": "verified" if dns_verified else "pending",
         "dns_verification_token": domain_data.get("verification_token"),
         "cname_target": os.getenv("WAF_CNAME_TARGET", "cdn.local"),
-        "ssl_status": domain_data.get("ssl_status", "none"),
+        "ssl_status": ssl_status,
+        "ssl_expires_at": ssl_expires_at,
+        "ssl_issuer": ssl_issuer,
+        "ssl_days_remaining": ssl_days_remaining,
+        "ssl_checked_at": ssl_checked_at,
         "created_at": domain_data.get("created_at"),
     }
 

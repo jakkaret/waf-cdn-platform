@@ -835,30 +835,63 @@ export const OriginDetail: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {domains.map((domain: Domain) => (
-                  <div
-                    key={domain.domain_id}
-                    className="dash-card p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-                        <Lock size={18} />
-                      </div>
-                      <div>
-                        <p className="font-bold text-[14px] text-[var(--text-primary)] font-mono m-0">
-                          {domain.domain_name}
-                        </p>
-                        <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
-                          TLS 1.3 • Issuer: Let&apos;s Encrypt / ZeroSSL (Auto-Renew)
-                        </p>
-                      </div>
-                    </div>
+                {domains.map((domain: Domain) => {
+                  // Real status from services/ssl_cert_monitor.py's periodic
+                  // probe (was previously always the literal string
+                  // "ACTIVE", regardless of whether a certificate existed
+                  // at all -- see api/domains.py's format_domain()).
+                  const sslBadgeColor =
+                    domain.ssl_status === 'active'
+                      ? 'success'
+                      : domain.ssl_status === 'error'
+                      ? 'danger'
+                      : 'gray'
+                  const sslSubtitle =
+                    domain.ssl_status === 'active'
+                      ? `Issuer: ${domain.ssl_issuer || 'unknown'}${
+                          typeof domain.ssl_days_remaining === 'number'
+                            ? domain.ssl_days_remaining < 0
+                              ? ' • EXPIRED'
+                              : ` • expires in ${domain.ssl_days_remaining} day(s)`
+                            : ''
+                        }`
+                      : domain.ssl_status === 'error'
+                      ? 'Certificate check failed -- see Alerts for details'
+                      : 'Not checked yet -- the SSL monitor probes new domains on its next cycle'
 
-                    <Badge color={domain.ssl_status === 'active' ? 'success' : 'warning'}>
-                      {(domain.ssl_status || 'ACTIVE').toUpperCase()}
-                    </Badge>
-                  </div>
-                ))}
+                  return (
+                    <div
+                      key={domain.domain_id}
+                      className="dash-card p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                            domain.ssl_status === 'active'
+                              ? 'bg-emerald-500/10 text-emerald-500'
+                              : domain.ssl_status === 'error'
+                              ? 'bg-red-500/10 text-red-500'
+                              : 'bg-[var(--bg-hover)] text-[var(--text-muted)]'
+                          }`}
+                        >
+                          <Lock size={18} />
+                        </div>
+                        <div>
+                          <p className="font-bold text-[14px] text-[var(--text-primary)] font-mono m-0">
+                            {domain.domain_name}
+                          </p>
+                          <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
+                            {sslSubtitle}
+                          </p>
+                        </div>
+                      </div>
+
+                      <Badge color={sslBadgeColor}>
+                        {(domain.ssl_status || 'pending').toUpperCase()}
+                      </Badge>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
