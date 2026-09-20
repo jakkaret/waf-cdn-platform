@@ -219,6 +219,15 @@ export const Origins: React.FC = () => {
               ? 'Click "Add Origin Server" to attach your backend hosts behind the WAF.'
               : 'No origins match the current search or status filter criteria.'}
           </p>
+          {origins.length === 0 && (
+            <button
+              type="button"
+              onClick={() => navigate('/onboarding')}
+              className="mt-1 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-orange-700 hover:bg-orange-800 text-white text-[12px] font-mono font-semibold transition-colors cursor-pointer"
+            >
+              เริ่มตั้งค่าด้วยตัวช่วย (Wizard)
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">

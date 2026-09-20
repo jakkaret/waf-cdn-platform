@@ -24,6 +24,7 @@ import OriginDetail from './pages/OriginDetail'
 import MLAnalyst from './pages/MLAnalyst'
 import Tunnels from './pages/Tunnels'
 import StatusPage from './pages/StatusPage'
+import Onboarding from './pages/Onboarding'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -152,6 +153,14 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 <Origins />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/onboarding"
+            element={
+              <ProtectedRoute>
+                <Onboarding />
               </ProtectedRoute>
             }
           />
