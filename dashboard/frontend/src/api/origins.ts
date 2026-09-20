@@ -1,7 +1,10 @@
 import { api } from './axios'
 import { Origin } from '../types'
 
-export const getOrigins = () => api.get<{ origins: Origin[] }>('/origins')
+export const getOrigins = (opts?: { forceRefreshStatus?: boolean }) =>
+  api.get<{ origins: Origin[] }>('/origins', {
+    params: opts?.forceRefreshStatus ? { refresh_status: true } : undefined,
+  })
 
 export const createOrigin = (data: { ip: string; port: number; label: string }) =>
   api.post<Origin>('/origins', data)

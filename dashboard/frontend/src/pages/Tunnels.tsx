@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { buildTunnelCommands } from '../lib/tunnelCommands'
+import { tunnelStatusBadge, combineTunnelHubStatus } from '../lib/tunnelStatus'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/axios'
 import { TopBar } from '../components/layout/TopBar'
@@ -33,12 +34,27 @@ export const Tunnels: React.FC = () => {
   const [scope, setScope] = useState<'my' | 'all'>('my')
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
-  // Fetch live active tunnels status from FRP server
-  const { data, isFetching, refetch } = useQuery({
+  // Fetch live active tunnels status from FRP server (shared-token clients:
+  // juice/dvwa/bwapp).
+  const { data, isFetching, refetch, isError: frpErrored } = useQuery({
     queryKey: ['tunnels-status', scope],
     queryFn: () => api.get('/tunnels/status', { params: { scope } }).then((r) => r.data),
     refetchInterval: 6000,
   })
+
+  // 2026-09-20: this page used to only ever poll the FRP status above --
+  // this platform's second, custom domain-scoped tunnel protocol (e.g.
+  // vampi) had zero visibility here at all. /api/tunnel/status reports
+  // that system's real state (server_running, from the tunnel server's own
+  // state file, considered stale after a timeout -- see api/tunnel.py).
+  const { data: cloudwaf, refetch: refetchCloudwaf } = useQuery({
+    queryKey: ['cloudwaf-tunnel-status'],
+    queryFn: () => api.get('/tunnel/status').then((r) => r.data),
+    refetchInterval: 6000,
+  })
+
+  const hubStatus = combineTunnelHubStatus(data !== undefined && !frpErrored, cloudwaf)
+  const cloudwafAgents = cloudwaf?.agents || []
 
   // Fetch generated commands
   const { data: configData } = useQuery({
@@ -94,10 +110,16 @@ export const Tunnels: React.FC = () => {
               Tunnel Hub Status
             </span>
             <div className="flex items-center gap-2 mt-1">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-              <span className="text-[16px] font-bold text-[var(--text-primary)] font-mono">ONLINE & READY</span>
+              <span
+                className={`w-2.5 h-2.5 rounded-full ${hubStatus.online ? 'bg-emerald-400 animate-ping' : 'bg-red-500'}`}
+              />
+              <span
+                className={`text-[16px] font-bold font-mono ${hubStatus.online ? 'text-[var(--text-primary)]' : 'text-red-400'}`}
+              >
+                {hubStatus.label}
+              </span>
             </div>
-            <p className="text-[11.5px] text-[var(--text-secondary)] mt-0.5">WAF Central Core (main.waf-it-kku.online)</p>
+            <p className="text-[11.5px] text-[var(--text-secondary)] mt-0.5">{hubStatus.detail}</p>
           </div>
           <div className="p-3 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
             <Server size={22} />
@@ -380,13 +402,84 @@ export const Tunnels: React.FC = () => {
                       <td className="py-3 px-3 text-amber-300">{t.local_target || 'Local App'}</td>
                       <td className="py-3 px-3 text-[var(--text-secondary)]">{t.connections || 0} conns</td>
                       <td className="py-3 px-3 text-right">
-                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          🟢 ONLINE
-                        </span>
+                        {(() => {
+                          const b = tunnelStatusBadge(t.is_online)
+                          return <Badge color={b.color}>{b.label}</Badge>
+                        })()}
                       </td>
                     </tr>
                   )
                 })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Custom Tunnel (cloudwaf) -- the platform's second, domain-scoped
+          tunnel protocol (e.g. vampi). Previously invisible on this page
+          entirely: only the FRP table above was ever rendered. */}
+      <div className="card p-5 border border-[var(--bg-border)] bg-[var(--bg-surface)] rounded-2xl shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Shield size={18} className="text-purple-400" />
+            <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono uppercase tracking-wider m-0">
+              Custom Tunnel — cloudwaf ({cloudwafAgents.length})
+            </h3>
+          </div>
+          <button
+            onClick={() => refetchCloudwaf()}
+            className="p-1.5 rounded-lg bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--bg-border)] transition-colors cursor-pointer"
+            title="Refresh Custom Tunnel"
+          >
+            <RefreshCw size={14} />
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse font-mono text-[12.5px]">
+            <thead>
+              <tr className="border-b border-[var(--bg-border)] text-[var(--text-muted)] text-[11px] uppercase tracking-wider">
+                <th className="py-2.5 px-3">Origin</th>
+                <th className="py-2.5 px-3">Domains</th>
+                <th className="py-2.5 px-3">Live Conns</th>
+                <th className="py-2.5 px-3 text-right">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--bg-border-subtle)]">
+              {!cloudwaf?.server_running ? (
+                <tr>
+                  <td colSpan={4} className="py-8 text-center text-[var(--text-muted)]">
+                    {cloudwaf?.reason || 'The custom tunnel server has not published any state.'}
+                  </td>
+                </tr>
+              ) : cloudwafAgents.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="py-8 text-center text-[var(--text-muted)]">
+                    No custom-tunnel agents currently connected.
+                  </td>
+                </tr>
+              ) : (
+                cloudwafAgents.map((a: any) => (
+                  <tr key={a.agent_id} className="hover:bg-[var(--bg-hover)] transition-colors">
+                    <td className="py-3 px-3 font-bold text-[var(--text-primary)] flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      {a.origin_label || a.agent_id}
+                    </td>
+                    <td className="py-3 px-3 text-indigo-400">{(a.domains || []).join(', ') || '—'}</td>
+                    <td className="py-3 px-3 text-[var(--text-secondary)]">{a.active_connections || 0} conns</td>
+                    <td className="py-3 px-3 text-right">
+                      {/* server_running is fresh here (checked above), so
+                          every agent still listed is connected right now --
+                          same "presence = online" guarantee the server's
+                          own snapshot() gives (see tunnel/server.py). */}
+                      {(() => {
+                        const b = tunnelStatusBadge(true)
+                        return <Badge color={b.color}>{b.label}</Badge>
+                      })()}
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { getOrigins, deleteOrigin, restoreOrigin } from '../api/origins'
 import { api } from '../api/axios'
@@ -9,6 +9,7 @@ import { Button } from '../components/ui/Button'
 import { AddOriginModal } from '../components/AddOriginModal'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { toast } from 'react-hot-toast'
+import { originStatusBadge } from '../lib/tunnelStatus'
 import { Origin } from '../types'
 import {
   Server,
@@ -24,21 +25,39 @@ import {
   Clock,
   ArrowRight,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react'
 
 export const Origins: React.FC = () => {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'pending' | 'error' | 'archived'>('all')
   const [originToDelete, setOriginToDelete] = useState<Origin | null>(null)
   const [originToRestore, setOriginToRestore] = useState<Origin | null>(null)
+  const [isRefreshingStatus, setIsRefreshingStatus] = useState(false)
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['origins'],
-    queryFn: getOrigins,
+    queryFn: () => getOrigins(),
     refetchInterval: 15000,
   })
+
+  // Tunnel live-connectivity is cached server-side for 60s (services/origin_service.py
+  // get_live_online_proxy_names) to avoid hammering the FRP dashboard on every
+  // page load -- this bypasses that cache for one immediate, accurate check.
+  const handleRefreshStatus = async () => {
+    setIsRefreshingStatus(true)
+    try {
+      const res = await getOrigins({ forceRefreshStatus: true })
+      queryClient.setQueryData(['origins'], res)
+    } catch {
+      toast.error('Failed to refresh tunnel status')
+    } finally {
+      setIsRefreshingStatus(false)
+    }
+  }
 
   const { data: quotaData } = useQuery({
     queryKey: ['origins-quota'],
@@ -173,6 +192,14 @@ export const Origins: React.FC = () => {
             <option value="error">Unreachable / Error</option>
             <option value="archived">Archived</option>
           </select>
+          <button
+            onClick={handleRefreshStatus}
+            disabled={isRefreshingStatus}
+            title="Force-check tunnel connectivity now (bypasses the 60s cache)"
+            className="p-1.5 rounded-lg border border-[var(--bg-border)] text-[var(--text-secondary)] hover:text-orange-500 hover:border-orange-500/40 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <RefreshCw size={14} className={isRefreshingStatus ? 'animate-spin' : ''} />
+          </button>
         </div>
       </div>
 
@@ -198,7 +225,6 @@ export const Origins: React.FC = () => {
           {filteredOrigins.map((origin: Origin) => {
             const isArchived = origin.status === 'archived'
             const isPending = origin.status === 'pending'
-            const isActive = origin.status === 'active'
 
             return (
               <div
@@ -222,12 +248,14 @@ export const Origins: React.FC = () => {
                       </div>
                     </div>
 
-                    <Badge
-                      color={isActive ? 'success' : isPending ? 'warning' : isArchived ? 'gray' : 'danger'}
-                      dot
-                    >
-                      {origin.status.toUpperCase()}
-                    </Badge>
+                    {(() => {
+                      const b = originStatusBadge(origin.status, origin.is_tunnel, origin.live_connected)
+                      return (
+                        <Badge color={b.color} dot>
+                          {b.label}
+                        </Badge>
+                      )
+                    })()}
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-[var(--bg-border-subtle)] space-y-2 text-[12px] font-mono">

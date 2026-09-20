@@ -5,7 +5,10 @@ import { getOrigin, deleteOrigin, restoreOrigin } from '../api/origins'
 import { getDomains, deleteDomain, verifyDomain } from '../api/domains'
 import { getCaptchaConfig, updateCaptchaConfig } from '../api/captcha'
 import { getOtpConfig, updateOtpConfig } from '../api/otp'
+import { getOriginViewers, addOriginViewer, removeOriginViewer } from '../api/origin_viewers'
 import { rulesApi } from '../api/rules'
+import { useAuthStore } from '../store/authStore'
+import { tunnelConnectivityBadge } from '../lib/tunnelStatus'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { LoadingSpinner } from '../components/ui/LoadingSpinner'
@@ -30,11 +33,14 @@ import {
   Code,
   Bot,
   Mail,
+  Users,
 } from 'lucide-react'
 
 export const OriginDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const currentUser = useAuthStore((s) => s.user)
+  const [viewerEmailInput, setViewerEmailInput] = useState('')
   const [activeTab, setActiveTab] = useState<'overview' | 'domains' | 'waf' | 'ssl' | 'shield'>('overview')
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false)
@@ -219,6 +225,34 @@ export const OriginDetail: React.FC = () => {
   const origin = data?.data || null
   const domains = domainsData?.data?.domains || []
   const verifiedDomainCount = domains.filter((d: Domain) => d.verification_status === 'verified').length
+
+  const isOwner = !!origin && !!currentUser && origin.admin_user_id === currentUser.user_id
+
+  const { data: viewersData, isLoading: viewersLoading } = useQuery({
+    queryKey: ['origin-viewers', id],
+    queryFn: () => getOriginViewers(id!),
+    enabled: !!id && isOwner,
+  })
+  const viewers = viewersData?.data?.viewers || []
+
+  const addViewerMutation = useMutation({
+    mutationFn: (email: string) => addOriginViewer(id!, email),
+    onSuccess: (res) => {
+      toast.success(`${res.data.viewer.username || res.data.viewer.email} can now view this origin`)
+      setViewerEmailInput('')
+      queryClient.invalidateQueries({ queryKey: ['origin-viewers', id] })
+    },
+    onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to add viewer'),
+  })
+
+  const removeViewerMutation = useMutation({
+    mutationFn: (viewerId: string) => removeOriginViewer(id!, viewerId),
+    onSuccess: () => {
+      toast.success('Viewer access removed')
+      queryClient.invalidateQueries({ queryKey: ['origin-viewers', id] })
+    },
+    onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to remove viewer'),
+  })
 
   const handleDelete = async () => {
     const isPending = origin?.status === 'pending'
@@ -418,6 +452,15 @@ export const OriginDetail: React.FC = () => {
                 Security & Protection Status
               </h3>
               <div className="space-y-3 font-mono text-[12px]">
+                {origin.is_tunnel && (
+                  <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
+                    <span className="text-[var(--text-muted)]">Tunnel Connectivity</span>
+                    {(() => {
+                      const b = tunnelConnectivityBadge(origin.live_connected)
+                      return <Badge color={b.color}>{b.label}</Badge>
+                    })()}
+                  </div>
+                )}
                 <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
                   <span className="text-[var(--text-muted)]">ModSecurity WAF</span>
                   <Badge color="success">ENABLED (CRS 3.3)</Badge>
@@ -436,6 +479,64 @@ export const OriginDetail: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {isOwner && (
+              <div className="dash-card p-5 space-y-4 md:col-span-2">
+                <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
+                  <Users size={14} /> Viewer Access
+                </h3>
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  Only you can see this origin by default. Grant another registered account
+                  read-only access below -- they will see it in their Origins list and in their
+                  Traffic Logs / Analytics, but cannot edit, delete, or manage its settings.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={viewerEmailInput}
+                    onChange={(e) => setViewerEmailInput(e.target.value)}
+                    placeholder="teammate@example.com"
+                    className="flex-1 bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
+                  />
+                  <Button
+                    size="sm"
+                    icon={<Plus size={14} />}
+                    onClick={() => viewerEmailInput.trim() && addViewerMutation.mutate(viewerEmailInput.trim())}
+                    disabled={!viewerEmailInput.trim() || addViewerMutation.isPending}
+                  >
+                    Add Viewer
+                  </Button>
+                </div>
+                {viewersLoading ? (
+                  <LoadingSpinner />
+                ) : viewers.length === 0 ? (
+                  <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                    No viewers granted yet -- this origin is only visible to you.
+                  </p>
+                ) : (
+                  <div className="space-y-2 font-mono text-[12px]">
+                    {viewers.map((v) => (
+                      <div
+                        key={v.user_id}
+                        className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]"
+                      >
+                        <span className="text-[var(--text-primary)]">
+                          {v.username || v.email} <span className="text-[var(--text-muted)]">({v.email})</span>
+                        </span>
+                        <button
+                          onClick={() => removeViewerMutation.mutate(v.user_id)}
+                          disabled={removeViewerMutation.isPending}
+                          className="text-red-500 hover:text-red-400"
+                          title="Revoke viewer access"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
