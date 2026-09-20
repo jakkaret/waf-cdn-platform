@@ -17,6 +17,7 @@ import {
   Shield,
   Network,
   Settings as SettingsIcon,
+  FlaskConical,
 } from 'lucide-react'
 
 export const Sidebar: React.FC = () => {
@@ -60,6 +61,10 @@ export const Sidebar: React.FC = () => {
       items: [
         { label: 'Access Control', path: '/users', icon: <Users size={15} />, roles: ['admin'] },
         { label: 'System Settings', path: '/settings', icon: <SettingsIcon size={15} />, roles: ['admin', 'viewer'] },
+        // Preview mockups only, not a live feature -- see ConceptBanner on
+        // every /concepts page. Admin-only: this is product-direction
+        // exploration, not something a viewer-scoped account needs.
+        { label: 'Concepts (preview)', path: '/concepts', icon: <FlaskConical size={15} />, roles: ['admin'] },
       ],
     },
   ]
