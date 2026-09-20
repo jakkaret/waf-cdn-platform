@@ -193,6 +193,7 @@ app.include_router(alerts.router)
 app.include_router(cdn.router)
 from api import ml, ml_rules, analytics, origins, domains, ip_rules, rate_limits, settings, ai_summary, tunnels, copilot, threshold_proposals
 from api import tunnel as tunnel_api
+from api import threat_intel as threat_intel_api
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
@@ -207,6 +208,7 @@ app.include_router(tunnels.router)
 app.include_router(tunnel_api.router)
 app.include_router(copilot.router)
 app.include_router(threshold_proposals.router)
+app.include_router(threat_intel_api.router)
 
 # Error Handlers
 from fastapi import Request
@@ -268,6 +270,15 @@ async def startup_event():
     if not hasattr(app.state, "dns_verification_task"):
         from services.dns_verification_worker import dns_verification_worker
         app.state.dns_verification_task = asyncio.create_task(dns_verification_worker())
+    # SSL cert monitor: waf_ssl_certs existed as a table reference with zero
+    # read/write callers anywhere in the codebase (confirmed empty
+    # 2026-09-21) -- OriginDetail.tsx's "SSL Certificates" tab was rendering
+    # domain.ssl_status || 'ACTIVE' for every domain regardless of real
+    # state. This worker replaces that with a real, periodically-probed
+    # status per domain.
+    if not hasattr(app.state, "ssl_cert_monitor_task"):
+        from services.ssl_cert_monitor import ssl_cert_monitor_worker
+        app.state.ssl_cert_monitor_task = asyncio.create_task(ssl_cert_monitor_worker())
 
 
 @app.on_event("shutdown")

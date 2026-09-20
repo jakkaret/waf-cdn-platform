@@ -9,6 +9,9 @@ export interface User {
   auth_provider: 'local' | 'google' | 'telegram'
   created_at: string
   last_login: string
+  // Cross-tenant threat intel opt-in (services/threat_intel.py) -- per-user,
+  // read fresh server-side on every share/read, never cached client-side.
+  share_threat_intel?: boolean
 }
 
 export interface WafLog {
@@ -148,6 +151,12 @@ export interface Domain {
   cname_target: string
   ssl_status: 'none' | 'pending' | 'active' | 'error'
   ssl_expires_at?: string
+  // Real cert data from services/ssl_cert_monitor.py's periodic probe
+  // (waf_ssl_certs), surfaced by api/domains.py's format_domain(). Absent
+  // (not just falsy) until the worker has probed this domain at least once.
+  ssl_issuer?: string
+  ssl_days_remaining?: number | null
+  ssl_checked_at?: string
   created_at: string
 }
 
