@@ -3,6 +3,7 @@ import time
 import httpx
 import hashlib
 import logging
+from datetime import timedelta
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from typing import List, Dict, Any, Optional, Tuple
@@ -21,6 +22,10 @@ FRP_DASHBOARD_URL = os.getenv("FRP_DASHBOARD_URL", "http://127.0.0.1:7500/api/pr
 FRP_ADMIN_USER = os.getenv("FRP_ADMIN_USER", "admin")
 FRP_ADMIN_PASS = os.getenv("FRP_ADMIN_PASS", "admin1234")
 LEGACY_STATIC_TOKEN = os.getenv("FRP_AUTH_TOKEN", "28cda1cc8790af9e459528ec6e325bcc4adf2ceb3f4b6f74de1f9c0a9a58b277")
+# A tunnel token authenticates a persistent connection (Restart=always,
+# meant to run unattended for months), not a browser login session -- see
+# the 2026-09-20 fix notes on create_tunnel_token/get_tunnel_config below.
+TUNNEL_TOKEN_DEFAULT_EXPIRE_DAYS = 365
 
 RESERVED_SUBDOMAINS = {
     "main.waf-it-kku.online", "waf-it-kku.online", "www.waf-it-kku.online",
@@ -252,7 +257,17 @@ async def create_tunnel_token(payload: CreateTunnelTokenRequest, current_user: d
     _assert_domain_claimable(domain_clean, current_user)
 
     # Generate Token
-    expires_sec = (payload.expires_days or 365) * 86400
+    # 2026-09-20 fix: expires_sec was computed here and never used -- this
+    # endpoint's own response below has always claimed "expires_in_days:
+    # 365" while the token itself silently carried auth_service's login-
+    # session default (60 minutes, see ACCESS_TOKEN_EXPIRE_MINUTES). A
+    # tunnel token authenticates a long-lived, persistent connection
+    # (Restart=always, meant to run for months), not a browser session --
+    # confirmed live on a real Lab deploy: its frpc.toml tokens had expired
+    # ~8h after being issued, silently breaking every proxy on that agent
+    # with "Invalid or expired WAF Tunnel Token" until someone happened to
+    # notice and re-ran the installer.
+    expires_sec = (payload.expires_days or TUNNEL_TOKEN_DEFAULT_EXPIRE_DAYS) * 86400
     token_data = {
         "sub": user_id,
         "user_id": user_id,
@@ -260,7 +275,7 @@ async def create_tunnel_token(payload: CreateTunnelTokenRequest, current_user: d
         "domain": domain_clean,
         "type": "tunnel_token",
     }
-    token = auth_service.create_access_token(token_data)
+    token = auth_service.create_access_token(token_data, expires_delta=timedelta(seconds=expires_sec))
 
     return {
         "success": True,
@@ -293,6 +308,12 @@ async def get_tunnel_config(
     _assert_domain_claimable(domain_clean, current_user)
 
     # Generate user-specific token
+    # 2026-09-20 fix: same bug as create_tunnel_token above -- no
+    # expires_delta meant this silently used auth_service's 60-minute
+    # login-session default instead of a lifetime appropriate for a
+    # persistent tunnel connection. This is the endpoint the 1-Click
+    # installer's copy-paste command actually calls, so this was the one
+    # that broke a real Lab deploy's tunnels ~1h after every fresh install.
     token_data = {
         "sub": user_id,
         "user_id": user_id,
@@ -300,7 +321,9 @@ async def get_tunnel_config(
         "domain": domain_clean,
         "type": "tunnel_token",
     }
-    token = auth_service.create_access_token(token_data)
+    token = auth_service.create_access_token(
+        token_data, expires_delta=timedelta(days=TUNNEL_TOKEN_DEFAULT_EXPIRE_DAYS)
+    )
 
     safe_name = f"waf-agent-{domain_clean.replace('.', '-')}"
 

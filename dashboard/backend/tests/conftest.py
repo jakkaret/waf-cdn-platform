@@ -80,6 +80,7 @@ from api import rules as rules_module  # noqa: E402
 from api import ai_summary as ai_summary_module  # noqa: E402
 from api import domains as domains_module  # noqa: E402
 from api import alerts as alerts_module  # noqa: E402
+from api import tunnels as tunnels_module  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +306,14 @@ def fake_infrastructure(monkeypatch, tmp_path):
     # tried a real network connection to the loopback DYNAMODB_ENDPOINT_URL
     # and failed with a 500 instead of writing to the fake store).
     monkeypatch.setattr(alerts_module, "db", FakeDynamoDBService())
+    # api/tunnels.py (plural -- the FRP one; distinct from api/tunnel.py
+    # singular, the cloudwaf one, which is file-state based and doesn't use
+    # this db singleton) also does `db = DynamoDBService()` at import time,
+    # used by create_tunnel_token/get_tunnel_config's _assert_domain_claimable
+    # (domains_table.scan()) and get_tunnels_status. Same gap class as
+    # alerts.py above -- caught live by a real test attempting a genuine
+    # DynamoDB connection to the dummy loopback endpoint.
+    monkeypatch.setattr(tunnels_module, "db", FakeDynamoDBService())
     # services/tenant_service.py's `db = DynamoDBService()` (used by
     # get_user_origins_and_domains, called from api/analytics.py,
     # api/copilot.py, api/ai_summary.py and api/tunnels.py's
