@@ -5,7 +5,7 @@ export const getDomains = (originId: string) =>
   api.get<{ domains: Domain[] }>(`/origins/${originId}/domains`)
 
 export const createDomain = (originId: string, data: { domain_name: string }) =>
-  api.post<{ domain: Domain; dns_instructions: DnsInstructions }>(
+  api.post<{ domain: Domain; dns_instructions: DnsInstructions | null; auto_verified: boolean }>(
     `/origins/${originId}/domains`, data
   )
 

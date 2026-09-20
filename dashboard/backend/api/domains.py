@@ -392,6 +392,33 @@ class DomainCreatePayload(BaseModel):
     def _domain_name_must_be_hostname(cls, v: str) -> str:
         return _validate_hostname(v)
 
+# 2026-09-22 (self-service onboarding, overnight session): a subdomain of
+# our own already-DNS-controlled wildcard needs no CNAME/TXT dance at all --
+# *.waf-it-kku.online already resolves to the edge with zero setup
+# (confirmed live earlier this session). Reserved labels are the ones the
+# Caddyfile itself already aliases to the dashboard UI (block 1: waf-it-kku.
+# online, www., main., dash.) -- letting a user "claim" one of those as
+# their own origin's domain would collide with the real dashboard at that
+# hostname.
+OWN_WILDCARD_DOMAIN = os.getenv("WAF_OWN_WILDCARD_DOMAIN", "waf-it-kku.online").strip().lower()
+_RESERVED_OWN_SUBDOMAIN_LABELS = {"www", "main", "dash"}
+
+
+def _is_claimable_own_wildcard_subdomain(domain_name: str) -> bool:
+    d = domain_name.strip().lower()
+    suffix = "." + OWN_WILDCARD_DOMAIN
+    if not d.endswith(suffix) or d == OWN_WILDCARD_DOMAIN:
+        return False
+    label = d[: -len(suffix)]
+    # Only a single-label subdomain auto-verifies -- a deeper one (e.g.
+    # api.myshop.waf-it-kku.online) still goes through the normal flow,
+    # since arbitrary nesting depth was never verified against the wildcard
+    # cert / Caddyfile blocks the way the single-level case was.
+    if not label or "." in label:
+        return False
+    return label not in _RESERVED_OWN_SUBDOMAIN_LABELS
+
+
 @origins_domains_router.post("/{origin_id}/domains")
 async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayload, current_user: dict = Depends(get_current_user)):
     verify_origin_ownership(origin_id, current_user)
@@ -407,22 +434,24 @@ async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayloa
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Domain name {domain_name} is already registered."
         )
-        
+
     domain_id = str(uuid.uuid4())
     verification_token = f"waf-token-{uuid.uuid4().hex[:16]}"
     now = datetime.now().isoformat() + "Z"
-    
+
+    auto_verified = _is_claimable_own_wildcard_subdomain(domain_name)
+
     domain_data = {
         "id": domain_id,
         "origin_id": origin_id,
         "domain_name": domain_name,
         "verification_token": verification_token,
-        "dns_verified": False,
-        "ssl_status": "none",
+        "dns_verified": auto_verified,
+        "ssl_status": "pending" if auto_verified else "none",
         "created_at": now,
         "updated_at": now
     }
-    
+
     try:
         db.domains_table.put_item(Item=domain_data)
     except Exception as e:
@@ -430,7 +459,16 @@ async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayloa
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save domain: {e}"
         )
-        
+
+    if auto_verified:
+        sync_domain_config(origin_id, domain_name)
+        invalidate_ssl_allowed_snapshot()
+        return {
+            "domain": format_domain(domain_data),
+            "dns_instructions": None,
+            "auto_verified": True,
+        }
+
     dns_instructions = {
         "cname_record": {
             "type": "CNAME",
@@ -443,10 +481,11 @@ async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayloa
             "value": verification_token
         }
     }
-    
+
     return {
         "domain": format_domain(domain_data),
-        "dns_instructions": dns_instructions
+        "dns_instructions": dns_instructions,
+        "auto_verified": False,
     }
 
 @origins_domains_router.post("/{origin_id}/domains/{domain_id}/verify")
