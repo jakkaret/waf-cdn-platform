@@ -31,6 +31,103 @@ RESERVED_SUBDOMAINS = {
 _TUNNELS_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 CACHE_TTL = 3.0
 
+# Served verbatim by main.py at GET /install-agent.sh (the URL the
+# linux_oneliner command below pipes into `sudo bash`). Plain string, not an
+# f-string -- every "{" here is bash (${VAR} / heredocs), not a Python
+# placeholder; values come from the CLI args the user's own copy-pasted
+# command supplies, mirroring the connection-token/proxy-metadatas split the
+# frp_webhook_gatekeeper below actually enforces.
+INSTALL_AGENT_SCRIPT = """#!/bin/bash
+set -e
+
+TOKEN=""
+DOMAIN=""
+PORT="3000"
+IP="127.0.0.1"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --token) TOKEN="$2"; shift 2 ;;
+    --domain) DOMAIN="$2"; shift 2 ;;
+    --port) PORT="$2"; shift 2 ;;
+    --ip) IP="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+if [[ -z "$TOKEN" || -z "$DOMAIN" ]]; then
+  echo "Usage: install-agent.sh --token <jwt> --domain <domain> [--port <port>] [--ip <ip>]" >&2
+  exit 1
+fi
+
+LEGACY_TOKEN="__CLOUDWAF_LEGACY_TOKEN__"
+PROXY_NAME="$(echo "$DOMAIN" | tr '.' '-')"
+
+mkdir -p /etc/waf-agent
+
+if [[ ! -x /usr/local/bin/waf-agent ]]; then
+  echo "==> Installing frpc 0.61.1 as /usr/local/bin/waf-agent..."
+  ARCH="$(uname -m)"
+  case "$ARCH" in
+    x86_64) FRP_ARCH="amd64" ;;
+    aarch64|arm64) FRP_ARCH="arm64" ;;
+    *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
+  esac
+  TMP_DIR="$(mktemp -d)"
+  curl -sSL "https://github.com/fatedier/frp/releases/download/v0.61.1/frp_0.61.1_linux_${FRP_ARCH}.tar.gz" -o "$TMP_DIR/frp.tar.gz"
+  tar -xzf "$TMP_DIR/frp.tar.gz" -C "$TMP_DIR"
+  install -m 755 "$TMP_DIR"/frp_0.61.1_linux_${FRP_ARCH}/frpc /usr/local/bin/waf-agent
+  rm -rf "$TMP_DIR"
+fi
+
+cat > /etc/waf-agent/frpc.toml <<EOF
+# CloudWAF Private Tunnel Configuration
+serverAddr = "main.waf-it-kku.online"
+serverPort = 7000
+user = "$LEGACY_TOKEN"
+
+auth.method = "token"
+auth.token = "$LEGACY_TOKEN"
+
+[[proxies]]
+name = "$PROXY_NAME"
+type = "http"
+localIP = "$IP"
+localPort = $PORT
+customDomains = ["$DOMAIN"]
+metadatas.token = "$TOKEN"
+metadatas.port = "$PORT"
+EOF
+
+cat > /etc/systemd/system/waf-agent.service <<'EOF'
+[Unit]
+Description=CloudWAF Private Tunnel Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/waf-agent -c /etc/waf-agent/frpc.toml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now waf-agent
+
+echo "==> waf-agent installed and started. Check status: systemctl status waf-agent"
+"""
+
+
+def render_install_agent_script() -> str:
+    """Fills the __CLOUDWAF_LEGACY_TOKEN__ placeholder from the one canonical
+    LEGACY_STATIC_TOKEN (env-sourced, declared above) at request time, so the
+    real value exists in exactly one place in source rather than being
+    duplicated as a second hardcoded literal inside the script template."""
+    return INSTALL_AGENT_SCRIPT.replace("__CLOUDWAF_LEGACY_TOKEN__", LEGACY_STATIC_TOKEN)
+
 # Fix 2026-09-07: connections using the shared legacy token pass Login (which
 # reads content["privilege_key"] at the top level) but NewProxy events for
 # that same connection carry no reusable identity at all -- a live capture
@@ -46,6 +143,21 @@ CACHE_TTL = 3.0
 # instead of re-deriving an identity NewProxy was never actually given.
 _LEGACY_RUN_IDS: Dict[str, float] = {}
 _LEGACY_RUN_ID_TTL = 24 * 3600  # a control connection can legitimately live for days
+
+# 2026-09-19 fix: Origin ownership used to be assigned to whoever happened to
+# view the Tunnels/Origins page first after a proxy came online (see
+# origin_service.auto_sync_tunnel_origins), not the account that actually
+# minted the tunnel token -- a first-viewer race, not real RBAC. NewProxy
+# below already decodes and verifies the domain-scoped JWT for every proxy
+# that gets this far (the "jwt" branch), so it is the one place that
+# authoritatively knows the true owner at the moment a tunnel registers.
+# Record it here; auto_sync_tunnel_origins reads it via get_proxy_owner()
+# instead of trusting its caller's own user_id.
+_PROXY_OWNERS: Dict[str, str] = {}
+
+
+def get_proxy_owner(proxy_name: str) -> Optional[str]:
+    return _PROXY_OWNERS.get(proxy_name)
 
 
 def _remember_legacy_run_id(run_id: str) -> None:
@@ -191,28 +303,63 @@ async def get_tunnel_config(
     token = auth_service.create_access_token(token_data)
 
     safe_name = f"waf-agent-{domain_clean.replace('.', '-')}"
-    linux_command = (
-        f"curl -sSL https://waf-it-kku.online/install-agent.sh | sudo bash -s -- "
-        f"--token {token} --domain {domain_clean} --port {port} --ip {local_ip}"
-    )
-    docker_command = (
-        f"docker run -d --name {safe_name} --restart=always --net=host "
-        f"snowdreamtech/frpc:0.61.1 -s main.waf-it-kku.online:7000 "
-        f"-u {token} --proxy_type http --custom_domains {domain_clean} --local_port {port}"
-    )
+
+    # Two tokens are in play, and the FRP gatekeeper (frp_webhook_gatekeeper
+    # above) requires each at a different scope: the connection-level
+    # auth.token is checked against the shared LEGACY_STATIC_TOKEN at Login
+    # (it carries no domain claim, so NewProxy explicitly rejects it -- see
+    # the "legacy" branch under op == "NewProxy"); the domain-scoped JWT must
+    # ride in metadatas.token on the [[proxies]] block, which is what
+    # NewProxy actually reads (content["metas"]["token"]) to authorize the
+    # binding. Verified against a live reconnect: this is the exact layout
+    # that produced "login to server success" + "start proxy success".
+    #
+    # metadatas.port: FRP's admin dashboard API (what origin_service.py's
+    # auto-create and get_tunnels_status below poll) returns conf.localIP
+    # but never conf.localPort -- frps genuinely does not track the client's
+    # local port at all, confirmed against a live proxy (verified 2026-09-19).
+    # metadatas IS returned in full by that same API, so the local port rides
+    # along there too, next to the token, instead of a field FRP will never
+    # give back.
     toml_config = (
         f'# CloudWAF Private Tunnel Configuration\n'
         f'serverAddr = "main.waf-it-kku.online"\n'
         f'serverPort = 7000\n'
-        f'user = "{token}"\n\n'
+        f'user = "{LEGACY_STATIC_TOKEN}"\n\n'
         f'auth.method = "token"\n'
-        f'auth.token = "{token}"\n\n'
+        f'auth.token = "{LEGACY_STATIC_TOKEN}"\n\n'
         f'[[proxies]]\n'
         f'name = "{domain_clean.replace(".", "-")}"\n'
         f'type = "http"\n'
         f'localIP = "{local_ip}"\n'
         f'localPort = {port}\n'
         f'customDomains = ["{domain_clean}"]\n'
+        f'metadatas.token = "{token}"\n'
+        f'metadatas.port = "{port}"\n'
+    )
+    linux_command = (
+        f"curl -sSL https://waf-it-kku.online/install-agent.sh | sudo bash -s -- "
+        f"--token {token} --domain {domain_clean} --port {port} --ip {local_ip}"
+    )
+    # frpc 0.61.1 dropped the old --proxy_type/--custom_domains/--local_port
+    # CLI flags entirely (config is toml-only now), so a proxy can no longer
+    # be described on the command line -- write the same toml_config to disk
+    # and mount it in, instead of maintaining a second, incompatible format.
+    # /etc/waf-agent is root:root 755 (verified on a real non-root deploy
+    # user): a plain `cat > /etc/waf-agent/...` redirect fails with Permission
+    # denied *before* `docker run` even executes, and `-v` against the
+    # now-missing path makes Docker silently create it as an empty directory,
+    # which then fails the bind-mount ("not a directory") -- `sudo` alone on
+    # `cat` does not help because the shell, not `cat`, performs the `>`
+    # redirection, so it must be `sudo tee` instead. Every privileged step
+    # gets its own explicit `sudo`, matching the linux_oneliner above.
+    docker_command = (
+        f"sudo mkdir -p /etc/waf-agent && sudo tee /etc/waf-agent/{safe_name}.toml > /dev/null <<'EOF'\n"
+        f"{toml_config}"
+        f"EOF\n"
+        f"sudo docker run -d --name {safe_name} --restart=always --net=host "
+        f"-v /etc/waf-agent/{safe_name}.toml:/etc/frp/frpc.toml:ro "
+        f"snowdreamtech/frpc:0.61.1 -c /etc/frp/frpc.toml"
     )
 
     return {
@@ -346,6 +493,9 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
         if kind == "jwt":
             token_domain = str(payload.get("domain") or "").strip().lower()
             if token_domain == target_domain:
+                owner_id = payload.get("user_id") or payload.get("sub")
+                if owner_id:
+                    _PROXY_OWNERS[proxy_name] = owner_id
                 logger.info(f"FRP Webhook: Proxy '{proxy_name}' authorized for domain '{target_domain}' (owned by token)")
                 return {"reject": False, "unchange": True}
             logger.warning(
@@ -474,7 +624,16 @@ async def get_tunnels_status(
                 traffic_in = p.get("todayTrafficIn") if "todayTrafficIn" in p else p.get("today_traffic_in", 0)
                 traffic_out = p.get("todayTrafficOut") if "todayTrafficOut" in p else p.get("today_traffic_out", 0)
                 local_ip = conf.get("localIP") or conf.get("local_ip") or "127.0.0.1"
-                local_port = conf.get("localPort") or conf.get("local_port") or 80
+                # frps' dashboard API never carries localPort (confirmed
+                # live, see the note in config-generator above) -- metadatas
+                # is the one thing here that's ours end to end, so the port
+                # we embedded there at generation time is the only reliable
+                # source; the localPort/local_port reads stay only for any
+                # tunnel whose config predates this fix.
+                local_port = (
+                    (conf.get("metadatas") or {}).get("port")
+                    or conf.get("localPort") or conf.get("local_port") or 80
+                )
 
                 owner_name = token_username or all_users_map.get(owner_id, "You" if is_mine else "User")
 
