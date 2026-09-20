@@ -8,6 +8,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
 from services.gemini_service import gemini_service
+from services import threat_intel
 from boto3.dynamodb.conditions import Attr
 
 load_dotenv()
@@ -94,6 +95,19 @@ async def dispatch_telegram_alert(data: dict):
             invalidate_alerts_cache()
         except Exception as err:
             logger.error("Error saving alert to DynamoDB: %s", err)
+
+        # Cross-tenant threat intel (opt-in, pattern-only -- see
+        # services/threat_intel.py's module docstring for the full design).
+        # This is *this* async task, already a fire-and-forget
+        # asyncio.create_task() from every caller -- adds no latency to the
+        # WAF's actual block response. Never raises: a missing host or a
+        # DynamoDB hiccup here must never take down the Telegram alert path.
+        host = data.get("host")
+        if host:
+            try:
+                threat_intel.record_pattern_hit_for_domain(host, rule_id, attack_type)
+            except Exception as e:
+                logger.warning("threat_intel pattern recording failed for %s: %s", host, e)
 
         if not BOT_TOKEN:
             logger.warning("Telegram BOT_TOKEN missing, alert not sent via Telegram")

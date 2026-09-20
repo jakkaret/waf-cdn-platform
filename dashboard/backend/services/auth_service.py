@@ -202,6 +202,17 @@ class AuthService:
     def delete_user(self, user_id: str):
         self.users_table.delete_item(Key={"user_id": user_id})
 
+    def set_threat_intel_opt_in(self, user_id: str, enabled: bool) -> None:
+        """services/threat_intel.py reads this field fresh (never cached) on
+        every write and read, so opting out here takes effect on the very
+        next attack -- see that module's docstring for why that direction
+        matters more than opt-in lag would."""
+        self.users_table.update_item(
+            Key={"user_id": user_id},
+            UpdateExpression="SET share_threat_intel = :v",
+            ExpressionAttributeValues={":v": bool(enabled)},
+        )
+
     def register_local(self, email: str, username: str, password: str, role: str = "viewer") -> Dict:
         existing = self.get_user_by_email(email)
         if existing:

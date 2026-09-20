@@ -81,6 +81,8 @@ from api import ai_summary as ai_summary_module  # noqa: E402
 from api import domains as domains_module  # noqa: E402
 from api import alerts as alerts_module  # noqa: E402
 from api import tunnels as tunnels_module  # noqa: E402
+from api import threat_intel as threat_intel_api_module  # noqa: E402
+import services.threat_intel as threat_intel_module  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +153,14 @@ def _apply_update_expression(item, expr, attr_values=None, attr_names=None):
     # first ADD if it doesn't exist yet, and a DELETE against a set that
     # doesn't contain the value (or doesn't exist) is a no-op, never an
     # error -- both mirrored here.
+    #
+    # 2026-09-21: real DynamoDB's ADD is arithmetic on a Number attribute
+    # (services/threat_intel.py's hit_count atomic counter) but a set-union
+    # on a String/Number Set attribute (tenant_hashes here, viewer sets
+    # elsewhere) -- two genuinely different operations sharing one keyword.
+    # This previously always took the set-union branch, which would have
+    # silently turned a numeric counter into a one-element set instead of
+    # incrementing it.
     add_part = clauses.get("ADD", "")
     if add_part:
         for assignment in add_part.split(","):
@@ -161,6 +171,9 @@ def _apply_update_expression(item, expr, attr_values=None, attr_names=None):
             name = attr_names.get(name_tok, name_tok)
             value = attr_values.get(val_tok.strip(), val_tok.strip())
             existing = item.get(name)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                item[name] = (existing or 0) + value
+                continue
             if not isinstance(existing, set):
                 existing = set(existing) if existing else set()
             existing |= set(value) if isinstance(value, (set, frozenset)) else {value}
@@ -223,6 +236,19 @@ class InMemoryTable:
                 _apply_update_expression(row, UpdateExpression, ExpressionAttributeValues,
                                           ExpressionAttributeNames)
                 return {}
+        # 2026-09-21: real DynamoDB's update_item *creates* the item if no
+        # row matches Key (that's exactly why ADD is the standard atomic
+        # counter pattern -- create-or-increment in one call, no read-modify
+        # -write race). This fake silently no-op'd instead, which every
+        # caller so far worked around with an explicit get_item-then-
+        # put_item/update_item split. services/threat_intel.py's
+        # cross-tenant pattern counter needs real ADD-creates-if-missing
+        # semantics for concurrent-tenant correctness, so this now mirrors
+        # AWS rather than the previous simplification.
+        new_row = dict(Key)
+        self.rows.append(new_row)
+        _apply_update_expression(new_row, UpdateExpression, ExpressionAttributeValues,
+                                  ExpressionAttributeNames)
         return {}
 
     def delete_item(self, Key):
@@ -264,6 +290,7 @@ class FakeDynamoDBService(DynamoDBService):
         self.domains_table = _table("waf_domains")
         self.ssl_certs_table = _table("waf_ssl_certs")
         self.pending_rules_table = _table("waf_pending_rules")
+        self.threat_patterns_table = _table("waf_threat_patterns")
 
 
 @pytest.fixture(autouse=True)
@@ -314,6 +341,17 @@ def fake_infrastructure(monkeypatch, tmp_path):
     # alerts.py above -- caught live by a real test attempting a genuine
     # DynamoDB connection to the dummy loopback endpoint.
     monkeypatch.setattr(tunnels_module, "db", FakeDynamoDBService())
+    # services/threat_intel.py's `db = DynamoDBService()` and
+    # `auth_service = AuthService()` (used by record_pattern_hit,
+    # get_trending_patterns and _build_domain_owner_map), plus
+    # api/threat_intel.py's own separate AuthService() instance (used by the
+    # PATCH /opt-in endpoint) -- same gap class as every other module in
+    # this list, and api/threat_intel.py's auth_service in particular must
+    # share the same users_table as api.auth's so a user registered via
+    # /api/auth/register is the same account seen by /api/threat-intel/*.
+    monkeypatch.setattr(threat_intel_module, "db", FakeDynamoDBService())
+    monkeypatch.setattr(threat_intel_module.auth_service, "users_table", _table("waf_users"))
+    monkeypatch.setattr(threat_intel_api_module.auth_service, "users_table", _table("waf_users"))
     # services/tenant_service.py's `db = DynamoDBService()` (used by
     # get_user_origins_and_domains, called from api/analytics.py,
     # api/copilot.py, api/ai_summary.py and api/tunnels.py's
@@ -369,6 +407,15 @@ def app() -> FastAPI:
 @pytest.fixture()
 def client(app: FastAPI) -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture()
+def db() -> FakeDynamoDBService:
+    """A standalone fake DynamoDB instance sharing the same backing _STORE
+    the autouse fixture clears before each test -- for tests that take `db`
+    as an explicit function parameter (dependency injection) rather than
+    reading a module's own patched singleton."""
+    return FakeDynamoDBService()
 
 
 DEFAULT_PASSWORD = "Sup3rSecret!"
