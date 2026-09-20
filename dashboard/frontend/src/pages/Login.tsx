@@ -233,6 +233,11 @@ export const Login: React.FC = () => {
                     Create one
                   </Link>
                 </p>
+                <p className="mt-1.5 text-center text-[11px] text-[var(--text-muted)]">
+                  <Link to="/status" className="underline-offset-4 hover:underline">
+                    System status
+                  </Link>
+                </p>
               </div>
             </div>
           </section>

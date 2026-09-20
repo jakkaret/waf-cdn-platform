@@ -23,6 +23,7 @@ import Origins from './pages/Origins'
 import OriginDetail from './pages/OriginDetail'
 import MLAnalyst from './pages/MLAnalyst'
 import Tunnels from './pages/Tunnels'
+import StatusPage from './pages/StatusPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -71,6 +72,7 @@ export const App: React.FC = () => {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/oauth-success" element={<OAuthSuccess />} />
+          <Route path="/status" element={<StatusPage />} />
 
           {/* Protected Routes */}
           <Route

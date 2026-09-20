@@ -16,6 +16,7 @@
 set -uo pipefail
 
 EDGE_IP="${EDGE_IP:-45.154.26.91}"
+ASIA_IP="${ASIA_IP:-57.158.25.236}"
 MAIN_IP="${MAIN_IP:-178.104.53.123}"
 DASH_HOST="${DASH_HOST:-waf-it-kku.online}"
 SITE_HOST="${SITE_HOST:-dvwa.waf-it-kku.online}"
@@ -111,6 +112,22 @@ case "$dash_issuer" in
   *"Let's Encrypt"*|*ZeroSSL*) check inv "Dashboard cert from a public CA" ok ok ;;
   *)                           check inv "Dashboard cert from a public CA" ok "${dash_issuer:-none}" ;;
 esac
+
+echo "${c_dim}-- Public status page leaks no internal topology -----------${c_off}"
+# 2026-09-22: this endpoint has no auth by design (a status page), which is
+# exactly why services/public_status.py builds its payload by naming every
+# field explicitly rather than forwarding api/cdn.py's real health-check
+# result (real edge IPs, a loopback health_url, lat/lng). This is the actual
+# proof of that, not a reading of the code -- same principle as T5 below,
+# applied to this endpoint's payload instead of the JS bundle.
+check inv "Public status endpoint reachable, no auth" 200 "$(code "http://$MAIN_IP:8000/api/status/public")"
+status_body="$("$CURL" -sk -m "$TIMEOUT" "http://$MAIN_IP:8000/api/status/public" 2>/dev/null)"
+leak_hits=0
+for needle in "$EDGE_IP" "$ASIA_IP" "$MAIN_IP" "127.0.0.1" "healthz" "8080"; do
+  hits="$(printf '%s' "$status_body" | grep -c "$needle" || true)"
+  leak_hits=$((leak_hits + hits))
+done
+check inv "Public status response has zero internal IPs/hosts" 0 "$leak_hits"
 
 # ------------------------------------------------------------ SECURITY GATES
 echo
