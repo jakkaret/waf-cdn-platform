@@ -6,6 +6,8 @@ import { getDomains, deleteDomain, verifyDomain } from '../api/domains'
 import { getCaptchaConfig, updateCaptchaConfig } from '../api/captcha'
 import { getOtpConfig, updateOtpConfig } from '../api/otp'
 import { getOriginViewers, addOriginViewer, removeOriginViewer } from '../api/origin_viewers'
+import { getOriginEditors, addOriginEditor, removeOriginEditor } from '../api/origin_editors'
+import { getOriginAuditLog } from '../api/origin_audit_log'
 import { rulesApi } from '../api/rules'
 import { useAuthStore } from '../store/authStore'
 import { tunnelConnectivityBadge } from '../lib/tunnelStatus'
@@ -41,7 +43,8 @@ export const OriginDetail: React.FC = () => {
   const navigate = useNavigate()
   const currentUser = useAuthStore((s) => s.user)
   const [viewerEmailInput, setViewerEmailInput] = useState('')
-  const [activeTab, setActiveTab] = useState<'overview' | 'domains' | 'waf' | 'ssl' | 'shield'>('overview')
+  const [editorEmailInput, setEditorEmailInput] = useState('')
+  const [activeTab, setActiveTab] = useState<'overview' | 'domains' | 'waf' | 'ssl' | 'shield' | 'team'>('overview')
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false)
   const [isDomainWizardOpen, setIsDomainWizardOpen] = useState(false)
@@ -254,6 +257,46 @@ export const OriginDetail: React.FC = () => {
     onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to remove viewer'),
   })
 
+  // Team Workspace (2026-09-22): editors can make routine, reversible
+  // changes (origin fields, CAPTCHA/OTP config, domains) but never
+  // delete/restore the origin or manage viewers/editors -- that stays
+  // owner-only, mirrored exactly from the viewer pattern above.
+  const { data: editorsData, isLoading: editorsLoading } = useQuery({
+    queryKey: ['origin-editors', id],
+    queryFn: () => getOriginEditors(id!),
+    enabled: !!id && isOwner,
+  })
+  const editors = editorsData?.data?.editors || []
+
+  const addEditorMutation = useMutation({
+    mutationFn: (email: string) => addOriginEditor(id!, email),
+    onSuccess: (res) => {
+      toast.success(`${res.data.editor.username || res.data.editor.email} can now edit this origin`)
+      setEditorEmailInput('')
+      queryClient.invalidateQueries({ queryKey: ['origin-editors', id] })
+    },
+    onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to add editor'),
+  })
+
+  const removeEditorMutation = useMutation({
+    mutationFn: (editorId: string) => removeOriginEditor(id!, editorId),
+    onSuccess: () => {
+      toast.success('Editor access removed')
+      queryClient.invalidateQueries({ queryKey: ['origin-editors', id] })
+    },
+    onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to remove editor'),
+  })
+
+  // Audit log is readable by owner, editor, and viewer alike (backend
+  // enforces via verify_origin_access) -- anyone who can already see this
+  // origin can see what changed on it and by whom.
+  const { data: auditLogData, isLoading: auditLogLoading } = useQuery({
+    queryKey: ['origin-audit-log', id],
+    queryFn: () => getOriginAuditLog(id!),
+    enabled: !!id && activeTab === 'team',
+  })
+  const auditEvents = auditLogData?.data?.events || []
+
   const handleDelete = async () => {
     const isPending = origin?.status === 'pending'
     try {
@@ -401,6 +444,7 @@ export const OriginDetail: React.FC = () => {
           { id: 'waf', label: 'WAF Policies', icon: <Shield size={14} /> },
           { id: 'ssl', label: 'SSL Certificates', icon: <Lock size={14} /> },
           { id: 'shield', label: 'Bot & Login Shield', icon: <Bot size={14} /> },
+          { id: 'team', label: 'Team & Audit Log', icon: <Users size={14} /> },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -479,64 +523,6 @@ export const OriginDetail: React.FC = () => {
                 </div>
               </div>
             </div>
-
-            {isOwner && (
-              <div className="dash-card p-5 space-y-4 md:col-span-2">
-                <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
-                  <Users size={14} /> Viewer Access
-                </h3>
-                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                  Only you can see this origin by default. Grant another registered account
-                  read-only access below -- they will see it in their Origins list and in their
-                  Traffic Logs / Analytics, but cannot edit, delete, or manage its settings.
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="email"
-                    value={viewerEmailInput}
-                    onChange={(e) => setViewerEmailInput(e.target.value)}
-                    placeholder="teammate@example.com"
-                    className="flex-1 bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
-                  />
-                  <Button
-                    size="sm"
-                    icon={<Plus size={14} />}
-                    onClick={() => viewerEmailInput.trim() && addViewerMutation.mutate(viewerEmailInput.trim())}
-                    disabled={!viewerEmailInput.trim() || addViewerMutation.isPending}
-                  >
-                    Add Viewer
-                  </Button>
-                </div>
-                {viewersLoading ? (
-                  <LoadingSpinner />
-                ) : viewers.length === 0 ? (
-                  <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                    No viewers granted yet -- this origin is only visible to you.
-                  </p>
-                ) : (
-                  <div className="space-y-2 font-mono text-[12px]">
-                    {viewers.map((v) => (
-                      <div
-                        key={v.user_id}
-                        className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]"
-                      >
-                        <span className="text-[var(--text-primary)]">
-                          {v.username || v.email} <span className="text-[var(--text-muted)]">({v.email})</span>
-                        </span>
-                        <button
-                          onClick={() => removeViewerMutation.mutate(v.user_id)}
-                          disabled={removeViewerMutation.isPending}
-                          className="text-red-500 hover:text-red-400"
-                          title="Revoke viewer access"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         )}
 
@@ -1282,6 +1268,161 @@ export const OriginDetail: React.FC = () => {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {activeTab === 'team' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {isOwner && (
+              <div className="dash-card p-5 space-y-4">
+                <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
+                  <Users size={14} /> Viewer Access
+                </h3>
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  Only you can see this origin by default. Grant another registered account
+                  read-only access below -- they will see it in their Origins list and in their
+                  Traffic Logs / Analytics, but cannot edit, delete, or manage its settings.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={viewerEmailInput}
+                    onChange={(e) => setViewerEmailInput(e.target.value)}
+                    placeholder="teammate@example.com"
+                    className="flex-1 bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
+                  />
+                  <Button
+                    size="sm"
+                    icon={<Plus size={14} />}
+                    onClick={() => viewerEmailInput.trim() && addViewerMutation.mutate(viewerEmailInput.trim())}
+                    disabled={!viewerEmailInput.trim() || addViewerMutation.isPending}
+                  >
+                    Add Viewer
+                  </Button>
+                </div>
+                {viewersLoading ? (
+                  <LoadingSpinner />
+                ) : viewers.length === 0 ? (
+                  <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                    No viewers granted yet -- this origin is only visible to you.
+                  </p>
+                ) : (
+                  <div className="space-y-2 font-mono text-[12px]">
+                    {viewers.map((v) => (
+                      <div
+                        key={v.user_id}
+                        className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]"
+                      >
+                        <span className="text-[var(--text-primary)]">
+                          {v.username || v.email} <span className="text-[var(--text-muted)]">({v.email})</span>
+                        </span>
+                        <button
+                          onClick={() => removeViewerMutation.mutate(v.user_id)}
+                          disabled={removeViewerMutation.isPending}
+                          className="text-red-500 hover:text-red-400"
+                          title="Revoke viewer access"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isOwner && (
+              <div className="dash-card p-5 space-y-4">
+                <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
+                  <Users size={14} /> Editor Access
+                </h3>
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  An editor can rename this origin, change its IP/port, configure the
+                  CAPTCHA/OTP shield, and add or remove domains -- but cannot archive/restore
+                  this origin or manage viewer/editor access.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={editorEmailInput}
+                    onChange={(e) => setEditorEmailInput(e.target.value)}
+                    placeholder="teammate@example.com"
+                    className="flex-1 bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
+                  />
+                  <Button
+                    size="sm"
+                    icon={<Plus size={14} />}
+                    onClick={() => editorEmailInput.trim() && addEditorMutation.mutate(editorEmailInput.trim())}
+                    disabled={!editorEmailInput.trim() || addEditorMutation.isPending}
+                  >
+                    Add Editor
+                  </Button>
+                </div>
+                {editorsLoading ? (
+                  <LoadingSpinner />
+                ) : editors.length === 0 ? (
+                  <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                    No editors granted yet.
+                  </p>
+                ) : (
+                  <div className="space-y-2 font-mono text-[12px]">
+                    {editors.map((ed) => (
+                      <div
+                        key={ed.user_id}
+                        className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]"
+                      >
+                        <span className="text-[var(--text-primary)]">
+                          {ed.username || ed.email} <span className="text-[var(--text-muted)]">({ed.email})</span>
+                        </span>
+                        <button
+                          onClick={() => removeEditorMutation.mutate(ed.user_id)}
+                          disabled={removeEditorMutation.isPending}
+                          className="text-red-500 hover:text-red-400"
+                          title="Revoke editor access"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className={`dash-card p-5 space-y-4 ${isOwner ? 'md:col-span-2' : 'md:col-span-2'}`}>
+              <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
+                <Code size={14} /> Audit Log
+              </h3>
+              <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                Who changed what and when on this origin -- settings, domains, and access
+                grants. Kept for 180 days.
+              </p>
+              {auditLogLoading ? (
+                <LoadingSpinner />
+              ) : auditEvents.length === 0 ? (
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  No changes recorded yet.
+                </p>
+              ) : (
+                <div className="space-y-2 font-mono text-[12px] max-h-[480px] overflow-y-auto">
+                  {auditEvents.map((ev) => (
+                    <div
+                      key={ev.event_id}
+                      className="flex flex-col gap-1 py-2 border-b border-[var(--bg-border-subtle)]"
+                    >
+                      <div className="flex justify-between items-center gap-2">
+                        <span className="text-[var(--text-primary)]">{ev.summary}</span>
+                        <Badge color="gray">{ev.action}</Badge>
+                      </div>
+                      <span className="text-[var(--text-muted)] text-[11px]">
+                        {ev.actor_username || ev.actor_user_id} &middot;{' '}
+                        {new Date(ev.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

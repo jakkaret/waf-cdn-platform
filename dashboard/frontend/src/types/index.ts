@@ -142,6 +142,25 @@ export interface OriginViewer {
   email: string
 }
 
+export interface OriginEditor {
+  user_id: string
+  username: string
+  email: string
+}
+
+// Team Workspace (2026-09-22): audit trail for origin/domain/editor/viewer
+// changes -- services/audit_log.py's write_audit_event() shape.
+export interface AuditEvent {
+  scope_id: string
+  event_id: string
+  timestamp: string
+  actor_user_id: string
+  actor_username: string
+  action: string
+  summary: string
+  details: Record<string, any>
+}
+
 export interface Domain {
   domain_id: string
   origin_id: string
