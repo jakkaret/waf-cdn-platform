@@ -34,6 +34,11 @@ import CveAutoPatch from './pages/concepts/CveAutoPatch'
 import SupplyChainMonitor from './pages/concepts/SupplyChainMonitor'
 import ApiSchemaGuard from './pages/concepts/ApiSchemaGuard'
 import AttackCostShield from './pages/concepts/AttackCostShield'
+import AgenticTrafficGovernance from './pages/concepts/AgenticTrafficGovernance'
+import AiFirewallLlm from './pages/concepts/AiFirewallLlm'
+import DeceptionLayer from './pages/concepts/DeceptionLayer'
+import QuantumSafeTls from './pages/concepts/QuantumSafeTls'
+import UnifiedRiskScore from './pages/concepts/UnifiedRiskScore'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -242,6 +247,46 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 <AttackCostShield />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/agentic-traffic"
+            element={
+              <ProtectedRoute>
+                <AgenticTrafficGovernance />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/ai-firewall"
+            element={
+              <ProtectedRoute>
+                <AiFirewallLlm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/deception"
+            element={
+              <ProtectedRoute>
+                <DeceptionLayer />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/quantum-tls"
+            element={
+              <ProtectedRoute>
+                <QuantumSafeTls />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/risk-score"
+            element={
+              <ProtectedRoute>
+                <UnifiedRiskScore />
               </ProtectedRoute>
             }
           />
