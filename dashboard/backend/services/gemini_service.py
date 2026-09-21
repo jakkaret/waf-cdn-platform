@@ -5,7 +5,7 @@ import logging
 import httpx
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -414,5 +414,70 @@ class GeminiService:
             logger.error(f"Failed to generate range summary: {e}")
 
         return "ไม่สามารถสร้างบทสรุป AI ได้ในขณะนี้ โปรดตรวจสอบการเชื่อมต่อ API"
+
+    async def generate_postmortem_narrative(self, timeline: Dict[str, Any]) -> Dict[str, Any]:
+        """AI Incident Postmortem (2026-09-22). Deliberately NOT a reuse of
+        generate_range_summary: that method's maxOutputTokens=800/timeout=15s
+        is sized for a 3-section summary, and a postmortem (summary +
+        timeline narrative + root-cause hypothesis + recommendations) in
+        Thai routinely exceeds it -- Thai tokenizes at roughly 2-3x English
+        for equivalent content, so reusing those settings would silently
+        truncate mid-sentence rather than fail loudly.
+
+        Returns {"narrative": str|None, "degraded": bool}. Never raises --
+        the timeline itself is real, useful data on its own; a narration
+        failure must not block persisting or returning the report.
+        """
+        audit_lines = "\n".join(
+            f"- [{e.get('timestamp', '')}] ({e.get('scope', '')}) {e.get('action', '')}: {e.get('summary', '')}"
+            for e in timeline.get("audit_events", [])
+        ) or "(ไม่มีการเปลี่ยนแปลงค่าคอนฟิกที่บันทึกไว้ในช่วงนี้)"
+
+        buckets_json = json.dumps(timeline.get("hourly_buckets", []), ensure_ascii=False, indent=2)
+        stats_json = json.dumps(timeline.get("stats", {}), ensure_ascii=False, indent=2)
+
+        prompt = (
+            "คุณคือ AI Senior Security Operations Lead กำลังเขียน Incident Postmortem Report "
+            f"สำหรับช่วงเวลา {timeline.get('start_time')} ถึง {timeline.get('end_time')} "
+            "โดยใช้ภาษาไทยที่อ่านง่าย ตรงประเด็น สำหรับทีมวิศวกรและผู้บริหาร\n\n"
+            f"สถิติรวม:\n{stats_json}\n\n"
+            f"จำนวนคำขอ/การแจ้งเตือนรายชั่วโมง:\n{buckets_json}\n\n"
+            f"เหตุการณ์การเปลี่ยนแปลงระบบ (audit log) ในช่วงเดียวกัน -- ทั้งการเปลี่ยนแปลงเฉพาะ origin นี้ "
+            f"และการเปลี่ยนแปลง system settings/ML rule ที่มีผลทั้งระบบ:\n{audit_lines}\n\n"
+            "กรุณาเขียนรายงานตามหัวข้อต่อไปนี้:\n"
+            "1. 📋 สรุปเหตุการณ์โดยย่อ (Executive Summary)\n"
+            "2. 🕐 ไทม์ไลน์เหตุการณ์สำคัญ (เชื่อมโยงช่วงเวลาที่ traffic/alert เปลี่ยนแปลงกับเหตุการณ์ audit log "
+            "ถ้าช่วงเวลาสอดคล้องกัน ให้ระบุว่าน่าจะเป็นสาเหตุที่เกี่ยวข้องกัน)\n"
+            "3. 🔍 สาเหตุที่เป็นไปได้ (Root Cause Hypothesis) -- ถ้าข้อมูลไม่พอสรุปสาเหตุชัดเจน ให้บอกตรงๆ ว่ายังสรุปไม่ได้ "
+            "แทนที่จะเดา\n"
+            "4. 💡 ข้อเสนอแนะเพื่อป้องกันไม่ให้เกิดซ้ำ (Recommendations)"
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                res = await client.post(
+                    f"{BASE_URL}?key={self.api_key}",
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {
+                            "temperature": 0.3,
+                            "maxOutputTokens": 2500,
+                        },
+                    },
+                )
+                if res.status_code == 200:
+                    candidates = res.json().get("candidates", [])
+                    if candidates:
+                        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                        finish_reason = candidates[0].get("finishReason", "")
+                        degraded = finish_reason == "MAX_TOKENS"
+                        if degraded:
+                            text += "\n\n[หมายเหตุ: เนื้อหาอาจถูกตัดเนื่องจากยาวเกินขีดจำกัดของ AI กรุณาย่อช่วงเวลาแล้วลองใหม่หากต้องการรายงานฉบับสมบูรณ์]"
+                        return {"narrative": text, "degraded": degraded}
+                logger.warning(f"Gemini postmortem call returned status {res.status_code}")
+        except Exception as e:
+            logger.error(f"Failed to generate postmortem narrative: {e}")
+
+        return {"narrative": None, "degraded": False}
 
 gemini_service = GeminiService()

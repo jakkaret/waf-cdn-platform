@@ -1,12 +1,14 @@
 from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import uuid
 from services.gemini_service import gemini_service
 from services.clickhouse_service import ClickHouseService
 from services.dynamodb_service import DynamoDBService
-from services.rbac import get_current_user
-from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter
+from services.rbac import get_current_user, verify_origin_ownership
+from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter, build_domain_pattern_sql
+from services import audit_log
 import logging
 
 logger = logging.getLogger(__name__)
@@ -233,3 +235,218 @@ async def mark_notifications_read(
     except Exception as e:
         logger.error(f"Error marking read: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── AI Incident Postmortem (2026-09-22) ───────────────────────────────────
+# Owner-only (verify_origin_ownership), deliberately: a postmortem merges
+# origin-scoped audit events with *global* ones (settings.update,
+# rule.approve/reject), and those carry raw details like paranoia_level or
+# threshold values that an editor/viewer of one origin has no business
+# seeing about the whole system. See services/audit_log.py's scope_id
+# convention -- "global" is system-wide, not this-origin-only.
+
+def _build_origin_scope_sql(origin: Dict[str, Any]) -> str:
+    """Fail-closed ClickHouse WHERE fragment restricted to this one origin's
+    own domains + IP -- same assembly as tenant_service's
+    get_user_origins_and_domains, scoped to a single origin instead of
+    every origin a user can see."""
+    origin_id = str(origin.get("id") or "")
+    keywords = set()
+    try:
+        all_domains = db.domains_table.scan().get("Items", [])
+        for d in all_domains:
+            if d.get("origin_id") == origin_id and d.get("domain_name"):
+                keywords.add(str(d["domain_name"]).strip().lower())
+    except Exception:
+        pass
+    ip_val = str(origin.get("ip", "")).strip().lower()
+    if ip_val:
+        keywords.add(ip_val)
+    label_val = str(origin.get("label", "")).strip().lower()
+    if "(" in label_val and ")" in label_val:
+        try:
+            extracted = label_val.split("(")[1].split(")")[0].strip()
+            if "." in extracted:
+                keywords.add(extracted)
+        except Exception:
+            pass
+    clauses = [build_domain_pattern_sql(k) for k in keywords]
+    clauses = [c for c in clauses if c]
+    return f"({' OR '.join(clauses)})" if clauses else "1=0"
+
+
+def build_incident_timeline(origin: Dict[str, Any], start_dt: datetime, end_dt: datetime) -> Dict[str, Any]:
+    """Pure assembly, no Gemini call: real traffic/alert stats for this one
+    origin correlated against the real audit trail (both this origin's own
+    events AND global system-settings/rule events) in the same window,
+    merged into one chronological timeline. This correlation -- not the
+    prompt -- is what makes a postmortem different from summarize-range."""
+    origin_id = str(origin.get("id"))
+    time_params = {"start": start_dt, "end": end_dt}
+    stats: Dict[str, Any] = {"total_requests": 0, "total_alerts": 0, "top_attack_types": []}
+    hourly_buckets: List[Dict[str, Any]] = []
+
+    if ch.connected and ch.client:
+        try:
+            scope_sql = _build_origin_scope_sql(origin)
+
+            count_query = f"""
+                SELECT count() AS total, countIf(alert = 1 OR status_code IN (403, 429)) AS blocked
+                FROM access_logs
+                WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} AND {scope_sql}
+            """
+            count_res = ch.client.query(count_query, parameters=time_params)
+            if count_res.result_rows:
+                stats["total_requests"] = int(count_res.result_rows[0][0])
+                stats["total_alerts"] = int(count_res.result_rows[0][1])
+
+            type_query = f"""
+                SELECT attack_type, count() AS cnt
+                FROM access_logs
+                WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} AND attack_type != '' AND {scope_sql}
+                GROUP BY attack_type ORDER BY cnt DESC LIMIT 5
+            """
+            type_res = ch.client.query(type_query, parameters=time_params)
+            stats["top_attack_types"] = [{"type": row[0], "count": int(row[1])} for row in type_res.result_rows]
+
+            bucket_query = f"""
+                SELECT toStartOfHour(timestamp) AS bucket, count() AS total,
+                       countIf(alert = 1 OR status_code IN (403, 429)) AS alerts
+                FROM access_logs
+                WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} AND {scope_sql}
+                GROUP BY bucket ORDER BY bucket ASC
+            """
+            bucket_res = ch.client.query(bucket_query, parameters=time_params)
+            hourly_buckets = [
+                {
+                    "hour": row[0].strftime("%Y-%m-%d %H:%M:%S") if hasattr(row[0], "strftime") else str(row[0]),
+                    "requests": int(row[1]),
+                    "alerts": int(row[2]),
+                }
+                for row in bucket_res.result_rows
+            ]
+        except Exception as e:
+            logger.warning(f"Error querying ClickHouse for postmortem timeline: {e}")
+
+    # Both scopes, merged chronologically -- see module-level note above for
+    # why "global" must be included, not just this origin_id.
+    start_utc = start_dt if start_dt.tzinfo else start_dt.replace(tzinfo=timezone.utc)
+    end_utc = end_dt if end_dt.tzinfo else end_dt.replace(tzinfo=timezone.utc)
+    origin_events = audit_log.get_audit_log(origin_id, start=start_utc, end=end_utc, limit=200)
+    global_events = audit_log.get_audit_log("global", start=start_utc, end=end_utc, limit=200)
+    for e in origin_events:
+        e["scope"] = "origin"
+    for e in global_events:
+        e["scope"] = "global"
+    merged_events = origin_events + global_events
+    merged_events.sort(key=lambda e: e.get("timestamp", ""))
+
+    return {
+        "origin_id": origin_id,
+        "start_time": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "end_time": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "stats": stats,
+        "hourly_buckets": hourly_buckets,
+        "audit_events": merged_events,
+    }
+
+
+class PostmortemCreateRequest(BaseModel):
+    start_time: str
+    end_time: str
+
+
+@router.post("/postmortems/{origin_id}")
+async def create_postmortem(
+    origin_id: str,
+    req: PostmortemCreateRequest,
+    origin: dict = Depends(verify_origin_ownership),
+    current_user: dict = Depends(get_current_user),
+):
+    start_dt = _parse_time_bound(req.start_time, "start_time")
+    end_dt = _parse_time_bound(req.end_time, "end_time")
+    if start_dt > end_dt:
+        raise HTTPException(status_code=422, detail="start_time must not be after end_time")
+
+    timeline = build_incident_timeline(origin, start_dt, end_dt)
+
+    narrative_result: Dict[str, Any] = {"narrative": None, "degraded": False}
+    try:
+        narrative_result = await gemini_service.generate_postmortem_narrative(timeline)
+    except Exception as e:
+        # The timeline is real data and valuable on its own -- a narration
+        # failure must never turn a successful timeline build into a 500.
+        logger.warning(f"Postmortem narrative generation failed: {e}")
+
+    postmortem_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    item = {
+        "id": postmortem_id,
+        "origin_id": origin_id,
+        "origin_label": origin.get("label", ""),
+        "created_by": current_user.get("user_id"),
+        "created_by_username": current_user.get("username", ""),
+        "created_at": now.isoformat(),
+        "start_time": timeline["start_time"],
+        "end_time": timeline["end_time"],
+        "stats": timeline["stats"],
+        "hourly_buckets": timeline["hourly_buckets"],
+        "audit_events": timeline["audit_events"],
+        "ai_narrative": narrative_result.get("narrative"),
+        "ai_narrative_degraded": narrative_result.get("degraded", False),
+    }
+    try:
+        db.postmortems_table.put_item(Item=item)
+    except Exception as e:
+        logger.error(f"Failed to persist postmortem: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save postmortem report")
+
+    return {"status": "success", "postmortem": item}
+
+
+@router.get("/postmortems/{origin_id}")
+async def list_postmortems(
+    origin: dict = Depends(verify_origin_ownership),
+):
+    """No range key on waf_postmortems (HASH=id only) -- scan + filter +
+    Python-side sort, the same shape services/audit_log.py's get_audit_log
+    already uses, rather than adding a GSI for this."""
+    origin_id = origin.get("id")
+    try:
+        items = db.postmortems_table.scan().get("Items", [])
+    except Exception as e:
+        logger.error(f"Failed to list postmortems: {e}")
+        return {"postmortems": []}
+    matching = [i for i in items if i.get("origin_id") == origin_id]
+    matching.sort(key=lambda i: i.get("created_at", ""), reverse=True)
+    # Full audit_events/hourly_buckets are not needed for a list view.
+    summaries = [
+        {
+            "id": i.get("id"),
+            "origin_id": i.get("origin_id"),
+            "origin_label": i.get("origin_label"),
+            "created_by_username": i.get("created_by_username"),
+            "created_at": i.get("created_at"),
+            "start_time": i.get("start_time"),
+            "end_time": i.get("end_time"),
+            "stats": i.get("stats"),
+            "has_ai_narrative": bool(i.get("ai_narrative")),
+        }
+        for i in matching
+    ]
+    return {"postmortems": summaries}
+
+
+@router.get("/postmortems/{origin_id}/{postmortem_id}")
+async def get_postmortem(
+    postmortem_id: str,
+    origin: dict = Depends(verify_origin_ownership),
+):
+    try:
+        item = db.postmortems_table.get_item(Key={"id": postmortem_id}).get("Item")
+    except Exception as e:
+        logger.error(f"Failed to fetch postmortem {postmortem_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load postmortem report")
+    if not item or item.get("origin_id") != origin.get("id"):
+        raise HTTPException(status_code=404, detail="Postmortem not found")
+    return {"postmortem": item}
