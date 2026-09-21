@@ -6,7 +6,8 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 import uuid
 from datetime import datetime
-from services.rbac import get_current_user, verify_origin_ownership
+from services.rbac import get_current_user, verify_origin_ownership, verify_origin_edit_access
+from services import audit_log
 from services.dynamodb_service import DynamoDBService
 from services.captcha_config import sync_domain_config
 from services.dns_service import verify_domain_dns
@@ -71,8 +72,10 @@ class DomainResponse(BaseModel):
 
 @router.post("", response_model=DomainResponse)
 async def create_domain(payload: DomainCreate, current_user: dict = Depends(get_current_user)):
-    # 1. Verify that current user owns the target origin
-    verify_origin_ownership(payload.origin_id, current_user)
+    # 1. Verify that current user can edit the target origin (Team
+    # Workspace, 2026-09-22: owner or editor -- adding a domain is a
+    # routine, reversible operational change, not a destructive one)
+    verify_origin_edit_access(payload.origin_id, current_user)
     
     # 2. Check if domain already exists
     # Scans/queries domains table for this domain_name
@@ -115,9 +118,10 @@ async def create_domain(payload: DomainCreate, current_user: dict = Depends(get_
 
 @router.get("/origin/{origin_id}", response_model=List[DomainResponse])
 async def list_domains_by_origin(origin_id: str, current_user: dict = Depends(get_current_user)):
-    # Verify origin ownership
-    verify_origin_ownership(origin_id, current_user)
-    
+    # Owner or editor (Team Workspace) -- unchanged for a plain viewer,
+    # who still cannot reach this endpoint, same as before this feature.
+    verify_origin_edit_access(origin_id, current_user)
+
     try:
         # Query domains table using GSI
         response = db.domains_table.query(
@@ -151,13 +155,21 @@ async def delete_domain(domain_id: str, current_user: dict = Depends(get_current
     if not domain:
         raise HTTPException(status_code=404, detail="Domain not found")
         
-    # 2. Verify that current user owns the parent origin
-    verify_origin_ownership(domain["origin_id"], current_user)
-    
+    # 2. Verify that current user can edit the parent origin
+    verify_origin_edit_access(domain["origin_id"], current_user)
+
     # 3. Delete domain
     try:
         db.domains_table.delete_item(Key={"id": domain_id})
         invalidate_ssl_allowed_snapshot()
+        audit_log.write_audit_event(
+            scope_id=domain["origin_id"],
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="domain.delete",
+            summary=f"ลบโดเมน: {domain.get('domain_name', domain_id)}",
+            details={"domain_id": domain_id, "domain_name": domain.get("domain_name")},
+        )
         return {"status": "success", "message": f"Domain {domain['domain_name']} deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -170,8 +182,8 @@ async def verify_domain_now(domain_id: str, current_user: dict = Depends(get_cur
     if not domain:
         raise HTTPException(status_code=404, detail="Domain not found")
         
-    # 2. Verify that current user owns origin
-    verify_origin_ownership(domain["origin_id"], current_user)
+    # 2. Verify that current user can edit origin
+    verify_origin_edit_access(domain["origin_id"], current_user)
     
     # 3. Trigger check immediately
     domain_name = domain.get("domain_name")
@@ -365,8 +377,9 @@ def format_domain(domain_data: dict) -> dict:
 
 @origins_domains_router.get("/{origin_id}/domains")
 async def list_domains_by_origin(origin_id: str, current_user: dict = Depends(get_current_user)):
-    verify_origin_ownership(origin_id, current_user)
-    
+    # Owner or editor (Team Workspace, 2026-09-22)
+    verify_origin_edit_access(origin_id, current_user)
+
     try:
         from boto3.dynamodb.conditions import Key
         response = db.domains_table.query(
@@ -421,7 +434,7 @@ def _is_claimable_own_wildcard_subdomain(domain_name: str) -> bool:
 
 @origins_domains_router.post("/{origin_id}/domains")
 async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayload, current_user: dict = Depends(get_current_user)):
-    verify_origin_ownership(origin_id, current_user)
+    verify_origin_edit_access(origin_id, current_user)
 
     domain_name = payload.domain_name
 
@@ -463,6 +476,14 @@ async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayloa
     if auto_verified:
         sync_domain_config(origin_id, domain_name)
         invalidate_ssl_allowed_snapshot()
+        audit_log.write_audit_event(
+            scope_id=origin_id,
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="domain.create",
+            summary=f"เพิ่มโดเมน: {domain_name} (auto-verified)",
+            details={"domain_name": domain_name, "auto_verified": True},
+        )
         return {
             "domain": format_domain(domain_data),
             "dns_instructions": None,
@@ -482,6 +503,14 @@ async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayloa
         }
     }
 
+    audit_log.write_audit_event(
+        scope_id=origin_id,
+        actor_user_id=current_user.get("user_id"),
+        actor_username=current_user.get("username", ""),
+        action="domain.create",
+        summary=f"เพิ่มโดเมน: {domain_name} (รอ verify DNS)",
+        details={"domain_name": domain_name, "auto_verified": False},
+    )
     return {
         "domain": format_domain(domain_data),
         "dns_instructions": dns_instructions,
@@ -490,7 +519,7 @@ async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayloa
 
 @origins_domains_router.post("/{origin_id}/domains/{domain_id}/verify")
 async def verify_domain_now_under_origin(origin_id: str, domain_id: str, current_user: dict = Depends(get_current_user)):
-    verify_origin_ownership(origin_id, current_user)
+    verify_origin_edit_access(origin_id, current_user)
     
     res = db.domains_table.get_item(Key={"id": domain_id})
     domain = res.get("Item")
@@ -524,16 +553,24 @@ async def verify_domain_now_under_origin(origin_id: str, domain_id: str, current
 
 @origins_domains_router.delete("/{origin_id}/domains/{domain_id}")
 async def delete_domain_under_origin(origin_id: str, domain_id: str, current_user: dict = Depends(get_current_user)):
-    verify_origin_ownership(origin_id, current_user)
-    
+    verify_origin_edit_access(origin_id, current_user)
+
     res = db.domains_table.get_item(Key={"id": domain_id})
     domain = res.get("Item")
     if not domain or domain.get("origin_id") != origin_id:
         raise HTTPException(status_code=404, detail="Domain not found")
-        
+
     try:
         db.domains_table.delete_item(Key={"id": domain_id})
         invalidate_ssl_allowed_snapshot()
+        audit_log.write_audit_event(
+            scope_id=origin_id,
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="domain.delete",
+            summary=f"ลบโดเมน: {domain.get('domain_name', domain_id)}",
+            details={"domain_id": domain_id, "domain_name": domain.get("domain_name")},
+        )
         return {"status": "success", "message": f"Domain {domain['domain_name']} deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

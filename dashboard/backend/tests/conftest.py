@@ -293,6 +293,8 @@ class FakeDynamoDBService(DynamoDBService):
         self.pending_rules_table = _table("waf_pending_rules")
         self.threat_patterns_table = _table("waf_threat_patterns")
         self.status_history_table = _table("waf_status_history")
+        self.audit_log_table = _table("waf_audit_log")
+        self.postmortems_table = _table("waf_postmortems")
 
 
 @pytest.fixture(autouse=True)

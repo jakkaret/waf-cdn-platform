@@ -1,0 +1,144 @@
+"""HTTP-level proof that Team Workspace (2026-09-22) works end to end
+through real registered users and the real endpoints -- complements
+tests/test_editor_role.py's direct rbac-function coverage (written first,
+before any endpoint was wired, per the advisor review for this feature)."""
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from services.rate_limiter import limiter
+from api import auth as auth_module
+from api import origins as origins_module
+from api import domains as domains_module
+import services.audit_log as audit_log_module
+
+
+@pytest.fixture()
+def app() -> FastAPI:
+    test_app = FastAPI()
+    test_app.state.limiter = limiter
+    test_app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    test_app.include_router(auth_module.router)
+    test_app.include_router(origins_module.router)
+    test_app.include_router(domains_module.origins_domains_router)
+    return test_app
+
+
+@pytest.fixture()
+def client(app: FastAPI) -> TestClient:
+    return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _patch_audit_log_db(monkeypatch, fake_infrastructure):
+    """audit_log.py's own `db = DynamoDBService()` -- same gap class as
+    every other module in the session's established list, patched here
+    locally rather than in conftest.py since only this test file exercises
+    endpoints that write audit events through the real HTTP path.
+
+    fake_infrastructure (conftest, autouse) clears the shared _STORE dict --
+    depending on it explicitly (rather than relying on same-scope autouse
+    ordering, which is not guaranteed) forces that clear to happen BEFORE
+    this fixture builds its FakeDynamoDBService, so waf_audit_log starts
+    empty for every test in this file."""
+    from tests.conftest import FakeDynamoDBService, _STORE
+    _STORE["waf_audit_log"] = []
+    monkeypatch.setattr(audit_log_module, "db", FakeDynamoDBService())
+
+
+def _create_origin(client, token, auth_header, label="workspace-origin"):
+    resp = client.post(
+        "/api/origins", json={"label": label, "ip": "203.0.113.50", "port": 8080},
+        headers=auth_header(token),
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["id"]
+
+
+def test_an_editor_can_update_the_origin_but_a_viewer_cannot(
+    client, register_user, auth_header,
+):
+    owner = register_user(email="ws-owner@example.com", username="ws_owner")
+    editor = register_user(email="ws-editor@example.com", username="ws_editor")
+    viewer = register_user(email="ws-viewer@example.com", username="ws_viewer")
+    owner_h = auth_header(owner["access_token"])
+    editor_h = auth_header(editor["access_token"])
+    viewer_h = auth_header(viewer["access_token"])
+
+    origin_id = _create_origin(client, owner["access_token"], auth_header)
+
+    grant = client.post(f"/api/origins/{origin_id}/editors", json={"email": "ws-editor@example.com"}, headers=owner_h)
+    assert grant.status_code == 200, grant.text
+    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "ws-viewer@example.com"}, headers=owner_h)
+
+    # Editor can update.
+    resp = client.put(f"/api/origins/{origin_id}", json={"label": "renamed-by-editor"}, headers=editor_h)
+    assert resp.status_code == 200, resp.text
+
+    # Viewer cannot.
+    resp = client.put(f"/api/origins/{origin_id}", json={"label": "renamed-by-viewer"}, headers=viewer_h)
+    assert resp.status_code == 403
+
+
+def test_an_editor_cannot_delete_the_origin(client, register_user, auth_header):
+    owner = register_user(email="ws-owner2@example.com", username="ws_owner2")
+    editor = register_user(email="ws-editor2@example.com", username="ws_editor2")
+    owner_h = auth_header(owner["access_token"])
+    editor_h = auth_header(editor["access_token"])
+
+    origin_id = _create_origin(client, owner["access_token"], auth_header)
+    client.post(f"/api/origins/{origin_id}/editors", json={"email": "ws-editor2@example.com"}, headers=owner_h)
+
+    resp = client.delete(f"/api/origins/{origin_id}", headers=editor_h)
+    assert resp.status_code == 403
+
+
+def test_an_editor_cannot_manage_viewers_or_other_editors(client, register_user, auth_header):
+    owner = register_user(email="ws-owner3@example.com", username="ws_owner3")
+    editor = register_user(email="ws-editor3@example.com", username="ws_editor3")
+    owner_h = auth_header(owner["access_token"])
+    editor_h = auth_header(editor["access_token"])
+
+    origin_id = _create_origin(client, owner["access_token"], auth_header)
+    client.post(f"/api/origins/{origin_id}/editors", json={"email": "ws-editor3@example.com"}, headers=owner_h)
+
+    resp = client.post(f"/api/origins/{origin_id}/viewers", json={"email": "someone-else@example.com"}, headers=editor_h)
+    assert resp.status_code == 403
+
+    resp = client.post(f"/api/origins/{origin_id}/editors", json={"email": "someone-else@example.com"}, headers=editor_h)
+    assert resp.status_code == 403
+
+
+def test_an_editor_can_add_and_delete_a_domain(client, register_user, auth_header):
+    owner = register_user(email="ws-owner4@example.com", username="ws_owner4")
+    editor = register_user(email="ws-editor4@example.com", username="ws_editor4")
+    owner_h = auth_header(owner["access_token"])
+    editor_h = auth_header(editor["access_token"])
+
+    origin_id = _create_origin(client, owner["access_token"], auth_header)
+    client.post(f"/api/origins/{origin_id}/editors", json={"email": "ws-editor4@example.com"}, headers=owner_h)
+
+    resp = client.post(
+        f"/api/origins/{origin_id}/domains", json={"domain_name": "editor-added.waf-it-kku.online"}, headers=editor_h,
+    )
+    assert resp.status_code == 200, resp.text
+    domain_id = resp.json()["domain"]["domain_id"]
+
+    resp = client.delete(f"/api/origins/{origin_id}/domains/{domain_id}", headers=editor_h)
+    assert resp.status_code == 200, resp.text
+
+
+def test_origin_update_and_domain_create_write_real_audit_events(client, register_user, auth_header):
+    owner = register_user(email="ws-owner5@example.com", username="ws_owner5")
+    owner_h = auth_header(owner["access_token"])
+    origin_id = _create_origin(client, owner["access_token"], auth_header)
+
+    client.put(f"/api/origins/{origin_id}", json={"label": "audited-rename"}, headers=owner_h)
+    client.post(f"/api/origins/{origin_id}/domains", json={"domain_name": "audited.waf-it-kku.online"}, headers=owner_h)
+
+    events = audit_log_module.get_audit_log(origin_id, db=audit_log_module.db)
+    actions = [e["action"] for e in events]
+    assert "origin.update" in actions
+    assert "domain.create" in actions

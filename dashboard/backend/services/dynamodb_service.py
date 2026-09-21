@@ -56,6 +56,8 @@ class DynamoDBService:
         self.pending_rules_table = self.dynamodb.Table("waf_pending_rules")
         self.threat_patterns_table = self.dynamodb.Table("waf_threat_patterns")
         self.status_history_table = self.dynamodb.Table("waf_status_history")
+        self.audit_log_table = self.dynamodb.Table("waf_audit_log")
+        self.postmortems_table = self.dynamodb.Table("waf_postmortems")
     
     def convert_floats(self, obj):
         if isinstance(obj, float):
@@ -304,6 +306,35 @@ class DynamoDBService:
             return True
         except Exception as e:
             print("Failed to remove origin viewer:", e)
+            return False
+
+    # Team Workspace (2026-09-22): editor_user_ids mirrors viewer_user_ids
+    # exactly -- same ADD/DELETE-on-a-Set update pattern, kept as its own
+    # attribute rather than upgrading viewer_user_ids to a role map, so the
+    # existing viewer grant/revoke code and every read of viewer_user_ids
+    # elsewhere stays untouched.
+    def add_origin_editor(self, origin_id: str, editor_user_id: str) -> bool:
+        try:
+            self.origins_table.update_item(
+                Key={"id": origin_id},
+                UpdateExpression="ADD editor_user_ids :v",
+                ExpressionAttributeValues={":v": {editor_user_id}},
+            )
+            return True
+        except Exception as e:
+            print("Failed to add origin editor:", e)
+            return False
+
+    def remove_origin_editor(self, origin_id: str, editor_user_id: str) -> bool:
+        try:
+            self.origins_table.update_item(
+                Key={"id": origin_id},
+                UpdateExpression="DELETE editor_user_ids :v",
+                ExpressionAttributeValues={":v": {editor_user_id}},
+            )
+            return True
+        except Exception as e:
+            print("Failed to remove origin editor:", e)
             return False
 
     def delete_origin(self, origin_id: str) -> bool:
