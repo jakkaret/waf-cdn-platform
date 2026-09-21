@@ -3,9 +3,11 @@ from pydantic import BaseModel
 from typing import Optional
 from services.ml_rule_service import MLRuleService
 from services.rbac import require_viewer_or_above, require_admin
+from services import audit_log
 
 router = APIRouter(prefix="/api/ml-rules", tags=["ml-rules"])
 rule_service = MLRuleService()
+AUDIT_SCOPE_GLOBAL = "global"
 
 class RuleRejectRequest(BaseModel):
     reason: Optional[str] = ""
@@ -29,6 +31,18 @@ async def get_ml_rule(rule_id: str, current_user: dict = Depends(require_viewer_
 async def approve_ml_rule(rule_id: str, current_user: dict = Depends(require_admin)):
     try:
         rule = rule_service.approve_rule(rule_id, approved_by=current_user.get("username", "admin"))
+        audit_log.write_audit_event(
+            scope_id=AUDIT_SCOPE_GLOBAL,
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="rule.approve",
+            summary=f"อนุมัติ+deploy ML rule: {rule_id}",
+            details={
+                "rule_id": rule_id,
+                "attack_type": rule.get("attack_type") if isinstance(rule, dict) else None,
+                "deployed_rule_id": rule.get("deployed_rule_id") if isinstance(rule, dict) else None,
+            },
+        )
         return {"message": "Rule approved and deployed", "rule": rule}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -41,6 +55,18 @@ async def approve_ml_rule(rule_id: str, current_user: dict = Depends(require_adm
 async def reject_ml_rule(rule_id: str, req: RuleRejectRequest, current_user: dict = Depends(require_admin)):
     try:
         rule = rule_service.reject_rule(rule_id, rejected_by=current_user.get("username", "admin"), reason=req.reason)
+        audit_log.write_audit_event(
+            scope_id=AUDIT_SCOPE_GLOBAL,
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="rule.reject",
+            summary=f"ปฏิเสธ ML rule: {rule_id}" + (f" ({req.reason})" if req.reason else ""),
+            details={
+                "rule_id": rule_id,
+                "attack_type": rule.get("attack_type") if isinstance(rule, dict) else None,
+                "reason": req.reason,
+            },
+        )
         return {"message": "Rule rejected", "rule": rule}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

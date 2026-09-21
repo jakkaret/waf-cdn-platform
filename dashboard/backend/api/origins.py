@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 import ipaddress
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Literal, Optional
-from services.rbac import get_current_user, verify_origin_ownership, verify_origin_access
+from services.rbac import get_current_user, verify_origin_ownership, verify_origin_access, verify_origin_edit_access
 import services.origin_service as origin_service
 from services.captcha_config import DEFAULT_CONFIG, get_origin_config, save_origin_config
 from services.otp_config import (
@@ -10,6 +10,7 @@ from services.otp_config import (
     get_origin_config as get_otp_origin_config,
     save_origin_config as save_otp_origin_config,
 )
+from services import audit_log
 
 router = APIRouter(prefix="/api/origins", tags=["Origins"])
 
@@ -171,7 +172,12 @@ async def get_origin(origin: dict = Depends(verify_origin_access)):
     return o
 
 @router.put("/{origin_id}")
-async def update_origin(origin_id: str, payload: OriginUpdate, origin: dict = Depends(verify_origin_ownership)):
+async def update_origin(
+    origin_id: str,
+    payload: OriginUpdate,
+    origin: dict = Depends(verify_origin_edit_access),
+    current_user: dict = Depends(get_current_user),
+):
     try:
         success = origin_service.update_origin(
             origin_id=origin_id,
@@ -180,6 +186,15 @@ async def update_origin(origin_id: str, payload: OriginUpdate, origin: dict = De
             port=payload.port
         )
         if success:
+            changed = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+            audit_log.write_audit_event(
+                scope_id=origin_id,
+                actor_user_id=current_user.get("user_id"),
+                actor_username=current_user.get("username", ""),
+                action="origin.update",
+                summary=f"แก้ไข origin: {', '.join(changed.keys()) or 'ไม่มีการเปลี่ยนแปลง'}",
+                details=changed,
+            )
             return {"status": "success", "message": "Origin updated successfully"}
         raise HTTPException(status_code=500, detail="Failed to update origin")
     except ValueError as e:
@@ -212,6 +227,7 @@ async def get_origin_viewers(origin: dict = Depends(verify_origin_ownership)):
 async def add_origin_viewer(
     payload: OriginViewerGrant,
     origin: dict = Depends(verify_origin_ownership),
+    current_user: dict = Depends(get_current_user),
 ):
     # Reuse origin_service's own AuthService instance rather than
     # constructing a fresh one per request.
@@ -226,19 +242,97 @@ async def add_origin_viewer(
         raise HTTPException(status_code=500, detail="Failed to add viewer")
     from services.tenant_service import invalidate_tenant_cache
     invalidate_tenant_cache(target_id)
+    audit_log.write_audit_event(
+        scope_id=origin.get("id"),
+        actor_user_id=current_user.get("user_id"),
+        actor_username=current_user.get("username", ""),
+        action="viewer.grant",
+        summary=f"เพิ่ม viewer: {target.get('email', target_id)}",
+        details={"viewer_user_id": target_id, "email": target.get("email", "")},
+    )
     return {"status": "success", "viewer": {"user_id": target_id, "username": target.get("username", ""), "email": target.get("email", "")}}
 
 @router.delete("/{origin_id}/viewers/{viewer_user_id}")
-async def remove_origin_viewer(viewer_user_id: str, origin: dict = Depends(verify_origin_ownership)):
+async def remove_origin_viewer(
+    viewer_user_id: str,
+    origin: dict = Depends(verify_origin_ownership),
+    current_user: dict = Depends(get_current_user),
+):
     success = origin_service.db.remove_origin_viewer(origin.get("id"), viewer_user_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to remove viewer")
     from services.tenant_service import invalidate_tenant_cache
     invalidate_tenant_cache(viewer_user_id)
+    audit_log.write_audit_event(
+        scope_id=origin.get("id"),
+        actor_user_id=current_user.get("user_id"),
+        actor_username=current_user.get("username", ""),
+        action="viewer.revoke",
+        summary=f"เอา viewer ออก: {viewer_user_id}",
+        details={"viewer_user_id": viewer_user_id},
+    )
     return {"status": "success", "message": "Viewer removed"}
 
+# --- Team Workspace (2026-09-22): editor role, mirrors viewer endpoints
+# exactly except for the grant/revoke summary text and which Set on the
+# origin item they touch. get/add/remove all stay owner-only
+# (verify_origin_ownership) -- deciding who gets write access to an origin
+# is itself a management action, not something an editor grants to peers.
+
+@router.get("/{origin_id}/editors")
+async def get_origin_editors(origin: dict = Depends(verify_origin_ownership)):
+    return {"editors": origin_service.list_origin_editors(origin.get("id"))}
+
+@router.post("/{origin_id}/editors")
+async def add_origin_editor(
+    payload: OriginViewerGrant,
+    origin: dict = Depends(verify_origin_ownership),
+    current_user: dict = Depends(get_current_user),
+):
+    target = origin_service.auth_service.get_user_by_email(payload.email.strip().lower())
+    if not target:
+        raise HTTPException(status_code=404, detail="No account found with that email")
+    target_id = target.get("user_id")
+    if target_id == origin.get("admin_user_id"):
+        raise HTTPException(status_code=400, detail="You already own this origin")
+    success = origin_service.db.add_origin_editor(origin.get("id"), target_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to add editor")
+    from services.tenant_service import invalidate_tenant_cache
+    invalidate_tenant_cache(target_id)
+    audit_log.write_audit_event(
+        scope_id=origin.get("id"),
+        actor_user_id=current_user.get("user_id"),
+        actor_username=current_user.get("username", ""),
+        action="editor.grant",
+        summary=f"เพิ่ม editor: {target.get('email', target_id)}",
+        details={"editor_user_id": target_id, "email": target.get("email", "")},
+    )
+    return {"status": "success", "editor": {"user_id": target_id, "username": target.get("username", ""), "email": target.get("email", "")}}
+
+@router.delete("/{origin_id}/editors/{editor_user_id}")
+async def remove_origin_editor(
+    editor_user_id: str,
+    origin: dict = Depends(verify_origin_ownership),
+    current_user: dict = Depends(get_current_user),
+):
+    success = origin_service.db.remove_origin_editor(origin.get("id"), editor_user_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to remove editor")
+    from services.tenant_service import invalidate_tenant_cache
+    invalidate_tenant_cache(editor_user_id)
+    audit_log.write_audit_event(
+        scope_id=origin.get("id"),
+        actor_user_id=current_user.get("user_id"),
+        actor_username=current_user.get("username", ""),
+        action="editor.revoke",
+        summary=f"เอา editor ออก: {editor_user_id}",
+        details={"editor_user_id": editor_user_id},
+    )
+    return {"status": "success", "message": "Editor removed"}
+
 @router.get("/{origin_id}/captcha")
-async def get_captcha_config(origin: dict = Depends(verify_origin_ownership)):
+async def get_captcha_config(origin: dict = Depends(verify_origin_edit_access)):
     try:
         config = get_origin_config(origin.get("id"))
     except RuntimeError as exc:
@@ -248,7 +342,7 @@ async def get_captcha_config(origin: dict = Depends(verify_origin_ownership)):
 @router.put("/{origin_id}/captcha")
 async def update_captcha_config(
     payload: CaptchaShieldConfig,
-    origin: dict = Depends(verify_origin_ownership),
+    origin: dict = Depends(verify_origin_edit_access),
 ):
     try:
         from boto3.dynamodb.conditions import Attr
@@ -268,7 +362,7 @@ async def update_captcha_config(
     return {"origin_id": origin.get("id"), "captcha_shield": config}
 
 @router.get("/{origin_id}/otp")
-async def get_otp_config(origin: dict = Depends(verify_origin_ownership)):
+async def get_otp_config(origin: dict = Depends(verify_origin_edit_access)):
     try:
         config = get_otp_origin_config(origin.get("id"))
     except RuntimeError as exc:
@@ -278,7 +372,7 @@ async def get_otp_config(origin: dict = Depends(verify_origin_ownership)):
 @router.put("/{origin_id}/otp")
 async def update_otp_config(
     payload: OtpShieldConfig,
-    origin: dict = Depends(verify_origin_ownership),
+    origin: dict = Depends(verify_origin_edit_access),
 ):
     try:
         from boto3.dynamodb.conditions import Attr

@@ -102,12 +102,12 @@ def verify_origin_access(
     origin_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    """Read-only counterpart to verify_origin_ownership: the owner, or a
-    user explicitly granted viewer access via /origins/{id}/viewers, may
-    read this origin. Every write/management endpoint (update, delete,
-    restore, captcha, otp, viewer management itself) stays on
-    verify_origin_ownership unchanged -- a viewer grant is read-only,
-    matching what its name says."""
+    """Read-only counterpart to verify_origin_ownership: the owner, a
+    viewer, or an editor (Team Workspace, 2026-09-22) may read this origin.
+    Without editor_user_ids here, a user granted only editor access would
+    pass verify_origin_edit_access on writes but 403 on every read of the
+    same origin -- a state no role should be in (an editor who can't even
+    open the page they were just given write access to)."""
     from services.dynamodb_service import DynamoDBService
     db = DynamoDBService()
     origin = db.get_origin_by_id(origin_id)
@@ -116,7 +116,33 @@ def verify_origin_access(
 
     user_id = current_user.get("user_id")
     viewer_ids = origin.get("viewer_user_ids") or set()
-    if origin.get("admin_user_id") != user_id and user_id not in viewer_ids:
+    editor_ids = origin.get("editor_user_ids") or set()
+    if origin.get("admin_user_id") != user_id and user_id not in viewer_ids and user_id not in editor_ids:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. You do not have access to this origin.")
+
+    return origin
+
+
+def verify_origin_edit_access(
+    origin_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Team Workspace (2026-09-22): the owner or an editor may perform
+    routine, reversible operational changes (update origin label/ip/port,
+    CAPTCHA/OTP shield config, domain create/verify/delete). Deliberately
+    NOT for: delete/restore origin, viewer/editor management, or minting
+    tunnel credentials -- those stay on verify_origin_ownership,
+    owner-only, unchanged. A viewer (read-only) is refused here same as
+    before this feature existed."""
+    from services.dynamodb_service import DynamoDBService
+    db = DynamoDBService()
+    origin = db.get_origin_by_id(origin_id)
+    if not origin or origin.get("status") in ARCHIVED_ORIGIN_STATUSES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Origin not found")
+
+    user_id = current_user.get("user_id")
+    editor_ids = origin.get("editor_user_ids") or set()
+    if origin.get("admin_user_id") != user_id and user_id not in editor_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. You do not have edit access to this origin.")
 
     return origin

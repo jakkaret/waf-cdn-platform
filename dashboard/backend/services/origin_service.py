@@ -217,6 +217,25 @@ def list_origin_viewers(origin_id: str) -> list:
     return viewers
 
 
+def list_origin_editors(origin_id: str) -> list:
+    """Team Workspace (2026-09-22): mirrors list_origin_viewers exactly for
+    editor_user_ids."""
+    origin = db.get_origin_by_id(origin_id)
+    if not origin:
+        return []
+    editor_ids = origin.get("editor_user_ids") or set()
+    editors = []
+    for uid in editor_ids:
+        u = auth_service.get_user_by_id(uid)
+        if u:
+            editors.append({
+                "user_id": uid,
+                "username": u.get("username", ""),
+                "email": u.get("email", ""),
+            })
+    return editors
+
+
 def get_origin(origin_id: str) -> dict:
     return db.get_origin_by_id(origin_id)
 

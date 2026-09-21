@@ -3,9 +3,19 @@ from pydantic import BaseModel
 from typing import Optional
 from services.settings_service import SettingsService
 from services.rbac import require_viewer_or_above, require_admin
+from services import audit_log
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 service = SettingsService()
+
+# System settings are global (not tied to one origin), so audit events for
+# them use this fixed scope_id rather than an origin_id -- matches
+# services/audit_log.py's documented convention.
+AUDIT_SCOPE_GLOBAL = "global"
+# Never write a real secret value into a persistent store (standing rule,
+# this session) -- a changed telegram_bot_token is recorded as "changed",
+# never its old/new value.
+_SECRET_FIELDS = {"telegram_bot_token"}
 
 
 class SettingsUpdate(BaseModel):
@@ -43,7 +53,29 @@ async def update_settings(
 ):
     try:
         data = {k: v for k, v in payload.dict().items() if v is not None}
+        before = service.get_settings()
         updated = service.update_settings(data)
+
+        changed = {}
+        for field, new_value in data.items():
+            old_value = before.get(field)
+            if old_value == new_value:
+                continue
+            if field in _SECRET_FIELDS:
+                changed[field] = {"old": "(changed)", "new": "(changed)"}
+            else:
+                changed[field] = {"old": old_value, "new": new_value}
+
+        if changed:
+            audit_log.write_audit_event(
+                scope_id=AUDIT_SCOPE_GLOBAL,
+                actor_user_id=current_user.get("user_id"),
+                actor_username=current_user.get("username", ""),
+                action="settings.update",
+                summary=f"แก้ system settings: {', '.join(changed.keys())}",
+                details=changed,
+            )
+
         return {"status": "success", "settings": updated}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
