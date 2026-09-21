@@ -29,6 +29,11 @@ import ConceptsIndex from './pages/concepts/ConceptsIndex'
 import AiRuleComposer from './pages/concepts/AiRuleComposer'
 import TeamWorkspace from './pages/concepts/TeamWorkspace'
 import IncidentPostmortem from './pages/concepts/IncidentPostmortem'
+import AiBotControl from './pages/concepts/AiBotControl'
+import CveAutoPatch from './pages/concepts/CveAutoPatch'
+import SupplyChainMonitor from './pages/concepts/SupplyChainMonitor'
+import ApiSchemaGuard from './pages/concepts/ApiSchemaGuard'
+import AttackCostShield from './pages/concepts/AttackCostShield'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -197,6 +202,46 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 <IncidentPostmortem />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/ai-bots"
+            element={
+              <ProtectedRoute>
+                <AiBotControl />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/cve-patch"
+            element={
+              <ProtectedRoute>
+                <CveAutoPatch />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/supply-chain"
+            element={
+              <ProtectedRoute>
+                <SupplyChainMonitor />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/api-guard"
+            element={
+              <ProtectedRoute>
+                <ApiSchemaGuard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/concepts/cost-shield"
+            element={
+              <ProtectedRoute>
+                <AttackCostShield />
               </ProtectedRoute>
             }
           />
