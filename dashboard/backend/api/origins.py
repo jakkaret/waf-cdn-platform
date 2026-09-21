@@ -331,6 +331,15 @@ async def remove_origin_editor(
     )
     return {"status": "success", "message": "Editor removed"}
 
+@router.get("/{origin_id}/audit-log")
+async def get_origin_audit_log(origin: dict = Depends(verify_origin_access)):
+    """Team Workspace (2026-09-22): owner, editor, or viewer may read the
+    audit trail for an origin they can already see -- it only ever shows
+    events about actions on this same origin, nothing they couldn't already
+    infer from having access to it."""
+    events = audit_log.get_audit_log(origin.get("id"))
+    return {"events": events}
+
 @router.get("/{origin_id}/captcha")
 async def get_captcha_config(origin: dict = Depends(verify_origin_edit_access)):
     try:

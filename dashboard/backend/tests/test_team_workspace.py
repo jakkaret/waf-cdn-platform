@@ -142,3 +142,30 @@ def test_origin_update_and_domain_create_write_real_audit_events(client, registe
     actions = [e["action"] for e in events]
     assert "origin.update" in actions
     assert "domain.create" in actions
+
+
+def test_audit_log_endpoint_is_readable_by_owner_and_editor_but_not_a_stranger(
+    client, register_user, auth_header,
+):
+    owner = register_user(email="ws-owner6@example.com", username="ws_owner6")
+    editor = register_user(email="ws-editor6@example.com", username="ws_editor6")
+    stranger = register_user(email="ws-stranger6@example.com", username="ws_stranger6")
+    owner_h = auth_header(owner["access_token"])
+    editor_h = auth_header(editor["access_token"])
+    stranger_h = auth_header(stranger["access_token"])
+
+    origin_id = _create_origin(client, owner["access_token"], auth_header)
+    client.post(f"/api/origins/{origin_id}/editors", json={"email": "ws-editor6@example.com"}, headers=owner_h)
+    client.put(f"/api/origins/{origin_id}", json={"label": "renamed-for-audit-view"}, headers=owner_h)
+
+    resp = client.get(f"/api/origins/{origin_id}/audit-log", headers=owner_h)
+    assert resp.status_code == 200, resp.text
+    events = resp.json()["events"]
+    assert any(e["action"] == "origin.update" for e in events)
+    assert any(e["action"] == "editor.grant" for e in events)
+
+    resp = client.get(f"/api/origins/{origin_id}/audit-log", headers=editor_h)
+    assert resp.status_code == 200, resp.text
+
+    resp = client.get(f"/api/origins/{origin_id}/audit-log", headers=stranger_h)
+    assert resp.status_code == 403
