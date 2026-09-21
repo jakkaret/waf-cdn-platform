@@ -161,6 +161,42 @@ export interface AuditEvent {
   details: Record<string, any>
 }
 
+// AI Incident Postmortem (2026-09-22)
+export interface PostmortemStats {
+  total_requests: number
+  total_alerts: number
+  top_attack_types: { type: string; count: number }[]
+}
+
+export interface PostmortemBucket {
+  hour: string
+  requests: number
+  alerts: number
+}
+
+export interface PostmortemAuditEvent extends AuditEvent {
+  scope: 'origin' | 'global'
+}
+
+export interface PostmortemSummary {
+  id: string
+  origin_id: string
+  origin_label: string
+  created_by_username: string
+  created_at: string
+  start_time: string
+  end_time: string
+  stats: PostmortemStats
+  has_ai_narrative: boolean
+}
+
+export interface Postmortem extends PostmortemSummary {
+  hourly_buckets: PostmortemBucket[]
+  audit_events: PostmortemAuditEvent[]
+  ai_narrative: string | null
+  ai_narrative_degraded: boolean
+}
+
 export interface Domain {
   domain_id: string
   origin_id: string
