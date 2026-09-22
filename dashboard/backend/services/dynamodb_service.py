@@ -264,6 +264,30 @@ class DynamoDBService:
             print("Failed to get origins by user:", e)
             return []
 
+    def get_origin_id_for_domain(self, domain_name: str) -> str:
+        """Resolve a Host header to the origin that owns it, exactly.
+
+        Uses waf_domains' domain_name-index. Returns "" when the host is
+        not a registered domain (direct-to-IP traffic, a probe for someone
+        else's hostname, an unverified domain) -- callers must treat that
+        as "not attributable" and never as "belongs to everyone".
+        """
+        clean = str(domain_name or "").strip().lower().rstrip(".")
+        if ":" in clean and not clean.startswith("["):
+            clean = clean.split(":", 1)[0]
+        if not clean:
+            return ""
+        try:
+            response = self.domains_table.query(
+                IndexName="domain_name-index",
+                KeyConditionExpression=boto3.dynamodb.conditions.Key("domain_name").eq(clean),
+            )
+            items = response.get("Items", [])
+            return str(items[0].get("origin_id") or "") if items else ""
+        except Exception as e:
+            print(f"Failed to resolve origin for domain {clean}:", e)
+            return ""
+
     def get_domains_by_origin_ids(self, origin_ids: List[str]) -> List[Dict]:
         """Domains belonging to the given origins, via waf_domains'
         origin_id-index.

@@ -84,6 +84,17 @@ async def dispatch_telegram_alert(data: dict):
         # as "domain" is what api/ai_summary.py's _alert_belongs_to_tenant
         # now matches against the requesting user's registered domains.
         domain = str(data.get("host") or "").strip().lower()
+        # 2026-09-23: resolve the captured Host to the origin that owns it,
+        # once, here at write time. Matching the stored domain string at
+        # read time (the 2026-09-22 fix above) is loose in both directions
+        # -- a tenant registered for "example.com" matched an alert whose
+        # Host was "example.com.attacker.test", because the check is a
+        # two-way substring test. An origin_id resolved from
+        # waf_domains' domain_name-index is exact. Empty means the Host is
+        # not a registered domain (direct-to-IP traffic, a probe for
+        # someone else's hostname): not attributable, so it stays
+        # admin-only rather than being shown to a guessed owner.
+        origin_id = db.get_origin_id_for_domain(domain)
         try:
             db.alerts_table.put_item(
                 Item={
@@ -92,6 +103,7 @@ async def dispatch_telegram_alert(data: dict):
                     "ip": ip,
                     "url": url,
                     "domain": domain,
+                    "origin_id": origin_id,
                     "status": status_code,
                     "rule_id": rule_id,
                     "attack_type": attack_type,

@@ -226,10 +226,28 @@ def _visible_alerts_for_user(current_user: dict, max_items: int = 2000) -> List[
     items = db.get_all_alerts(max_items=max_items)
     if current_user.get("role") == "admin":
         return items
-    _origin_ids, _active_origins, user_domains = get_user_origins_and_domains(current_user.get("user_id"))
-    if not user_domains:
+    origin_ids, _active_origins, user_domains = get_user_origins_and_domains(current_user.get("user_id"))
+    if not origin_ids and not user_domains:
         return []
-    return [a for a in items if _alert_belongs_to_tenant(a, user_domains)]
+    visible_origin_ids = {str(o) for o in origin_ids if o}
+    visible = []
+    for alert in items:
+        alert_origin_id = str(alert.get("origin_id") or "")
+        if alert_origin_id:
+            # Exact attribution, resolved once at write time against
+            # waf_domains' domain_name-index. Includes origins shared via a
+            # viewer/editor grant, because origin_ids comes from
+            # get_origins_visible_to_user, not just owned origins.
+            if alert_origin_id in visible_origin_ids:
+                visible.append(alert)
+            continue
+        # Alerts written before origin_id existed keep the older,
+        # deliberately loose domain match. It cannot be tightened
+        # retroactively (the Host was all that was captured), so it decays
+        # out as those rows age rather than being made stricter in place.
+        if _alert_belongs_to_tenant(alert, user_domains):
+            visible.append(alert)
+    return visible
 
 
 @router.get("/notifications/feed")
