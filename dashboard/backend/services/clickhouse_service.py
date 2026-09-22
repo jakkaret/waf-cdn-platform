@@ -52,6 +52,27 @@ def escape_like_value(value: str) -> str:
     return str(value).replace("\\", "\\\\").replace("'", "\\'")
 
 
+def normalize_host(value) -> str:
+    """Canonical form of a Host header for the access_logs.host column.
+
+    Written once at insert so every tenant filter can compare with a plain
+    equality instead of each call site re-deriving its own normalisation.
+    Lowercased, port stripped (a Host header legitimately carries ':8080'),
+    trailing root-label dot stripped -- matching how domain_name is stored
+    in DynamoDB's waf_domains, so the two compare directly.
+    """
+    host = str(value or "").strip().lower()
+    if not host:
+        return ""
+    if host.startswith("["):  # IPv6 literal: [::1]:8080
+        closing = host.find("]")
+        if closing != -1:
+            host = host[1:closing]
+    elif ":" in host:
+        host = host.split(":", 1)[0]
+    return host.rstrip(".")
+
+
 class ClickHouseService:
     def __init__(self, host='localhost', port=8123, username='default', password='mysecurepassword'):
         self.host = host
@@ -97,7 +118,11 @@ class ClickHouseService:
                     edge_node String,
                     alert UInt8,
                     attack_type String,
-                    rule_id String
+                    rule_id String,
+                    request_id String DEFAULT '',
+                    http_referer String DEFAULT '',
+                    body_bytes_sent UInt32 DEFAULT 0,
+                    host String DEFAULT ''
                 ) ENGINE = MergeTree()
                 ORDER BY (timestamp, client_ip)
                 TTL timestamp + INTERVAL {ACCESS_LOGS_RETENTION_DAYS} DAY
@@ -115,6 +140,21 @@ class ClickHouseService:
             # executes.
             self.client.command(
                 f"ALTER TABLE access_logs MODIFY TTL timestamp + INTERVAL {ACCESS_LOGS_RETENTION_DAYS} DAY"
+            )
+
+            # 2026-09-22: access_logs never stored which origin/domain a
+            # request belonged to, so every tenant filter in this codebase
+            # (services/tenant_service.py, threshold_proposal_service.py)
+            # had to guess ownership from URL keywords -- 'dvwa' matching
+            # url LIKE '%.php%' pulled in any PHP traffic in the whole
+            # table, across tenants. ModSecurity's audit log has carried
+            # the real Host header all along (see log_forward.py's
+            # normalize_modsec); it was simply dropped at insert because
+            # no column existed to hold it. IF NOT EXISTS keeps this
+            # idempotent on every startup, same as MODIFY TTL above; old
+            # rows keep host = '' and still fall back to keyword matching.
+            self.client.command(
+                "ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS host String DEFAULT ''"
             )
 
             # Create security_audit_logs table
@@ -189,11 +229,12 @@ class ClickHouseService:
                     str(data.get('request_id') or ''),
                     data.get('http_referer') or '',
                     int(data.get('body_bytes_sent') or 0),
+                    normalize_host(data.get('host')),
                 ]
                 self.client.insert(table_name, [row], column_names=[
                     'id', 'timestamp', 'client_ip', 'method', 'url', 'status_code',
                     'request_time_ms', 'user_agent', 'country', 'edge_node', 'alert', 'attack_type', 'rule_id',
-                    'request_id', 'http_referer', 'body_bytes_sent',
+                    'request_id', 'http_referer', 'body_bytes_sent', 'host',
                 ])
                 return True
                 

@@ -56,7 +56,13 @@ def test_two_different_registered_users_share_a_pattern_and_see_it_trend(
     _opt_in(client, alice_headers, True)
     _opt_in(client, bob_headers, True)
 
-    now = dt.datetime(2026, 9, 21, 12, 0, tzinfo=dt.timezone.utc)
+    # Has to stay inside threat_intel.DEFAULT_WINDOW_HOURS (24h) of the real
+    # clock: get_trending() computes its cutoff from dt.datetime.now(), so a
+    # hardcoded timestamp stops matching the moment it ages past the window.
+    # The literal that used to be here (2026-09-21 12:00Z) did exactly that
+    # the day after it was written, turning this into a rotting test rather
+    # than a real regression.
+    now = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)
     threat_intel_module.record_pattern_hit(alice["user"]["user_id"], "942100", "SQL Injection", now=now)
     threat_intel_module.record_pattern_hit(bob["user"]["user_id"], "942100", "SQL Injection", now=now)
 

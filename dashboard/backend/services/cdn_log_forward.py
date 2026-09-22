@@ -78,6 +78,11 @@ def normalize_cdn_access(data, region):
         "url": url,
         "status": status_code,
         "user_agent": data.get("http_user_agent", ""),
+        # Edge-side counterpart of log_forward.py's own host attribution.
+        # Reads whichever key the edge's cdn_json log_format supplies; edge
+        # nodes running a format older than 2026-09-22 send none, and those
+        # rows keep host = '' and fall back to keyword matching.
+        "host": data.get("host") or data.get("http_host"),
         "timestamp": int(time.time()),
         "datetime": data.get("time", datetime.utcnow().isoformat() + "Z"),
         "source": "cdn",
