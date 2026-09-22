@@ -58,7 +58,16 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        if ($http_cookie ~* "PHPSESSID|security=") { set $skip_cache 1; }
+        # 2026-09-22: real bug -- cache key ($host|$method|$uri) never
+        # varied by cookie, so a CAPTCHA/OTP challenge page cached from one
+        # visitor's unauthenticated request kept being served to every
+        # later visitor at the same URI within the cache window, even one
+        # who had just solved the challenge and held a valid clearance
+        # cookie ("solved OTP, still shows the same challenge page").
+        # waf_clearance is captcha_engine.py's cookie, waf_otp_clearance is
+        # otp_engine.py's -- either one present means this request's
+        # response depends on auth state the cache key doesn't capture.
+        if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
@@ -97,7 +106,16 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        if ($http_cookie ~* "PHPSESSID|security=") { set $skip_cache 1; }
+        # 2026-09-22: real bug -- cache key ($host|$method|$uri) never
+        # varied by cookie, so a CAPTCHA/OTP challenge page cached from one
+        # visitor's unauthenticated request kept being served to every
+        # later visitor at the same URI within the cache window, even one
+        # who had just solved the challenge and held a valid clearance
+        # cookie ("solved OTP, still shows the same challenge page").
+        # waf_clearance is captcha_engine.py's cookie, waf_otp_clearance is
+        # otp_engine.py's -- either one present means this request's
+        # response depends on auth state the cache key doesn't capture.
+        if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
@@ -179,7 +197,16 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        if ($http_cookie ~* "PHPSESSID|security=") { set $skip_cache 1; }
+        # 2026-09-22: real bug -- cache key ($host|$method|$uri) never
+        # varied by cookie, so a CAPTCHA/OTP challenge page cached from one
+        # visitor's unauthenticated request kept being served to every
+        # later visitor at the same URI within the cache window, even one
+        # who had just solved the challenge and held a valid clearance
+        # cookie ("solved OTP, still shows the same challenge page").
+        # waf_clearance is captcha_engine.py's cookie, waf_otp_clearance is
+        # otp_engine.py's -- either one present means this request's
+        # response depends on auth state the cache key doesn't capture.
+        if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
@@ -219,7 +246,16 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        if ($http_cookie ~* "PHPSESSID|security=") { set $skip_cache 1; }
+        # 2026-09-22: real bug -- cache key ($host|$method|$uri) never
+        # varied by cookie, so a CAPTCHA/OTP challenge page cached from one
+        # visitor's unauthenticated request kept being served to every
+        # later visitor at the same URI within the cache window, even one
+        # who had just solved the challenge and held a valid clearance
+        # cookie ("solved OTP, still shows the same challenge page").
+        # waf_clearance is captcha_engine.py's cookie, waf_otp_clearance is
+        # otp_engine.py's -- either one present means this request's
+        # response depends on auth state the cache key doesn't capture.
+        if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
