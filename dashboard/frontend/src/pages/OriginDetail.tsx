@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getOrigin, deleteOrigin, restoreOrigin } from '../api/origins'
+import { getOrigin, deleteOrigin, restoreOrigin, updateOrigin } from '../api/origins'
 import { getDomains, deleteDomain, verifyDomain } from '../api/domains'
 import { getCaptchaConfig, updateCaptchaConfig } from '../api/captcha'
 import { getOtpConfig, updateOtpConfig } from '../api/otp'
@@ -50,6 +50,7 @@ export const OriginDetail: React.FC = () => {
   const [pmStart, setPmStart] = useState('')
   const [pmEnd, setPmEnd] = useState('')
   const [selectedPostmortemId, setSelectedPostmortemId] = useState<string | null>(null)
+  const [techTagInput, setTechTagInput] = useState('')
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false)
   const [isDomainWizardOpen, setIsDomainWizardOpen] = useState(false)
@@ -330,6 +331,18 @@ export const OriginDetail: React.FC = () => {
     onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to generate postmortem'),
   })
 
+  // CVE Auto-Patch (2026-09-22): feeds POST /api/ml-rules/cve-scan's
+  // matching -- self-declared, no real fingerprinting.
+  const updateTechTagsMutation = useMutation({
+    mutationFn: (tags: string[]) => updateOrigin(id!, { tech_stack_tags: tags }),
+    onSuccess: () => {
+      toast.success('อัปเดต Tech Stack Tags แล้ว')
+      queryClient.invalidateQueries({ queryKey: ['origin', id] })
+      setTechTagInput('')
+    },
+    onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to update tech stack tags'),
+  })
+
   const handleDelete = async () => {
     const isPending = origin?.status === 'pending'
     try {
@@ -557,6 +570,80 @@ export const OriginDetail: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {isOwner && (
+              <div className="dash-card p-5 space-y-4 md:col-span-2">
+                <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)]">
+                  Tech Stack Tags
+                </h3>
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  Self-declared, not auto-detected. Feeds CVE Auto-Patch: a scan matches these
+                  tags against the real NVD CVE feed and drafts a proposal into the ML Anomaly
+                  Rules queue for review -- it never applies anything automatically.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={techTagInput}
+                    onChange={(e) => setTechTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && techTagInput.trim()) {
+                        const current = origin.tech_stack_tags || []
+                        if (!current.includes(techTagInput.trim())) {
+                          updateTechTagsMutation.mutate([...current, techTagInput.trim()])
+                        } else {
+                          setTechTagInput('')
+                        }
+                      }
+                    }}
+                    placeholder="e.g. nginx, wordpress, php 8.1"
+                    className="flex-1 bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
+                  />
+                  <Button
+                    size="sm"
+                    icon={<Plus size={14} />}
+                    onClick={() => {
+                      if (!techTagInput.trim()) return
+                      const current = origin.tech_stack_tags || []
+                      if (!current.includes(techTagInput.trim())) {
+                        updateTechTagsMutation.mutate([...current, techTagInput.trim()])
+                      } else {
+                        setTechTagInput('')
+                      }
+                    }}
+                    disabled={!techTagInput.trim() || updateTechTagsMutation.isPending}
+                  >
+                    Add Tag
+                  </Button>
+                </div>
+                {(origin.tech_stack_tags || []).length === 0 ? (
+                  <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                    No tags set yet -- CVE Auto-Patch has nothing to match against this origin.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {(origin.tech_stack_tags || []).map((tag) => (
+                      <span
+                        key={tag}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] text-[12px] font-mono text-[var(--text-primary)]"
+                      >
+                        {tag}
+                        <button
+                          onClick={() =>
+                            updateTechTagsMutation.mutate((origin.tech_stack_tags || []).filter((t) => t !== tag))
+                          }
+                          disabled={updateTechTagsMutation.isPending}
+                          className="text-[var(--text-muted)] hover:text-red-500"
+                          title="Remove tag"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

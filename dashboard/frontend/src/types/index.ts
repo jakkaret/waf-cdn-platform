@@ -134,6 +134,9 @@ export interface Origin {
   // state): whether the underlying FRP tunnel is connected right now. null
   // for non-tunnel origins, where the question doesn't apply.
   live_connected?: boolean | null
+  // CVE Auto-Patch (2026-09-22): self-declared, admin-set -- no real
+  // fingerprinting. Feeds POST /api/ml-rules/cve-scan's matching.
+  tech_stack_tags?: string[]
 }
 
 export interface OriginViewer {

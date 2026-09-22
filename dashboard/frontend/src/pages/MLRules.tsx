@@ -33,6 +33,7 @@ import {
   Minimize2,
   Shield,
   Zap,
+  Bug,
 } from 'lucide-react'
 
 const PAGE_SIZE = 10
@@ -91,6 +92,26 @@ export const MLRules: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['ml-rules'] })
     },
     onError: (err: any) => toast.error(err.response?.data?.detail || 'Failed to reject rule'),
+  })
+
+  // CVE Auto-Patch (2026-09-22): admin-only, matches proposals into this
+  // SAME queue -- reviewed the same way, never auto-applied. "Proposal
+  // drafted" is the only claim; approval below is still the real gate.
+  const cveScanMutation = useMutation({
+    mutationFn: () => mlRulesApi.runCveScan(),
+    onSuccess: (res) => {
+      if (res.proposals_created > 0) {
+        toast.success(
+          `สแกน CVE เสร็จ: พบ ${res.matches_found} match, สร้าง proposal ใหม่ ${res.proposals_created} รายการ (ตรวจสอบ/อนุมัติก่อนถึงจะมีผล)`
+        )
+      } else {
+        toast.success(
+          `สแกน CVE เสร็จ: พบ ${res.matches_found} match แต่ไม่มี proposal ใหม่ (ซ้ำ ${res.skipped_duplicate}, pattern ไม่ผ่าน ${res.skipped_no_valid_pattern})`
+        )
+      }
+      queryClient.invalidateQueries({ queryKey: ['ml-rules'] })
+    },
+    onError: (err: any) => toast.error(err.response?.data?.detail || 'Failed to run CVE scan'),
   })
 
   const handleApprove = (id: string) => {
@@ -392,6 +413,17 @@ export const MLRules: React.FC = () => {
         }
         action={
           <div className="flex items-center gap-2">
+            {isAdmin && (
+              <button
+                onClick={() => cveScanMutation.mutate()}
+                disabled={cveScanMutation.isPending}
+                className="px-3 py-1.5 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--bg-border)] text-[12px] font-mono font-medium flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm disabled:opacity-60"
+                title="Scan the real NVD CVE feed against origins' tech stack tags -- drafts proposals into this same queue, never auto-applies anything"
+              >
+                <Bug size={13} className={cveScanMutation.isPending ? 'animate-pulse text-red-500' : ''} />
+                <span>{cveScanMutation.isPending ? 'Scanning...' : 'Scan CVE Feed'}</span>
+              </button>
+            )}
             <button
               onClick={() => refetch()}
               disabled={isFetching}
