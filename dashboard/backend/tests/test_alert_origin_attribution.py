@@ -28,7 +28,13 @@ def visible(monkeypatch):
 
     def _run(alerts, origin_ids, user_domains, role="viewer"):
         fake_db = MagicMock()
+        # Post-migration read path: alerts carrying an origin_id come back
+        # from a per-partition query, and only rows with no origin_id (the
+        # pre-migration tail) are reached by the scan.
         fake_db.get_all_alerts.return_value = alerts
+        fake_db.get_alerts_for_origins.side_effect = lambda oids, max_items=2000: [
+            a for a in alerts if str(a.get("origin_id") or "") in set(oids)
+        ]
         monkeypatch.setattr(ai_summary_module, "db", fake_db)
         monkeypatch.setattr(
             ai_summary_module,

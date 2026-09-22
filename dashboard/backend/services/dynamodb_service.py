@@ -28,7 +28,14 @@ class DynamoDBService:
     def __init__(self):
         self.region = os.getenv("AWS_REGION", "ap-southeast-1")
 
-        self.alerts_table_name = "waf_alerts"
+        # Migrated 2026-09-23 (scripts/migrate_alerts_to_origin_key.py).
+        # waf_alerts was keyed (user_id, alert_id) with user_id hardcoded to
+        # "default-user" by the only writer, so the partition key identified
+        # nothing and every read was a full scan filtered in Python. v2 is
+        # keyed (origin_id, alert_id): reads become per-origin queries and
+        # the key means what it says. Rows whose Host could not be resolved
+        # to a registered domain live in the UNATTRIBUTED partition.
+        self.alerts_table_name = "waf_alerts_v2"
         self.logs_table_name = "waf_logs"
         self.rules_table_name = "waf_rules"
         self.users_table_name = "waf_users"
@@ -47,6 +54,9 @@ class DynamoDBService:
 
         # Initialize tables
         self.alerts_table = self.dynamodb.Table(self.alerts_table_name)
+        # Pre-migration table, left intact as the rollback target. Nothing
+        # reads or writes it any more.
+        self.alerts_legacy_table = self.dynamodb.Table("waf_alerts")
         self.logs_table = self.dynamodb.Table(self.logs_table_name)
         # Misnomer, kept because the physical table name cannot be changed
         # in place. "waf_rules" holds BOLA policies (services/bola_guard.py
@@ -137,12 +147,23 @@ class DynamoDBService:
         severity: str = None,
         edge_node: str = None,
         domain: str = None,
+        origin_id: str = None,
     ) -> bool:
 
         #บันทึก alert ที่จำเป็นลง DynamoDB (waf_alerts)
 
         try:
+            # Partition key since the 2026-09-23 migration to waf_alerts_v2.
+            # Resolved from the captured Host when the caller did not
+            # already do it; an unresolvable Host lands in the
+            # UNATTRIBUTED partition rather than being attributed to a
+            # guessed owner.
+            resolved_origin_id = str(origin_id or "").strip()
+            if not resolved_origin_id and domain:
+                resolved_origin_id = self.get_origin_id_for_domain(domain)
             item = {
+                "origin_id": resolved_origin_id or self.ALERTS_UNATTRIBUTED,
+                # No longer a key; kept because pre-migration rows carry it.
                 "user_id": user_id,
                 "alert_id": alert_id,
                 "ip": ip,
@@ -182,6 +203,37 @@ class DynamoDBService:
         except Exception as e:
             print("Failed to save alert:", e)
             return False
+
+    ALERTS_UNATTRIBUTED = "unattributed"
+
+    def get_alerts_for_origins(self, origin_ids: List[str], max_items: int = 2000) -> List[Dict]:
+        """Alerts belonging to specific origins, by partition key.
+
+        The point of the v2 key schema: a tenant's alerts are N indexed
+        queries instead of scanning every tenant's rows and filtering in
+        Python. Callers pass the origins the user can actually see
+        (get_origins_visible_to_user, so viewer/editor grants included);
+        the UNATTRIBUTED partition is deliberately NOT included here --
+        those alerts have no resolvable owner and stay admin-only.
+        """
+        items: List[Dict] = []
+        for origin_id in origin_ids:
+            if not origin_id or len(items) >= max_items:
+                continue
+            kwargs = {
+                "KeyConditionExpression": boto3.dynamodb.conditions.Key("origin_id").eq(str(origin_id)),
+            }
+            try:
+                while len(items) < max_items:
+                    response = self.alerts_table.query(**kwargs)
+                    items.extend(response.get("Items", []))
+                    last_key = response.get("LastEvaluatedKey")
+                    if not last_key:
+                        break
+                    kwargs["ExclusiveStartKey"] = last_key
+            except Exception as e:
+                print(f"Failed to query alerts for origin {origin_id}:", e)
+        return items[:max_items]
 
     def get_all_alerts(self, max_items: int = 2000) -> List[Dict]:
         """Fetch all alerts from DynamoDB with In-Memory Cache (TTL 5s) and full pagination"""

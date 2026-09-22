@@ -305,9 +305,14 @@ _STORE: dict = {}
 # known key fields (append-only put_item, the pre-existing behavior) --
 # only add an entry here once the real schema has actually been checked.
 _TABLE_KEY_FIELDS = {
-    # waf_alerts: HASH=user_id, RANGE=alert_id (confirmed live 2026-09-22,
-    # the mark-all-read bug investigation).
+    # waf_alerts was HASH=user_id, RANGE=alert_id (confirmed live
+    # 2026-09-22, the mark-all-read bug investigation). user_id was the
+    # constant "default-user" written by the only writer, so it identified
+    # nothing; migrated 2026-09-23 to waf_alerts_v2 keyed by the origin the
+    # alert actually belongs to. Both are listed: the old table still
+    # exists untouched as the rollback target.
     "waf_alerts": {"user_id", "alert_id"},
+    "waf_alerts_v2": {"origin_id", "alert_id"},
 }
 
 
@@ -326,11 +331,12 @@ class FakeDynamoDBService(DynamoDBService):
 
     def __init__(self):  # noqa: super() intentionally not called - no boto3 here
         self.region = "test"
-        self.alerts_table_name = "waf_alerts"
+        self.alerts_table_name = "waf_alerts_v2"
         self.logs_table_name = "waf_logs"
         self.rules_table_name = "waf_rules"
         self.users_table_name = "waf_users"
-        self.alerts_table = _table("waf_alerts")
+        self.alerts_table = _table("waf_alerts_v2")
+        self.alerts_legacy_table = _table("waf_alerts")
         self.logs_table = _table("waf_logs")
         self.rules_table = _table("waf_rules")
         self.waf_users = _table("waf_users")
