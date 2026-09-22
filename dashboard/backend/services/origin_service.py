@@ -184,9 +184,12 @@ def get_origins_for_user(admin_user_id: str) -> list:
 
 def get_origins_visible_to_user(user_id: str) -> list:
     """Owned origins UNION origins this user was explicitly granted viewer
-    access to. Use this (not get_origins_for_user) anywhere "can this user
-    see it" is the question -- get_origins_for_user stays for the narrower
-    "does this user own it" cases (quota, create-time dedup)."""
+    OR editor access to (Team Workspace, 2026-09-22 -- an editor must see
+    the origin they were granted write access to, the same reasoning
+    services/rbac.py's verify_origin_access already applies per-request).
+    Use this (not get_origins_for_user) anywhere "can this user see it" is
+    the question -- get_origins_for_user stays for the narrower "does this
+    user own it" cases (quota, create-time dedup)."""
     owned = get_origins_for_user(user_id)
     owned_ids = {o.get("id") for o in owned}
     try:
@@ -195,7 +198,11 @@ def get_origins_visible_to_user(user_id: str) -> list:
         return owned
     shared = [
         o for o in all_origins
-        if o.get("id") not in owned_ids and user_id in (o.get("viewer_user_ids") or set())
+        if o.get("id") not in owned_ids
+        and (
+            user_id in (o.get("viewer_user_ids") or set())
+            or user_id in (o.get("editor_user_ids") or set())
+        )
     ]
     return owned + shared
 

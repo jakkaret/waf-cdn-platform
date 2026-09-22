@@ -114,6 +114,38 @@ def test_requesting_an_origin_you_do_not_own_returns_empty_not_another_tenants_l
     assert get_logs_spy.call_count == 0, "a forbidden-domain request must not reach ClickHouse at all"
 
 
+def test_recent_logs_a_properly_scoped_but_empty_result_never_falls_back_to_the_unscoped_buffer(
+    client: TestClient, register_user, auth_header, monkeypatch
+):
+    """Real bug, reported live and reproduced 2026-09-22: a brand-new/low-
+    traffic account (has an origin, so domain_targets is a real non-empty
+    list -- not the zero-origin __NO_TENANT_ORIGINS__ path already covered
+    above) whose ClickHouse query correctly finds zero matching logs used
+    to fall through to services/fetch_logs.py's get_recent_logs(), an
+    unscoped legacy DynamoDB buffer with no per-tenant filtering at all --
+    leaking whatever real traffic happened to be in it (confirmed live:
+    another tenant's real request). A properly-scoped empty result must be
+    returned as empty, not treated as "ClickHouse had nothing to say"."""
+    monkeypatch.setattr(logs_module.ch, "connected", True)
+    monkeypatch.setattr(logs_module.ch, "get_logs", MagicMock(return_value={"logs": []}))
+    fallback_spy = MagicMock(return_value=[{"url": "/someone-elses-real-request", "user_id": "default-user"}])
+    monkeypatch.setattr(logs_module, "get_recent_logs", fallback_spy)
+
+    register_user(email="logs-empty-bootstrap@example.com", username="logs_empty_bootstrap")
+    owner = register_user(email="logs-empty-owner@example.com", username="logs_empty_owner", role="viewer")
+    headers = auth_header(owner["access_token"])
+
+    origin_resp = client.post(
+        "/api/origins", json={"label": "NoTrafficYetApp", "ip": "203.0.113.77", "port": 8080}, headers=headers,
+    )
+    assert origin_resp.status_code == 200
+
+    resp = client.get("/api/logs/recent", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"logs": []}
+    fallback_spy.assert_not_called()
+
+
 def test_admin_can_view_all_logs_with_no_domain_filter(
     client: TestClient, register_user, auth_header, monkeypatch
 ):

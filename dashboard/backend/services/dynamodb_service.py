@@ -128,10 +128,11 @@ class DynamoDBService:
         attack_type: str = None,
         severity: str = None,
         edge_node: str = None,
+        domain: str = None,
     ) -> bool:
-        
+
         #บันทึก alert ที่จำเป็นลง DynamoDB (waf_alerts)
-        
+
         try:
             item = {
                 "user_id": user_id,
@@ -153,6 +154,16 @@ class DynamoDBService:
                 item["severity"] = severity
             if edge_node:
                 item["edge_node"] = edge_node
+            if domain:
+                # 2026-09-22: the real tenant-scoping key for alerts.
+                # user_id has always been a hardcoded "default-user"
+                # placeholder (confirmed in services/telegram_listener.py,
+                # the real production writer) -- it was never a usable
+                # owner. The Host header, captured but previously discarded
+                # in services/log_forward.py's log pipeline, is what
+                # actually identifies which tenant's origin this alert
+                # belongs to. See api/ai_summary.py's _alert_belongs_to_tenant.
+                item["domain"] = str(domain).strip().lower()
             self.alerts_table.put_item(Item=item)
             # Update In-Memory Cache immediately
             global _alerts_cache, _alerts_cache_ts
