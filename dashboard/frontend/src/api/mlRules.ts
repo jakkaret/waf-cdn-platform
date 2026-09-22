@@ -26,5 +26,14 @@ export const mlRulesApi = {
   deleteRule: async (id: string) => {
     const res = await api.delete(`/ml-rules/${id}`)
     return res.data
-  }
+  },
+
+  // CVE Auto-Patch (2026-09-22): admin-triggered, real outbound call to
+  // NVD -- never scheduled/background, so this stays a deliberate click.
+  runCveScan: async (days?: number) => {
+    const res = await api.post('/ml-rules/cve-scan', undefined, {
+      params: days ? { days } : undefined,
+    })
+    return res.data
+  },
 }
