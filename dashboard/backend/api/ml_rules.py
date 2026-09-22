@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from services.ml_rule_service import MLRuleService
-from services.rbac import require_viewer_or_above, require_admin
+from services.rbac import require_admin
 from services import audit_log
 from services.cve_feed import fetch_recent_cves, match_cves_to_origins
 from services.gemini_service import gemini_service
@@ -25,7 +25,19 @@ class RuleRejectRequest(BaseModel):
     reason: Optional[str] = ""
 
 @router.get("/")
-async def list_ml_rules(status: Optional[str] = None, current_user: dict = Depends(require_viewer_or_above)):
+async def list_ml_rules(status: Optional[str] = None, current_user: dict = Depends(require_admin)):
+    """Admin-only (2026-09-22, diagnosing-bugs skill applied to the tenant-
+    isolation audit's open finding). This queue has no per-tenant field
+    anywhere in its data model -- neither create_pending_rule()'s item
+    shape nor either of its two real callers (api/ml.py's user-invoked
+    predict_and_suggest, this file's own CVE-Auto-Patch scan) ever capture
+    an origin_id or domain, unlike alerts (which had a recoverable Host
+    header). Was previously require_viewer_or_above -- i.e. any signed-up
+    user -- exposing every tenant's real attack payloads/URLs to every
+    other tenant. Since real per-tenant scoping cannot be built without an
+    upstream data-model change, this is restricted to admin-only, matching
+    the policy already applied to approve/reject/delete on this exact
+    queue."""
     try:
         rules = rule_service.list_rules(status)
         return {"rules": rules}
@@ -33,7 +45,8 @@ async def list_ml_rules(status: Optional[str] = None, current_user: dict = Depen
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{rule_id}")
-async def get_ml_rule(rule_id: str, current_user: dict = Depends(require_viewer_or_above)):
+async def get_ml_rule(rule_id: str, current_user: dict = Depends(require_admin)):
+    """Admin-only -- see list_ml_rules above for why."""
     rule = rule_service.get_rule_detail(rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
