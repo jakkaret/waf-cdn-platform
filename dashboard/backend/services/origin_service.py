@@ -240,7 +240,8 @@ def get_origin(origin_id: str) -> dict:
     return db.get_origin_by_id(origin_id)
 
 
-def update_origin(origin_id: str, label: str = None, ip: str = None, port: int = None) -> bool:
+def update_origin(origin_id: str, label: str = None, ip: str = None, port: int = None,
+                   tech_stack_tags: List[str] = None) -> bool:
     update_data = {"updated_at": datetime.now().isoformat() + "Z"}
     if label:
         update_data["label"] = label
@@ -252,7 +253,9 @@ def update_origin(origin_id: str, label: str = None, ip: str = None, port: int =
         if not (1 <= port <= 65535):
             raise ValueError("Invalid port number")
         update_data["port"] = port
-        
+    if tech_stack_tags is not None:
+        update_data["tech_stack_tags"] = tech_stack_tags
+
     success = db.update_origin(origin_id, update_data)
     if success:
         invalidate_tenant_cache()
