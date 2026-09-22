@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import uuid
 from services.gemini_service import gemini_service
 from services.clickhouse_service import ClickHouseService
-from services.dynamodb_service import DynamoDBService
+from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
 from services.rbac import get_current_user, verify_origin_ownership
 from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter, build_domain_pattern_sql
 from services import audit_log
@@ -221,16 +221,63 @@ async def mark_notifications_read(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Mark specific or all notifications as read.
+    Mark one alert read (alert_id given), or ALL alerts read when alert_id
+    is omitted -- this is exactly what the dashboard's "Mark all read"
+    button sends (NotificationCenter.tsx's handleMarkAllRead calls
+    markRead(undefined)).
+
+    Real bug #1 fixed 2026-09-22: this previously only had the single-
+    alert_id branch, so "mark all" (alert_id=None) silently updated nothing
+    in DynamoDB while still returning {"success": True} -- every
+    notification stayed unread after clicking it. Also invalidates the
+    alerts in-memory cache (5s TTL, services/dynamodb_service.py) after
+    writing: update_item() bypasses save_alert()'s own cache write, so
+    without this a feed fetch made within that window could still show the
+    pre-update unread count even for the single-alert path.
+
+    Real bug #2 fixed 2026-09-22, deeper: waf_alerts' real key schema is
+    COMPOSITE (HASH=user_id, RANGE=alert_id -- confirmed live via
+    describe_table), not a plain alert_id key. Key={"alert_id": alert_id}
+    (the ORIGINAL code, before bug #1's fix was even written) has never
+    matched that schema and raised ValidationException: "The provided key
+    element does not match the schema" on every single call -- caught by
+    the blanket except below and turned into a 500, so *every* "mark as
+    read" click, not just "mark all", has always failed in production.
+    Fixed by looking the alert(s) up first (get_all_alerts(), already
+    cached) to get each one's real user_id, then updating with the full
+    composite key.
     """
     try:
         if alert_id:
-            db.alerts_table.update_item(
-                Key={"alert_id": alert_id},
-                UpdateExpression="SET #r = :val",
-                ExpressionAttributeNames={"#r": "read"},
-                ExpressionAttributeValues={":val": True}
-            )
+            targets = [a for a in db.get_all_alerts(max_items=2000) if a.get("alert_id") == alert_id]
+            for a in targets:
+                if not a.get("user_id") or not a.get("alert_id"):
+                    continue
+                db.alerts_table.update_item(
+                    Key={"user_id": a["user_id"], "alert_id": a["alert_id"]},
+                    UpdateExpression="SET #r = :val",
+                    ExpressionAttributeNames={"#r": "read"},
+                    ExpressionAttributeValues={":val": True}
+                )
+        else:
+            # "Mark all" can touch thousands of real rows (confirmed live:
+            # this project's own backlog was 1000+) -- one UpdateItem call
+            # per row is too slow for a single HTTP request (confirmed
+            # live: the request ran past 120s and had to be backgrounded).
+            # batch_writer() batches up to 25 items per real
+            # BatchWriteItem call instead. It only supports put/delete,
+            # not update, so each target's FULL item (already in hand from
+            # get_all_alerts()) is rewritten with read=True rather than
+            # patched in place.
+            targets = [a for a in db.get_all_alerts(max_items=2000) if not a.get("read", False)]
+            with db.alerts_table.batch_writer() as batch:
+                for a in targets:
+                    if not a.get("user_id") or not a.get("alert_id"):
+                        continue
+                    updated_item = dict(a)
+                    updated_item["read"] = True
+                    batch.put_item(Item=updated_item)
+        invalidate_alerts_cache()
         return {"success": True, "message": "Marked as read"}
     except Exception as e:
         logger.error(f"Error marking read: {e}")
