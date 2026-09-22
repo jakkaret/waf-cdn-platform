@@ -43,6 +43,27 @@ def compute_onboarding_status(origins: list, domain_items: list) -> dict:
     else:
         next_step = "done"
 
+    # 2026-09-22 fix: the frontend's resume effect used to advance `step`
+    # based on next_step alone, but never restored originId/domainId/
+    # domainName (this endpoint never sent them) -- so resuming at
+    # add_domain landed on the right step with a null originId (the
+    # create-domain call would fail), and resuming at verify_domain showed
+    # the domain-creation form again instead of the verification screen.
+    # Most-recently-created origin, and its first domain row (preferring
+    # one still unverified, since that's the one resume needs to act on).
+    resume_origin_id = None
+    resume_domain_id = None
+    resume_domain_name = None
+    if origins:
+        latest = max(origins, key=lambda o: o.get("created_at", ""))
+        resume_origin_id = latest.get("id") or latest.get("origin_id")
+        for d in domain_items:
+            if d.get("origin_id") == resume_origin_id:
+                resume_domain_id = d.get("id") or d.get("domain_id")
+                resume_domain_name = d.get("domain_name")
+                if not d.get("dns_verified"):
+                    break
+
     return {
         "has_origin": has_origin,
         "origin_count": origin_count,
@@ -50,6 +71,9 @@ def compute_onboarding_status(origins: list, domain_items: list) -> dict:
         "domain_verified": domain_verified,
         "next_step": next_step,
         "onboarding_complete": next_step == "done",
+        "resume_origin_id": resume_origin_id,
+        "resume_domain_id": resume_domain_id,
+        "resume_domain_name": resume_domain_name,
     }
 
 

@@ -69,7 +69,11 @@ export const Tunnels: React.FC = () => {
   })
 
   const tunnels = data?.tunnels || []
-  const activeCount = data?.active_count || (tunnels.length > 0 ? tunnels.length : 0)
+  // ?? not || -- active_count is a real, legitimate 0 when every tunnel is
+  // offline (backend only increments it per-online-tunnel; a falsy-0
+  // fallback to tunnels.length claimed every tunnel was active while the
+  // table below correctly showed them all offline).
+  const activeCount = data?.active_count ?? 0
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text)

@@ -332,7 +332,7 @@ export const Alerts: React.FC = () => {
         `"${a.status || ''}"`,
         `"${(a.message || '').replace(/"/g, '""')}"`,
         `"${a.severity || 'CRITICAL'}"`,
-        `"${a.rule_id || '942100'}"`,
+        `"${a.rule_id || ''}"`,
       ].join(',')),
     ]
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
@@ -756,10 +756,16 @@ export const Alerts: React.FC = () => {
                 paginatedAlerts.map((alert: WafAlert, idx: number) => {
                   const alertId = formatAlertId(alert.alert_id, (page - 1) * limit + idx + 1)
                   const isCritical = String(alert.severity).toUpperCase() === 'CRITICAL' || String(alert.status).includes('403')
+                  // formatAlertId strips the trailing IP suffix for display,
+                  // so two alerts from different attacking IPs in the same
+                  // second (plausible in a distributed attack) can format
+                  // to the same string -- use the raw, un-stripped ID for
+                  // the React key so rows don't get misreconciled.
+                  const rowKey = alert.alert_id || alertId
 
                   return (
                     <tr
-                      key={alertId}
+                      key={rowKey}
                       className={`cursor-pointer transition-colors border-b border-[var(--bg-border-subtle)] ${
                         isCritical
                           ? 'bg-red-50/40 dark:bg-red-950/[0.08] hover:bg-red-50/80 dark:hover:bg-red-950/[0.15]'
@@ -801,11 +807,15 @@ export const Alerts: React.FC = () => {
                         {getSeverityBadge(alert.severity)}
                       </td>
 
-                      {/* Dispatch Status */}
+                      {/* Dispatch Status -- fallback matches alertMetrics'
+                          own `dispatched` KPI, which never counts an empty
+                          status as dispatched; showing the literal text
+                          "DISPATCHED" here for the same empty status
+                          contradicted that count. */}
                       <td className="border-r border-[var(--bg-border-subtle)]">
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] font-mono font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
                           <Send size={10} />
-                          <span>{alert.status || 'DISPATCHED'}</span>
+                          <span>{alert.status || 'UNKNOWN'}</span>
                         </span>
                       </td>
 

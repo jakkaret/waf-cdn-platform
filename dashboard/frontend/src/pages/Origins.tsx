@@ -115,7 +115,7 @@ export const Origins: React.FC = () => {
         subtitle="Upstream web server pools protected behind the CloudWAF reverse proxy"
         badge={
           <Badge color="blue" dot>
-            {origins.length} POOLS CONFIGURED
+            {origins.filter((o: Origin) => o.status !== 'archived').length} POOLS CONFIGURED
           </Badge>
         }
         action={
