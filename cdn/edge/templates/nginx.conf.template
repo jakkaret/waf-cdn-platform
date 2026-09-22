@@ -19,6 +19,7 @@ http {
         '"request_id":"$request_id",'
         '"region":"${EDGE_REGION}",'
         '"remote_addr":"$remote_addr",'
+        '"host":"$host",'
         '"method":"$request_method",'
         '"uri":"$uri",'
         '"status":"$status",'
