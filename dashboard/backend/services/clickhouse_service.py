@@ -122,7 +122,8 @@ class ClickHouseService:
                     request_id String DEFAULT '',
                     http_referer String DEFAULT '',
                     body_bytes_sent UInt32 DEFAULT 0,
-                    host String DEFAULT ''
+                    host String DEFAULT '',
+                    cache_status String DEFAULT ''
                 ) ENGINE = MergeTree()
                 ORDER BY (timestamp, client_ip)
                 TTL timestamp + INTERVAL {ACCESS_LOGS_RETENTION_DAYS} DAY
@@ -157,6 +158,16 @@ class ClickHouseService:
                 "ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS host String DEFAULT ''"
             )
 
+            # CDN edge rows used to keep their cache_status only in the
+            # DynamoDB waf_logs copy. That copy is gone (see api/cdn.py:
+            # waf_logs' key is user_id + whole-second timestamp with a
+            # constant user_id, so it could physically hold one row per
+            # second for the entire system and silently overwrote the
+            # rest), so the field lives here now.
+            self.client.command(
+                "ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS cache_status String DEFAULT ''"
+            )
+
             # Create security_audit_logs table
             self.client.command('''
                 CREATE TABLE IF NOT EXISTS security_audit_logs (
@@ -176,10 +187,145 @@ class ClickHouseService:
             print(f"⚠️ Error initializing ClickHouse tables: {e}")
             self.connected = False
 
+    ACCESS_LOG_COLUMNS = [
+        'id', 'timestamp', 'client_ip', 'method', 'url', 'status_code',
+        'request_time_ms', 'user_agent', 'country', 'edge_node', 'alert', 'attack_type', 'rule_id',
+        'request_id', 'http_referer', 'body_bytes_sent', 'host', 'cache_status',
+    ]
+
+    def save_logs_bulk(self, table_name, entries: list) -> int:
+        """Insert many access_logs rows in one INSERT.
+
+        Same row construction as save_log(); the difference is one network
+        round trip for the whole batch instead of one per row. The CDN
+        ingest path receives entries in batches of thousands, and inserting
+        them one at a time was a large part of why that endpoint could not
+        answer inside the edge forwarder's timeout.
+
+        Deliberately still one call from one thread: ch.client is a single
+        shared object and is not documented thread-safe (api/cdn.py has a
+        comment about entries silently vanishing when this was parallelised
+        across threads).
+        """
+        if not self.connected or table_name != 'access_logs' or not entries:
+            return 0
+        rows = []
+        for data in entries:
+            try:
+                rows.append(self._build_access_log_row(data))
+            except Exception as e:
+                print(f"⚠️ ClickHouse row build error (entry skipped): {e}")
+        if not rows:
+            return 0
+        try:
+            self.client.insert(table_name, rows, column_names=self.ACCESS_LOG_COLUMNS)
+            return len(rows)
+        except Exception as e:
+            print(f"⚠️ ClickHouse bulk insert error: {e}")
+            return 0
+
+    def get_cdn_logs(self, limit: int = 50, region: str = "ALL", origin_clause: str = "") -> list:
+        """Edge-served requests, newest first, in the shape the CdnLog
+        frontend type expects.
+
+        Replaces the DynamoDB read this endpoint used to do. `region` is
+        matched against edge_node ('th' -> 'edge-th'); `origin_clause` is
+        the caller's already-built tenant filter and is embedded as-is,
+        exactly like the other ClickHouse readers in this file -- callers
+        must pass something produced by tenant_service, never raw input.
+        """
+        if not self.connected:
+            return []
+        conditions = ["edge_node != 'unknown'"]
+        region_clean = str(region or "ALL").strip().lower()
+        if region_clean and region_clean != "all":
+            node = region_clean if region_clean.startswith("edge-") else f"edge-{region_clean}"
+            conditions.append(f"edge_node = '{escape_like_value(node)}'")
+        if origin_clause:
+            conditions.append(origin_clause)
+        where_sql = " AND ".join(conditions)
+        try:
+            rows = self.client.query(f"""
+                SELECT edge_node, client_ip, url, method, status_code,
+                       cache_status, request_time_ms, timestamp
+                FROM access_logs
+                WHERE {where_sql}
+                ORDER BY timestamp DESC
+                LIMIT {int(limit)}
+            """).result_rows
+        except Exception as e:
+            print(f"⚠️ ClickHouse get_cdn_logs error: {e}")
+            return []
+        return [
+            {
+                "region": str(r[0]).replace("edge-", "").upper(),
+                "ip": r[1],
+                "url": r[2],
+                "method": r[3],
+                "status": int(r[4]),
+                "cache_status": r[5] or "MISS",
+                "latency_ms": float(r[6] or 0.0),
+                "datetime": r[7].isoformat() if hasattr(r[7], "isoformat") else str(r[7]),
+            }
+            for r in rows
+        ]
+
+    def _build_access_log_row(self, data: dict) -> list:
+        raw_id = data.get('request_id') or data.get('id') or data.get('log_id')
+        if raw_id:
+            try:
+                log_uuid = uuid.UUID(str(raw_id))
+            except Exception:
+                log_uuid = uuid.uuid4()
+        else:
+            log_uuid = uuid.uuid4()
+
+        raw_time = data.get('datetime') or data.get('timestamp')
+        if raw_time:
+            try:
+                if isinstance(raw_time, str):
+                    clean_time = raw_time.replace('Z', '')
+                    if 'T' in clean_time:
+                        dt = datetime.fromisoformat(clean_time)
+                    else:
+                        dt = datetime.strptime(clean_time, '%Y-%m-%d %H:%M:%S')
+                elif isinstance(raw_time, (int, float)):
+                    dt = datetime.utcfromtimestamp(raw_time)
+                else:
+                    dt = datetime.utcnow()
+            except Exception:
+                dt = datetime.utcnow()
+        else:
+            dt = datetime.utcnow()
+
+        status_val = int(data.get('status') or data.get('status_code') or 0)
+        is_alert = 1 if (data.get('alert') or status_val in [403, 429]) else 0
+
+        return [
+            log_uuid,
+            dt,
+            data.get('ip') or data.get('client_ip') or '',
+            data.get('method') or 'GET',
+            data.get('url') or '/',
+            status_val,
+            float(data.get('latency_ms') or data.get('request_time_ms') or 0.0),
+            data.get('user_agent') or '',
+            data.get('country') or 'TH',
+            resolve_edge_node(data.get('edge_node')),
+            is_alert,
+            data.get('attack_type') or '',
+            str(data.get('rule_id') or ''),
+            str(data.get('request_id') or ''),
+            data.get('http_referer') or '',
+            int(data.get('body_bytes_sent') or 0),
+            normalize_host(data.get('host')),
+            str(data.get('cache_status') or ''),
+        ]
+
     def save_log(self, table_name, data: dict):
         if not self.connected:
             return False
-            
+
         try:
             if table_name == 'access_logs':
                 raw_id = data.get('request_id') or data.get('id') or data.get('log_id')
@@ -190,7 +336,7 @@ class ClickHouseService:
                         log_uuid = uuid.uuid4()
                 else:
                     log_uuid = uuid.uuid4()
-                    
+
                 raw_time = data.get('datetime') or data.get('timestamp')
                 if raw_time:
                     try:
@@ -230,12 +376,9 @@ class ClickHouseService:
                     data.get('http_referer') or '',
                     int(data.get('body_bytes_sent') or 0),
                     normalize_host(data.get('host')),
+                    str(data.get('cache_status') or ''),
                 ]
-                self.client.insert(table_name, [row], column_names=[
-                    'id', 'timestamp', 'client_ip', 'method', 'url', 'status_code',
-                    'request_time_ms', 'user_agent', 'country', 'edge_node', 'alert', 'attack_type', 'rule_id',
-                    'request_id', 'http_referer', 'body_bytes_sent', 'host',
-                ])
+                self.client.insert(table_name, [row], column_names=self.ACCESS_LOG_COLUMNS)
                 return True
                 
         except Exception as e:

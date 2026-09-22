@@ -16,7 +16,7 @@ from services.clickhouse_service import ClickHouseService, escape_like_value
 from services.cdn_log_forward import normalize_cdn_access
 from services.telegram_listener import dispatch_telegram_alert
 from services.pii_masker import pii_masker
-from services.tenant_service import get_user_origins_and_domains
+from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/cdn", tags=["cdn"])
@@ -369,12 +369,24 @@ async def cdn_logs(
     role = current_user.get("role", "viewer")
     is_admin = (role == "admin")
 
+    # Served from ClickHouse since 2026-09-23. The DynamoDB copy this used
+    # to read is no longer written (see _store_cdn_log_batch: waf_logs'
+    # constant-user_id + whole-second key made it lossy by construction),
+    # and reading it here had a second problem of its own -- it checked
+    # that a non-admin owned *some* origin and then returned every
+    # tenant's CDN rows regardless. access_logs.host now carries the real
+    # domain, so the same tenant filter the rest of the dashboard uses
+    # applies here too.
+    origin_clause = ""
     if not is_admin:
         origin_ids, active_origins, user_domains = get_user_origins_and_domains(user_id)
         if not active_origins and not user_domains:
             return {"logs": []}
+        origin_clause = build_tenant_origin_filter("ALL", user_domains, is_admin)
+        if origin_clause == "1=0":
+            return {"logs": []}
 
-    logs = _db.get_cdn_logs(limit=limit, region=region or "ALL")
+    logs = ch.get_cdn_logs(limit=limit, region=region or "ALL", origin_clause=origin_clause)
     return {"logs": logs}
 
 
@@ -432,18 +444,37 @@ def _store_cdn_log_batch(entries: list, region: str) -> int:
     Processing the whole batch serially inside ONE to_thread call keeps
     the event loop free (the fix that mattered) without concurrent access
     to either shared client (the correctness this needs).
+
+    2026-09-23: found wedged in production -- 4679 entries buffered on
+    edge-th and climbing, every POST hitting the forwarder's 5s timeout,
+    each retry sending a larger batch than the one that had just failed.
+    Two causes, both removed here.
+
+    One: a round trip per entry per store. ClickHouse now takes the whole
+    batch in a single INSERT, still from one thread, so the shared-client
+    property the previous fix established is unchanged.
+
+    Two, and the reason the DynamoDB write is gone rather than batched:
+    waf_logs is keyed (user_id HASH, timestamp RANGE) where user_id is the
+    constant "default-user" and timestamp is whole seconds. That table can
+    physically hold one row per second for the entire system; every other
+    row in the same second silently overwrote its predecessor, and a
+    batch_write_item of a real batch is simply rejected ("Provided list of
+    item keys contains duplicates"). It was never storing what it appeared
+    to store. ClickHouse holds the same rows with real per-row identity,
+    and now carries cache_status too, so nothing is lost by dropping it --
+    see cdn_logs() below, which reads from there instead.
     """
-    stored = 0
+    normalized = []
     for entry in entries:
         try:
-            data = normalize_cdn_access(entry, region)
-            if ch.connected:
-                ch.save_log("access_logs", data)
-            _db.save_log(data)
-            stored += 1
+            normalized.append(normalize_cdn_access(entry, region))
         except Exception:
-            logger.exception("cdn log ingest: failed to store one entry from region=%s", region)
-    return stored
+            logger.exception("cdn log ingest: failed to normalize one entry from region=%s", region)
+    if not normalized or not ch.connected:
+        return 0
+
+    return ch.save_logs_bulk("access_logs", normalized)
 
 
 @router.post("/logs/ingest", include_in_schema=False)
