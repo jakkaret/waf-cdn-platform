@@ -203,12 +203,48 @@ def _apply_update_expression(item, expr, attr_values=None, attr_names=None):
 class InMemoryTable:
     """Stands in for a boto3 DynamoDB Table resource, backed by a shared list."""
 
-    def __init__(self, rows):
+    def __init__(self, rows, key_fields=None):
         self.rows = rows  # shared list object; only ever mutated in place
+        # The real table's primary key field names (e.g. {"user_id",
+        # "alert_id"} for waf_alerts, confirmed live via describe_table),
+        # so put_item can replace an existing row by primary key --
+        # matching real DynamoDB's PutItem contract -- instead of always
+        # appending a duplicate. None (the default) keeps every caller
+        # that never needs this (append-only usage, the common case)
+        # unaffected.
+        self._key_fields = set(key_fields) if key_fields else None
 
     def put_item(self, Item):
+        if self._key_fields:
+            for i, row in enumerate(self.rows):
+                if all(row.get(k) == Item.get(k) for k in self._key_fields):
+                    self.rows[i] = dict(Item)
+                    return {}
         self.rows.append(dict(Item))
         return {}
+
+    def batch_writer(self):
+        """Minimal stand-in for boto3's Table.batch_writer() context
+        manager -- real batching (up to 25 items/request) is an AWS network
+        optimisation with no equivalent need in an in-memory fake; each
+        put_item here goes straight through this table's own put_item, so
+        it gets the same replace-by-key behavior."""
+        table = self
+
+        class _FakeBatchWriter:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc_info):
+                return False
+
+            def put_item(self, Item):
+                return table.put_item(Item)
+
+            def delete_item(self, Key):
+                return table.delete_item(Key)
+
+        return _FakeBatchWriter()
 
     def get_item(self, Key):
         for row in self.rows:
@@ -264,9 +300,20 @@ class InMemoryTable:
 _STORE: dict = {}
 
 
+# Real composite-key tables (HASH+RANGE), confirmed live via
+# describe_table where noted. A table absent from this map defaults to no
+# known key fields (append-only put_item, the pre-existing behavior) --
+# only add an entry here once the real schema has actually been checked.
+_TABLE_KEY_FIELDS = {
+    # waf_alerts: HASH=user_id, RANGE=alert_id (confirmed live 2026-09-22,
+    # the mark-all-read bug investigation).
+    "waf_alerts": {"user_id", "alert_id"},
+}
+
+
 def _table(name: str) -> InMemoryTable:
     _STORE.setdefault(name, [])
-    return InMemoryTable(_STORE[name])
+    return InMemoryTable(_STORE[name], key_fields=_TABLE_KEY_FIELDS.get(name))
 
 
 class FakeDynamoDBService(DynamoDBService):
