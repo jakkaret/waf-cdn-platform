@@ -306,6 +306,23 @@ server {
         mirror /internal-ml-capture;
         mirror_request_body on;
 
+        # 2026-09-22: this block was missing the same auth_request every
+        # other domain's location / has (found live: OTP shield config was
+        # enabled+correct in Redis and control-api's decision logic was
+        # correct when called directly, but the real external request never
+        # reached /api/shield/access at all -- this domain's location /
+        # simply never asked). Single auth_request per location is a real
+        # nginx constraint (not multi-value). nginx's auth_request module
+        # only treats 401/403 as valid "deny" statuses eligible for
+        # error_page mapping (other codes, e.g. 418, make it log "unexpected
+        # status" and 500 instead) -- 403 is ModSecurity's own block status
+        # here, so captcha and OTP share 401 via one combined check
+        # (nginx/includes/otp_server.conf) that tags which gate failed on a
+        # header for the challenge page to read.
+        auth_request /internal-shield-check;
+        auth_request_set $retry_after $upstream_http_retry_after;
+        auth_request_set $shield_type $upstream_http_x_shield_type;
+
         proxy_pass http://cloudwaf_tunnel;
         proxy_set_header Host $host;
         proxy_set_header Accept-Encoding "";
@@ -315,6 +332,26 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
         proxy_read_timeout 60s;
+    }
+
+    location = /internal-rate-limit {
+        internal;
+        proxy_method GET;
+        proxy_pass http://host.docker.internal:8000/api/limiter/check;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Host $host;
+    }
+
+    error_page 401 =429 @rate_limit_exceeded;
+    location @rate_limit_exceeded {
+        add_header Retry-After $retry_after always;
+        add_header Content-Type text/plain always;
+        return 429 "Too Many Requests. Rate limit exceeded. Please try again later.";
     }
 }
 
