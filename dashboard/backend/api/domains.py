@@ -236,15 +236,33 @@ def _load_ssl_allowed_from_db() -> set:
     """
     allowed = set()
 
+    # 2026-09-23: archiving an origin is a soft delete on the origin row
+    # only -- nothing cascades to its domains, which have no status field
+    # of their own. Without this filter an archived origin's domains stayed
+    # in the allow-list forever, so a resource the owner had removed could
+    # still obtain and renew TLS certificates indefinitely. Ownership and
+    # tenant scoping already exclude archived origins
+    # (tenant_service.get_user_origins_and_domains); this is the same rule
+    # applied to cert issuance.
+    origin_items = db.origins_table.scan().get("Items", [])
+    inactive_origin_ids = {
+        str(o.get("id"))
+        for o in origin_items
+        if o.get("status") in ("archived", "deleted")
+    }
+
     domain_items = db.domains_table.scan().get("Items", [])
     allowed |= {
         str(i.get("domain_name", "")).strip().lower()
         for i in domain_items
-        if i.get("dns_verified", False) and i.get("domain_name")
+        if i.get("dns_verified", False)
+        and i.get("domain_name")
+        and str(i.get("origin_id")) not in inactive_origin_ids
     }
 
-    origin_items = db.origins_table.scan().get("Items", [])
     for o in origin_items:
+        if o.get("status") in ("archived", "deleted"):
+            continue
         for d in (o.get("tunnel_domains") or []):
             if d:
                 allowed.add(str(d).strip().lower())
