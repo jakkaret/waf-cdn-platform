@@ -223,15 +223,27 @@ def _visible_alerts_for_user(current_user: dict, max_items: int = 2000) -> List[
     """Admin sees every alert (same "is_admin -> no filter" branch
     summarize_range already uses); everyone else sees only alerts matching
     their own registered origins' domains/IPs."""
-    items = db.get_all_alerts(max_items=max_items)
     if current_user.get("role") == "admin":
-        return items
+        # Admins see every partition including UNATTRIBUTED, so a scan is
+        # still the right shape for them.
+        return db.get_all_alerts(max_items=max_items)
+
     origin_ids, _active_origins, user_domains = get_user_origins_and_domains(current_user.get("user_id"))
     if not origin_ids and not user_domains:
         return []
     visible_origin_ids = {str(o) for o in origin_ids if o}
+
+    # Post-migration (waf_alerts_v2, keyed origin_id + alert_id) this is a
+    # handful of indexed queries rather than a scan of every tenant's rows.
+    items = db.get_alerts_for_origins(sorted(visible_origin_ids), max_items=max_items)
+    # Rows written before the alert carried an origin_id are not reachable
+    # by partition key, so they still need the older domain match. Scanning
+    # for them is confined to this legacy tail and disappears once those
+    # rows age out.
+    legacy_items = [a for a in db.get_all_alerts(max_items=max_items) if not a.get("origin_id")]
+
     visible = []
-    for alert in items:
+    for alert in items + legacy_items:
         alert_origin_id = str(alert.get("origin_id") or "")
         if alert_origin_id:
             # Exact attribution, resolved once at write time against
@@ -324,10 +336,10 @@ async def mark_notifications_read(
         if alert_id:
             targets = [a for a in visible_alerts if a.get("alert_id") == alert_id]
             for a in targets:
-                if not a.get("user_id") or not a.get("alert_id"):
+                if not a.get("origin_id") or not a.get("alert_id"):
                     continue
                 db.alerts_table.update_item(
-                    Key={"user_id": a["user_id"], "alert_id": a["alert_id"]},
+                    Key={"origin_id": a["origin_id"], "alert_id": a["alert_id"]},
                     UpdateExpression="SET #r = :val",
                     ExpressionAttributeNames={"#r": "read"},
                     ExpressionAttributeValues={":val": True}
@@ -345,7 +357,7 @@ async def mark_notifications_read(
             targets = [a for a in visible_alerts if not a.get("read", False)]
             with db.alerts_table.batch_writer() as batch:
                 for a in targets:
-                    if not a.get("user_id") or not a.get("alert_id"):
+                    if not a.get("origin_id") or not a.get("alert_id"):
                         continue
                     updated_item = dict(a)
                     updated_item["read"] = True

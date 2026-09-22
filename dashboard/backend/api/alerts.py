@@ -1,6 +1,11 @@
 # pyrefly: ignore [missing-import]
 from fastapi import APIRouter, HTTPException, Depends
 from services.dynamodb_service import DynamoDBService
+# Imported from the sibling router rather than duplicated: this is the one
+# place alert tenant-scoping is decided, and a second copy would be a
+# second thing to get wrong (this endpoint's own hand-rolled filter is
+# exactly what went wrong before).
+from api.ai_summary import _visible_alerts_for_user
 from services.rbac import get_current_user
 from services.telegram_listener import invalidate_user_cache
 import os, secrets, time, httpx, asyncio, logging
@@ -38,14 +43,15 @@ async def get_recent_alerts(
     try:
         if limit > 500:
             limit = 500
-        user_id = current_user.get("user_id")
-        role = current_user.get("role", "viewer")
-
-        alerts = db.get_all_alerts(max_items=2000)
-
-        # Filter by tenant user if not admin
-        if role != "admin":
-            alerts = [a for a in alerts if a.get("user_id") == user_id]
+        # 2026-09-23: this used to filter on a.get("user_id") == user_id.
+        # waf_alerts' user_id has always been the constant "default-user"
+        # written by services/telegram_listener.py, so that comparison was
+        # false for every real account -- this endpoint returned an empty
+        # list to every non-admin, which is why the Alerts page showed no
+        # incidents while the dashboard's own notification feed (which used
+        # the scoping below) showed unread ones. Same scoping as the feed
+        # now: exact origin attribution, viewer/editor grants included.
+        alerts = _visible_alerts_for_user(current_user, max_items=2000)
 
         return {"alerts": alerts[:limit]}
     except Exception as e:

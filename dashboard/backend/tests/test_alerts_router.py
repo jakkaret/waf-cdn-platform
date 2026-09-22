@@ -22,6 +22,7 @@ from slowapi.errors import RateLimitExceeded
 from services.rate_limiter import limiter
 from api import auth as auth_module
 from api import alerts as alerts_module
+from api import ai_summary as ai_summary_module
 
 
 @pytest.fixture()
@@ -50,36 +51,64 @@ def _reset_pending_codes():
 
 # --------------------------------------------------------------- /recent
 
-def test_non_admin_only_sees_their_own_alerts(client: TestClient, register_user, auth_header, monkeypatch):
-    admin = register_user(email="alerts-admin@example.com", username="alerts_admin")
+def test_non_admin_only_sees_alerts_for_origins_they_can_see(
+    client: TestClient, register_user, auth_header, monkeypatch
+):
+    """Rewritten 2026-09-23. The previous version seeded three alerts with
+    three different user_id values and asserted a viewer saw only the row
+    whose user_id matched theirs. No such data has ever existed: the only
+    writer (services/telegram_listener.py) wrote the constant
+    "default-user" into every row, so in production that filter matched
+    nothing and /recent returned an empty list to every non-admin -- the
+    Alerts page showed no incidents at all. The test passed because the
+    fixture invented per-user alerts the real writer never produced.
+
+    Scoping is by the origin an alert belongs to, so that is what this
+    asserts now."""
+    register_user(email="alerts-admin@example.com", username="alerts_admin")
     viewer = register_user(email="alerts-viewer@example.com", username="alerts_viewer", role="viewer")
 
     all_alerts = [
-        {"id": "a1", "user_id": admin["user"]["user_id"], "message": "admin's alert"},
-        {"id": "a2", "user_id": viewer["user"]["user_id"], "message": "viewer's own alert"},
-        {"id": "a3", "user_id": "some-other-user", "message": "a third tenant's alert"},
+        {"id": "a1", "alert_id": "a1", "origin_id": "o-someone-else", "message": "another tenant's alert"},
+        {"id": "a2", "alert_id": "a2", "origin_id": "o-viewer", "message": "viewer's own alert"},
+        {"id": "a3", "alert_id": "a3", "origin_id": "unattributed", "message": "no resolvable owner"},
     ]
-    monkeypatch.setattr(alerts_module.db, "get_all_alerts", MagicMock(return_value=all_alerts))
+    monkeypatch.setattr(
+        ai_summary_module.db, "get_alerts_for_origins",
+        MagicMock(side_effect=lambda oids, max_items=2000: [
+            a for a in all_alerts if a["origin_id"] in set(oids)
+        ]),
+    )
+    monkeypatch.setattr(ai_summary_module.db, "get_all_alerts", MagicMock(return_value=all_alerts))
+    monkeypatch.setattr(
+        ai_summary_module, "get_user_origins_and_domains",
+        lambda _uid: (["o-viewer"], [], ["viewer.example.com"]),
+    )
 
     resp = client.get("/api/alerts/recent", headers=auth_header(viewer["access_token"]))
     assert resp.status_code == 200
     ids = {a["id"] for a in resp.json()["alerts"]}
-    assert ids == {"a2"}, "a non-admin must only ever see their own alerts, never another tenant's"
+    assert ids == {"a2"}, (
+        "a non-admin must see their own origin's alerts -- and only those. "
+        "An empty set here is the production bug this replaced; "
+        "'unattributed' has no resolvable owner and is admin-only."
+    )
 
 
 def test_admin_sees_every_tenants_alerts(client: TestClient, register_user, auth_header, monkeypatch):
     admin = register_user(email="alerts-admin2@example.com", username="alerts_admin2")
 
     all_alerts = [
-        {"id": "a1", "user_id": "user-x", "message": "x's alert"},
-        {"id": "a2", "user_id": "user-y", "message": "y's alert"},
+        {"id": "a1", "alert_id": "a1", "origin_id": "o-x", "message": "x's alert"},
+        {"id": "a2", "alert_id": "a2", "origin_id": "unattributed", "message": "unowned"},
     ]
-    monkeypatch.setattr(alerts_module.db, "get_all_alerts", MagicMock(return_value=all_alerts))
+    monkeypatch.setattr(ai_summary_module.db, "get_all_alerts", MagicMock(return_value=all_alerts))
 
     resp = client.get("/api/alerts/recent", headers=auth_header(admin["access_token"]))
     assert resp.status_code == 200
     ids = {a["id"] for a in resp.json()["alerts"]}
-    assert ids == {"a1", "a2"}
+    assert ids == {"a1", "a2"}, "an admin sees every partition, including unattributed"
+
 
 
 # --------------------------------------------------------- connect/* flow

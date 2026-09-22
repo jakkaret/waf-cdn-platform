@@ -94,16 +94,23 @@ async def dispatch_telegram_alert(data: dict):
         # not a registered domain (direct-to-IP traffic, a probe for
         # someone else's hostname): not attributable, so it stays
         # admin-only rather than being shown to a guessed owner.
-        origin_id = db.get_origin_id_for_domain(domain)
+        # Partition key as of the 2026-09-23 migration to waf_alerts_v2.
+        # Never empty: an unresolvable Host (direct-to-IP traffic, a probe
+        # for someone else's hostname) goes to the UNATTRIBUTED partition,
+        # which is admin-only on read, rather than being attributed to a
+        # guessed owner.
+        origin_id = db.get_origin_id_for_domain(domain) or db.ALERTS_UNATTRIBUTED
         try:
             db.alerts_table.put_item(
                 Item={
+                    "origin_id": origin_id,
+                    # No longer a key. Kept because every pre-migration row
+                    # carries it and some UI still surfaces it.
                     "user_id": "default-user",
                     "alert_id": alert_id,
                     "ip": ip,
                     "url": url,
                     "domain": domain,
-                    "origin_id": origin_id,
                     "status": status_code,
                     "rule_id": rule_id,
                     "attack_type": attack_type,
