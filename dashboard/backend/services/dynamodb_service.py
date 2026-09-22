@@ -48,7 +48,15 @@ class DynamoDBService:
         # Initialize tables
         self.alerts_table = self.dynamodb.Table(self.alerts_table_name)
         self.logs_table = self.dynamodb.Table(self.logs_table_name)
+        # Misnomer, kept because the physical table name cannot be changed
+        # in place. "waf_rules" holds BOLA policies (services/bola_guard.py
+        # is its only reader/writer, and it is empty in production), NOT
+        # WAF rules: real SecRules live in modsecurity/custom-rules/*.conf
+        # and are managed by services/rule_manager.py, which never touches
+        # DynamoDB. Both names are bound so code reads honestly while the
+        # existing accessor keeps working.
         self.rules_table = self.dynamodb.Table(self.rules_table_name)
+        self.bola_policies_table = self.rules_table
         self.waf_users = self.dynamodb.Table(self.users_table_name)
         self.origins_table = self.dynamodb.Table("waf_origins")
         self.domains_table = self.dynamodb.Table("waf_domains")
