@@ -68,6 +68,12 @@ export const Register: React.FC = () => {
       toast.success('Account created successfully')
       navigate('/')
     } catch (err: any) {
+      // Matches Login.tsx's identical login->getMe flow: if getMe() throws
+      // after the token was already set into the store, reset it here too
+      // -- otherwise a real bearer token sits in the persisted store while
+      // isAuthenticated stays false, and axios keeps attaching it to
+      // subsequent requests as a stale/orphaned credential.
+      useAuthStore.setState({ token: null })
       const detail = err.response?.data?.detail
       const message =
         typeof detail === 'string'

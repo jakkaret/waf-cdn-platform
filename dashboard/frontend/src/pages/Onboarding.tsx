@@ -6,6 +6,7 @@ import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { createOrigin } from '../api/origins'
 import { createDomain, verifyDomain, getDomains } from '../api/domains'
+import { DnsInstructions } from '../types'
 import { onboardingApi } from '../api/onboarding'
 import { api } from '../api/axios'
 import { buildTunnelCommands } from '../lib/tunnelCommands'
@@ -55,10 +56,7 @@ export const Onboarding: React.FC = () => {
   const [domainMode, setDomainMode] = useState<'subdomain' | 'custom'>('subdomain')
   const [subdomainLabel, setSubdomainLabel] = useState('')
   const [customDomain, setCustomDomain] = useState('')
-  const [dnsInstructions, setDnsInstructions] = useState<{
-    cname_record: { name: string; value: string }
-    txt_record: { name: string; value: string }
-  } | null>(null)
+  const [dnsInstructions, setDnsInstructions] = useState<DnsInstructions | null>(null)
   const [verifying, setVerifying] = useState(false)
 
   // Resume where the user left off, on first load only.
@@ -70,6 +68,31 @@ export const Onboarding: React.FC = () => {
   useEffect(() => {
     if (!existingStatus) return
     if (existingStatus.next_step === 'add_domain' || existingStatus.next_step === 'verify_domain') {
+      // 2026-09-22 fix: this used to advance `step` alone, leaving
+      // originId/domainId/domainName null -- add_domain's create-domain
+      // call needs originId, and verify_domain showed the domain-creation
+      // form again (domainName still null) instead of the verify screen.
+      if (existingStatus.resume_origin_id) setOriginId(existingStatus.resume_origin_id)
+      if (existingStatus.next_step === 'verify_domain' && existingStatus.resume_domain_id) {
+        setDomainId(existingStatus.resume_domain_id)
+        setDomainName(existingStatus.resume_domain_name)
+        if (existingStatus.resume_origin_id) {
+          getDomains(existingStatus.resume_origin_id)
+            .then((res) => {
+              const d = res.data.domains.find((x) => x.domain_id === existingStatus.resume_domain_id)
+              if (d && d.verification_status !== 'verified') {
+                setDnsInstructions({
+                  cname_record: { type: 'CNAME', name: d.domain_name, value: d.cname_target },
+                  txt_record: { type: 'TXT', name: `_waf-challenge.${d.domain_name}`, value: d.dns_verification_token },
+                })
+              }
+            })
+            .catch(() => {
+              // Resume still lands on the right step/domain even if this
+              // best-effort DNS-instructions refetch fails.
+            })
+        }
+      }
       setStep(2)
     } else if (existingStatus.next_step === 'done') {
       setStep(4)

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rulesApi } from '../api/rules'
@@ -84,7 +84,7 @@ export const Rules: React.FC = () => {
 
   const syncMutation = useMutation({
     mutationFn: () => rulesApi.syncRules(),
-    onSuccess: (data: any) => toast.success(`Edge Sync Complete: ${data?.synced_nodes || 3} POP nodes synchronized`),
+    onSuccess: (data: any) => toast.success(`Edge Sync Complete: ${data?.synced_nodes ?? 0} POP nodes synchronized`),
     onError: (err: any) => toast.error(err?.response?.data?.detail || 'Edge rule synchronization failed'),
   })
 
@@ -99,8 +99,13 @@ export const Rules: React.FC = () => {
       operator: op,
       severity: (editingRule.severity || 'CRITICAL').toUpperCase() as any,
     }
+    // id-only lookup (matches the modal title's own check below) -- the
+    // previous `editingRule !== exists` object-reference check meant
+    // opening Edit and submitting without changing any field (editingRule
+    // still the exact object pulled from `rules`) fell through to create,
+    // attempting to duplicate an existing rule ID.
     const exists = rules.find((r) => r.id === editingRule.id || r.id === `custom-${editingRule.id}`)
-    if (exists && editingRule !== exists) updateMutation.mutate({ id: String(editingRule.id), rule })
+    if (exists) updateMutation.mutate({ id: String(editingRule.id), rule })
     else createMutation.mutate(rule as any)
   }
 
@@ -153,6 +158,14 @@ export const Rules: React.FC = () => {
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredRules.length / PAGE_SIZE))
+  // refetchInterval means the rule list can shrink under the current page
+  // (another admin deletes rules) without any filter/search change firing
+  // -- the only other place `page` was ever reset. Without this, a stale
+  // out-of-range page silently rendered a blank table with a nonsensical
+  // "Page 5 of 2" footer instead of showing the now-valid last page.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [page, totalPages])
   const paginatedRules = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE
     return filteredRules.slice(start, start + PAGE_SIZE)

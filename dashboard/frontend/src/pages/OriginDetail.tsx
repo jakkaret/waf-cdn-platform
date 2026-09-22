@@ -562,7 +562,14 @@ export const OriginDetail: React.FC = () => {
                 </div>
                 <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
                   <span className="text-[var(--text-muted)]">Rate Limiting</span>
-                  <Badge color="brand">100 REQ/MIN</Badge>
+                  {/* Was a hardcoded "100 REQ/MIN" -- matched only the
+                      global fallback default (api/limiter.py), not the
+                      per-rule-configurable real values (see
+                      RateLimiting.tsx), and even that fallback's real
+                      window is 10s not 60s. No per-origin rate-limit value
+                      is fetched on this page, so this states what's true
+                      without a specific number. */}
+                  <Badge color="brand">ENABLED</Badge>
                 </div>
                 <div className="flex justify-between items-center py-1.5">
                   <span className="text-[var(--text-muted)]">Attached Domains</span>
@@ -587,7 +594,12 @@ export const OriginDetail: React.FC = () => {
                     value={techTagInput}
                     onChange={(e) => setTechTagInput(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && techTagInput.trim()) {
+                      // isPending guard matches the Add Tag button and the
+                      // remove buttons below -- without it, two fast Enter
+                      // presses fire two updateOrigin calls built off the
+                      // same stale origin.tech_stack_tags, and the second
+                      // overwrites the first (lost-update race).
+                      if (e.key === 'Enter' && techTagInput.trim() && !updateTechTagsMutation.isPending) {
                         const current = origin.tech_stack_tags || []
                         if (!current.includes(techTagInput.trim())) {
                           updateTechTagsMutation.mutate([...current, techTagInput.trim()])

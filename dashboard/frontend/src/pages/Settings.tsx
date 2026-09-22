@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { settingsApi, SystemSettings } from '../api/settings'
+import { systemApi } from '../api/system'
 import { threatIntelApi, TrendingPattern } from '../api/threatIntel'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
@@ -37,6 +38,17 @@ export const Settings: React.FC = () => {
   const queryClient = useQueryClient()
 
   const [activeTab, setActiveTab] = useState<'waf' | 'alerts' | 'edge' | 'system' | 'threat-intel'>('waf')
+
+  // Stack Diagnostics (tab 4): was fully static JSX with a hardcoded green
+  // pulsing dot and "ONLINE" for all 4 services regardless of real state --
+  // wired to the same GET /api/system/status Dashboard.tsx already uses,
+  // which checks each service's real TCP port.
+  const { data: systemStatus, isLoading: isSystemStatusLoading } = useQuery({
+    queryKey: ['system-status-settings'],
+    queryFn: () => systemApi.getSystemStatus(),
+    refetchInterval: 10000,
+    enabled: activeTab === 'system',
+  })
 
   // Settings State Form
   const [form, setForm] = useState<Partial<SystemSettings>>({
@@ -410,15 +422,17 @@ export const Settings: React.FC = () => {
                       </span>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => testAlertMutation.mutate()}
-                    disabled={testAlertMutation.isPending}
-                    className="px-3 py-1.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--bg-border)] rounded-md text-[11.5px] font-mono font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
-                  >
-                    <Send size={12} className="text-sky-500" />
-                    <span>{testAlertMutation.isPending ? 'Sending...' : 'Send Test Alert'}</span>
-                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => testAlertMutation.mutate()}
+                      disabled={testAlertMutation.isPending}
+                      className="px-3 py-1.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--bg-border)] rounded-md text-[11.5px] font-mono font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                    >
+                      <Send size={12} className="text-sky-500" />
+                      <span>{testAlertMutation.isPending ? 'Sending...' : 'Send Test Alert'}</span>
+                    </button>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-2">
@@ -528,67 +542,63 @@ export const Settings: React.FC = () => {
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="p-3.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <div>
-                      <div className="font-mono font-bold text-[12.5px] text-[var(--text-primary)]">
-                        ModSecurity CRS (waf-nginx)
+              {isSystemStatusLoading ? (
+                <div className="text-[12px] text-[var(--text-muted)] font-mono">Checking service ports...</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {[
+                    { key: 'waf_nginx', label: 'ModSecurity CRS (waf-nginx)' },
+                    { key: 'redis', label: 'Redis Sliding Window (waf-redis)' },
+                    { key: 'clickhouse', label: 'ClickHouse OLAP (waf-clickhouse)' },
+                  ].map(({ key, label }) => {
+                    const svc = systemStatus?.services?.[key]
+                    const online = svc?.status === 'online'
+                    return (
+                      <div
+                        key={key}
+                        className="p-3.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className={`w-2.5 h-2.5 rounded-full ${online ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}
+                          />
+                          <div>
+                            <div className="font-mono font-bold text-[12.5px] text-[var(--text-primary)]">
+                              {label}
+                            </div>
+                            <div className="text-[10.5px] text-[var(--text-muted)] font-mono">
+                              Port {svc?.port ?? '—'} • {svc?.desc || (svc ? 'unreachable' : 'unknown')}
+                            </div>
+                          </div>
+                        </div>
+                        <span
+                          className={`mono-chip font-bold ${online ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
+                        >
+                          {svc ? (online ? 'ONLINE' : 'OFFLINE') : 'UNKNOWN'}
+                        </span>
                       </div>
-                      <div className="text-[10.5px] text-[var(--text-muted)] font-mono">
-                        Port 8080 / 8443 • Healthy
-                      </div>
-                    </div>
-                  </div>
-                  <span className="mono-chip text-emerald-600 dark:text-emerald-400 font-bold">ONLINE</span>
-                </div>
+                    )
+                  })}
 
-                <div className="p-3.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <div>
-                      <div className="font-mono font-bold text-[12.5px] text-[var(--text-primary)]">
-                        Redis Sliding Window (waf-redis)
-                      </div>
-                      <div className="text-[10.5px] text-[var(--text-muted)] font-mono">
-                        Port 6379 • Connected
-                      </div>
-                    </div>
-                  </div>
-                  <span className="mono-chip text-emerald-600 dark:text-emerald-400 font-bold">ONLINE</span>
-                </div>
-
-                <div className="p-3.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <div>
-                      <div className="font-mono font-bold text-[12.5px] text-[var(--text-primary)]">
-                        ClickHouse OLAP (waf-clickhouse)
-                      </div>
-                      <div className="text-[10.5px] text-[var(--text-muted)] font-mono">
-                        Port 8123 / 9000 • Connected
+                  {/* Caddy isn't in the backend's checked SERVICES map (see
+                      main.py's GET /api/system/status) -- shown as
+                      unmonitored rather than a fabricated ONLINE. */}
+                  <div className="p-3.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] flex items-center justify-between opacity-70">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[var(--text-muted)]" />
+                      <div>
+                        <div className="font-mono font-bold text-[12.5px] text-[var(--text-primary)]">
+                          Caddy SSL Reverse Proxy
+                        </div>
+                        <div className="text-[10.5px] text-[var(--text-muted)] font-mono">
+                          Port 80 / 443 • Not monitored by this check
+                        </div>
                       </div>
                     </div>
+                    <span className="mono-chip text-[var(--text-muted)] font-bold">UNKNOWN</span>
                   </div>
-                  <span className="mono-chip text-emerald-600 dark:text-emerald-400 font-bold">ONLINE</span>
                 </div>
-
-                <div className="p-3.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <div>
-                      <div className="font-mono font-bold text-[12.5px] text-[var(--text-primary)]">
-                        Caddy SSL Reverse Proxy
-                      </div>
-                      <div className="text-[10.5px] text-[var(--text-muted)] font-mono">
-                        Port 80 / 443 • Active
-                      </div>
-                    </div>
-                  </div>
-                  <span className="mono-chip text-emerald-600 dark:text-emerald-400 font-bold">ONLINE</span>
-                </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -760,33 +770,37 @@ export const Settings: React.FC = () => {
             </h4>
 
             <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => testAlertMutation.mutate()}
-                disabled={testAlertMutation.isPending}
-                className="w-full py-2 px-3 rounded-md bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--bg-border)] text-[11.5px] font-mono font-medium flex items-center justify-between transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-2">
-                  <Send size={12} className="text-sky-500" />
-                  <span>Test Telegram Dispatch</span>
-                </div>
-                <span className="text-[10.5px] font-mono text-[var(--text-muted)]">Ping</span>
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => testAlertMutation.mutate()}
+                  disabled={testAlertMutation.isPending}
+                  className="w-full py-2 px-3 rounded-md bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--bg-border)] text-[11.5px] font-mono font-medium flex items-center justify-between transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <Send size={12} className="text-sky-500" />
+                    <span>Test Telegram Dispatch</span>
+                  </div>
+                  <span className="text-[10.5px] font-mono text-[var(--text-muted)]">Ping</span>
+                </button>
+              )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  saveMutation.mutate(form)
-                }}
-                disabled={saveMutation.isPending}
-                className="w-full py-2 px-3 rounded-md bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--bg-border)] text-[11.5px] font-mono font-medium flex items-center justify-between transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-2">
-                  <RotateCw size={12} className="text-orange-500" />
-                  <span>Sync & Reload Engine</span>
-                </div>
-                <span className="text-[10.5px] font-mono text-[var(--text-muted)]">Hot Reload</span>
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    saveMutation.mutate(form)
+                  }}
+                  disabled={saveMutation.isPending}
+                  className="w-full py-2 px-3 rounded-md bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--bg-border)] text-[11.5px] font-mono font-medium flex items-center justify-between transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <RotateCw size={12} className="text-orange-500" />
+                    <span>Sync & Reload Engine</span>
+                  </div>
+                  <span className="text-[10.5px] font-mono text-[var(--text-muted)]">Hot Reload</span>
+                </button>
+              )}
             </div>
           </div>
 

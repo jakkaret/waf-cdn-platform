@@ -31,8 +31,6 @@ import {
   Sparkles,
   Copy,
   Check,
-  TrendingUp,
-  TrendingDown,
   Shield,
   Layers,
   X,
@@ -99,10 +97,21 @@ export const Dashboard: React.FC = () => {
   const uniqueIPs = analytics?.unique_ips ?? new Set(logs.map((l) => l.ip)).size
   const blockRate = totalRequests > 0 ? ((blockedCount / totalRequests) * 100).toFixed(1) : '0.0'
 
-  // Time aggregated timeline
+  // Time aggregated timeline. log.datetime is a ClickHouse-sourced,
+  // offset-less string ("2026-09-22 06:14:00") -- treated as UTC and
+  // rendered in Asia/Bangkok, matching formatThaiDateTime's convention in
+  // Alerts.tsx/Logs.tsx. Previously read as raw browser-local time here,
+  // so the same event plotted up to 7 hours off from where it shows on
+  // those other pages.
   const chartData = logs
     .reduce((acc, log) => {
-      const time = new Date(log.datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      const rawDt = String(log.datetime)
+      const isoDt = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(rawDt)
+        ? rawDt.replace(' ', 'T') + 'Z'
+        : rawDt
+      const time = new Date(isoDt).toLocaleTimeString('en-GB', {
+        timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', second: '2-digit',
+      })
       const existing = acc.find((d: any) => d.time === time)
       const isBlocked = log.status === 403
       const isLimited = log.status === 429
@@ -229,11 +238,8 @@ export const Dashboard: React.FC = () => {
               <span className="text-[26px] font-bold font-mono tracking-tight leading-none text-[var(--text-primary)]">
                 {isAnalyticsLoading ? '—' : (analytics?.total_requests ?? totalRequests).toLocaleString()}
               </span>
-              <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center justify-between text-[11px]">
+              <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11px]">
                 <span className="text-[var(--text-muted)] font-mono">HTTP/S Analyzed</span>
-                <span className="flex items-center gap-1 font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
-                  <TrendingUp size={11} /> 4.2%
-                </span>
               </div>
             </div>
 
@@ -255,11 +261,8 @@ export const Dashboard: React.FC = () => {
                   {blockRate}%
                 </span>
               </div>
-              <div className="mt-3 pt-2.5 border-t border-red-200/40 dark:border-red-500/10 flex items-center justify-between text-[11px]">
+              <div className="mt-3 pt-2.5 border-t border-red-200/40 dark:border-red-500/10 flex items-center text-[11px]">
                 <span className="text-red-600/60 dark:text-red-400/50 font-mono">CRS & Custom Rules</span>
-                <span className="flex items-center gap-1 font-mono text-red-600 dark:text-red-400 font-semibold">
-                  <TrendingDown size={11} /> 12.8%
-                </span>
               </div>
             </div>
 
@@ -281,11 +284,15 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Supporting: Engine Health */}
+            {/* Supporting: Engine Latency. Was a hardcoded fake "100.0%
+                Engine Health" with no data behind it at all -- replaced
+                with the one real metric this card already had access to
+                (average_latency_ms), which used to be relegated to a
+                secondary badge with a fake "14ms" fallback. */}
             <div className="dash-card p-4 sm:p-5 flex flex-col justify-between">
               <div className="flex items-center justify-between gap-2 mb-3">
                 <span className="text-[11px] font-semibold tracking-wide text-[var(--text-muted)] uppercase font-mono">
-                  Engine Health
+                  Avg Response Time
                 </span>
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10">
                   <ShieldCheck size={15} className="text-emerald-600 dark:text-emerald-400" />
@@ -293,14 +300,11 @@ export const Dashboard: React.FC = () => {
               </div>
               <div className="flex items-baseline gap-2">
                 <span className="text-[26px] font-bold font-mono tracking-tight leading-none text-emerald-600 dark:text-emerald-400">
-                  100.0%
-                </span>
-                <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] text-[var(--text-secondary)] font-mono">
-                  {analytics?.average_latency_ms || 14}ms
+                  {isAnalyticsLoading ? '—' : analytics?.average_latency_ms != null ? `${analytics.average_latency_ms}ms` : '—'}
                 </span>
               </div>
               <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11px]">
-                <span className="text-[var(--text-muted)] font-mono">ModSec v3 + CRS 3.3.5</span>
+                <span className="text-[var(--text-muted)] font-mono">ModSecurity v3 + CRS 3.3.10</span>
               </div>
             </div>
           </div>
@@ -352,7 +356,7 @@ export const Dashboard: React.FC = () => {
                     </button>
                   </div>
                   <Badge color="gray" size="sm">
-                    LIVE 10s
+                    LIVE 8s
                   </Badge>
                 </div>
               </div>
@@ -661,8 +665,16 @@ export const Dashboard: React.FC = () => {
                 ModSecurity Reverse Proxy, Caddy SSL Termination, and ClickHouse OLAP
               </p>
             </div>
-            <Badge color="success" dot pulse>
-              ALL SYSTEMS OPERATIONAL
+            {/* Was hardcoded regardless of thNode/mainNode's real status --
+                the exact bug class selectNode() (lib/systemStatus.ts) was
+                written to eliminate on the individual node cards below,
+                just missed on this summary badge. */}
+            <Badge
+              color={thNode.online && mainNode.online ? 'success' : 'danger'}
+              dot
+              pulse={thNode.online && mainNode.online}
+            >
+              {thNode.online && mainNode.online ? 'ALL SYSTEMS OPERATIONAL' : 'DEGRADED — CHECK NODE STATUS'}
             </Badge>
           </div>
 
@@ -693,7 +705,7 @@ export const Dashboard: React.FC = () => {
                 </div>
                 <div>
                   <span className="text-[var(--text-dim)] block text-[10px] uppercase">WAF Engine</span>
-                  <span className="font-bold text-emerald-400">CRS 4.0 Active</span>
+                  <span className="font-bold text-emerald-400">CRS 3.3.10 Active</span>
                 </div>
               </div>
             </div>

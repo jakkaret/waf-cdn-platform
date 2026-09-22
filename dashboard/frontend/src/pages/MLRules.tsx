@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { mlRulesApi } from '../api/mlRules'
 import { useAuthStore } from '../store/authStore'
@@ -213,8 +213,15 @@ export const MLRules: React.FC = () => {
     })
   }, [allRules, activeTab, attackTypeFilter, variableFilter, methodFilter, search])
 
-  // Pagination calculation
+  // Pagination calculation. refetchInterval: 10000 means the queue can
+  // shrink under the current page (another admin approves/rejects rules)
+  // without any filter/tab change firing -- clamp page back into range
+  // rather than silently rendering a blank queue with an out-of-range
+  // "Page N of M" footer.
   const totalPages = Math.max(1, Math.ceil(filteredRules.length / PAGE_SIZE))
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [page, totalPages])
   const paginatedRules = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE
     return filteredRules.slice(start, start + PAGE_SIZE)
@@ -1022,7 +1029,16 @@ export const MLRules: React.FC = () => {
                         <Button
                           variant="danger"
                           size="sm"
-                          onClick={() => setRejectingId(rule.rule_id)}
+                          onClick={() => {
+                            // rejectReason is shared state across every
+                            // row's textbox -- without clearing it here,
+                            // starting a reason for rule A then clicking
+                            // Reject on rule B (before confirming/
+                            // cancelling A) opens B's box pre-filled with
+                            // A's stale text, submittable as-is.
+                            setRejectReason('')
+                            setRejectingId(rule.rule_id)
+                          }}
                           icon={<X size={13} />}
                         >
                           Reject

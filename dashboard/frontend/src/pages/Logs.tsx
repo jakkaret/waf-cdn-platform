@@ -468,7 +468,11 @@ export const Logs: React.FC = () => {
                 </div>
                 <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
                   <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Severity</span>
-                  <p className="font-bold text-[var(--text-primary)] m-0">{selectedLog.severity || 'LOW'}</p>
+                  {/* Matches the table badge's own fallback ('NONE', line
+                      ~162) -- showing 'LOW' here for the same empty
+                      severity implied an actual detected threat on a row
+                      the table correctly marked as clean traffic. */}
+                  <p className="font-bold text-[var(--text-primary)] m-0">{selectedLog.severity || 'NONE'}</p>
                 </div>
               </div>
 

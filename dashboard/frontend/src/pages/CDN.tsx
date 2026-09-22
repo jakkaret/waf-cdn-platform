@@ -78,7 +78,7 @@ export const CDN: React.FC = () => {
         cache_miss: Math.round(((data.requests || 0) * (100 - (data.hit_ratio || 0))) / 100),
         cache_bypass: 0,
         blocked_count: 0,
-        avg_latency: data.avg_latency_ms || 24,
+        avg_latency: data.avg_latency_ms ?? 0,
       }))
     : []
 
@@ -107,7 +107,7 @@ export const CDN: React.FC = () => {
     ? String(statsObj.avg_ttfb_ms)
     : statsList.length > 0
     ? (statsList.reduce((sum, s) => sum + (s.avg_latency || 0), 0) / statsList.length).toFixed(0)
-    : '24'
+    : '0'
 
   const pieData = [
     { name: 'Cache Hit', value: totalHits, color: '#10b981' },
@@ -139,7 +139,6 @@ export const CDN: React.FC = () => {
           color="green"
           icon={<HardDrive size={16} />}
           sub={`${totalHits.toLocaleString()} Cached Responses`}
-          trend={{ value: 3.5, label: 'bandwidth saved', isPositive: true }}
         />
         <StatCard
           label="Edge Ingest Volume"
