@@ -53,13 +53,20 @@ MIN_THRESHOLD_FLOOR = 3
 
 LOOKBACK_HOURS_DEFAULT = 24
 
-# Same URL-pattern-based origin attribution api/analytics.py's
-# _build_domain_pattern_sql already uses elsewhere in this codebase --
-# access_logs has no origin_id column (a separate, tracked gap; see
-# docs/PROJECT-DISCOVERY.md), so this is the existing convention for
-# grouping traffic by origin from ClickHouse, not a new invention.
+# Groups traffic by the origin it actually belongs to. access_logs.host
+# (added 2026-09-22) carries the real Host header, so rows that have one
+# are grouped by the real domain. The URL-keyword buckets below are the
+# pre-host fallback and only apply to older rows -- they lump every
+# tenant running the same app into one bucket ('%.php%' -> 'dvwa'), which
+# is exactly the attribution error the host column exists to remove.
+#
+# Consequence worth knowing: real hostnames produce more, smaller origin
+# buckets than four app-category buckets did, so MIN_SAMPLES_PER_ORIGIN
+# and MIN_ORIGINS_FOR_CONSENSUS now bite on real per-domain volume.
+# Fewer proposals, each backed by evidence that is actually per-origin.
 _ORIGIN_CASE_SQL = """
 multiIf(
+  host != '', host,
   url LIKE '%juice%' OR url LIKE '%rest%', 'juice',
   url LIKE '%dvwa%' OR url LIKE '%.php%', 'dvwa',
   url LIKE '%vampi%' OR url LIKE '%/api/v1/%', 'vampi',

@@ -139,6 +139,15 @@ def normalize_access(data):
         "status": status_code,
         "user_agent": data.get("http_user_agent"),
 
+        # 2026-09-22: nginx's json_combined log_format gained "host":"$host"
+        # so this path carries the real domain too, not just the ModSec one
+        # below -- a request that never triggers a rule (plain 200, or a raw
+        # nginx 429) is exactly the traffic the analytics totals are built
+        # from, and it used to reach ClickHouse with no domain attribution
+        # at all. Stays empty on logs written before that format change;
+        # services/tenant_service.py falls back to keyword matching there.
+        "host": data.get("host"),
+
         "body_bytes_sent": int(data.get("body_bytes_sent", 0)),
         "http_referer": data.get("http_referer"),
         "request_time_ms": request_time_ms,
@@ -276,6 +285,11 @@ def try_merge(key):
             merged["rule_id"] = access.get("rule_id") or modsec.get("rule_id")
         if not merged.get("severity"):
             merged["severity"] = access.get("severity") or modsec.get("severity")
+        # modsec wins the dict merge above, so a ModSec entry with no Host
+        # header would blank out the $host nginx did record for the same
+        # request. Same guard the two fields above already use.
+        if not merged.get("host"):
+            merged["host"] = modsec.get("host") or access.get("host")
 
         print("🔥 MERGED:", key, "Rule:", merged.get("rule_id"), "Sev:", merged.get("severity"))
         save_hybrid_log(merged)
