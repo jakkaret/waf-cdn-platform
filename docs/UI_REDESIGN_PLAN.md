@@ -14,11 +14,15 @@ The audit found a working design system (17 shared components, token set, CSS-va
 
 ## Phase 4 — Core Layout
 
-No structural change indicated by the audit — `AppLayout`/`Sidebar`/`TopBar` not yet flagged with concrete problems. Inspect during implementation (not yet read this pass); only touch if a real issue surfaces. Navigation reorganization by user mental model (brief Section 4) deferred until Sidebar's current structure is confirmed against actual usage patterns — premature to restructure nav without seeing real current groupings first.
+**Moved to top priority after the live browser pass**: `AppLayout.tsx` (`ml-[240px]`, no breakpoints) + `Sidebar.tsx` (`fixed w-[240px]`, no breakpoints, no toggle) confirmed broken on mobile — 390px viewport squeezes all page content into a ~210px column on every single route. No hamburger/drawer-nav exists at all. Fix: collapse sidebar to an off-canvas drawer (reuse the same `Drawer`-pattern backdrop/ESC/scroll-lock being built in Phase 3) below a `md:` breakpoint, with a hamburger toggle in a new mobile header bar; `main`'s margin becomes conditional (`md:ml-[240px]`, `ml-0` below). This is now the single highest-value item in the whole redesign — one shared component, affects every page, currently makes the product unusable on a phone.
+
+Also fix in this phase: `Sidebar.tsx`'s header badge hardcodes "ModSec CRS 4.0" — real version is 3.3.10 (confirmed via server config), and the Dashboard KPI card already shows the correct value after `057e1ee`. One-line fix, same file as the mobile work.
+
+Navigation reorganization by user mental model (brief Section 4): **not done this pass** — no evidence found that the current grouping (Monitoring & Core / Security & Access Control / Edge & Delivery / Administration) is actually confusing; restructuring it without real usage data would be a guess, not a fix. Flagging this explicitly rather than silently dropping it — tell the user and let them confirm or push back.
 
 ## Phase 5 — Authentication (Login/Register)
 
-Real bug already found and fixed this session in `Register.tsx` (token-reset-on-error race, commit `057e1ee`) — functionally sound. Visual redesign here is pure polish; low priority relative to Phase 6-7's real UX debt. Must not touch auth logic, OAuth flow, or hardcode any credential — reuse existing `authStore`/`api/auth.ts` untouched.
+Real bug already found and fixed this session in `Register.tsx` (token-reset-on-error race, commit `057e1ee`) — functionally sound. **Flagging explicitly, not silently de-scoping**: the brief asked for a real Login/Register redesign, and this plan is deprioritizing it below Phase 4/6/7's confirmed bugs since no concrete UX problem was found here (just a bootstrap-explainer layout that already screenshots cleanly — see `login-1440.png`). If the user wants visual redesign here regardless of the audit not flagging a problem, say so and it moves up. Must not touch auth logic, OAuth flow, or hardcode any credential — reuse existing `authStore`/`api/auth.ts` untouched.
 
 ## Phase 6 — Dashboard
 
