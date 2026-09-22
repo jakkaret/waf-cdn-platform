@@ -518,7 +518,19 @@ async def list_postmortems(
     already uses, rather than adding a GSI for this."""
     origin_id = origin.get("id")
     try:
-        items = db.postmortems_table.scan().get("Items", [])
+        # Paginated: scan() returns at most 1MB per call, so the unpaginated
+        # version silently stopped listing once the table crossed that --
+        # an origin's older reports would just disappear from the list with
+        # no error. Still a scan rather than a GSI, per the note above.
+        items = []
+        scan_kwargs = {}
+        while True:
+            resp = db.postmortems_table.scan(**scan_kwargs)
+            items.extend(resp.get("Items", []))
+            last_key = resp.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
     except Exception as e:
         logger.error(f"Failed to list postmortems: {e}")
         return {"postmortems": []}

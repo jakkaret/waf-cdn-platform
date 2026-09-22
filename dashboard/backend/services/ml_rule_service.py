@@ -35,6 +35,19 @@ class MLRuleService:
             # created_by. Used for dedup -- a scan never proposes a second
             # rule for a CVE ID that already has one in the queue.
             "cve_id": rule_data.get("cve_id", ""),
+            # 2026-09-23: which origin's exposure prompted this proposal.
+            # The CVE scanner knows it exactly (cve_feed.match_cves_to_origins
+            # matches a CVE's keywords against one origin's tech_stack_tags).
+            # The ML anomaly path does not: /api/ml/analyze receives only
+            # url/method/body, with no Host, so it stores "" rather than
+            # guessing -- an empty value here means "not attributable",
+            # never "belongs to everyone".
+            #
+            # Attribution only. Approving a rule deploys it to ModSecurity
+            # for every origin, so this does not make the queue per-tenant
+            # and the endpoints stay admin-only (see api/ml_rules.py).
+            "origin_id": rule_data.get("origin_id", ""),
+            "origin_label": rule_data.get("origin_label", ""),
         }
         
         self.table.put_item(Item=item)

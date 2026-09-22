@@ -191,6 +191,11 @@ async def run_cve_scan(
             "source_url": f"https://nvd.nist.gov/vuln/detail/{match['cve_id']}",
             "source_method": "GET",
             "cve_id": match["cve_id"],
+            # match_cves_to_origins() matched this CVE's keywords against
+            # this specific origin's tech_stack_tags, so the attribution is
+            # exact rather than inferred.
+            "origin_id": match.get("origin_id", ""),
+            "origin_label": match.get("origin_label", ""),
         }
         created = rule_service.create_pending_rule(rule_data, created_by="cve-auto")
         proposals_created.append(created)
