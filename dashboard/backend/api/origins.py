@@ -23,6 +23,27 @@ class OriginUpdate(BaseModel):
     label: Optional[str] = None
     ip: Optional[str] = None
     port: Optional[int] = Field(None, ge=1, le=65535)
+    # CVE Auto-Patch (2026-09-22): self-declared, admin-set -- no real
+    # fingerprinting, deliberately (unreliable, out of scope for this
+    # feature). Free-form strings like "nginx", "wordpress", "php 8.1".
+    tech_stack_tags: Optional[List[str]] = None
+
+    @field_validator("tech_stack_tags")
+    @classmethod
+    def validate_tech_stack_tags(cls, values):
+        if values is None:
+            return values
+        if len(values) > 20:
+            raise ValueError("tech_stack_tags supports at most 20 tags")
+        cleaned = []
+        for v in values:
+            v = str(v).strip()
+            if not v:
+                continue
+            if len(v) > 50:
+                raise ValueError("each tech_stack_tag must be 50 characters or fewer")
+            cleaned.append(v)
+        return cleaned
 
 class OriginViewerGrant(BaseModel):
     email: str
@@ -183,7 +204,8 @@ async def update_origin(
             origin_id=origin_id,
             label=payload.label,
             ip=payload.ip,
-            port=payload.port
+            port=payload.port,
+            tech_stack_tags=payload.tech_stack_tags,
         )
         if success:
             changed = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}

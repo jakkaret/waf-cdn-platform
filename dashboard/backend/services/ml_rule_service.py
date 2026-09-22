@@ -30,7 +30,11 @@ class MLRuleService:
             "secrule_template": rule_data.get("secrule_template", ""),
             "source_url": rule_data.get("source_url", ""),
             "source_method": rule_data.get("source_method", "GET"),
-            "created_by": created_by
+            "created_by": created_by,
+            # CVE Auto-Patch (2026-09-22): empty string for every other
+            # created_by. Used for dedup -- a scan never proposes a second
+            # rule for a CVE ID that already has one in the queue.
+            "cve_id": rule_data.get("cve_id", ""),
         }
         
         self.table.put_item(Item=item)

@@ -480,4 +480,57 @@ class GeminiService:
 
         return {"narrative": None, "degraded": False}
 
+    async def draft_cve_rule_pattern(self, cve_id: str, description: str, matched_tag: str) -> Optional[str]:
+        """CVE Auto-Patch (2026-09-22). Returns ONLY a bare regex pattern
+        string (no SecRule wrapper, no quotes) meant for @rx, or None.
+
+        Deliberately minimal ask: the caller (api/ml_rules.py) compiles the
+        result with Python's re before it is ever embedded in a
+        SecRule and written to the pending-rules queue -- an LLM-drafted
+        regex that doesn't even compile must never reach the approval
+        queue, let alone a live ModSecurity conf. Returning None (Gemini
+        unreachable, empty response, or a response that still fails
+        re.compile after this) means the caller skips that CVE for this
+        scan rather than writing a guess.
+        """
+        prompt = (
+            f"CVE: {cve_id}\n"
+            f"Affected technology tag on our system: {matched_tag}\n"
+            f"Description: {description}\n\n"
+            "Suggest ONE regex pattern (PCRE-compatible, safe for a ModSecurity "
+            "@rx operator) that would plausibly match HTTP requests attempting to "
+            "exploit this specific vulnerability -- e.g. a known vulnerable path, "
+            "parameter name, or payload signature mentioned in the description. "
+            "If the description does not give enough detail to suggest a specific "
+            "pattern, respond with exactly: NONE\n\n"
+            "Respond with ONLY the raw regex pattern on a single line, or NONE. "
+            "No explanation, no markdown, no quotes around it."
+        )
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(
+                    f"{BASE_URL}?key={self.api_key}",
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 200},
+                    },
+                )
+                if res.status_code != 200:
+                    logger.warning(f"Gemini CVE pattern call returned status {res.status_code}")
+                    return None
+                candidates = res.json().get("candidates", [])
+                if not candidates:
+                    return None
+                text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                if not text or text.upper() == "NONE":
+                    return None
+                # Defensive strip in case Gemini wraps it despite the prompt.
+                text = text.strip("`").strip()
+                if text.startswith('"') and text.endswith('"'):
+                    text = text[1:-1]
+                return text or None
+        except Exception as e:
+            logger.error(f"Failed to draft CVE rule pattern for {cve_id}: {e}")
+            return None
+
 gemini_service = GeminiService()
