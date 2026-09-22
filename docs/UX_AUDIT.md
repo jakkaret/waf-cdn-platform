@@ -52,14 +52,28 @@ This is the single most important correction to the task brief: a real component
 
 As of the code-review pass in commit `057e1ee` (same session, hours before this audit), Dashboard.tsx already answers most of Section 5's questions with **real** data (after removing several fabricated metrics found in that pass): total requests, blocked count, unique IPs, real average latency, a real per-node online/offline summary badge, a live traffic timeline chart. It does **not** currently have a single "what needs attention right now" surface — the closest is the Alerts KPI strip, but there's no unified "top thing to look at" element answering Section 5's question 3 ("อะไรต้องจัดการก่อน?"). **Recommended addition, not full rebuild:** a single "Needs Attention" panel (unresolved critical alerts count + pending ML rule review count + any offline node) above the KPI grid, Level 1 in the visual hierarchy the brief asks for.
 
-## 7. Responsive — not yet audited
+## 7. Responsive — audited live, confirmed broken
 
-Not checked in this pass (would require the browser-driven QA phase, Section 11/Agent 5/6's job). Flagging as unknown, not "fine": Tailwind is used throughout with some `sm:`/`md:`/`lg:` breakpoints visible in already-reviewed pages (e.g., `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4`), suggesting *some* responsive intent exists, but sidebar-on-mobile, table-on-mobile, and drawer-on-mobile behavior are unverified.
+Browser pass against the real production site (390×844 viewport, throwaway `ux-audit-temp` viewer account, no special access needed) confirms a real, systemic, previously-undocumented bug:
+
+**The sidebar never collapses on mobile. There is no toggle, hamburger, or breakpoint anywhere in the layout.** `AppLayout.tsx`: `<main className="flex-1 ml-[240px] ...">` — hardcoded left margin, zero responsive classes. `Sidebar.tsx` line 73: `className="w-[240px] ... fixed left-0 top-0 ..."` — hardcoded fixed width, zero `sm:`/`md:` breakpoints, no `useState` for open/closed, no hamburger button in the source at all. Confirmed identically on `/` (Dashboard) and `/alerts` at 390px: the 240px sidebar permanently eats ~62% of a 390px viewport, squeezing all page content into a ~210px column — KPI card labels wrap mid-word ("INBOUND TRAFFIC" → 2 lines), values are clipped ("THREATS MITIGATE[D]"), and the floating "AI Copilot LIVE" pill overlaps the sidebar's own user-identity footer. This reproduces on every route since it's a shared layout component, not a per-page issue. **This is the single highest-value fix for Phase 9** — one component, affects every page, currently unusable on a phone.
+
+`grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` patterns seen in individual pages during source review are real and fine *once content can actually reach that grid* — moot while the shell itself doesn't respond.
+
+Table-on-mobile and drawer-on-mobile behavior still unverified beyond this — lower priority than the shell fix above, since nothing downstream matters until the shell is responsive.
 
 ## 8. Accessibility — not yet audited
 
 Same status as responsive: unknown, needs the dedicated pass (Section 12/Agent 5). No `aria-*` attributes were observed in any file read during tonight's code-review pass, which is a signal (not proof) that this needs real attention, particularly: icon-only buttons (several observed, e.g. Rules.tsx's action icons) likely lack `aria-label`; the Drawer and Modal both need `role="dialog"` + `aria-modal="true"` + labelled-by wiring before first real use.
 
-## 9. What this audit deliberately did not do
+## 9. Live data-consistency bug found during browser pass
 
-Per the brief's own Phase 1 instruction ("ห้ามแก้ code ในช่วง audit"), no code was changed in this pass beyond the two already-committed fixes referenced above (those happened in the prior, separate code-review task, not as part of this audit). Browser-driven inspection (Section 15's explicit ask to look at the real rendered app, not just source) was **not** performed in this pass — recommended as the first task for Agent 5 (Interaction/Accessibility) once implementation begins, to validate every judgment call in this document against the real rendered UI before committing to it.
+Sidebar header badge (`Sidebar.tsx`, near line ~14, rendered as "ModSec CRS 4.0" in every screenshot taken) hardcodes a wrong CRS version. The real installed version, confirmed earlier this session via `/opt/owasp-crs/crs-setup.conf` (`tx.crs_setup_version=3310`), is **3.3.10** — the same value the Dashboard KPI card correctly shows ("ModSecurity v3 + CRS 3.3.10") after the `057e1ee` code-review pass fixed *that* card's version mismatch. The Sidebar's separate hardcoded "4.0" was missed in that pass since Sidebar.tsx wasn't one of the files touched. Same bug class, different file — worth a one-line fix in the same Phase 3/6 pass rather than a separate task.
+
+## 10. Environment note for this audit
+
+Registering a throwaway viewer account (`ux-audit-temp`, no origins granted) was sufficient to inspect Login/Register/Dashboard/Alerts and confirm the layout bug above, matching a real fresh-signup user's actual first experience. Admin-only screens (`/users`, ML-rule approval flow on `/ml-analyst`) and any page requiring real origin data (populated Alerts/Logs tables, Origins list, OriginDetail's 7 tabs) were **not** reachable with this account and remain visually unverified — real judgment calls made in §3 (Origins keep-as-page) and the Users.tsx row rest on source reading only, not a rendered check. Verifying those needs either the user's own login or a grant of origin access to the throwaway account.
+
+## 11. What this audit deliberately did not do
+
+Per the brief's own Phase 1 instruction ("ห้ามแก้ code ในช่วง audit"), no code was changed in this pass beyond the two already-committed fixes referenced above (those happened in the prior, separate code-review task, not as part of this audit) and the throwaway test account created for browser verification. Admin-only screens and populated-data views remain unverified (see §10).
