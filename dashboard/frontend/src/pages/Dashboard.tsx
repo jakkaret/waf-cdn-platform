@@ -1,9 +1,13 @@
 import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { logsApi } from '../api/logs'
 import { systemApi } from '../api/system'
 import { analyticsApi } from '../api/analytics'
+import { aiSummaryApi } from '../api/aiSummary'
+import { mlRulesApi } from '../api/mlRules'
 import { useOriginFilterStore } from '../store/originFilterStore'
+import { useAuthStore } from '../store/authStore'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
 import { selectNode } from '../lib/systemStatus'
@@ -34,6 +38,10 @@ import {
   Shield,
   Layers,
   X,
+  AlertTriangle,
+  Bell,
+  FlaskConical,
+  WifiOff,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -43,6 +51,8 @@ export const Dashboard: React.FC = () => {
   const [copiedIp, setCopiedIp] = useState<string | null>(null)
   const { theme } = useThemeStore()
   const { selectedOrigin, selectedOriginLabel, setSelectedOrigin } = useOriginFilterStore()
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === 'admin'
 
   const { data: logs = [], isLoading: isLogsLoading, isFetching: isLogsFetching, refetch: refetchLogs } = useQuery({
     queryKey: ['logs-dashboard', selectedOrigin],
@@ -62,7 +72,26 @@ export const Dashboard: React.FC = () => {
     queryKey: ['system-status-dashboard'],
     queryFn: () => systemApi.getSystemStatus(),
     refetchInterval: 5000,
-    enabled: activeTab === 'infrastructure',
+    // Always enabled (not just on the infrastructure tab): the "Needs
+    // Attention" summary above the tabs needs node health regardless of
+    // which tab is active.
+  })
+
+  // "Needs Attention" summary data -- real counts, no new backend
+  // endpoints. unread_count already backs the notification bell/mark-all-
+  // read feature (tenant-scoped since 09234bf); pending ML rule count is
+  // admin-only since the review queue itself is admin-only (b414134).
+  const { data: notificationFeed } = useQuery({
+    queryKey: ['notifications-feed-dashboard'],
+    queryFn: () => aiSummaryApi.getNotificationFeed(1),
+    refetchInterval: 15000,
+  })
+
+  const { data: pendingMlRules } = useQuery({
+    queryKey: ['ml-rules-pending-dashboard'],
+    queryFn: () => mlRulesApi.listRules('pending'),
+    refetchInterval: 15000,
+    enabled: isAdmin,
   })
 
   // Edge/hub health for the infrastructure cards, from /api/system/status.
@@ -218,6 +247,69 @@ export const Dashboard: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* ═══ Needs Attention -- Level 1 of the visual hierarchy: what to
+          handle first, always visible regardless of which tab is active ═══ */}
+      {(() => {
+        const unreadCount = notificationFeed?.unread_count ?? 0
+        const pendingRuleCount = pendingMlRules?.length ?? 0
+        const offlineNodes = [thNode, mainNode].filter((n) => n && !n.online)
+        const hasAttentionItems = unreadCount > 0 || pendingRuleCount > 0 || offlineNodes.length > 0
+
+        if (!hasAttentionItems) {
+          return (
+            <div className="mb-5 p-3.5 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/[0.12] border border-emerald-200/60 dark:border-emerald-500/20 flex items-center gap-2.5 text-[12.5px] font-mono">
+              <ShieldCheck size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span className="text-emerald-700 dark:text-emerald-400 font-semibold">Nothing needs attention right now</span>
+              <span className="text-[var(--text-muted)]">-- no unread alerts, no pending rule reviews, all nodes online.</span>
+            </div>
+          )
+        }
+
+        return (
+          <div className="mb-5 p-3.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/[0.12] border border-amber-300/60 dark:border-amber-500/25">
+            <div className="flex items-center gap-2 mb-2.5">
+              <AlertTriangle size={15} className="text-amber-600 dark:text-amber-400" />
+              <span className="text-[11px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400 font-mono">
+                Needs Attention
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2.5">
+              {unreadCount > 0 && (
+                <Link
+                  to="/alerts"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-amber-300/50 dark:border-amber-500/20 text-[12px] font-mono hover:border-amber-400 dark:hover:border-amber-500/40 transition-colors"
+                >
+                  <Bell size={13} className="text-amber-600 dark:text-amber-400" />
+                  <span className="font-semibold text-[var(--text-primary)]">{unreadCount}</span>
+                  <span className="text-[var(--text-muted)]">unread alert{unreadCount === 1 ? '' : 's'}</span>
+                </Link>
+              )}
+              {isAdmin && pendingRuleCount > 0 && (
+                <Link
+                  to="/ml-rules"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-amber-300/50 dark:border-amber-500/20 text-[12px] font-mono hover:border-amber-400 dark:hover:border-amber-500/40 transition-colors"
+                >
+                  <FlaskConical size={13} className="text-amber-600 dark:text-amber-400" />
+                  <span className="font-semibold text-[var(--text-primary)]">{pendingRuleCount}</span>
+                  <span className="text-[var(--text-muted)]">rule{pendingRuleCount === 1 ? '' : 's'} awaiting review</span>
+                </Link>
+              )}
+              {offlineNodes.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('infrastructure')}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-amber-300/50 dark:border-amber-500/20 text-[12px] font-mono hover:border-amber-400 dark:hover:border-amber-500/40 transition-colors cursor-pointer"
+                >
+                  <WifiOff size={13} className="text-amber-600 dark:text-amber-400" />
+                  <span className="font-semibold text-[var(--text-primary)]">{offlineNodes.length}</span>
+                  <span className="text-[var(--text-muted)]">node{offlineNodes.length === 1 ? '' : 's'} offline</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {activeTab === 'security' ? (
         <div id="security-panel" role="tabpanel" aria-label="Security Analytics Dashboard" className="animate-fade-in">
