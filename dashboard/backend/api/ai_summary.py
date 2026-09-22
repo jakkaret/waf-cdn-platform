@@ -355,9 +355,12 @@ def _build_origin_scope_sql(origin: Dict[str, Any]) -> str:
     origin_id = str(origin.get("id") or "")
     keywords = set()
     try:
-        all_domains = db.domains_table.scan().get("Items", [])
-        for d in all_domains:
-            if d.get("origin_id") == origin_id and d.get("domain_name"):
+        # origin_id-index query, not a full-table scan: same reasoning as
+        # tenant_service.get_user_origins_and_domains -- an unpaginated
+        # scan() silently stops at DynamoDB's 1MB cap, which here would
+        # drop domains out of this origin's own scope filter.
+        for d in db.get_domains_by_origin_ids([origin_id]):
+            if d.get("domain_name"):
                 keywords.add(str(d["domain_name"]).strip().lower())
     except Exception:
         pass

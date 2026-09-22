@@ -264,6 +264,41 @@ class DynamoDBService:
             print("Failed to get origins by user:", e)
             return []
 
+    def get_domains_by_origin_ids(self, origin_ids: List[str]) -> List[Dict]:
+        """Domains belonging to the given origins, via waf_domains'
+        origin_id-index.
+
+        Callers used to scan() the whole table and filter origin_id in
+        Python. Two problems with that, beyond reading every tenant's rows
+        to answer a single-tenant question: scan() returns at most 1MB per
+        call, and none of those call sites paginated -- so once the table
+        crosses that size, domains start disappearing from tenant filters
+        with no error anywhere. The GSI has existed since the table was
+        created (scripts/create_origins_tables.py); it simply was not used.
+
+        Origins per user are quota-capped (10), so this is a handful of
+        indexed queries against one unbounded table read.
+        """
+        items: List[Dict] = []
+        for origin_id in origin_ids:
+            if not origin_id:
+                continue
+            try:
+                kwargs = {
+                    "IndexName": "origin_id-index",
+                    "KeyConditionExpression": boto3.dynamodb.conditions.Key("origin_id").eq(str(origin_id)),
+                }
+                while True:
+                    response = self.domains_table.query(**kwargs)
+                    items.extend(response.get("Items", []))
+                    last_key = response.get("LastEvaluatedKey")
+                    if not last_key:
+                        break
+                    kwargs["ExclusiveStartKey"] = last_key
+            except Exception as e:
+                print(f"Failed to get domains for origin {origin_id}:", e)
+        return items
+
     def get_origin_by_id(self, origin_id: str) -> Dict:
         try:
             response = self.origins_table.get_item(Key={"id": origin_id})

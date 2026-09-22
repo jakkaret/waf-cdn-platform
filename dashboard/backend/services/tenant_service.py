@@ -132,13 +132,16 @@ def get_user_origins_and_domains(user_id: str) -> Tuple[List[str], List[Dict], L
 
         origin_ids = [str(o.get("id")) for o in active_origins if o.get("id")]
 
-        # Collect all domain names registered under user's origins in domains_table
+        # Collect all domain names registered under user's origins.
+        # Indexed lookup per origin rather than a full-table scan: this runs
+        # on every analytics/logs/copilot request behind a 3s cache, and the
+        # scan it replaces both read every other tenant's rows and silently
+        # truncated at DynamoDB's 1MB response cap without paginating.
         try:
-            all_domains = db.domains_table.scan().get("Items", [])
             user_registered_domains = [
                 str(d.get("domain_name")).strip().lower()
-                for d in all_domains
-                if d.get("origin_id") in origin_ids and d.get("domain_name")
+                for d in db.get_domains_by_origin_ids(origin_ids)
+                if d.get("domain_name")
             ]
         except Exception:
             user_registered_domains = []
