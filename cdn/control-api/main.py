@@ -43,6 +43,39 @@ RULES_DIR = Path(os.getenv("CUSTOM_RULES_DIR", "/src/custom-rules"))
 
 CONTROL_TOKEN = os.getenv("CONTROL_TOKEN", "")
 
+# 2026-09-23: GET /api/blocklist and GET /api/sync/bundle were reachable by
+# anyone on the internet (this service is published on 0.0.0.0:8070 so the
+# edges can reach it -- see the note at the top of this file). Between them
+# they hand out the full ModSecurity rule bundle and every blocked IP:
+# an attacker could read exactly which rules exist before probing, and
+# check whether their own address is blocked. The writes here have always
+# required CONTROL_TOKEN; the reads required nothing.
+#
+# Fixed with a source-IP allow-list rather than a token because the edges'
+# own sync script calls the bundle with a plain unauthenticated curl
+# (edge_node/edge/entrypoint.d/99-rulesync.sh), so requiring a header would
+# have silently stopped rule and blocklist propagation to both edges. Both
+# addresses below are already proven to be the edges' real egress IPs --
+# dashboard/backend/api/cdn.py gates /api/cdn/logs/ingest on the same list
+# and both forwarders are delivering through it.
+_EDGE_ALLOWED_IPS = {
+    ip.strip()
+    for ip in os.getenv(
+        "EDGE_ALLOWED_IPS",
+        "45.154.26.91,57.158.25.236,127.0.0.1,::1,172.17.0.1,172.18.0.1",
+    ).split(",")
+    if ip.strip()
+}
+
+
+def _require_edge_source(request: Request):
+    """404 rather than 403: an unauthorised caller learns nothing about
+    whether this path exists, matching how api/cdn.py's ingest endpoint
+    already refuses non-edge callers."""
+    client_host = request.client.host if request.client else ""
+    if client_host not in _EDGE_ALLOWED_IPS:
+        raise HTTPException(status_code=404, detail="Not found")
+
 
 def db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -120,7 +153,8 @@ def healthz():
 
 
 @app.get("/api/blocklist")
-def get_blocklist() -> dict:
+def get_blocklist(request: Request) -> dict:
+    _require_edge_source(request)
     conn = db()
     rows = conn.execute("SELECT ip, created_at, source FROM blocklist ORDER BY created_at DESC").fetchall()
     conn.close()
@@ -167,7 +201,8 @@ def remove_block(ip: str, x_control_token: str = Header(default="")) -> dict:
 
 
 @app.get("/api/sync/bundle")
-def get_bundle() -> Response:
+def get_bundle(request: Request) -> Response:
+    _require_edge_source(request)
     # Build a gzip tar with rules + global blocklist assets from RULES_DIR
     tar_buf = io.BytesIO()
     with tarfile.open(fileobj=tar_buf, mode="w") as tar:
