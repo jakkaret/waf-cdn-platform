@@ -79,9 +79,12 @@ export const Login: React.FC = () => {
       <main className="flex-1 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10 lg:py-14 w-full">
         <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-start">
 
-          {/* Left: what this console actually protects */}
-          <section className="hidden lg:flex lg:col-span-7 xl:col-span-7 flex-col gap-8 pr-4">
-            <div>
+          {/* Left: what this console actually protects. Shown on mobile too,
+              below the form -- previously `hidden lg:flex` dropped this
+              entire value-prop panel below 1024px, so a phone user saw only
+              a bare form with no context on what they're signing into. */}
+          <section className="order-2 lg:order-1 flex lg:col-span-7 xl:col-span-7 flex-col gap-8 pr-4">
+            <div className="hidden lg:block">
               <h1 className="max-w-xl text-[32px] font-bold leading-tight tracking-tight text-[var(--text-primary)] font-mono">
                 Operator access for WAF, CDN edge, and ML rule review.
               </h1>
@@ -95,7 +98,7 @@ export const Login: React.FC = () => {
           </section>
 
           {/* Right: the actual form */}
-          <section className="col-span-1 lg:col-span-5 xl:col-span-5 flex justify-center lg:justify-end">
+          <section className="order-1 lg:order-2 col-span-1 lg:col-span-5 xl:col-span-5 flex justify-center lg:justify-end">
             <div className="w-full max-w-[420px]">
 
               {/* Mobile heading */}
