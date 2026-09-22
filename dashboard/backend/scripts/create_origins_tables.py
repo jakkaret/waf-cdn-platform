@@ -72,24 +72,23 @@ tables_to_create = [
         ],
         "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}
     },
+    # NOTE (2026-09-23): this table is keyed by domain NAME, not by a
+    # surrogate id -- services/ssl_cert_monitor.py and api/domains.py both
+    # do get_item(Key={"id": <domain_name>}). It used to declare a
+    # domain_id-index GSI implying an ssl_certs.domain_id -> waf_domains.id
+    # foreign key; nothing ever wrote domain_id, so on Main that index sat
+    # ACTIVE with ItemCount 0 while still consuming write capacity on every
+    # cert write. Dropped here so a fresh install stops creating it. The
+    # live index still exists and has to be removed separately:
+    #   aws dynamodb update-table --table-name waf_ssl_certs \
+    #     --global-secondary-index-updates '[{"Delete":{"IndexName":"domain_id-index"}}]'
     {
         "TableName": "waf_ssl_certs",
         "KeySchema": [
             {"AttributeName": "id", "KeyType": "HASH"}
         ],
         "AttributeDefinitions": [
-            {"AttributeName": "id", "AttributeType": "S"},
-            {"AttributeName": "domain_id", "AttributeType": "S"}
-        ],
-        "GlobalSecondaryIndexes": [
-            {
-                "IndexName": "domain_id-index",
-                "KeySchema": [
-                    {"AttributeName": "domain_id", "KeyType": "HASH"}
-                ],
-                "Projection": {"ProjectionType": "ALL"},
-                "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}
-            }
+            {"AttributeName": "id", "AttributeType": "S"}
         ],
         "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}
     }
