@@ -222,6 +222,20 @@ export const MLRules: React.FC = () => {
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
   }, [page, totalPages])
+
+  // Same shrink-under-you problem as the page clamp above, but for bulk
+  // selection: refetchInterval polls every 10s, so a rule someone else
+  // just approved/rejected can still sit in selectedRuleIds. Bulk
+  // Approve/Reject Selected would then fire a call against an id that's
+  // no longer pending. Prune against allRules (not the filtered/paginated
+  // view) so a search or tab change doesn't itself clear a real selection
+  // -- only a genuine status change does.
+  useEffect(() => {
+    const stillPendingIds = new Set(
+      allRules.filter((r) => r.status === 'pending').map((r) => r.rule_id)
+    )
+    setSelectedRuleIds((prev) => prev.filter((id) => stillPendingIds.has(id)))
+  }, [allRules])
   const paginatedRules = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE
     return filteredRules.slice(start, start + PAGE_SIZE)
