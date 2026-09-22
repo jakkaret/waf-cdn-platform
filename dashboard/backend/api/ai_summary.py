@@ -191,18 +191,63 @@ async def summarize_threat_range(
         raise HTTPException(status_code=500, detail="Failed to summarize the requested range")
 
 
+def _alert_belongs_to_tenant(alert: Dict[str, Any], domain_keywords: List[str]) -> bool:
+    """Real cross-tenant leak fixed 2026-09-22: waf_alerts' user_id has
+    always been a hardcoded "default-user" placeholder (confirmed in
+    services/telegram_listener.py, the real writer), never a usable owner
+    -- filtering on it would hide every alert from every user, not scope
+    them correctly. The real signal is the alert's captured domain (Host
+    header, stored as "domain" as of this fix) matched against the
+    tenant's registered domains/IPs, same substring-both-directions match
+    already used for CVE matching (services/cve_feed.py) and ClickHouse
+    scoping (tenant_service.build_domain_pattern_sql). An alert with no
+    domain captured (rows written before this fix) matches nothing --
+    fail closed, never open, matching build_tenant_origin_filter's own
+    convention elsewhere in this file."""
+    alert_domain = str(alert.get("domain", "")).strip().lower()
+    alert_ip = str(alert.get("ip", "")).strip().lower()
+    if not alert_domain and not alert_ip:
+        return False
+    for kw in domain_keywords:
+        kw = str(kw).strip().lower()
+        if not kw:
+            continue
+        if alert_domain and (kw in alert_domain or alert_domain in kw):
+            return True
+        if alert_ip and kw == alert_ip:
+            return True
+    return False
+
+
+def _visible_alerts_for_user(current_user: dict, max_items: int = 2000) -> List[Dict[str, Any]]:
+    """Admin sees every alert (same "is_admin -> no filter" branch
+    summarize_range already uses); everyone else sees only alerts matching
+    their own registered origins' domains/IPs."""
+    items = db.get_all_alerts(max_items=max_items)
+    if current_user.get("role") == "admin":
+        return items
+    _origin_ids, _active_origins, user_domains = get_user_origins_and_domains(current_user.get("user_id"))
+    if not user_domains:
+        return []
+    return [a for a in items if _alert_belongs_to_tenant(a, user_domains)]
+
+
 @router.get("/notifications/feed")
 async def get_notification_feed(
     limit: int = 50,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get persistent notification feed with AI explanations for Dashboard Notification Center.
+    Get persistent notification feed with AI explanations for Dashboard
+    Notification Center. Tenant-scoped (see _visible_alerts_for_user) --
+    real bug fixed 2026-09-22: this used to return every alert in the
+    system to every logged-in user, confirmed live with a brand-new
+    account seeing the full production alert backlog.
     """
     try:
         if limit > 100:
             limit = 100
-        items = db.get_all_alerts(max_items=1000)
+        items = _visible_alerts_for_user(current_user)
         sliced = items[:limit]
         return {
             "success": True,
@@ -246,10 +291,20 @@ async def mark_notifications_read(
     Fixed by looking the alert(s) up first (get_all_alerts(), already
     cached) to get each one's real user_id, then updating with the full
     composite key.
+
+    Real bug #3 fixed 2026-09-22, the most serious: neither branch was
+    tenant-scoped. A non-admin user could mark (and, via "mark all", DID
+    mark -- confirmed run live against this project's own production data
+    tonight) every other tenant's alerts as read, or guess/enumerate an
+    alert_id belonging to someone else and mark it individually. Both
+    branches now start from _visible_alerts_for_user(current_user) instead
+    of the raw unscoped get_all_alerts(), the same scoping the feed uses.
     """
     try:
+        visible_alerts = _visible_alerts_for_user(current_user)
+
         if alert_id:
-            targets = [a for a in db.get_all_alerts(max_items=2000) if a.get("alert_id") == alert_id]
+            targets = [a for a in visible_alerts if a.get("alert_id") == alert_id]
             for a in targets:
                 if not a.get("user_id") or not a.get("alert_id"):
                     continue
@@ -269,7 +324,7 @@ async def mark_notifications_read(
             # not update, so each target's FULL item (already in hand from
             # get_all_alerts()) is rewritten with read=True rather than
             # patched in place.
-            targets = [a for a in db.get_all_alerts(max_items=2000) if not a.get("read", False)]
+            targets = [a for a in visible_alerts if not a.get("read", False)]
             with db.alerts_table.batch_writer() as batch:
                 for a in targets:
                     if not a.get("user_id") or not a.get("alert_id"):

@@ -74,6 +74,16 @@ async def dispatch_telegram_alert(data: dict):
             alert_id = str(raw_alert_id)
         else:
             alert_id = f"ALT-{timestamp_int}-{rand_suffix}"
+        # 2026-09-22: real cross-tenant leak fixed -- user_id here has
+        # always been the hardcoded placeholder below, never a real owner,
+        # so GET /api/ai/notifications/feed had no way to scope alerts per
+        # tenant and showed every user every alert (confirmed live: a
+        # brand-new account saw the full backlog). services/log_forward.py
+        # already captures the real Host header into data["host"]; it was
+        # simply never carried through to the stored alert. Storing it here
+        # as "domain" is what api/ai_summary.py's _alert_belongs_to_tenant
+        # now matches against the requesting user's registered domains.
+        domain = str(data.get("host") or "").strip().lower()
         try:
             db.alerts_table.put_item(
                 Item={
@@ -81,6 +91,7 @@ async def dispatch_telegram_alert(data: dict):
                     "alert_id": alert_id,
                     "ip": ip,
                     "url": url,
+                    "domain": domain,
                     "status": status_code,
                     "rule_id": rule_id,
                     "attack_type": attack_type,

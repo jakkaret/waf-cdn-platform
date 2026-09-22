@@ -84,6 +84,17 @@ async def get_logs(
             domain_filter=domain_targets
         )
 
+    # ClickHouse itself is unavailable. services/fetch_logs.py's
+    # get_recent_logs() is a legacy, PRE-multi-tenant DynamoDB buffer
+    # (waf_logs, queried under a single shared "default-user" partition --
+    # it has no per-tenant scoping mechanism at all, unlike ClickHouse's
+    # access_logs). Real cross-tenant leak fixed 2026-09-22 (found via
+    # GET /recent below, which had the same fallback but reachable even
+    # with ClickHouse connected): never show this buffer to a non-admin,
+    # there is no way to know whose traffic is in it.
+    if current_user.get("role") != "admin":
+        return {"logs": [], "total": 0, "page": page, "limit": limit, "total_pages": 1}
+
     # Fallback to DynamoDB/in-memory logs
     raw_logs = get_recent_logs(limit=limit)
     enriched_logs = []
@@ -118,8 +129,22 @@ async def fetch_recent_logs(
 
     if ch.connected:
         res = ch.get_logs(limit=limit, page=1, domain_filter=domain_targets)
-        if res.get("logs"):
-            return {"logs": res["logs"]}
+        # Real cross-tenant leak fixed 2026-09-22, reported live and
+        # reproduced with a fresh account: a properly-scoped-but-EMPTY
+        # ClickHouse result (this tenant genuinely has no matching traffic
+        # yet -- the normal case for any new/low-traffic account) is not
+        # the same as "ClickHouse has no capability to answer". The old
+        # `if res.get("logs"):` treated an empty list as falsy and fell
+        # through to the unscoped legacy buffer below, which showed a
+        # brand-new account another tenant's real request. Return the
+        # scoped result exactly as given, even when empty.
+        return {"logs": res.get("logs", [])}
+
+    # ClickHouse itself is unavailable -- see get_logs() above for why this
+    # legacy DynamoDB fallback (waf_logs, shared "default-user" partition,
+    # no per-tenant scoping at all) must stay admin-only.
+    if current_user.get("role") != "admin":
+        return {"logs": []}
 
     raw = get_recent_logs(limit=limit)
     enriched = []
