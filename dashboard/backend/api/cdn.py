@@ -423,7 +423,7 @@ class CdnLogIngestPayload(BaseModel):
     logs: List[Dict[str, Any]]
 
 
-def _store_cdn_log_batch(entries: list, region: str) -> int:
+def _store_cdn_log_batch(entries: list, region: str) -> Tuple[int, list]:
     """Runs as ONE unit in a single worker thread (see below) -- ch.save_log/
     _db.save_log are synchronous (boto3, clickhouse-connect) and measured
     ~5.9s for a single entry in production (likely real AWS DynamoDB
@@ -464,6 +464,27 @@ def _store_cdn_log_batch(entries: list, region: str) -> int:
     to store. ClickHouse holds the same rows with real per-row identity,
     and now carries cache_status too, so nothing is lost by dropping it --
     see cdn_logs() below, which reads from there instead.
+
+    2026-09-23, second fix same day: dispatch_telegram_alert was imported
+    here from the start and never once called -- every blocked request that
+    ever reached the CDN ingest path (i.e. anything through an edge, which
+    is most real traffic) produced a ClickHouse row and nothing else: no
+    Telegram push, no waf_alerts_v2 row, invisible on the Alert Center page.
+    Confirmed live against www.originweb.site: two 403s landed in
+    access_logs with alert=1 and zero rows in waf_alerts_v2's origin
+    partition. log_forward.py's own nginx-local path (dvwa/juice/vampi/
+    bwapp) has always fired this correctly; this path silently didn't.
+
+    Not fixed by calling dispatch_telegram_alert() in this function: it is
+    `async def` and this function runs inside asyncio.to_thread, i.e. a
+    plain worker thread with no running event loop, so
+    asyncio.create_task() here raises "no running event loop" (the same
+    class of threading bug the docstring above already describes fixing
+    once, for the store calls). Returning the flagged entries instead and
+    dispatching from ingest_cdn_logs, which runs on the actual event loop,
+    keeps the alert path off the synchronous store batch entirely -- a slow
+    Gemini call (dispatch_telegram_alert awaits gemini_service.explain_attack)
+    must not add latency to the response the edge forwarder is waiting on.
     """
     normalized = []
     for entry in entries:
@@ -472,9 +493,15 @@ def _store_cdn_log_batch(entries: list, region: str) -> int:
         except Exception:
             logger.exception("cdn log ingest: failed to normalize one entry from region=%s", region)
     if not normalized or not ch.connected:
-        return 0
+        return 0, []
 
-    return ch.save_logs_bulk("access_logs", normalized)
+    stored = ch.save_logs_bulk("access_logs", normalized)
+    # Same condition log_forward.py's try_merge/flush_old_logs use.
+    flagged = [
+        e for e in normalized
+        if e.get("status") in (403, 429) or e.get("severity") in ("CRITICAL", "HIGH")
+    ]
+    return stored, flagged
 
 
 @router.post("/logs/ingest", include_in_schema=False)
@@ -484,6 +511,11 @@ async def ingest_cdn_logs(payload: CdnLogIngestPayload, request: _Request):
         raise HTTPException(status_code=404, detail="Not found")
 
     entries = [e for e in payload.logs if isinstance(e, dict)]
-    stored = await asyncio.to_thread(_store_cdn_log_batch, entries, payload.region)
+    stored, flagged = await asyncio.to_thread(_store_cdn_log_batch, entries, payload.region)
+
+    # Fire-and-forget, same pattern log_forward.py uses: the response to
+    # the edge forwarder must not wait on a Gemini call or a DynamoDB write.
+    for entry in flagged:
+        asyncio.create_task(dispatch_telegram_alert(entry))
 
     return {"received": len(payload.logs), "stored": stored}
