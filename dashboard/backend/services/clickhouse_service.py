@@ -8,6 +8,8 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+from services.geoip import country_code
+
 # access_logs had no retention at all -- grew to 1.1M rows in 19 days
 # (~58k/day) before being manually cleared once, with nothing stopping it
 # from growing right back to the same size. 30 days is enough for demo +
@@ -310,7 +312,7 @@ class ClickHouseService:
             status_val,
             float(data.get('latency_ms') or data.get('request_time_ms') or 0.0),
             data.get('user_agent') or '',
-            data.get('country') or 'TH',
+            country_code(data.get('ip') or data.get('client_ip') or ''),
             resolve_edge_node(data.get('edge_node')),
             is_alert,
             data.get('attack_type') or '',
@@ -367,7 +369,7 @@ class ClickHouseService:
                     status_val,
                     float(data.get('latency_ms') or data.get('request_time_ms') or 0.0),
                     data.get('user_agent') or '',
-                    data.get('country') or 'TH',
+                    country_code(data.get('ip') or data.get('client_ip') or ''),
                     resolve_edge_node(data.get('edge_node')),
                     is_alert,
                     data.get('attack_type') or '',

@@ -6,6 +6,7 @@ import httpx
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
+from services.geoip import country_code
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ class GeminiService:
         rule_id = str(data.get("rule_id") or "OWASP-CRS")
         attack_type = str(data.get("attack_type") or "WAF Security Block")
         status = str(data.get("status") or data.get("status_code") or "403")
-        country = str(data.get("country") or "")
+        country = str(data.get("country") or country_code(ip) or "")
 
         prompt = (
             "คุณคือ AI Security Analyst ประจำระบบ WAF จงวิเคราะห์และสรุปเหตุการณ์การโจมตีนี้ให้เข้าใจง่าย "

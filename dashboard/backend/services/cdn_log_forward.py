@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from services.dynamodb_service import DynamoDBService
 from services.clickhouse_service import ClickHouseService
+from services.geoip import country_code
 
 logger = logging.getLogger(__name__)
 db = DynamoDBService()
@@ -54,8 +55,13 @@ def normalize_cdn_access(data, region):
     except (ValueError, TypeError):
         latency_ms = 0
 
-    _REGION_TO_COUNTRY = {"sg": "SG", "jp": "JP", "th": "TH"}
-    country = _REGION_TO_COUNTRY.get(region.lower(), region.upper())
+    # country: resolved from the CLIENT's IP by services/geoip.py. This used
+    # to be _REGION_TO_COUNTRY.get(region) -- the country of the *edge node*
+    # the request happened to land on, presented as if it were the client's.
+    # Every request through edge-th was therefore "TH" regardless of who sent
+    # it, which is why the dashboard's country breakdown was a single bar.
+    client_ip = data.get("remote_addr") or data.get("ip") or data.get("client_ip")
+    country = country_code(client_ip)
 
     # Extract Rule ID & Severity from Edge Logs
     raw_rule = data.get("rule_id") or data.get("waf_rule_id") or data.get("matched_rule_id")
