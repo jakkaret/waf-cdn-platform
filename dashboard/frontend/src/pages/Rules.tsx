@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useEffect } from 'react'
-import { createPortal } from 'react-dom'
+import React, { useState, useMemo, useEffect, useId } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rulesApi } from '../api/rules'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
+import { Drawer } from '../components/ui/Drawer'
 import { Button } from '../components/ui/Button'
 import { useAuthStore } from '../store/authStore'
 import {
@@ -34,6 +34,7 @@ export const Rules: React.FC = () => {
   const queryClient = useQueryClient()
 
   // State
+  const formId = useId()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingRule, setEditingRule] = useState<Partial<WafRule> | null>(null)
   const [search, setSearch] = useState('')
@@ -624,41 +625,28 @@ export const Rules: React.FC = () => {
         )}
       </div>
 
-      {/* ═══ Create / Edit Rule Modal ═══ */}
-      {isModalOpen && typeof document !== 'undefined' && createPortal(
-        <div
-          className="modal-backdrop"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsModalOpen(false)
-          }}
-        >
-          <div
-            className="dash-modal w-full max-w-xl shadow-2xl animate-fade-in"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="dash-card-header bg-[var(--bg-surface-elevated)]">
-              <div className="flex items-center gap-2">
-                <Code size={16} className="text-orange-600 dark:text-orange-400" />
-                <h3 className="font-mono">
-                  {editingRule?.id && rules.find((r) => r.id === editingRule.id)
-                    ? `Edit Custom Rule #${String(editingRule.id).replace('custom-', '')}`
-                    : 'Create Custom SecRule Policy'}
-                </h3>
-              </div>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] font-mono text-base cursor-pointer px-1"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="p-5 space-y-4 text-[12.5px]">
+      {/* ═══ Create / Edit Rule ═══ */}
+      <Drawer
+        open={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        size="xl"
+        title={
+          <span className="inline-flex items-center gap-2">
+            <Code size={16} className="text-orange-600 dark:text-orange-400 shrink-0" aria-hidden="true" />
+            <span>
+              {editingRule?.id && rules.find((r) => r.id === editingRule.id)
+                ? `Edit Custom Rule #${String(editingRule.id).replace('custom-', '')}`
+                : 'Create Custom SecRule Policy'}
+            </span>
+          </span>
+        }
+      >
+            <form onSubmit={handleSubmit} className="space-y-4 text-[12.5px]">
               <div>
-                <label className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                <label htmlFor={`${formId}-rule-id`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
                   Rule ID (Numeric e.g. 100007)
                 </label>
-                <input
+                <input id={`${formId}-rule-id`}
                   required
                   type="text"
                   placeholder="e.g. 100007"
@@ -670,10 +658,10 @@ export const Rules: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                  <label htmlFor={`${formId}-variable`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
                     Target Variable
                   </label>
-                  <select
+                  <select id={`${formId}-variable`}
                     className="w-full dash-input font-mono cursor-pointer"
                     value={editingRule?.variable || 'REQUEST_URI'}
                     onChange={(e) => setEditingRule({ ...editingRule, variable: e.target.value as any })}
@@ -687,10 +675,10 @@ export const Rules: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                  <label htmlFor={`${formId}-severity`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
                     Action Severity
                   </label>
-                  <select
+                  <select id={`${formId}-severity`}
                     className="w-full dash-input font-mono cursor-pointer"
                     value={editingRule?.severity || 'CRITICAL'}
                     onChange={(e) => setEditingRule({ ...editingRule, severity: e.target.value as any })}
@@ -704,10 +692,10 @@ export const Rules: React.FC = () => {
               </div>
 
               <div>
-                <label className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                <label htmlFor={`${formId}-operator`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
                   Operator & Pattern
                 </label>
-                <input
+                <input id={`${formId}-operator`}
                   required
                   type="text"
                   placeholder="@rx (union.*select) or @contains badkeyword"
@@ -723,10 +711,10 @@ export const Rules: React.FC = () => {
               </div>
 
               <div>
-                <label className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                <label htmlFor={`${formId}-message`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
                   Policy Description / Alert Message
                 </label>
-                <input
+                <input id={`${formId}-message`}
                   required
                   type="text"
                   placeholder="e.g. Block SQL injection payload attempt"
@@ -756,10 +744,7 @@ export const Rules: React.FC = () => {
                 </Button>
               </div>
             </form>
-          </div>
-        </div>,
-        document.body
-      )}
+      </Drawer>
     </div>
   )
 }

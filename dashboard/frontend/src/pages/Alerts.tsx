@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { alertsApi } from '../api/alerts'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
+import { Drawer } from '../components/ui/Drawer'
 import { Button } from '../components/ui/Button'
 import {
   Bell,
@@ -923,35 +923,21 @@ export const Alerts: React.FC = () => {
         </div>
       </div>
 
-      {/* ═══ Alert Detail Inspector Modal ═══ */}
-      {selectedAlert && typeof document !== 'undefined' && createPortal(
-        <div
-          className="modal-backdrop"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setSelectedAlert(null)
-          }}
-        >
-          <div
-            className="dash-modal w-full max-w-2xl shadow-2xl animate-fade-in"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="dash-card-header bg-[var(--bg-surface-elevated)]">
-              <div className="flex items-center gap-2.5">
-                <ShieldAlert size={16} className="text-red-500" />
-                <h3 className="font-mono text-[14px]">
-                  Incident Alert Inspector & Payload Analysis
-                </h3>
-              </div>
-              <button
-                onClick={() => setSelectedAlert(null)}
-                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] font-mono text-base px-2 cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto font-mono text-[12px]">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* ═══ Alert Detail Inspector ═══ */}
+      <Drawer
+        open={!!selectedAlert}
+        onClose={() => setSelectedAlert(null)}
+        size="lg"
+        title={
+          <span className="inline-flex items-center gap-2">
+            <ShieldAlert size={16} className="text-red-500 shrink-0" aria-hidden="true" />
+            <span>Incident Alert Inspector &amp; Payload Analysis</span>
+          </span>
+        }
+      >
+        {selectedAlert && (
+          <div className="space-y-4 font-mono text-[12px]">
+              <div className="grid grid-cols-1 gap-3">
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)] flex items-center justify-between">
                   <div>
                     <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
@@ -964,7 +950,7 @@ export const Alerts: React.FC = () => {
                   <button
                     onClick={() => handleCopy(formatAlertId(selectedAlert.alert_id), 'Alert ID')}
                     className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded cursor-pointer"
-                    title="Copy Alert ID"
+                    title="Copy Alert ID" aria-label="Copy Alert ID"
                   >
                     {copiedText === formatAlertId(selectedAlert.alert_id) ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                   </button>
@@ -989,7 +975,7 @@ export const Alerts: React.FC = () => {
                   <button
                     onClick={() => handleCopy(selectedAlert.ip, 'IP Address')}
                     className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded cursor-pointer"
-                    title="Copy IP"
+                    title="Copy IP" aria-label="Copy IP address"
                   >
                     {copiedText === selectedAlert.ip ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                   </button>
@@ -1004,7 +990,7 @@ export const Alerts: React.FC = () => {
                   <button
                     onClick={() => handleCopy(selectedAlert.url, 'Target URI')}
                     className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded cursor-pointer"
-                    title="Copy URI"
+                    title="Copy URI" aria-label="Copy target request URI"
                   >
                     {copiedText === selectedAlert.url ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                   </button>
@@ -1045,20 +1031,9 @@ export const Alerts: React.FC = () => {
                   </p>
                 )}
               </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-[var(--bg-border)]">
-                <button
-                  onClick={() => setSelectedAlert(null)}
-                  className="px-4 py-1.5 bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] rounded-md font-semibold text-[12px] cursor-pointer"
-                >
-                  Close Inspector
-                </button>
-              </div>
-            </div>
           </div>
-        </div>,
-        document.body
-      )}
+        )}
+      </Drawer>
     </div>
   )
 }

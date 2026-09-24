@@ -1,9 +1,9 @@
 import React, { useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { logsApi } from '../api/logs'
 import { useOriginFilterStore } from '../store/originFilterStore'
 import { TopBar } from '../components/layout/TopBar'
+import { Drawer } from '../components/ui/Drawer'
 import { Badge } from '../components/ui/Badge'
 import {
   Download,
@@ -344,7 +344,17 @@ export const Logs: React.FC = () => {
                     className="hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
                   >
                     <td className="py-2.5 px-3.5 text-[var(--text-secondary)] whitespace-nowrap">
-                      {formatThaiDateTime(log.datetime)}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedLog(log)
+                        }}
+                        aria-label={`Inspect event from ${log.ip} at ${log.datetime}`}
+                        className="text-left cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60"
+                      >
+                        {formatThaiDateTime(log.datetime)}
+                      </button>
                     </td>
                     <td className="py-2.5 px-3.5 font-bold text-[var(--text-primary)] whitespace-nowrap">
                       {log.ip}
@@ -421,26 +431,20 @@ export const Logs: React.FC = () => {
         </div>
       </div>
 
-      {/* Log Detail Modal */}
-      {selectedLog &&
-        createPortal(
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in font-mono">
-            <div className="bg-[var(--bg-surface)] border border-[var(--bg-border)] rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl overflow-y-auto max-h-[90vh]">
-              <div className="flex justify-between items-center border-b border-[var(--bg-border)] pb-3">
-                <div className="flex items-center gap-2">
-                  <Code size={16} className="text-orange-500" />
-                  <h3 className="text-[14px] font-bold text-[var(--text-primary)] m-0">
-                    Event Inspection Details
-                  </h3>
-                </div>
-                <button
-                  onClick={() => setSelectedLog(null)}
-                  className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] text-[16px] cursor-pointer"
-                >
-                  ✕
-                </button>
-              </div>
-
+      {/* Log Detail */}
+      <Drawer
+        open={!!selectedLog}
+        onClose={() => setSelectedLog(null)}
+        size="lg"
+        title={
+          <span className="inline-flex items-center gap-2">
+            <Code size={16} className="text-orange-500 shrink-0" aria-hidden="true" />
+            <span>Event Inspection Details</span>
+          </span>
+        }
+      >
+        {selectedLog && (
+          <div className="space-y-4 font-mono">
               <div className="grid grid-cols-2 gap-3 text-[12px]">
                 <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
                   <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Timestamp (Asia/Bangkok)</span>
@@ -457,7 +461,7 @@ export const Logs: React.FC = () => {
                 <p className="font-bold text-[var(--text-primary)] break-all m-0">{selectedLog.url}</p>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 text-[12px]">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[12px]">
                 <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
                   <span className="text-[10.5px] text-[var(--text-muted)] uppercase">HTTP Method</span>
                   <p className="font-bold text-sky-400 m-0">{selectedLog.method}</p>
@@ -482,19 +486,9 @@ export const Logs: React.FC = () => {
                   <p className="font-bold text-red-300 m-0">Rule ID: {selectedLog.rule_id}</p>
                 </div>
               )}
-
-              <div className="flex justify-end pt-2">
-                <button
-                  onClick={() => setSelectedLog(null)}
-                  className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-[12px] transition-colors cursor-pointer"
-                >
-                  Close Inspection
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
+          </div>
         )}
+      </Drawer>
     </div>
   )
 }
