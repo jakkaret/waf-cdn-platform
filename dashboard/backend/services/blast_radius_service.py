@@ -430,7 +430,7 @@ class BlastRadiusService:
                     ip_stats[ip] = {
                         "ip": ip,
                         "count": 0,
-                        "country": log.get("country") or "TH"
+                        "country": log.get("country") or ""
                     }
                 ip_stats[ip]["count"] += 1
 

@@ -32,3 +32,4 @@ redis==5.0.1
 
 # ClickHouse Database Connector
 clickhouse-connect>=0.7.0
+maxminddb>=2.6.0  # services/geoip.py: local country lookup (DB-IP Lite / GeoLite2 .mmdb)

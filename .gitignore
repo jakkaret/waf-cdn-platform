@@ -51,3 +51,6 @@ backups/
 
 # vuln-scan report output (generated)
 reports/vuln-scan/
+
+# GeoIP database: an 8 MB monthly download (scripts/update_geoip.py), not source
+dashboard/backend/data/geoip/

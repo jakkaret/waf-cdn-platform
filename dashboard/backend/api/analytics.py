@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 from services.clickhouse_service import ClickHouseService, escape_like_value
 from services.rbac import require_viewer_or_above
 from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter
+from services.geoip import flag_emoji
 import logging
 
 logger = logging.getLogger(__name__)
@@ -142,10 +143,11 @@ async def get_analytics_summary(
             ORDER BY total DESC
             LIMIT 5
         """)
-        country_flags = {
-            "TH": "🇹🇭", "SG": "🇸🇬", "JP": "🇯🇵", "US": "🇺🇸",
-            "CN": "🇨🇳", "GB": "🇬🇧", "DE": "🇩🇪", "HK": "🇭🇰", "NL": "🇳🇱"
-        }
+        # Real GeoIP now (services/geoip.py), so any ISO code can appear, not
+        # just the nine this used to hard-code. The flag is derived from the
+        # code itself; `name` is a best effort for a few common ones and falls
+        # back to the code -- the dashboard resolves the full display name in
+        # the browser with Intl.DisplayNames, which is always complete.
         country_names = {
             "TH": "Thailand", "SG": "Singapore", "JP": "Japan", "US": "United States",
             "CN": "China", "GB": "United Kingdom", "DE": "Germany", "HK": "Hong Kong", "NL": "Netherlands"
@@ -154,7 +156,7 @@ async def get_analytics_summary(
             {
                 "country": str(row[0]),
                 "name": country_names.get(str(row[0]).upper(), str(row[0])),
-                "flag": country_flags.get(str(row[0]).upper(), "🌐"),
+                "flag": flag_emoji(str(row[0])),
                 "total": int(row[1]),
                 "count": int(row[1]),
                 "blocked": int(row[2])
