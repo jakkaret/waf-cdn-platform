@@ -37,6 +37,28 @@ export default {
         ],
       },
       colors: {
+        // Token names the shared components (Table, ConfirmDialog, EmptyState,
+        // LoadingSpinner, SearchInput, ErrorBoundary, ...) were written with --
+        // `bg-bg-surface`, `text-text-primary`, `border-bg-border` and so on --
+        // mapped onto the CSS variables the rest of the app actually themes
+        // with (index.css, light and dark). Tailwind had no colour for any of
+        // them, so every one of those classes generated no CSS at all and the
+        // components fell back to inherited colours. Var-based colours cannot
+        // take an opacity suffix (bg-bg-surface/50), and none of them use one.
+        bg: {
+          app: 'var(--bg-app)',
+          primary: 'var(--bg-primary)',
+          surface: 'var(--bg-surface)',
+          surface2: 'var(--bg-surface-elevated)',
+          border: 'var(--bg-border)',
+          hover: 'var(--bg-hover)',
+        },
+        text: {
+          primary: 'var(--text-primary)',
+          secondary: 'var(--text-secondary)',
+          muted: 'var(--text-muted)',
+          dim: 'var(--text-dim)',
+        },
         // Fortinet & Cloudflare Security Dashboard Palette
         brand: {
           50: '#fff7ed',
