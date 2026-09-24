@@ -99,9 +99,10 @@ async def dispatch_telegram_alert(data: dict):
         # for someone else's hostname) goes to the UNATTRIBUTED partition,
         # which is admin-only on read, rather than being attributed to a
         # guessed owner.
-        origin_id = db.get_origin_id_for_domain(domain) or db.ALERTS_UNATTRIBUTED
+        origin_id = await asyncio.to_thread(db.get_origin_id_for_domain, domain) or db.ALERTS_UNATTRIBUTED
         try:
-            db.alerts_table.put_item(
+            await asyncio.to_thread(
+                db.alerts_table.put_item,
                 Item={
                     "origin_id": origin_id,
                     # No longer a key. Kept because every pre-migration row
@@ -135,7 +136,9 @@ async def dispatch_telegram_alert(data: dict):
         host = data.get("host")
         if host:
             try:
-                threat_intel.record_pattern_hit_for_domain(host, rule_id, attack_type)
+                await asyncio.to_thread(
+                    threat_intel.record_pattern_hit_for_domain, host, rule_id, attack_type
+                )
             except Exception as e:
                 logger.warning("threat_intel pattern recording failed for %s: %s", host, e)
 
@@ -144,7 +147,7 @@ async def dispatch_telegram_alert(data: dict):
             return
 
         # 3. Get registered users with chat_id from DynamoDB
-        users = _get_telegram_users()
+        users = await asyncio.to_thread(_get_telegram_users)
         if not users:
             logger.warning("No users registered with telegram_chat_id")
             return
