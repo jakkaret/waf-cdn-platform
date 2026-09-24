@@ -45,6 +45,25 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
+// Full English country name for an ISO alpha-2 code, from the browser's own
+// data (always complete and current) rather than a list we maintain. The API's
+// `name` only covers a handful of countries now that the code comes from real
+// GeoIP; falls back to the code itself if the runtime lacks Intl.DisplayNames.
+const regionNames: Intl.DisplayNames | null = (() => {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' })
+  } catch {
+    return null
+  }
+})()
+const countryDisplayName = (code: string, fallback?: string): string => {
+  try {
+    return regionNames?.of(code.toUpperCase()) || fallback || code
+  } catch {
+    return fallback || code
+  }
+}
+
 export const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'security' | 'infrastructure'>('security')
   const [chartView, setChartView] = useState<'area' | 'bar'>('area')
@@ -701,7 +720,7 @@ export const Dashboard: React.FC = () => {
                               <div className="flex items-center gap-2">
                                 <span className="text-base leading-none">{c.flag || '🌐'}</span>
                                 <span className="font-medium text-[12px] text-[var(--text-primary)]">
-                                  {c.name || c.country}
+                                  {countryDisplayName(c.country, c.name)}
                                 </span>
                                 <span className="text-[10px] font-mono text-[var(--text-dim)] uppercase">
                                   [{c.country}]
@@ -740,6 +759,19 @@ export const Dashboard: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+              <p className="px-4 py-2 text-[10px] text-[var(--text-dim)] font-mono border-t border-[var(--bg-border-subtle)]">
+                Country is estimated from the client IP (approximate; VPNs and proxies show their exit location). IP
+                geolocation by{' '}
+                <a
+                  href="https://db-ip.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-2 hover:text-[var(--text-secondary)]"
+                >
+                  DB-IP
+                </a>
+                .
+              </p>
             </div>
           </div>
         </div>
