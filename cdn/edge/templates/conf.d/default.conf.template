@@ -26,17 +26,40 @@ server {
     modsecurity on;
     modsecurity_transaction_id "$request_id";
 
-    # --- Rate Limiting: custom 429 error page ---
+    # --- Custom Error Pages (403 WAF Block & 429 Rate Limit) ---
+    error_page 403 /403.html;
+    location = /403.html {
+        root /usr/share/nginx/html;
+        internal;
+    }
+
+    # Deception layer. A synced custom rule marks a request for deception by
+    # denying it with status 418. The edge does not build the fake response
+    # itself: it hands the request to Main, whose WAF matches the same rule and
+    # serves the synthetic body (the real origin is never contacted). Without
+    # this, visitors got a bare "418" -- an obvious tell -- with the
+    # "public, max-age" Cache-Control of location /. No proxy_cache and no
+    # add_header here on purpose: a deception body must never be stored.
+    error_page 418 = @deception_via_main;
+    location @deception_via_main {
+        proxy_pass http://website_origin;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 5s;
+    }
+
     error_page 429 /429.html;
     location = /429.html {
         root /usr/share/nginx/html;
         internal;
     }
-   error_page 403 /403.html;
-   location = /403.html {
-        root /root/waf_project/cdn/edge/html;
-        internal;
-   }
+
     location = /healthz {
         access_log off;
         add_header Content-Type application/json;
@@ -58,21 +81,12 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        # 2026-09-22: real bug -- cache key ($host|$method|$uri) never
-        # varied by cookie, so a CAPTCHA/OTP challenge page cached from one
-        # visitor's unauthenticated request kept being served to every
-        # later visitor at the same URI within the cache window, even one
-        # who had just solved the challenge and held a valid clearance
-        # cookie ("solved OTP, still shows the same challenge page").
-        # waf_clearance is captcha_engine.py's cookie, waf_otp_clearance is
-        # otp_engine.py's -- either one present means this request's
-        # response depends on auth state the cache key doesn't capture.
         if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
         proxy_cache edge_cache;
-        proxy_cache_key "$request_method|$uri";
+        proxy_cache_key "$host|$request_method|$uri$is_args$args";
         proxy_cache_valid 200 301 302 10m;
         proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
         proxy_cache_background_update on;
@@ -90,6 +104,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -106,21 +121,12 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        # 2026-09-22: real bug -- cache key ($host|$method|$uri) never
-        # varied by cookie, so a CAPTCHA/OTP challenge page cached from one
-        # visitor's unauthenticated request kept being served to every
-        # later visitor at the same URI within the cache window, even one
-        # who had just solved the challenge and held a valid clearance
-        # cookie ("solved OTP, still shows the same challenge page").
-        # waf_clearance is captcha_engine.py's cookie, waf_otp_clearance is
-        # otp_engine.py's -- either one present means this request's
-        # response depends on auth state the cache key doesn't capture.
         if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
         proxy_cache edge_cache;
-        proxy_cache_key "$request_method|$uri";
+        proxy_cache_key "$host|$request_method|$uri$is_args$args";
         proxy_cache_valid 200 301 302 1h;
         proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
         proxy_cache_background_update on;
@@ -139,6 +145,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -168,16 +175,37 @@ server {
     modsecurity on;
     modsecurity_transaction_id "$request_id";
 
-    # --- Rate Limiting: custom 429 error page ---
-    error_page 429 /429.html;
-    location = /429.html {
+    # --- Custom Error Pages (403 WAF Block & 429 Rate Limit) ---
+    error_page 403 /403.html;
+    location = /403.html {
         root /usr/share/nginx/html;
         internal;
     }
-    
-    error_page 403 /403.html;
-    location = /403.html {
-        root /root/waf_project/cdn/edge/html;
+
+    # Deception layer. A synced custom rule marks a request for deception by
+    # denying it with status 418. The edge does not build the fake response
+    # itself: it hands the request to Main, whose WAF matches the same rule and
+    # serves the synthetic body (the real origin is never contacted). Without
+    # this, visitors got a bare "418" -- an obvious tell -- with the
+    # "public, max-age" Cache-Control of location /. No proxy_cache and no
+    # add_header here on purpose: a deception body must never be stored.
+    error_page 418 = @deception_via_main;
+    location @deception_via_main {
+        proxy_pass http://website_origin;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 5s;
+    }
+
+    error_page 429 /429.html;
+    location = /429.html {
+        root /usr/share/nginx/html;
         internal;
     }
 
@@ -197,21 +225,12 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        # 2026-09-22: real bug -- cache key ($host|$method|$uri) never
-        # varied by cookie, so a CAPTCHA/OTP challenge page cached from one
-        # visitor's unauthenticated request kept being served to every
-        # later visitor at the same URI within the cache window, even one
-        # who had just solved the challenge and held a valid clearance
-        # cookie ("solved OTP, still shows the same challenge page").
-        # waf_clearance is captcha_engine.py's cookie, waf_otp_clearance is
-        # otp_engine.py's -- either one present means this request's
-        # response depends on auth state the cache key doesn't capture.
         if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
         proxy_cache edge_cache;
-        proxy_cache_key "$request_method|$uri";
+        proxy_cache_key "$host|$request_method|$uri$is_args$args";
         proxy_cache_valid 200 301 302 10m;
         proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
         proxy_cache_background_update on;
@@ -230,6 +249,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
@@ -246,21 +266,12 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        # 2026-09-22: real bug -- cache key ($host|$method|$uri) never
-        # varied by cookie, so a CAPTCHA/OTP challenge page cached from one
-        # visitor's unauthenticated request kept being served to every
-        # later visitor at the same URI within the cache window, even one
-        # who had just solved the challenge and held a valid clearance
-        # cookie ("solved OTP, still shows the same challenge page").
-        # waf_clearance is captcha_engine.py's cookie, waf_otp_clearance is
-        # otp_engine.py's -- either one present means this request's
-        # response depends on auth state the cache key doesn't capture.
         if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
         proxy_cache edge_cache;
-        proxy_cache_key "$request_method|$uri";
+        proxy_cache_key "$host|$request_method|$uri$is_args$args";
         proxy_cache_valid 200 301 302 1h;
         proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
         proxy_cache_background_update on;
@@ -280,6 +291,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;

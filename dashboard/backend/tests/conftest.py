@@ -444,6 +444,25 @@ def fake_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(rules_module.rule_manager, "test_nginx", lambda: None)
     monkeypatch.setattr(rules_module.rule_manager, "reload_nginx", lambda: None)
 
+    # Deception layer: its audit logger lazily builds a real ClickHouseService
+    # (production credentials) and DynamoDBService. Without this, every test
+    # that hits /api/deception/respond wrote fake attack rows into the live
+    # access_logs / security_audit_logs (happened 2026-09-27). Swap the classes
+    # the module constructs *and* the already-built singleton's sinks.
+    from services import deception_service as deception_module
+
+    class _NoClickHouse:
+        connected = False
+        client = None
+
+        def save_log(self, *_args, **_kwargs):
+            return False
+
+    monkeypatch.setattr(deception_module, "ClickHouseService", _NoClickHouse)
+    monkeypatch.setattr(deception_module, "DynamoDBService", FakeDynamoDBService)
+    monkeypatch.setattr(deception_module.deception_service, "_ch", _NoClickHouse())
+    monkeypatch.setattr(deception_module.deception_service, "_db", FakeDynamoDBService())
+
     # Rate limiter storage is a module-level singleton shared across the
     # whole test session; reset it so one test's register/login calls never
     # trip another test's 5-per-minute/10-per-minute limits.

@@ -2,6 +2,7 @@ services:
   waf:
     image: owasp/modsecurity-crs:nginx
     container_name: waf-nginx
+    env_file: .env
     user: root
     ports:
       - "8080:8080"
