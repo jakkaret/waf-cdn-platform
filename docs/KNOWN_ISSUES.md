@@ -68,6 +68,42 @@ zero live TCP/UDP connections to Cloudflare). All four Lab apps now route exclus
 through the WAF-fronted paths (FRP or the custom tunnel protocol). Do not re-enable
 either service without explicit approval — this was a confirmed WAF-bypass path.
 
+## 7. Tenant log isolation: origin ownership used substring matching — FIXED IN CODE 2026-09-28
+
+Found while writing the system manual (docs/backend/12-multi-tenant.md). When a
+non-admin passed an explicit `origin` (`/api/logs`, `/api/logs/recent`,
+`/api/analytics/...`), ownership was a two-way substring test
+(`requested in domain or domain in requested`) and the query then ran as
+`host = '<requested>'`. A tenant owning `shop.example.com` could request
+`example.com` (or `e.com`, `shop.example.co`, `shop.example.com.evil.test`)
+and read that host's traffic. Worse, a user with no domains at all skipped the
+check entirely and could name any origin.
+
+Fix: `services/tenant_service.py::is_origin_owned` (exact, case-insensitive,
+root dot ignored; no domains = nothing owned), used by both
+`build_tenant_origin_filter` and `api/logs.py::_resolve_tenant_domains`. The
+origin selector only sends values taken from the user's own origins, so normal
+use is unchanged. Regression tests in `tests/test_host_attribution.py` and
+`tests/test_logs_router.py`; full suite 722 passed (isolated copy).
+Deployment status: see the commit that closes this entry.
+
+## 8. Telegram alerts are broadcast to every linked user — OPEN
+
+`services/telegram_listener.py::dispatch_telegram_alert` sends each alert to
+every user in `waf_users` that has a `telegram_chat_id`
+(`_get_telegram_users`), regardless of which origin the alert belongs to. The
+stored alert is correctly partitioned by `origin_id` in `waf_alerts_v2`, but
+the Telegram copy is not, so tenant A receives tenant B's alert details (IP,
+URL, rule, AI summary). Fix direction: send only to the owner/viewers/editors
+of the alert's `origin_id` (and admins for `unattributed`).
+
+## 9. CLAUDE.md names the wrong ML approval path — DOC ONLY
+
+CLAUDE.md says ML rules are approved via `POST /api/ml_rules/{rule_id}/approve`;
+the router prefix is `/api/ml-rules` (`api/ml_rules.py`), so the real path is
+`POST /api/ml-rules/{rule_id}/approve` (still `require_admin`). The safety
+statement itself (no auto-deploy path) remains true.
+
 ## Handling
 
 Re-check the relevant runtime evidence before acting. Update this register when the
