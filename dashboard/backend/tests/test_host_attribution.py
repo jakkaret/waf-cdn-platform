@@ -100,3 +100,32 @@ def test_requesting_another_tenants_origin_still_forbidden():
 
 def test_admin_all_scope_unrestricted():
     assert build_tenant_origin_filter("ALL", ["anything"], is_admin=True) == ""
+
+
+# 2026-09-28: ownership of a requested origin is an exact match. It used to be
+# a two-way substring test, and it was skipped when the user had no domains.
+
+def test_parent_domain_of_an_owned_domain_is_forbidden():
+    assert build_tenant_origin_filter("example.com", ["shop.example.com"], is_admin=False) == "1=0"
+
+
+def test_substring_of_an_owned_domain_is_forbidden():
+    assert build_tenant_origin_filter("shop.example.co", ["shop.example.com"], is_admin=False) == "1=0"
+    assert build_tenant_origin_filter("e.com", ["shop.example.com"], is_admin=False) == "1=0"
+
+
+def test_longer_name_containing_an_owned_domain_is_forbidden():
+    assert build_tenant_origin_filter("shop.example.com.evil.test", ["shop.example.com"], is_admin=False) == "1=0"
+
+
+def test_user_without_domains_cannot_name_an_origin():
+    assert build_tenant_origin_filter("victim.example", [], is_admin=False) == "1=0"
+
+
+def test_exact_owned_domain_still_allowed_case_insensitive():
+    sql = build_tenant_origin_filter("Shop.Example.com.", ["shop.example.com"], is_admin=False)
+    assert "host = 'shop.example.com'" in sql
+
+
+def test_admin_may_name_any_origin():
+    assert "host = 'anything.example'" in build_tenant_origin_filter("anything.example", [], is_admin=True)
