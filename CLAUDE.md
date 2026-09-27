@@ -59,7 +59,7 @@ to be a full system snapshot, just enough to revert the specific file/config fas
 The ML pipeline (`ml/auto_rule_generator.py`, `dashboard/backend/services/ml_rule_service.py`,
 `dashboard/backend/api/ml_rules.py`) only ever produces a rule with `status: "pending"` in the
 `waf_pending_rules` DynamoDB table. No code path deploys an ML-suggested rule without going
-through `POST /api/ml_rules/{rule_id}/approve`, which requires `require_admin`. Do not add an
+through `POST /api/ml-rules/{rule_id}/approve` (router prefix `/api/ml-rules`, file `api/ml_rules.py`), which requires `require_admin`. Do not add an
 auto-apply/auto-deploy path for ML-suggested rules without an explicit request — measured attack
 recall (62.26%, accuracy 80.47%, see `ml/models/eval_results.json`) is not high enough on its own
 to justify unattended blocking decisions.

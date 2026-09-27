@@ -53,7 +53,7 @@ Logs (ClickHouse access_logs.host) · Alerts (waf_alerts_v2 partition = origin_i
 | ข้อจำกัด | ผลกระทบ | สถานะ |
 |---|---|---|
 | (แก้แล้ว 2026-09-28) เดิมเมื่อ viewer ระบุ `origin` เอง ระบบตรวจสิทธิ์ด้วยการเทียบ substring สองทาง และข้ามการตรวจเมื่อผู้ใช้ไม่มีโดเมน | ปัจจุบันใช้ `tenant_service.is_origin_owned` เทียบตรงตัว (ไม่สนตัวพิมพ์, ตัดจุดท้าย) และไม่มีโดเมน = ไม่มีสิทธิ์ ใช้ทั้ง `build_tenant_origin_filter` และ `api/logs.py` | แก้แล้ว (KNOWN_ISSUES #7) |
-| Telegram ส่ง alert ถึงผู้ใช้ทุกคนที่ผูก chat id ไม่กรองตาม origin | tenant อื่นได้รับรายละเอียด alert | เปิดอยู่ (KNOWN_ISSUES #8) |
+| (แก้แล้ว 2026-09-28) Telegram เคยส่ง alert ถึงผู้ใช้ทุกคนที่ผูก chat id | ปัจจุบันส่งเฉพาะ admin + ทีมของ origin | แก้แล้ว (KNOWN_ISSUES #8) |
 | Main บันทึก IP ของ edge เป็น client IP สำหรับ traffic ที่มาทาง edge | ข้อมูล IP ใน log ของ tenant ไม่ใช่ IP จริง | ทราบแล้ว |
 | กฎ WAF ใช้ร่วมกันทั้งระบบ | tenant กำหนดกฎเฉพาะของตัวเองไม่ได้ | ข้อจำกัดของการออกแบบ |
 

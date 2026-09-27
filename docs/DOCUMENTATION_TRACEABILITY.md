@@ -28,7 +28,7 @@ status: VERIFIED
 | Log แยก tenant ด้วย `host` แบบ fail closed | `services/tenant_service.py:72–96` | VERIFIED |
 | การตรวจ origin ของ viewer เป็นแบบตรงตัว (แก้จาก substring 2026-09-28) | `services/tenant_service.py::is_origin_owned`, `tests/test_host_attribution.py`, `tests/test_logs_router.py` (722 passed) | VERIFIED |
 | Alert partition ตาม `origin_id`, `unattributed` | `scripts/migrate_alerts_to_origin_key.py`, `telegram_listener.py` | VERIFIED |
-| Telegram ส่งถึงผู้ใช้ทุกคนที่มี chat id | `telegram_listener.py::_get_telegram_users` | VERIFIED |
+| Telegram ส่งเฉพาะ admin + owner/editor/viewer ของ origin | `telegram_listener.py::_alert_recipients`, `tests/test_telegram_recipients.py` | VERIFIED |
 | access_logs TTL 30 วัน | `clickhouse_service.py:17,131` | VERIFIED |
 | ML accuracy 0.8047 ไม่ผ่านเป้า | `GET 127.0.0.1:5000/health` | VERIFIED |
 | analyzer ไม่บันทึก pending rule | `ml/async_log_analyzer.py:108–118` | VERIFIED |
