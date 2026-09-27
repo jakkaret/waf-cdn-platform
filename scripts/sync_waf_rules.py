@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime
+import re
 from pathlib import Path
 
 import httpx
@@ -32,7 +33,17 @@ SYNC_CONF_FILE = LOCAL_RULES_DIR / "dashboard-sync.conf"
 SYNC_LOG_FILE = LOCAL_RULES_DIR / "sync.log"
 
 
+ALLOWED_VARIABLES = {"REQUEST_URI", "ARGS", "REQUEST_HEADERS", "REQUEST_BODY"}
+ALLOWED_ACTIONS = {"BLOCK", "CHALLENGE", "DECEIVE"}
+ALLOWED_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "ERROR", "WARNING", "NOTICE"}
+
+
 # ── Rule Formatter ──────────────────────────────────────────────────────────
+def escape_secrule_string(value: str, quote_char: str) -> str:
+    """Escape a value for safe embedding inside a ModSecurity SecRule quoted field."""
+    return str(value).replace("\\", "\\\\").replace(quote_char, "\\" + quote_char)
+
+
 def rules_to_modsecurity_conf(rules: list) -> str:
     """Convert rule dicts to ModSecurity SecRule directives."""
     ts = datetime.utcnow().isoformat() + "Z"
@@ -43,18 +54,61 @@ def rules_to_modsecurity_conf(rules: list) -> str:
         "",
     ]
     for rule in rules:
-        rid      = rule.get("id", "CUSTOM-000")
+        raw_id = str(rule.get("id", "")).strip()
+        rid = raw_id.replace("custom-", "")
+        # Skip invalid/non-numeric IDs or dummy files like 00-modsecurity-override
+        if not rid or not rid.isdigit():
+            continue
+
         variable = rule.get("variable", "REQUEST_URI")
+        if variable == "N/A":
+            continue
+
         operator = rule.get("operator", "@rx .")
-        severity = rule.get("severity", "HIGH")
-        message  = rule.get("message", "Custom rule").replace('"', "'")
-        lines.append(
-            f'SecRule {variable} "{operator}" \\'
-        )
-        lines.append(
-            f'    "id:{rid},phase:2,deny,status:403,severity:{severity},msg:\'{message}\'"'
-        )
+        if operator == "N/A":
+            continue
+
+        severity = str(rule.get("severity", "HIGH")).upper()
+        if severity == "N/A":
+            severity = "HIGH"
+
+        message = str(rule.get("message", "Custom rule"))
+        if message == "N/A":
+            message = "Custom rule"
+
+        action = str(rule.get("action", "BLOCK") or "BLOCK").strip().upper()
+        deception_template = str(rule.get("deception_template", "auto") or "auto").strip().lower()
+
+        # Same guards as RuleManager.validate_rule: rules reach this script
+        # from the API, but a line break would still break the whole file.
+        if variable not in ALLOWED_VARIABLES or action not in ALLOWED_ACTIONS:
+            continue
+        if any(c in str(operator) + message for c in "\r\n\x00"):
+            continue
+        if not re.fullmatch(r"[A-Za-z_]{1,32}", deception_template):
+            deception_template = "auto"
+        if severity not in ALLOWED_SEVERITIES:
+            severity = "HIGH"
+
+        safe_operator = escape_secrule_string(operator, '"')
+        # msg:'...' sits inside the double-quoted action list: escape both quotes
+        safe_message = escape_secrule_string(message, "'").replace('"', '\\"')
+
+        if action == "DECEIVE":
+            # Change to phase:1 to run before CRS 949110
+            directives = f"id:{rid},phase:1,deny,status:418,tag:'action:deceive'"
+            if deception_template and deception_template != "auto":
+                directives += f",tag:'template:{deception_template}'"
+            directives += f",severity:{severity},log,msg:'{safe_message}'"
+        elif action == "CHALLENGE":
+            directives = f"id:{rid},phase:2,deny,status:401,tag:'action:challenge',severity:{severity},log,msg:'{safe_message}'"
+        else:  # BLOCK (default)
+            directives = f"id:{rid},phase:2,deny,status:403,severity:{severity},log,msg:'{safe_message}'"
+
+        lines.append(f'SecRule {variable} "{safe_operator}" \\')
+        lines.append(f'    "{directives}"')
         lines.append("")
+
     return "\n".join(lines)
 
 

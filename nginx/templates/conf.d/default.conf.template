@@ -99,6 +99,29 @@ server {
         return 429 "Too Many Requests. Rate limit exceeded. Please try again later.";
     }
 
+    error_page 418 = @deception;
+    location @deception {
+        rewrite ^ /api/deception/respond break;
+        proxy_pass http://host.docker.internal:8000;
+        proxy_connect_timeout 1s;
+        proxy_read_timeout 3s;
+        proxy_set_header X-Internal-Deception-Key ${DECEPTION_INTERNAL_KEY};
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header X-Original-Host $host;
+        proxy_set_header X-Deception-Template "";
+        proxy_set_header X-Matched-Rule-ID "";
+        proxy_hide_header X-Deception-Engine;
+        proxy_intercept_errors on;
+        error_page 502 504 = @deception_static;
+    }
+    location @deception_static {
+        default_type text/plain;
+        return 200 "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n";
+    }
+
     error_page 403 /403.html; 
     location = /403.html { root /usr/share/nginx/html; internal; }
     include includes/location_common.conf;
@@ -178,6 +201,29 @@ server {
         add_header Retry-After $retry_after always;
         add_header Content-Type text/plain always;
         return 429 "Too Many Requests. Rate limit exceeded. Please try again later.";
+    }
+
+    error_page 418 = @deception;
+    location @deception {
+        rewrite ^ /api/deception/respond break;
+        proxy_pass http://host.docker.internal:8000;
+        proxy_connect_timeout 1s;
+        proxy_read_timeout 3s;
+        proxy_set_header X-Internal-Deception-Key ${DECEPTION_INTERNAL_KEY};
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header X-Original-Host $host;
+        proxy_set_header X-Deception-Template "";
+        proxy_set_header X-Matched-Rule-ID "";
+        proxy_hide_header X-Deception-Engine;
+        proxy_intercept_errors on;
+        error_page 502 504 = @deception_static;
+    }
+    location @deception_static {
+        default_type text/plain;
+        return 200 "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n";
     }
 
     error_page 403 /403.html;
@@ -260,6 +306,29 @@ server {
         return 429 "Too Many Requests. Rate limit exceeded. Please try again later.";
     }
 
+    error_page 418 = @deception;
+    location @deception {
+        rewrite ^ /api/deception/respond break;
+        proxy_pass http://host.docker.internal:8000;
+        proxy_connect_timeout 1s;
+        proxy_read_timeout 3s;
+        proxy_set_header X-Internal-Deception-Key ${DECEPTION_INTERNAL_KEY};
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header X-Original-Host $host;
+        proxy_set_header X-Deception-Template "";
+        proxy_set_header X-Matched-Rule-ID "";
+        proxy_hide_header X-Deception-Engine;
+        proxy_intercept_errors on;
+        error_page 502 504 = @deception_static;
+    }
+    location @deception_static {
+        default_type text/plain;
+        return 200 "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n";
+    }
+
     error_page 403 /403.html;
     location = /403.html { root /usr/share/nginx/html; internal; }
 }
@@ -280,6 +349,29 @@ server {
 
     modsecurity on;
     modsecurity_transaction_id "$request_id";
+
+    error_page 418 = @deception;
+    location @deception {
+        rewrite ^ /api/deception/respond break;
+        proxy_pass http://host.docker.internal:8000;
+        proxy_connect_timeout 1s;
+        proxy_read_timeout 3s;
+        proxy_set_header X-Internal-Deception-Key ${DECEPTION_INTERNAL_KEY};
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header X-Original-Host $host;
+        proxy_set_header X-Deception-Template "";
+        proxy_set_header X-Matched-Rule-ID "";
+        proxy_hide_header X-Deception-Engine;
+        proxy_intercept_errors on;
+        error_page 502 504 = @deception_static;
+    }
+    location @deception_static {
+        default_type text/plain;
+        return 200 "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n";
+    }
 
     error_page 403 /403.html;
     location = /403.html {
@@ -429,6 +521,29 @@ server {
         add_header Retry-After $retry_after always;
         add_header Content-Type text/plain always;
         return 429 "Too Many Requests. Rate limit exceeded. Please try again later.";
+    }
+
+    error_page 418 = @deception;
+    location @deception {
+        rewrite ^ /api/deception/respond break;
+        proxy_pass http://host.docker.internal:8000;
+        proxy_connect_timeout 1s;
+        proxy_read_timeout 3s;
+        proxy_set_header X-Internal-Deception-Key ${DECEPTION_INTERNAL_KEY};
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header X-Original-Host $host;
+        proxy_set_header X-Deception-Template "";
+        proxy_set_header X-Matched-Rule-ID "";
+        proxy_hide_header X-Deception-Engine;
+        proxy_intercept_errors on;
+        error_page 502 504 = @deception_static;
+    }
+    location @deception_static {
+        default_type text/plain;
+        return 200 "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n";
     }
 
     error_page 403 /403.html;

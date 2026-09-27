@@ -196,6 +196,7 @@ from api import tunnel as tunnel_api
 from api import threat_intel as threat_intel_api
 from api import public_status as public_status_api
 from api import onboarding as onboarding_api
+from api import deception as deception_api
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
@@ -213,6 +214,7 @@ app.include_router(threshold_proposals.router)
 app.include_router(threat_intel_api.router)
 app.include_router(public_status_api.router)
 app.include_router(onboarding_api.router)
+app.include_router(deception_api.router)
 
 # Error Handlers
 from fastapi import Request

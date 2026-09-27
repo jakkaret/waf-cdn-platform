@@ -1,7 +1,7 @@
 import asyncio
 from typing import Optional, List, Dict, Any, Union
 from fastapi import APIRouter, HTTPException, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from services.rule_manager import RuleManager
 from services.blast_radius_service import blast_radius_service
 from services.bola_guard import bola_guard
@@ -15,12 +15,56 @@ from services.explainability_service import explainability_service
 from services.bola_guard import validate_policy_regex
 
 
+ALLOWED_ACTIONS = {"BLOCK", "CHALLENGE", "DECEIVE"}
+ALLOWED_TEMPLATES = {"auto", "path_traversal", "sqli", "sql_injection"}
+
+
+def validate_rule_action(v: Any) -> str:
+    if v is None or v == "":
+        return "BLOCK"
+    if isinstance(v, str):
+        v_upper = v.strip().upper()
+        if v_upper in ALLOWED_ACTIONS:
+            return v_upper
+    valid_str = ", ".join(sorted(ALLOWED_ACTIONS))
+    raise ValueError(f"action must be one of: {valid_str}")
+
+
+def validate_rule_template(v: Any) -> str:
+    if v is None or v == "":
+        return "auto"
+    if isinstance(v, str):
+        v_lower = v.strip().lower()
+        if v_lower in ALLOWED_TEMPLATES:
+            return v_lower
+    valid_str = ", ".join(sorted(ALLOWED_TEMPLATES))
+    raise ValueError(f"deception_template must be one of: {valid_str}")
+
+
 class RuleCreate(BaseModel):
     id: str
     variable: str
     operator: str
     severity: str
     message: str
+    action: Optional[str] = Field(
+        default="BLOCK",
+        description="Rule action: BLOCK, CHALLENGE, or DECEIVE",
+    )
+    deception_template: Optional[str] = Field(
+        default="auto",
+        description="Deception template: auto, path_traversal, sqli, or sql_injection",
+    )
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def check_action(cls, v: Any) -> str:
+        return validate_rule_action(v)
+
+    @field_validator("deception_template", mode="before")
+    @classmethod
+    def check_template(cls, v: Any) -> str:
+        return validate_rule_template(v)
 
 
 class RuleSchema(BaseModel):
@@ -28,6 +72,37 @@ class RuleSchema(BaseModel):
     operator: str
     severity: str
     message: str
+    action: Optional[str] = Field(
+        default="BLOCK",
+        description="Rule action: BLOCK, CHALLENGE, or DECEIVE",
+    )
+    deception_template: Optional[str] = Field(
+        default="auto",
+        description="Deception template: auto, path_traversal, sqli, or sql_injection",
+    )
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def check_action(cls, v: Any) -> str:
+        return validate_rule_action(v)
+
+    @field_validator("deception_template", mode="before")
+    @classmethod
+    def check_template(cls, v: Any) -> str:
+        return validate_rule_template(v)
+
+
+RuleUpdate = RuleSchema
+
+
+class RuleResponse(BaseModel):
+    id: str
+    variable: str
+    operator: str
+    severity: str
+    message: str
+    action: str = "BLOCK"
+    deception_template: Optional[str] = "auto"
 
 
 class BlastRadiusRequest(BaseModel):
@@ -98,10 +173,12 @@ async def get_rules(current_user: dict = Depends(require_viewer_or_above)):
 @router.post("/")
 async def create_rule(rule: RuleCreate, current_user: dict = Depends(require_admin)):
     try:
-        success = rule_manager.add_rule(rule.dict())
+        success = rule_manager.add_rule(rule.model_dump())
         if success:
             return {"message": "Rule created", "rule_id": rule.id}
         raise HTTPException(status_code=500, detail="Failed to create rule")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -122,7 +199,7 @@ async def delete_rule(rule_id: str, current_user: dict = Depends(require_admin))
 @router.put("/{rule_id}")
 async def update_rule(rule_id: str, rule: RuleSchema, current_user: dict = Depends(require_admin)):
     try:
-        rule_manager.update_rule(rule_id, rule.dict())
+        rule_manager.update_rule(rule_id, rule.model_dump())
         return {"status": "updated", "rule_id": rule_id}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
