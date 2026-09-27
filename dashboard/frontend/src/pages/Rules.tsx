@@ -43,6 +43,9 @@ export const Rules: React.FC = () => {
   const [page, setPage] = useState(1)
   const [pageInput, setPageInput] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  
+  const [isTestingBlastRadius, setIsTestingBlastRadius] = useState(false)
+  const [blastRadiusResult, setBlastRadiusResult] = useState<any | null>(null)
 
   // Fetch Rules
   const { data: rules = [], isLoading, isFetching, refetch } = useQuery({
@@ -58,6 +61,7 @@ export const Rules: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['waf-rules'] })
       setIsModalOpen(false)
       setEditingRule(null)
+      setBlastRadiusResult(null)
       toast.success('Custom WAF rule deployed successfully')
     },
     onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to create rule'),
@@ -69,6 +73,7 @@ export const Rules: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['waf-rules'] })
       setIsModalOpen(false)
       setEditingRule(null)
+      setBlastRadiusResult(null)
       toast.success('WAF rule updated successfully')
     },
     onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to update rule'),
@@ -88,6 +93,33 @@ export const Rules: React.FC = () => {
     onSuccess: (data: any) => toast.success(`Edge Sync Complete: ${data?.synced_nodes ?? 0} POP nodes synchronized`),
     onError: (err: any) => toast.error(err?.response?.data?.detail || 'Edge rule synchronization failed'),
   })
+
+  const handleBlastRadiusTest = async () => {
+    try {
+      setIsTestingBlastRadius(true)
+      let op = (editingRule?.operator || '').trim()
+      if (op && !op.startsWith('@')) op = `@contains ${op}`
+      
+      const payload = {
+        variable: editingRule?.variable || 'REQUEST_URI',
+        operator: op || '@contains <pattern>',
+        severity: editingRule?.severity || 'CRITICAL'
+      }
+
+      const res = await rulesApi.blastRadius(payload)
+      setBlastRadiusResult(res)
+      toast.success('Blast Radius Simulation Complete')
+    } catch (err: any) {
+      let errMsg = 'Failed to test blast radius'
+      if (err?.response?.data?.detail) {
+        const detail = err.response.data.detail
+        errMsg = Array.isArray(detail) ? detail[0]?.msg : String(detail)
+      }
+      toast.error(errMsg)
+    } finally {
+      setIsTestingBlastRadius(false)
+    }
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -494,9 +526,18 @@ export const Rules: React.FC = () => {
 
                       {/* Action & Severity Column */}
                       <td className="border-r border-[var(--bg-border-subtle)]">
-                        <Badge color={isCritical ? 'danger' : isHigh ? 'warning' : 'info'}>
-                          {rule.severity || 'CRITICAL'} (DENY)
-                        </Badge>
+                        <div className="flex flex-col gap-1 items-start">
+                          <Badge color={isCritical ? 'danger' : isHigh ? 'warning' : 'info'}>
+                            {rule.severity || 'CRITICAL'}
+                          </Badge>
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                            rule.action === 'DECEIVE' ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/30' :
+                            rule.action === 'CHALLENGE' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30' :
+                            'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30'
+                          }`}>
+                            {rule.action || 'BLOCK'}
+                          </span>
+                        </div>
                       </td>
 
                       {/* Policy Description Column */}
@@ -710,6 +751,39 @@ export const Rules: React.FC = () => {
                 </p>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor={`${formId}-action`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                    Rule Action
+                  </label>
+                  <select id={`${formId}-action`}
+                    className="w-full dash-input font-mono cursor-pointer"
+                    value={editingRule?.action || 'BLOCK'}
+                    onChange={(e) => setEditingRule({ ...editingRule, action: e.target.value as any })}
+                  >
+                    <option value="BLOCK">BLOCK</option>
+                    <option value="CHALLENGE">CHALLENGE</option>
+                    <option value="DECEIVE">DECEIVE (Honeypot)</option>
+                  </select>
+                </div>
+                {(editingRule?.action === 'DECEIVE') && (
+                  <div>
+                    <label htmlFor={`${formId}-template`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                      Deception Template
+                    </label>
+                    <select id={`${formId}-template`}
+                      className="w-full dash-input font-mono cursor-pointer"
+                      value={editingRule?.deception_template || 'auto'}
+                      onChange={(e) => setEditingRule({ ...editingRule, deception_template: e.target.value as any })}
+                    >
+                      <option value="auto">Auto-Detect</option>
+                      <option value="path_traversal">Fake /etc/passwd</option>
+                      <option value="sqli">Fake SQL JSON</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label htmlFor={`${formId}-message`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
                   Policy Description / Alert Message
@@ -733,6 +807,47 @@ export const Rules: React.FC = () => {
                 <div className="p-3 overflow-x-auto text-amber-300 bg-slate-950 leading-relaxed">
                   <code>{modalSecRulePreview}</code>
                 </div>
+              </div>
+
+              {/* Blast Radius Section */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleBlastRadiusTest()}
+                  disabled={isTestingBlastRadius}
+                  className="w-full py-2 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 font-bold text-[12px] transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <ShieldAlert size={14} />
+                  {isTestingBlastRadius ? 'Running Simulation...' : 'Simulate Blast Radius (Test False Positives)'}
+                </button>
+                
+                {blastRadiusResult && (
+                  <div className="mt-3 p-3 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Impacted Requests</span>
+                      <span className={`text-[14px] font-bold ${(blastRadiusResult.matched_count || 0) > 100 ? 'text-red-500' : 'text-emerald-500'}`}>
+                        {(blastRadiusResult.matched_count || 0).toLocaleString()} / {blastRadiusResult.total_samples || 0}
+                      </span>
+                    </div>
+                    {blastRadiusResult.safety_recommendation && (
+                      <div className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                        {blastRadiusResult.safety_recommendation}
+                      </div>
+                    )}
+                    {blastRadiusResult.impacted_ips?.length > 0 && (
+                      <div className="text-[11px]">
+                        <span className="font-bold text-slate-500 dark:text-slate-400">Sample IPs Blocked:</span>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {blastRadiusResult.impacted_ips.map((item: any, i: number) => (
+                            <span key={i} className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 rounded font-mono text-[10px]">
+                              {item.ip} ({item.count})
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-2.5 pt-4 border-t border-[var(--bg-border)]">

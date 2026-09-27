@@ -39,6 +39,8 @@ import AiFirewallLlm from './pages/concepts/AiFirewallLlm'
 import DeceptionLayer from './pages/concepts/DeceptionLayer'
 import QuantumSafeTls from './pages/concepts/QuantumSafeTls'
 import UnifiedRiskScore from './pages/concepts/UnifiedRiskScore'
+import ThresholdProposals from './pages/ThresholdProposals'
+import BolaRules from './pages/BolaRules'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -111,6 +113,22 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 <Rules />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/bola"
+            element={
+              <ProtectedRoute>
+                <BolaRules />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/threshold-proposals"
+            element={
+              <ProtectedRoute>
+                <ThresholdProposals />
               </ProtectedRoute>
             }
           />

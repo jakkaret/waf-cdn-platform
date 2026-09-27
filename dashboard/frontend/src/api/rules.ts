@@ -25,5 +25,16 @@ export const rulesApi = {
   syncRules: async () => {
     const res = await api.post('/rules/sync')
     return res.data
+  },
+
+  blastRadius: async (payload: { variable: string; operator: string; severity: string }): Promise<any> => {
+    const res = await api.post('/rules/blast-radius', payload)
+    return res.data
+  },
+
+  getBolaPolicies: async () => {
+    // GET lists; POST on the same path creates a policy (admin-only).
+    const res = await api.get('/rules/bola/policies')
+    return res.data
   }
 }
