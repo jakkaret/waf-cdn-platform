@@ -25,7 +25,7 @@ status: VERIFIED
 | Backend API (123 endpoints) | VERIFIED | AST + runtime | |
 | Frontend | VERIFIED | build + vitest | |
 | Multi-tenant logs | VERIFIED | `tenant_service.py`, tests | ช่องโหว่ substring แก้แล้ว 2026-09-28 (KNOWN_ISSUES #7) |
-| Multi-tenant alerts | PARTIAL | `waf_alerts_v2` partition | ที่จัดเก็บแยกถูกต้อง แต่ Telegram ส่งถึงผู้ใช้ทุกคนที่ผูก chat id (KNOWN_ISSUES #8) |
+| Multi-tenant alerts | VERIFIED | `waf_alerts_v2` partition, `_alert_recipients` + tests | Telegram ส่งเฉพาะผู้มีสิทธิ์ตั้งแต่ 2026-09-28 (KNOWN_ISSUES #8) |
 | Authentication (JWT, Argon2, Google OAuth) | VERIFIED | code | ไม่มี refresh token |
 | Logging → ClickHouse | VERIFIED | runtime | IP ผ่าน edge เป็น IP ของ edge |
 | Alerting (DynamoDB + Telegram + Gemini) | VERIFIED | code + journal | Gemini quota free tier |

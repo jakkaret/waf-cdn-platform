@@ -23,7 +23,7 @@ log จาก edge ผ่าน `api/cdn.py` (ingest) ก็ส่งคำข�
 | 2 | หา `origin_id` จาก Host ผ่าน `waf_domains` (`domain_name-index`) | ไม่พบ → `unattributed` |
 | 3 | `put_item` ลง `waf_alerts_v2` (`origin_id`, `alert_id`, ip, url, rule_id, attack_type, severity, edge_node, ai_summary …) | เรียกผ่าน `asyncio.to_thread` ไม่บล็อก event loop |
 | 4 | บันทึกรูปแบบลง threat intel (ถ้า Host มีค่า) | opt-in, ไม่ระบุตัวตน |
-| 5 | ส่งข้อความ HTML ผ่าน Telegram Bot API ถึงผู้ใช้ทุกคนที่มี `telegram_chat_id` | ต้องตั้ง bot token; รายชื่อผู้ใช้ cache 60 วินาที |
+| 5 | ส่งข้อความ HTML ผ่าน Telegram Bot API ถึงผู้ใช้ที่มี `telegram_chat_id` **และมีสิทธิ์เห็น alert** (admin + ทีมของ origin) | ต้องตั้ง bot token; รายชื่อผู้ใช้ cache 60 วินาที |
 
 ## 15.3 การแสดงผล
 
@@ -32,7 +32,7 @@ log จาก edge ผ่าน `api/cdn.py` (ingest) ก็ส่งคำข�
 
 ## 15.4 ข้อจำกัด
 
-- Telegram ส่งถึง **ผู้ใช้ทุกคนที่ผูก chat id** ไม่ได้กรองตาม tenant ของ alert — ควรตรวจสอบก่อนเปิดให้ลูกค้าหลายรายใช้ Telegram (UNKNOWN ว่าตั้งใจหรือไม่)
+- (แก้แล้ว 2026-09-28) เดิม Telegram ส่งถึงผู้ใช้ทุกคนที่ผูก chat id ปัจจุบัน `_alert_recipients` ส่งเฉพาะ admin + owner/editor/viewer ของ origin ของ alert (alert `unattributed` ส่งเฉพาะ admin) — KNOWN_ISSUES #8
 - Gemini free tier มี quota รายวัน (พบข้อความ quota exceeded ใน journal)
 
 ## แหล่งอ้างอิง (Evidence)

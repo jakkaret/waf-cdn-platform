@@ -48,7 +48,7 @@ status: PARTIAL
 - สแกน `.md/.mmd/.html` ทั้งหมดด้วย pattern ของ GitHub token, AWS key, Google API key, Telegram bot token, private key, JWT, รหัสผ่าน, อีเมล → **ไม่พบในเอกสารชุดใหม่** (พบเพียงข้อความ `ghp_...` ที่ตัดแล้วในเอกสารเก่า `PROJECT_IMPLEMENTATION_REPORT.md` ซึ่งไม่ได้อยู่ในเว็บ)
 - PDF: ไม่พบ `ghp_`, `PRIVATE KEY`, `eyJhbGci`
 - ชื่อตัวแปรลับ (เช่น `DECEPTION_INTERNAL_KEY`) ปรากฏเฉพาะชื่อ ไม่มีค่า
-- **ข้อควรระวัง:** เอกสารอธิบายจุดอ่อนที่ยังไม่แก้ (พอร์ต 8000, การแยก tenant แบบ substring ฯลฯ) และ IP ของโครงสร้างพื้นฐาน repository บน GitHub เป็น public จึง **ไม่ควร push เอกสารชุดนี้ขึ้น public** จนกว่าจะแก้จุดอ่อนหรือเปลี่ยน repo เป็น private
+- **ข้อควรระวัง:** เอกสารอธิบายจุดอ่อนที่ยังไม่แก้ (เช่น พอร์ต 8000 เปิดสู่อินเทอร์เน็ต; ปัญหา tenant/Telegram แก้แล้ว 2026-09-28) และ IP ของโครงสร้างพื้นฐาน repository บน GitHub เป็น public จึง **ไม่ควร push เอกสารชุดนี้ขึ้น public** จนกว่าจะแก้จุดอ่อนหรือเปลี่ยน repo เป็น private
 
 ## 5. Repository / Runtime accuracy
 
@@ -60,8 +60,7 @@ status: PARTIAL
 
 | แหล่ง | บอกว่า | ของจริง |
 |---|---|---|
-| `CLAUDE.md` | อนุมัติกฎ ML ที่ `POST /api/ml_rules/{rule_id}/approve` | path จริง `POST /api/ml-rules/{rule_id}/approve` |
-| `CLAUDE.md` | branch ในเครื่องชื่อ `backend` | เครื่องนักพัฒนาใช้ `Backend` (ตรงกับ remote) |
+| `CLAUDE.md` | อนุมัติกฎ ML ที่ `POST /api/ml_rules/{rule_id}/approve` | path จริง `POST /api/ml-rules/{rule_id}/approve` — แก้ใน CLAUDE.md แล้ว (KNOWN_ISSUES #9) |
 | ความคิดเห็นในโค้ด `ml/async_log_analyzer.py` | "Pending Approval" | analyzer ไม่ได้บันทึกกฎรออนุมัติ |
 | `api/cdn.py` / Settings `auto_purge_edge_cache` | มี purge | ไม่มี endpoint purge ที่ edge |
 | เอกสารเก่าใน `docs/` (ARCHITECTURE.md ฯลฯ, ตรวจล่าสุด 2026-08-26) | – | อาจล้าสมัย ให้ยึดชุดนี้ |

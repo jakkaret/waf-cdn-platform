@@ -87,22 +87,26 @@ use is unchanged. Regression tests in `tests/test_host_attribution.py` and
 `tests/test_logs_router.py`; full suite 722 passed (isolated copy).
 Deployed to Main 2026-09-28 (commit `0d67633`, `waf-dashboard` restarted, `/api/health` 200).
 
-## 8. Telegram alerts are broadcast to every linked user — OPEN
+## 8. Telegram alerts are broadcast to every linked user — RESOLVED 2026-09-28
 
 `services/telegram_listener.py::dispatch_telegram_alert` sends each alert to
 every user in `waf_users` that has a `telegram_chat_id`
 (`_get_telegram_users`), regardless of which origin the alert belongs to. The
 stored alert is correctly partitioned by `origin_id` in `waf_alerts_v2`, but
 the Telegram copy is not, so tenant A receives tenant B's alert details (IP,
-URL, rule, AI summary). Fix direction: send only to the owner/viewers/editors
-of the alert's `origin_id` (and admins for `unattributed`).
+URL, rule, AI summary).
 
-## 9. CLAUDE.md names the wrong ML approval path — DOC ONLY
+Fix: `_alert_recipients(users, origin)` sends to admins plus the owner, editors
+and viewers of the alert's `origin_id` (admins only for `unattributed`), the
+same audience as the Alert Center. Tests: `tests/test_telegram_recipients.py`;
+full suite 727 passed (isolated copy).
+
+## 9. CLAUDE.md names the wrong ML approval path — RESOLVED 2026-09-28
 
 CLAUDE.md says ML rules are approved via `POST /api/ml_rules/{rule_id}/approve`;
 the router prefix is `/api/ml-rules` (`api/ml_rules.py`), so the real path is
 `POST /api/ml-rules/{rule_id}/approve` (still `require_admin`). The safety
-statement itself (no auto-deploy path) remains true.
+statement itself (no auto-deploy path) remains true. CLAUDE.md corrected.
 
 ## Handling
 
