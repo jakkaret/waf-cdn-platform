@@ -219,3 +219,41 @@ def test_explain_masks_pii_in_the_sanitized_url(client: TestClient, register_use
     )
     assert resp.status_code == 200
     assert "someone@example.com" not in resp.json()["sanitized_url"]
+
+
+def test_parent_domain_of_owned_domain_returns_empty(client: TestClient, register_user, auth_header, monkeypatch):
+    """Owning mylogsapp.example.com must not grant ?origin=example.com (the old
+    two-way substring check did)."""
+    monkeypatch.setattr(logs_module.ch, "connected", True)
+    get_logs_spy = MagicMock(return_value={"logs": [{"url": "/should-never-be-returned"}]})
+    monkeypatch.setattr(logs_module.ch, "get_logs", get_logs_spy)
+
+    register_user(email="parent-bootstrap@example.com", username="parent_bootstrap")
+    owner = register_user(email="parent-owner@example.com", username="parent_owner", role="viewer")
+    headers = auth_header(owner["access_token"])
+    origin_id = client.post(
+        "/api/origins", json={"label": "ParentApp", "ip": "203.0.113.31", "port": 8080}, headers=headers,
+    ).json()["id"]
+    tenant_service_module.db.domains_table.put_item(Item={
+        "id": "domain-parent-1", "origin_id": origin_id, "domain_name": "mylogsapp.example.com",
+    })
+
+    resp = client.get("/api/logs", params={"origin": "example.com"}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["logs"] == []
+    assert get_logs_spy.call_count == 0
+
+
+def test_user_without_domains_cannot_request_an_arbitrary_origin(client: TestClient, register_user, auth_header, monkeypatch):
+    """A viewer with no origins used to skip the ownership check entirely when
+    naming an origin."""
+    monkeypatch.setattr(logs_module.ch, "connected", True)
+    get_logs_spy = MagicMock(return_value={"logs": [{"url": "/should-never-be-returned"}]})
+    monkeypatch.setattr(logs_module.ch, "get_logs", get_logs_spy)
+
+    register_user(email="nodom-bootstrap@example.com", username="nodom_bootstrap")
+    user = register_user(email="nodom@example.com", username="nodom", role="viewer")
+    resp = client.get("/api/logs", params={"origin": "victim.example.com"}, headers=auth_header(user["access_token"]))
+    assert resp.status_code == 200
+    assert resp.json()["logs"] == []
+    assert get_logs_spy.call_count == 0

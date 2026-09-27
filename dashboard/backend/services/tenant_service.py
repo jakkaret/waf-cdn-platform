@@ -69,6 +69,24 @@ def _build_legacy_keyword_sql(clean: str) -> str:
         return f"(url LIKE '%{escaped}%' OR client_ip LIKE '%{escaped}%')"
 
 
+def _normalize_origin_key(value: str) -> str:
+    return str(value or "").strip().lower().rstrip(".")
+
+
+def is_origin_owned(requested: str, user_domains: List[str]) -> bool:
+    """True only when `requested` is exactly one of the user's domains/IPs.
+
+    2026-09-28: this used to be a two-way substring test
+    (`req in d or d in req`), so a tenant owning "shop.example.com" could ask
+    for origin="example.com" (or "shop.example.co", "e.com", ...) and have
+    the query run as host = '<what they asked for>' -- another tenant's
+    traffic. The origin selector only ever sends a value taken verbatim from
+    the user's own origins, so exact matching costs legitimate use nothing.
+    """
+    req = _normalize_origin_key(requested)
+    return bool(req) and any(req == _normalize_origin_key(d) for d in user_domains or [])
+
+
 def build_tenant_origin_filter(origin: Optional[str], user_domains: List[str], is_admin: bool) -> str:
     """Build a strictly isolated ClickHouse SQL WHERE filter for the current
     tenant/user. Returns "1=0" (matches nothing) rather than "" (matches
@@ -77,10 +95,13 @@ def build_tenant_origin_filter(origin: Optional[str], user_domains: List[str], i
     # 1. If a specific origin was requested
     if origin and str(origin).strip().upper() not in ["ALL", ""]:
         req_clean = str(origin).strip()
-        if not is_admin and user_domains:
-            if not any(req_clean.lower() in d.lower() or d.lower() in req_clean.lower() for d in user_domains):
-                return "1=0"  # Forbidden / not this user's domain
-        return build_domain_pattern_sql(req_clean)
+        # Also covers a user with no domains at all: that used to skip the
+        # check entirely and query whatever origin was asked for.
+        if not is_admin and not is_origin_owned(req_clean, user_domains):
+            return "1=0"  # Forbidden / not this user's domain
+        # Same normalisation as the ownership check and as access_logs.host
+        # (normalize_host drops the root-label dot).
+        return build_domain_pattern_sql(_normalize_origin_key(req_clean))
 
     # 2. "ALL" (or no origin specified)
     if is_admin:
