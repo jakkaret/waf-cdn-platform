@@ -26,7 +26,7 @@ status: VERIFIED
 | JWT HS256 อายุ 60 นาที, Argon2 | `services/auth_service.py:18–75` | VERIFIED |
 | ผู้ใช้คนแรกเป็น admin อัตโนมัติ | `api/auth.py:44–58` | VERIFIED |
 | Log แยก tenant ด้วย `host` แบบ fail closed | `services/tenant_service.py:72–96` | VERIFIED |
-| ช่องโหว่ substring เมื่อ viewer ระบุ origin | `services/tenant_service.py:78–82` | VERIFIED (จากโค้ด) |
+| การตรวจ origin ของ viewer เป็นแบบตรงตัว (แก้จาก substring 2026-09-28) | `services/tenant_service.py::is_origin_owned`, `tests/test_host_attribution.py`, `tests/test_logs_router.py` (722 passed) | VERIFIED |
 | Alert partition ตาม `origin_id`, `unattributed` | `scripts/migrate_alerts_to_origin_key.py`, `telegram_listener.py` | VERIFIED |
 | Telegram ส่งถึงผู้ใช้ทุกคนที่มี chat id | `telegram_listener.py::_get_telegram_users` | VERIFIED |
 | access_logs TTL 30 วัน | `clickhouse_service.py:17,131` | VERIFIED |
