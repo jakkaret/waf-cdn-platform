@@ -68,7 +68,7 @@ zero live TCP/UDP connections to Cloudflare). All four Lab apps now route exclus
 through the WAF-fronted paths (FRP or the custom tunnel protocol). Do not re-enable
 either service without explicit approval — this was a confirmed WAF-bypass path.
 
-## 7. Tenant log isolation: origin ownership used substring matching — FIXED IN CODE 2026-09-28
+## 7. Tenant log isolation: origin ownership used substring matching — RESOLVED 2026-09-28
 
 Found while writing the system manual (docs/backend/12-multi-tenant.md). When a
 non-admin passed an explicit `origin` (`/api/logs`, `/api/logs/recent`,
@@ -85,7 +85,7 @@ root dot ignored; no domains = nothing owned), used by both
 origin selector only sends values taken from the user's own origins, so normal
 use is unchanged. Regression tests in `tests/test_host_attribution.py` and
 `tests/test_logs_router.py`; full suite 722 passed (isolated copy).
-Deployment status: see the commit that closes this entry.
+Deployed to Main 2026-09-28 (commit `0d67633`, `waf-dashboard` restarted, `/api/health` 200).
 
 ## 8. Telegram alerts are broadcast to every linked user — OPEN
 
