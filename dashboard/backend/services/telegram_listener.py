@@ -45,6 +45,24 @@ def _get_telegram_users() -> list:
     return _user_cache
 
 
+def _alert_recipients(users: list, origin: dict) -> list:
+    """Users who may see this alert, i.e. who would see it in the Alert Center.
+
+    Admins get everything (including the admin-only ``unattributed``
+    partition). Otherwise only the origin's owner, editors and viewers.
+    2026-09-28: every user with a chat id used to receive every alert, so
+    tenant A was sent tenant B's IPs, URLs, rules and AI summary even though
+    the stored alert itself is correctly partitioned by origin_id.
+    """
+    allowed = set()
+    if origin:
+        if origin.get("admin_user_id"):
+            allowed.add(origin["admin_user_id"])
+        allowed |= set(origin.get("editor_user_ids") or [])
+        allowed |= set(origin.get("viewer_user_ids") or [])
+    return [u for u in users if u.get("role") == "admin" or u.get("user_id") in allowed]
+
+
 def invalidate_user_cache():
     global _user_cache_ts
     _user_cache_ts = 0.0
@@ -150,6 +168,14 @@ async def dispatch_telegram_alert(data: dict):
         users = await asyncio.to_thread(_get_telegram_users)
         if not users:
             logger.warning("No users registered with telegram_chat_id")
+            return
+
+        origin = {}
+        if origin_id != db.ALERTS_UNATTRIBUTED:
+            origin = await asyncio.to_thread(db.get_origin_by_id, origin_id) or {}
+        users = _alert_recipients(users, origin)
+        if not users:
+            logger.info("No Telegram recipients allowed to see alert for origin %s", origin_id)
             return
 
         # Format beautiful Telegram HTML Message with AI Explanation
