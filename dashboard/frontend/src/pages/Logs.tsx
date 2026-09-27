@@ -76,6 +76,11 @@ export const Logs: React.FC = () => {
   const [severityFilter, setSeverityFilter] = useState('ALL')
   const [selectedLog, setSelectedLog] = useState<WafLog | null>(null)
   const [copiedText, setCopiedText] = useState<string | null>(null)
+  
+  const [explanation, setExplanation] = useState<string | null>(null)
+  const [isExplaining, setIsExplaining] = useState(false)
+  const [maskedPayload, setMaskedPayload] = useState<string | null>(null)
+  const [isMasking, setIsMasking] = useState(false)
   const limit = 20
 
   const { selectedOrigin, selectedOriginLabel, setSelectedOrigin } = useOriginFilterStore()
@@ -108,6 +113,31 @@ export const Logs: React.FC = () => {
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value)
     setPage(1)
+  }
+
+  const handleExplainLog = async (logId: string) => {
+    try {
+      setIsExplaining(true)
+      const res = await logsApi.explainLog(logId)
+      setExplanation(res.explanation || res.analysis || JSON.stringify(res))
+    } catch (err) {
+      toast.error('Failed to generate explanation')
+    } finally {
+      setIsExplaining(false)
+    }
+  }
+
+  const handleMaskPreview = async (logId: string, logUrl: string) => {
+    try {
+      setIsMasking(true)
+      // Sending URL to preview masking
+      const res = await logsApi.maskPreview(logUrl)
+      setMaskedPayload(res.masked_text || res.masked_payload || JSON.stringify(res))
+    } catch (err) {
+      toast.error('Failed to generate mask preview')
+    } finally {
+      setIsMasking(false)
+    }
   }
 
   const handleCopy = (text: string, label: string) => {
@@ -434,7 +464,11 @@ export const Logs: React.FC = () => {
       {/* Log Detail */}
       <Drawer
         open={!!selectedLog}
-        onClose={() => setSelectedLog(null)}
+        onClose={() => {
+          setSelectedLog(null)
+          setExplanation(null)
+          setMaskedPayload(null)
+        }}
         size="lg"
         title={
           <span className="inline-flex items-center gap-2">
@@ -484,6 +518,40 @@ export const Logs: React.FC = () => {
                 <div className="p-2.5 rounded-xl bg-red-950/20 border border-red-500/30 space-y-1 text-[12px]">
                   <span className="text-[10.5px] text-red-400 uppercase font-bold">Triggered ModSecurity Rule</span>
                   <p className="font-bold text-red-300 m-0">Rule ID: {selectedLog.rule_id}</p>
+                </div>
+              )}
+
+              {/* Log Explain & Mask Preview Actions */}
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => handleExplainLog(selectedLog.log_id!)}
+                  disabled={isExplaining}
+                  className="flex-1 py-2 rounded-xl bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 font-bold text-[12px] transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isExplaining ? 'Analyzing...' : 'AI Explain Log'}
+                </button>
+                <button
+                  onClick={() => handleMaskPreview(selectedLog.log_id!, selectedLog.url)}
+                  disabled={isMasking}
+                  className="flex-1 py-2 rounded-xl bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 font-bold text-[12px] transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isMasking ? 'Masking...' : 'PII Mask Preview'}
+                </button>
+              </div>
+
+              {explanation && (
+                <div className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-500/30 space-y-2 text-[12px]">
+                  <span className="text-[10.5px] text-indigo-400 uppercase font-bold">AI Explanation</span>
+                  <p className="text-[var(--text-primary)] m-0 leading-relaxed whitespace-pre-wrap">{explanation}</p>
+                </div>
+              )}
+
+              {maskedPayload && (
+                <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 space-y-2 text-[12px]">
+                  <span className="text-[10.5px] text-emerald-400 uppercase font-bold">Masked Payload Preview</span>
+                  <pre className="text-[var(--text-primary)] m-0 p-2 bg-black/40 rounded-lg overflow-x-auto text-[11px] font-mono whitespace-pre-wrap">
+                    {maskedPayload}
+                  </pre>
                 </div>
               )}
           </div>

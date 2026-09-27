@@ -47,5 +47,15 @@ export const logsApi = {
   getFilterOptions: async (): Promise<LogFilterOptions> => {
     const res = await api.get<LogFilterOptions>('/logs/filters')
     return res.data
+  },
+  explainLog: async (logId: string): Promise<any> => {
+    // GET /api/logs/explain/{log_id}
+    const res = await api.get(`/logs/explain/${logId}`)
+    return res.data
+  },
+  maskPreview: async (text: string): Promise<any> => {
+    // POST /api/logs/mask-preview takes { text: "..." }
+    const res = await api.post('/logs/mask-preview', { text })
+    return res.data
   }
 }

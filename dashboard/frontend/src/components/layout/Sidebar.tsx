@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import {
   LayoutDashboard,
+  Network,
   ShieldAlert,
   ListFilter,
   Bell,
@@ -58,6 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
       label: 'Protection Rules',
       items: [
         { label: 'WAF Rules', path: '/rules', icon: <ShieldAlert size={15} />, roles: ['admin', 'viewer'] },
+        { label: 'API Security (BOLA)', path: '/bola', icon: <Network size={15} />, roles: ['admin', 'viewer'] },
         { label: 'IP Access List', path: '/ip-rules', icon: <Ban size={15} />, roles: ['admin', 'viewer'] },
         { label: 'Rate Limiting', path: '/rate-limits', icon: <Gauge size={15} />, roles: ['admin', 'viewer'] },
         { label: 'ML Anomaly Rules', path: '/ml-rules', icon: <Sparkles size={15} />, roles: ['admin'] },
@@ -68,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
       label: 'Detection & Response',
       items: [
         { label: 'AI Security Analyst', path: '/ml-analyst', icon: <Brain size={15} />, roles: ['admin', 'viewer'] },
+        { label: 'Tuning Proposals', path: '/threshold-proposals', icon: <LayoutDashboard size={15} />, roles: ['admin', 'viewer'] },
         { label: 'Alert Center', path: '/alerts', icon: <Bell size={15} />, roles: ['admin', 'viewer'] },
       ],
     },

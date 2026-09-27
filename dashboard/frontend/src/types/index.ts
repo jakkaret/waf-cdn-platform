@@ -42,6 +42,8 @@ export interface WafRule {
   operator: string
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
   message: string
+  action?: 'BLOCK' | 'CHALLENGE' | 'DECEIVE'
+  deception_template?: 'auto' | 'path_traversal' | 'sqli'
 }
 
 export interface WafAlert {
