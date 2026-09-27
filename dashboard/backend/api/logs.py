@@ -8,7 +8,7 @@ from services.rbac import require_viewer_or_above
 from services.pii_masker import pii_masker, zk_hash
 from services.explainability_service import explainability_service
 from services.fetch_logs import get_recent_logs
-from services.tenant_service import get_user_origins_and_domains
+from services.tenant_service import _normalize_origin_key, get_user_origins_and_domains, is_origin_owned
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 ch = ClickHouseService()
@@ -39,11 +39,12 @@ def _resolve_tenant_domains(current_user: dict, requested_origin: Optional[str])
     # 1. Specific origin requested
     if requested_origin and str(requested_origin).strip().upper() not in ["ALL", ""]:
         req_clean = str(requested_origin).strip()
-        if not is_admin and user_domains:
-            # Check ownership
-            if not any(req_clean.lower() in d.lower() or d.lower() in req_clean.lower() for d in user_domains):
-                return ["__FORBIDDEN_TENANT_DOMAIN__"]
-        return [req_clean]
+        # Exact ownership only, and no domains means nothing is owned (the
+        # old check was a two-way substring match and was skipped entirely
+        # for a user without domains). See tenant_service.is_origin_owned.
+        if not is_admin and not is_origin_owned(req_clean, user_domains):
+            return ["__FORBIDDEN_TENANT_DOMAIN__"]
+        return [_normalize_origin_key(req_clean)]
 
     # 2. 'ALL' selected
     if is_admin:
