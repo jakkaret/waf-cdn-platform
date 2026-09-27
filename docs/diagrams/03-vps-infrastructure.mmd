@@ -1,0 +1,15 @@
+flowchart LR
+  subgraph hz["Hetzner nbg1 — Main 178.104.53.123 (2 vCPU, 3.7 GiB)"]
+    direction TB
+    m1["Docker: caddy, waf-nginx, control-api, clickhouse, redis, dvwa, geodns"]
+    m2["systemd: waf-dashboard, waf-ml, waf-log-analyzer, frps, cloudwaf-tunnel"]
+  end
+  subgraph th["KVM VPS — edge-th 45.154.26.91 (1 vCPU, 1.9 GiB)"]
+    t1["Docker: cdn-caddy-ssl, cdn-edge-node, cdn-log-forwarder"]
+  end
+  subgraph az["Azure — edge-asia 57.158.25.236 (1 vCPU, 893 MiB)"]
+    a1["Docker: cdn-caddy-ssl, cdn-edge-node, cdn-log-forwarder"]
+  end
+  th -->|8080 origin, 8070 rules, 8000 logs| hz
+  az -->|8080 origin, 8070 rules, 8000 logs| hz
+  aws["AWS DynamoDB"] --- hz

@@ -1,0 +1,18 @@
+sequenceDiagram
+  participant C as Client
+  participant EC as Edge Caddy
+  participant EN as Edge nginx + ModSecurity
+  participant MN as Main waf-nginx + ModSecurity
+  participant API as FastAPI /api/deception/respond
+  participant O as Origin
+  C->>EC: HTTPS GET /path?deceive marker
+  EC->>EN: HTTP
+  EN->>EN: rule DECEIVE phase 1 → deny 418
+  EN->>MN: error_page 418 → @deception_via_main (ส่งคำขอเดิมต่อ)
+  MN->>MN: rule เดียวกัน → 418 → @deception
+  MN->>API: internal key, X-Original-URI/Method/Host, X-Request-ID
+  API->>API: classify → เลือก template, บันทึก log (background)
+  API-->>MN: 200 + body สังเคราะห์ + no-store
+  MN-->>EN: 200
+  EN-->>C: 200 (ไม่ถูก cache)
+  Note over O: origin ไม่ถูกเรียกเลย

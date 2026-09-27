@@ -1,0 +1,26 @@
+flowchart TB
+  subgraph main["Main host"]
+    caddy["caddy-ssl-termination :80/:443"]
+    subgraph net["docker network waf_project_waf-net"]
+      waf["waf-nginx :8080"]
+      ctl["waf-control-api :8070"]
+      chdb["waf-clickhouse :8123/:9000"]
+      redis["waf-redis :6379"]
+      dvwa["dvwa :80"]
+    end
+    geodns["geodns :53 (bridge)"]
+    api["waf-dashboard (host) :8000"]
+    mlsvc["waf-ml (host) 127.0.0.1:5000"]
+    frps["frps (host) :7000 / :8085"]
+    cwt["cloudwaf-tunnel (host) :8050 / :8060"]
+  end
+  caddy --> api
+  caddy --> waf
+  waf -->|host.docker.internal:8000| api
+  waf --> dvwa
+  waf -->|172.18.0.1:8085| frps
+  waf -->|172.18.0.1:8060| cwt
+  api --> chdb
+  api --> redis
+  ctl --> redis
+  api --> mlsvc

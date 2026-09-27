@@ -1,0 +1,45 @@
+erDiagram
+  WAF_USERS ||--o{ WAF_ORIGINS : "admin_user_id (owner)"
+  WAF_USERS }o--o{ WAF_ORIGINS : "viewer_user_ids / editor_user_ids"
+  WAF_ORIGINS ||--o{ WAF_DOMAINS : "origin_id"
+  WAF_ORIGINS ||--o{ WAF_ALERTS_V2 : "origin_id (partition)"
+  WAF_DOMAINS ||--o{ ACCESS_LOGS : "domain_name = host"
+  WAF_PENDING_RULES }o--|| WAF_RULES : "approved into"
+  WAF_USERS {
+    string user_id PK
+    string email "EmailIndex"
+    string role "admin / viewer"
+    string telegram_chat_id
+  }
+  WAF_ORIGINS {
+    string id PK
+    string admin_user_id "admin_user_id-index"
+    string status "active / archived"
+    bool is_tunnel
+  }
+  WAF_DOMAINS {
+    string id PK
+    string origin_id "origin_id-index"
+    string domain_name "domain_name-index"
+    bool dns_verified
+  }
+  WAF_ALERTS_V2 {
+    string origin_id PK "or 'unattributed'"
+    string alert_id PK "sort key"
+    string domain
+    string rule_id
+    string severity
+  }
+  WAF_PENDING_RULES {
+    string rule_id PK
+    string created_at PK "sort key"
+    string status "status-index"
+  }
+  ACCESS_LOGS {
+    UUID id
+    DateTime timestamp
+    string client_ip
+    string host
+    string rule_id
+    string attack_type
+  }

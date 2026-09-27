@@ -1,0 +1,15 @@
+flowchart LR
+  internet(("Internet"))
+  internet -->|80/443| edgeTH["edge-th"]
+  internet -->|80/443| edgeAS["edge-asia"]
+  internet -->|80/443 dashboard| mainCaddy["Main Caddy"]
+  internet -->|7000 FRP, 8050 CloudWAF agents| mainTun["Main tunnel servers"]
+  internet -. "8000 เปิดอยู่ (ข้อจำกัด)" .-> mainApi["Main FastAPI"]
+  edgeTH -->|8080| mainWaf["Main waf-nginx"]
+  edgeAS -->|8080| mainWaf
+  edgeTH -->|8070 จำกัด IP| ctl["control-api"]
+  edgeAS -->|8070 จำกัด IP| ctl
+  edgeTH -->|8000 log ingest, TLS ask| mainApi
+  edgeAS -->|8000 log ingest, TLS ask| mainApi
+  originA["Origin agent"] -->|ขาออก 7000 / 8050| mainTun
+  mainWaf --> mainTun

@@ -54,3 +54,8 @@ reports/vuln-scan/
 
 # GeoIP database: an 8 MB monthly download (scripts/update_geoip.py), not source
 dashboard/backend/data/geoip/
+
+# docs site build (docs/site): generated outputs and the node_modules link
+docs/node_modules
+docs/diagrams/rendered/
+docs/site/.vitepress/cache/

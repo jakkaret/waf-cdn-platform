@@ -1,0 +1,16 @@
+sequenceDiagram
+  participant C as Client
+  participant EN as Edge nginx
+  participant K as proxy_cache
+  participant M as Main waf-nginx :8080
+  participant O as Origin
+  C->>EN: GET /page (ผ่าน Caddy)
+  EN->>K: lookup
+  K-->>EN: MISS (หรือ skip: ไม่ใช่ GET/HEAD, มี Authorization, cookie session, มี query)
+  EN->>M: proxy_pass website_origin
+  M->>M: ModSecurity CRS
+  M->>O: tunnel / upstream
+  O-->>M: 200
+  M-->>EN: 200
+  EN->>K: เก็บ 200/301/302 (10 นาที dynamic, 1 ชั่วโมง static) ถ้าไม่ถูก skip
+  EN-->>C: 200 + X-Cache-Status: MISS

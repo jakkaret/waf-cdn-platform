@@ -1,0 +1,11 @@
+sequenceDiagram
+  participant C as Client
+  participant EC as Edge Caddy
+  participant EN as Edge nginx
+  participant K as proxy_cache /var/cache/nginx/edge
+  C->>EC: HTTPS GET /logo.png
+  EC->>EN: HTTP
+  EN->>EN: ModSecurity ผ่าน, rate limit ผ่าน
+  EN->>K: key = host|method|uri+args
+  K-->>EN: HIT
+  EN-->>C: 200 + X-Cache-Status: HIT, X-Edge-Region
