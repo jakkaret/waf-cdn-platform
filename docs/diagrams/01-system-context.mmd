@@ -1,0 +1,9 @@
+flowchart LR
+  user["ผู้ใช้เว็บ / ผู้โจมตี"] -->|HTTPS| platform["WAF + CDN Platform"]
+  owner["เจ้าของเว็บ / Admin"] -->|Dashboard HTTPS| platform
+  platform -->|tunnel หรือ HTTP| origin["Origin ของลูกค้า"]
+  platform -->|Bot API| tg["Telegram"]
+  platform -->|API| gemini["Google Gemini"]
+  platform -->|boto3| ddb["AWS DynamoDB"]
+  platform -->|ACME| le["Let's Encrypt / ZeroSSL"]
+  dns["Hostinger DNS"] -.->|CNAME cdn.waf-it-kku.online| platform

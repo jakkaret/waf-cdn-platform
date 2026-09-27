@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant C as Client
+  participant EN as Edge nginx + ModSecurity
+  participant MN as Main waf-nginx + ModSecurity
+  participant BE as FastAPI workers
+  participant DB as ClickHouse / DynamoDB
+  participant TG as Telegram
+  C->>EN: GET /?file=../../../../etc/passwd
+  EN->>EN: CRS 930xxx +score, 949110 score ≥ 10
+  EN-->>C: 403 (หน้า 403)
+  EN->>BE: log forwarder → /api/cdn/logs/ingest
+  BE->>DB: access_logs (alert=1)
+  BE->>DB: waf_alerts_v2 (origin_id)
+  BE->>TG: แจ้งเตือน + คำอธิบาย Gemini
+  Note over MN: ถ้าคำขอมาถึง Main ตรง (:8080) Main บล็อกเองแบบเดียวกัน

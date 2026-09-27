@@ -1,0 +1,18 @@
+sequenceDiagram
+  participant C as Browser
+  participant MN as Main waf-nginx
+  participant S as control-api /api/shield/access
+  participant R as Redis
+  C->>MN: GET /login (origin เปิด Bot/Login Shield)
+  MN->>S: auth_request (URI, IP, UA, Cookie)
+  S->>R: ตรวจ clearance / นโยบายของ origin
+  S-->>MN: 401 + X-Shield-Type captcha|otp
+  MN-->>C: error_page 401 → /cdn-cgi/challenge (หน้า captcha หรือ OTP)
+  C->>MN: POST /cdn-cgi/challenge/verify หรือ /cdn-cgi/otp/verify
+  MN->>S: proxy
+  S->>R: บันทึก clearance
+  S-->>C: Set-Cookie waf_clearance / waf_otp_clearance + redirect
+  C->>MN: GET /login (มี cookie)
+  MN->>S: auth_request
+  S-->>MN: 200
+  MN->>MN: proxy ไป origin

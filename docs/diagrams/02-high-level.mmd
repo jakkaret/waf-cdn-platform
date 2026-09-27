@@ -1,0 +1,21 @@
+flowchart TB
+  client["Client"] --> dns["DNS: cdn.waf-it-kku.online"]
+  dns --> ecaddy["Edge Caddy (TLS)"]
+  ecaddy --> enginx["cdn-edge-node: nginx + ModSecurity + cache"]
+  enginx -->|HTTP 8080| mnginx["Main waf-nginx: ModSecurity CRS"]
+  mnginx --> decide{"ผลตรวจ"}
+  decide -->|Allow| origin["Origin (FRP / CloudWAF tunnel / lab)"]
+  decide -->|Block 403| block["หน้า 403"]
+  decide -->|Challenge 401| ch["control-api captcha / OTP"]
+  decide -->|Deceive 418| dec["FastAPI /api/deception/respond"]
+  mnginx --> logs["logs/nginx/access.json"]
+  enginx --> fwd["cdn-log-forwarder"]
+  logs --> backend["FastAPI backend"]
+  fwd -->|HTTP 8000| backend
+  backend --> ch_db["ClickHouse"]
+  backend --> ddb["DynamoDB alerts"]
+  ddb --> tg["Telegram"]
+  logs --> analyzer["waf-log-analyzer"] --> ml["waf-ml :5000"]
+  backend -->|"AI Analyst: predict-and-suggest"| ml
+  backend --> pending["waf_pending_rules"] --> admin["Admin อนุมัติ"] --> rules["modsecurity/custom-rules"]
+  rules -->|bundle ทุก 5s| enginx

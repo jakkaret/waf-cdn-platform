@@ -1,0 +1,14 @@
+sequenceDiagram
+  participant U as Browser
+  participant D as Hostinger DNS
+  participant EC as Edge Caddy
+  participant API as Main FastAPI :8000
+  participant CA as Let's Encrypt / ZeroSSL
+  U->>D: shop.example.com?
+  D-->>U: CNAME cdn.waf-it-kku.online → 45.154.26.91
+  U->>EC: TLS ClientHello SNI=shop.example.com
+  EC->>API: GET /api/domains/check-ssl-allowed?domain=shop.example.com
+  API-->>EC: 200 (dns_verified) หรือ 400
+  EC->>CA: ACME ขอใบรับรอง (ครั้งแรก)
+  CA-->>EC: certificate
+  EC-->>U: TLS handshake สำเร็จ

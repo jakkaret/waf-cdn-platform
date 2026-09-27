@@ -1,0 +1,26 @@
+flowchart TB
+  subgraph fastapi["waf-dashboard (FastAPI main.py :8000)"]
+    mw["Middleware: CORS, SecurityHeaders, slowapi"]
+    routers["24 routers: auth, rules, logs, alerts, cdn, origins, domains, tunnels, ml, ml_rules, analytics, ..."]
+    spa["SPA catch-all: dashboard/frontend/dist"]
+    workers["Background tasks: alert_worker, log_forward_worker, dns_verification_worker, ssl_cert_monitor, public_status_history"]
+  end
+  subgraph services["services/"]
+    auth["auth_service + rbac"]
+    tenant["tenant_service"]
+    rulemgr["rule_manager"]
+    logfwd["log_forward / cdn_log_forward"]
+    tg["telegram_listener + gemini_service"]
+    dec["deception_service"]
+    mlrule["ml_rule_service / threshold_proposal_service"]
+  end
+  routers --> services
+  workers --> logfwd
+  logfwd --> ch["ClickHouse"]
+  logfwd --> tg
+  tg --> ddb["DynamoDB"]
+  auth --> ddb
+  tenant --> ddb
+  rulemgr --> files["modsecurity/custom-rules/*.conf"]
+  mlrule --> mlapi["waf-ml :5000"]
+  dec --> ch

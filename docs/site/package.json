@@ -1,0 +1,26 @@
+{
+  "name": "waf-docs-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "ln -sfn site/node_modules ../node_modules",
+    "sync": "node scripts/sync-embeds.mjs",
+    "lint": "node scripts/lint-md.mjs --check",
+    "diagrams": "node scripts/render-diagrams.mjs",
+    "dev": "vitepress dev .",
+    "build": "vitepress build .",
+    "preview": "vitepress preview .",
+    "docx": "node scripts/build-docx.mjs",
+    "pdf": "node scripts/build-pdf.mjs",
+    "all": "npm run sync && npm run lint && npm run diagrams && npm run build && npm run docx && npm run pdf"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.3",
+    "vitepress-plugin-mermaid": "^2.0.17",
+    "mermaid": "^11.4.1",
+    "playwright": "^1.55.0",
+    "docx": "^9.5.1",
+    "marked": "^15.0.7",
+    "gray-matter": "^4.0.3"
+  }
+}

@@ -1,0 +1,17 @@
+flowchart TB
+  C["Client"] --> DNS["Hostinger DNS: CNAME cdn.waf-it-kku.online"]
+  DNS --> EC["edge-th Caddy: TLS on-demand (ask Main :8000)"]
+  EC --> EN["cdn-edge-node: rate limit → ModSecurity → cache"]
+  EN -->|HIT| C
+  EN -->|403 / 429| C
+  EN -->|418| MN
+  EN -->|MISS| MN["Main waf-nginx :8080: ModSecurity → shield/rate limit"]
+  MN -->|403| C
+  MN -->|401| CH["control-api challenge"] --> C
+  MN -->|418| DEC["FastAPI deception"] --> C
+  MN -->|allow| TUN["frps / cloudwaf-tunnel"] --> O["Origin"]
+  EN -.-> LF["log forwarder"] -.-> API["FastAPI :8000"]
+  MN -.-> LOG["access.json + audit.json"] -.-> API
+  API -.-> CHDB["ClickHouse"]
+  API -.-> ALERT["waf_alerts_v2 + Telegram"]
+  CTL["control-api bundle"] -.->|ทุก 5s| EN

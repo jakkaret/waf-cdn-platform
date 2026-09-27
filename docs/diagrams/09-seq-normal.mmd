@@ -1,0 +1,22 @@
+sequenceDiagram
+  participant C as Client
+  participant D as DNS
+  participant EC as Edge Caddy
+  participant EN as Edge nginx
+  participant MN as Main waf-nginx
+  participant S as control-api shield
+  participant T as Tunnel (frps / cloudwaf)
+  participant O as Origin
+  C->>D: resolve shop.example.com
+  D-->>C: CNAME cdn.waf-it-kku.online → edge-th
+  C->>EC: HTTPS
+  EC->>EN: HTTP + security headers
+  EN->>EN: rate limit, ModSecurity (ผ่าน), cache MISS
+  EN->>MN: HTTP :8080 (Host เดิม)
+  MN->>MN: ModSecurity (ผ่าน)
+  MN->>S: auth_request /internal-shield-check
+  S-->>MN: 200 (ไม่ต้อง challenge)
+  MN->>T: proxy_pass
+  T->>O: ผ่าน tunnel ที่ origin เปิดไว้
+  O-->>C: 200 (ย้อนกลับทางเดิม, edge อาจ cache)
+  MN-->>MN: access.json → log_forward → ClickHouse

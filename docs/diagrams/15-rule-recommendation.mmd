@@ -1,0 +1,21 @@
+sequenceDiagram
+  participant U as Analyst UI
+  participant BE as FastAPI
+  participant ML as waf-ml
+  participant DB as waf_pending_rules
+  participant UI as Dashboard
+  participant A as Admin
+  participant RM as rule_manager
+  participant N as waf-nginx
+  participant E as Edges
+  U->>BE: POST /api/ml/predict-and-suggest
+  BE->>ML: /predict แล้ว /generate-rule
+  BE->>DB: create_pending_rule (status=pending)
+  UI->>DB: GET /api/ml-rules
+  A->>UI: ตรวจรายละเอียด / blast radius
+  A->>UI: Approve
+  UI->>RM: POST /api/ml-rules/{id}/approve
+  RM->>RM: write_ml_rule(ml-<id>.conf)
+  RM->>N: nginx -t แล้ว reload (ล้มเหลว = ลบไฟล์)
+  RM->>DB: status=approved, deployed_rule_id
+  E->>E: ดึง bundle จาก control-api ทุก 5s

@@ -1,0 +1,10 @@
+sequenceDiagram
+  participant A as Admin
+  participant API as FastAPI POST /api/cdn/purge
+  participant P as CDN_PURGE_API_URL (ค่าเริ่มต้น localhost:8080)
+  participant E as Edge caches
+  A->>API: url=/path (require_admin)
+  API->>API: ต้องมี CDN_PURGE_TOKEN
+  API->>P: POST /purge
+  Note over P,E: ไม่พบ purge endpoint ที่ edge หรือ Main - การ purge ไม่ถึง edge (PARTIAL)
+  Note over E: cache หมดอายุตาม TTL 10 นาที / 1 ชั่วโมง

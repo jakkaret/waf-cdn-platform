@@ -1,0 +1,14 @@
+flowchart LR
+  log["logs/nginx/access.json"] --> an["waf-log-analyzer tail ทุก 0.5s"]
+  an -->|POST /predict| ml["waf-ml :5000"]
+  an -->|ผิดปกติ: POST /generate-rule| ml
+  an -.->|พิมพ์ผลลง journal เท่านั้น| out["ไม่ได้บันทึกลง DB"]
+  ui["หน้า AI Security Analyst"] -->|POST /api/ml/predict-and-suggest| be["FastAPI"]
+  be -->|/predict| ml
+  ml --> rf["Random Forest ONNX/joblib + Isolation Forest"]
+  be -->|ผิดปกติ: /generate-rule| ml
+  be -->|create_pending_rule| pend["waf_pending_rules status=pending"]
+  admin["Admin หน้า ML Rules"] -->|approve| apply["rule_manager.write_ml_rule"]
+  pend --> admin
+  apply --> conf["custom-rules/ml-*.conf"]
+  conf -->|nginx -t + reload| waf["waf-nginx"]
