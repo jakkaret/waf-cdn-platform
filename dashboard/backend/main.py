@@ -199,6 +199,8 @@ from api import public_status as public_status_api
 from api import onboarding as onboarding_api
 from api import deception as deception_api
 from api import shield_events as shield_events_api
+from api import tenant_rules as tenant_rules_api
+from api import managed_rules as managed_rules_api
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
@@ -218,6 +220,8 @@ app.include_router(public_status_api.router)
 app.include_router(onboarding_api.router)
 app.include_router(deception_api.router)
 app.include_router(shield_events_api.router)
+app.include_router(tenant_rules_api.router)
+app.include_router(managed_rules_api.router)
 
 # Error Handlers
 from fastapi import Request
@@ -300,6 +304,13 @@ async def startup_event():
     if not hasattr(app.state, "shield_events_task"):
         from services.shield_events import shield_events_worker
         app.state.shield_events_task = asyncio.create_task(shield_events_worker(ch))
+    # Managed (central) ruleset: publishes new versions from
+    # modsecurity/managed-rules/ and regenerates managed-00-hostmap.conf /
+    # managed-10-rules.conf on an interval so newly-verified domains and
+    # newly-published rules reach the WAF without a manual step.
+    if not hasattr(app.state, "managed_ruleset_task"):
+        from services.managed_ruleset import managed_ruleset_worker
+        app.state.managed_ruleset_task = asyncio.create_task(managed_ruleset_worker())
 
 
 @app.on_event("shutdown")

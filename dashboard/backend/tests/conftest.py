@@ -104,6 +104,7 @@ from api import origins as origins_module  # noqa: E402
 from api import rules as rules_module  # noqa: E402
 from api import ai_summary as ai_summary_module  # noqa: E402
 from api import domains as domains_module  # noqa: E402
+from api import managed_rules as managed_rules_module  # noqa: E402
 from api import alerts as alerts_module  # noqa: E402
 from api import tunnels as tunnels_module  # noqa: E402
 from api import threat_intel as threat_intel_api_module  # noqa: E402
@@ -469,6 +470,11 @@ def fake_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(rules_module.rule_manager, "rules_dir", str(tmp_path))
     monkeypatch.setattr(rules_module.rule_manager, "test_nginx", lambda: None)
     monkeypatch.setattr(rules_module.rule_manager, "reload_nginx", lambda: None)
+    # api.tenant_rules and api.managed_rules both import this same rule_manager
+    # instance (services/tenant_rules.py, services/managed_ruleset.py), so the
+    # three patches above already cover them -- only their own DynamoDB
+    # singleton needs separate faking.
+    monkeypatch.setattr(managed_rules_module, "_db", FakeDynamoDBService())
 
     # Deception layer: its audit logger lazily builds a real ClickHouseService
     # (production credentials) and DynamoDBService. Without this, every test
