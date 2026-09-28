@@ -124,6 +124,10 @@ export type UserRole = 'admin' | 'viewer'
 export interface Origin {
   origin_id: string
   admin_user_id: string
+  // Additional origin Admins (the stored field keeps its old "editor" name).
+  // Same rights as the creator except the creator can't be removed.
+  editor_user_ids?: string[]
+  viewer_user_ids?: string[]
   label: string
   ip: string
   port: number
