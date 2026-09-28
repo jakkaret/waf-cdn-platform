@@ -19,6 +19,16 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState } from '../components/ui/EmptyState'
 import { DomainSetupWizard } from '../components/DomainSetupWizard'
 import { ShieldActivity } from '../components/ShieldActivity'
+import {
+  ModeSelector,
+  ExcludePathsField,
+  OtpAccessField,
+  ShieldPresets,
+  ShieldPreset,
+  ShieldMode,
+  OtpAccessMode,
+  useShieldImpactCheck,
+} from '../components/ShieldExtras'
 import { toast } from 'react-hot-toast'
 import { WafRule, Domain, CaptchaShieldConfig, OtpShieldConfig } from '../types'
 import { parseListInput, formatListInput } from '../lib/captchaForm'
@@ -66,6 +76,7 @@ export const OriginDetail: React.FC = () => {
     message: string
   }>({ id: '', variable: 'REQUEST_URI', operator: '', severity: 'HIGH', message: '' })
   const queryClient = useQueryClient()
+  const impactCheck = useShieldImpactCheck(id || '')
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['origin', id],
@@ -117,6 +128,8 @@ export const OriginDetail: React.FC = () => {
     bypassIpsText: string
     powDifficulty: number
     clearanceTtl: number
+    mode: ShieldMode
+    excludePathsText: string
   } | null>(null)
   const shieldLoadedFor = React.useRef<string | null>(null)
 
@@ -134,6 +147,8 @@ export const OriginDetail: React.FC = () => {
       bypassIpsText: formatListInput(remoteShieldConfig.bypass_ips),
       powDifficulty: remoteShieldConfig.pow_difficulty,
       clearanceTtl: remoteShieldConfig.clearance_ttl,
+      mode: remoteShieldConfig.mode ?? 'enforce',
+      excludePathsText: formatListInput(remoteShieldConfig.exclude_paths ?? []),
     })
   }, [remoteShieldConfig, id])
 
@@ -158,14 +173,25 @@ export const OriginDetail: React.FC = () => {
       toast.error('Every login path must start with /')
       return
     }
-    saveShieldMutation.mutate({
+    const exclude_paths = parseListInput(shieldForm.excludePathsText)
+    if (exclude_paths.some((p) => !p.startsWith('/'))) {
+      toast.error('Every excluded path must start with /')
+      return
+    }
+    const payload: CaptchaShieldConfig = {
       enabled: shieldForm.enabled,
       engine: shieldForm.engine,
       login_paths,
       bypass_ips: parseListInput(shieldForm.bypassIpsText),
       pow_difficulty: shieldForm.powDifficulty,
       clearance_ttl: shieldForm.clearanceTtl,
-    })
+      mode: shieldForm.mode,
+      exclude_paths,
+    }
+    impactCheck.guard(
+      { kind: 'CAPTCHA', enabled: payload.enabled, mode: payload.mode, login_paths, exclude_paths },
+      () => saveShieldMutation.mutate(payload),
+    )
   }
 
   // OTP Shield -- sibling of the CAPTCHA state above, same shape throughout.
@@ -182,6 +208,10 @@ export const OriginDetail: React.FC = () => {
     codeLength: number
     codeTtl: number
     clearanceTtl: number
+    mode: ShieldMode
+    excludePathsText: string
+    accessMode: OtpAccessMode
+    allowedEmailsText: string
   } | null>(null)
   const otpLoadedFor = React.useRef<string | null>(null)
 
@@ -197,6 +227,10 @@ export const OriginDetail: React.FC = () => {
       codeLength: remoteOtpConfig.code_length,
       codeTtl: remoteOtpConfig.code_ttl,
       clearanceTtl: remoteOtpConfig.clearance_ttl,
+      mode: remoteOtpConfig.mode ?? 'enforce',
+      excludePathsText: formatListInput(remoteOtpConfig.exclude_paths ?? []),
+      accessMode: remoteOtpConfig.access_mode ?? 'open',
+      allowedEmailsText: formatListInput(remoteOtpConfig.allowed_emails ?? []),
     })
   }, [remoteOtpConfig, id])
 
@@ -221,7 +255,17 @@ export const OriginDetail: React.FC = () => {
       toast.error('Every login path must start with /')
       return
     }
-    saveOtpMutation.mutate({
+    const exclude_paths = parseListInput(otpForm.excludePathsText)
+    if (exclude_paths.some((p) => !p.startsWith('/'))) {
+      toast.error('Every excluded path must start with /')
+      return
+    }
+    const allowed_emails = parseListInput(otpForm.allowedEmailsText)
+    if (otpForm.enabled && otpForm.accessMode === 'allowlist' && allowed_emails.length === 0) {
+      toast.error('Add at least one email address or @domain to the allowlist')
+      return
+    }
+    const payload: OtpShieldConfig = {
       enabled: otpForm.enabled,
       login_paths,
       bypass_ips: parseListInput(otpForm.bypassIpsText),
@@ -229,7 +273,45 @@ export const OriginDetail: React.FC = () => {
       code_ttl: otpForm.codeTtl,
       clearance_ttl: otpForm.clearanceTtl,
       channel: 'email',
-    })
+      mode: otpForm.mode,
+      exclude_paths,
+      access_mode: otpForm.accessMode,
+      allowed_emails,
+    }
+    impactCheck.guard(
+      { kind: 'OTP', enabled: payload.enabled, mode: payload.mode, login_paths, exclude_paths },
+      () => saveOtpMutation.mutate(payload),
+    )
+  }
+
+  // Presets only fill the two forms (always in Log only); the Admin still reviews and saves.
+  const [appliedPreset, setAppliedPreset] = useState<string | null>(null)
+  const applyPreset = (p: ShieldPreset) => {
+    setShieldForm((f) =>
+      f
+        ? {
+            ...f,
+            enabled: p.captcha.enabled,
+            loginPathsText: formatListInput(p.captcha.login_paths),
+            excludePathsText: formatListInput(p.captcha.exclude_paths),
+            mode: 'log_only',
+          }
+        : f,
+    )
+    setOtpForm((f) =>
+      f
+        ? {
+            ...f,
+            enabled: p.otp.enabled,
+            loginPathsText: formatListInput(p.otp.login_paths),
+            excludePathsText: formatListInput(p.otp.exclude_paths),
+            accessMode: p.otp.access_mode,
+            clearanceTtl: p.otp.clearance_ttl,
+            mode: 'log_only',
+          }
+        : f,
+    )
+    setAppliedPreset(p.key)
   }
 
   const origin = data?.data || null
@@ -1029,6 +1111,9 @@ export const OriginDetail: React.FC = () => {
               </p>
             </div>
 
+            {shieldForm && otpForm && <ShieldPresets onApply={applyPreset} appliedKey={appliedPreset} />}
+            {impactCheck.dialog}
+
             {captchaLoading || !shieldForm ? (
               <div className="dash-card p-12 text-center text-[var(--text-muted)] font-mono text-[12px]">
                 <RefreshCw size={18} className="animate-spin inline mr-2 text-orange-500" />
@@ -1049,7 +1134,7 @@ export const OriginDetail: React.FC = () => {
                     </div>
                     <div>
                       <p className="font-bold text-[13.5px] text-[var(--text-primary)] font-mono m-0">
-                        {shieldForm.enabled ? 'Shield is active' : 'Shield is off'}
+                        {!shieldForm.enabled ? 'Shield is off' : shieldForm.mode === 'log_only' ? 'Shield is logging only' : 'Shield is active'}
                       </p>
                       <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
                         {shieldForm.enabled
@@ -1101,6 +1186,17 @@ export const OriginDetail: React.FC = () => {
                     onChange={(e) =>
                       setShieldForm((f) => (f ? { ...f, loginPathsText: e.target.value } : f))
                     }
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <ModeSelector
+                    mode={shieldForm.mode}
+                    onChange={(mode) => setShieldForm((f) => (f ? { ...f, mode } : f))}
+                  />
+                  <ExcludePathsField
+                    value={shieldForm.excludePathsText}
+                    onChange={(v) => setShieldForm((f) => (f ? { ...f, excludePathsText: v } : f))}
                   />
                 </div>
 
@@ -1225,7 +1321,7 @@ export const OriginDetail: React.FC = () => {
                     </div>
                     <div>
                       <p className="font-bold text-[13.5px] text-[var(--text-primary)] font-mono m-0">
-                        {otpForm.enabled ? 'OTP Shield is active' : 'OTP Shield is off'}
+                        {!otpForm.enabled ? 'OTP Shield is off' : otpForm.mode === 'log_only' ? 'OTP Shield is logging only' : 'OTP Shield is active'}
                       </p>
                       <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
                         {otpForm.enabled
@@ -1275,6 +1371,24 @@ export const OriginDetail: React.FC = () => {
                     onChange={(e) =>
                       setOtpForm((f) => (f ? { ...f, loginPathsText: e.target.value } : f))
                     }
+                  />
+                </div>
+
+                <OtpAccessField
+                  accessMode={otpForm.accessMode}
+                  allowedText={otpForm.allowedEmailsText}
+                  onModeChange={(accessMode) => setOtpForm((f) => (f ? { ...f, accessMode } : f))}
+                  onAllowedChange={(v) => setOtpForm((f) => (f ? { ...f, allowedEmailsText: v } : f))}
+                />
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <ModeSelector
+                    mode={otpForm.mode}
+                    onChange={(mode) => setOtpForm((f) => (f ? { ...f, mode } : f))}
+                  />
+                  <ExcludePathsField
+                    value={otpForm.excludePathsText}
+                    onChange={(v) => setOtpForm((f) => (f ? { ...f, excludePathsText: v } : f))}
                   />
                 </div>
 
