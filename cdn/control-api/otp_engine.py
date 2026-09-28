@@ -42,6 +42,8 @@ from captcha_engine import _new_challenge
 from captcha_engine import _challenge_html as _captcha_challenge_html
 from ml_policy import ml_access_decision
 from email_sender import send_otp_email
+from captcha_engine import get_config as captcha_get_config
+import shield_events
 
 logger = logging.getLogger(__name__)
 COOKIE_NAME = "waf_otp_clearance"
@@ -134,10 +136,15 @@ def _cookie_valid(request: Request, host: str) -> bool:
         value = jar[COOKIE_NAME].value
     except (KeyError, ValueError):
         return False
-    parts = value.split(".", 2)
-    if len(parts) != 3:
+    # "<expiry>.<host>.<signature>": the host itself contains dots, so split
+    # the expiry off the front and the (hex, dot-free) signature off the end.
+    # split(".", 2) cut the host at its first dot, so no clearance cookie for a
+    # real hostname ever validated and every visitor looped back to the
+    # challenge right after passing it (seen in production 2026-09-29).
+    expiry, _, rest = value.partition(".")
+    cookie_host, _, signature = rest.rpartition(".")
+    if not cookie_host or not signature:
         return False
-    expiry, cookie_host, signature = parts
     if not expiry.isdigit() or int(expiry) <= int(time.time()):
         return False
     if normalize_host(cookie_host) != host:
@@ -150,8 +157,9 @@ def _cookie_valid(request: Request, host: str) -> bool:
 
 
 def access_decision(request: Request) -> str:
+    # All methods except OPTIONS -- see captcha_engine.access_decision.
     original_method = request.headers.get("x-original-method", request.method).upper()
-    if original_method not in {"GET", "HEAD"}:
+    if original_method == "OPTIONS":
         return "allow"
     host = normalize_host(request.headers.get("x-original-host") or request.headers.get("host", ""))
     path = urlsplit(request.headers.get("x-original-uri", "/")).path or "/"
@@ -177,6 +185,31 @@ async def otp_access(request: Request) -> Response:
     return Response(status_code=204)
 
 
+def _deny(request: Request, kind: str) -> Response:
+    """GET/HEAD without clearance -> 401, which nginx turns into the challenge
+    page. Any other method -> 403: a form or API POST can't be answered with an
+    HTML page it will never render, and the request must not reach the origin.
+    nginx serves its normal 403 page for it (same path as a ModSecurity block)."""
+    method = request.headers.get("x-original-method", request.method).upper()
+    host = normalize_host(request.headers.get("x-original-host") or request.headers.get("host", ""))
+    path = urlsplit(request.headers.get("x-original-uri", "/")).path or "/"
+    config, client = (captcha_get_config if kind == "captcha" else get_config)(host)
+    blocked = method not in {"GET", "HEAD"}
+    shield_events.record(
+        client, kind=kind, event="blocked_no_clearance" if blocked else "challenge_shown",
+        host=host, origin_id=config.get("origin_id", ""), client_ip=client_ip(request), path=path,
+    )
+    if blocked:
+        return Response(
+            status_code=403,
+            headers={"X-Shield-Type": f"{kind}-required", "Cache-Control": "no-store"},
+        )
+    return Response(
+        status_code=401,
+        headers={"X-Shield-Type": kind, "Cache-Control": "no-store"},
+    )
+
+
 async def shield_access(request: Request) -> Response:
     # Combined captcha+OTP gate for nginx's auth_request.
     #
@@ -193,15 +226,9 @@ async def shield_access(request: Request) -> Response:
     # (via auth_request_set + proxy_set_header) to the single challenge-page
     # route, which reads it and renders the right page.
     if captcha_access_decision(request) == "challenge":
-        return Response(
-            status_code=401,
-            headers={"X-Shield-Type": "captcha", "Cache-Control": "no-store"},
-        )
+        return _deny(request, "captcha")
     if access_decision(request) == "challenge":
-        return Response(
-            status_code=401,
-            headers={"X-Shield-Type": "otp", "Cache-Control": "no-store"},
-        )
+        return _deny(request, "otp")
     # Gen3 roadmap 1.3: third branch, ML-driven. No-op ("pass" always,
     # immediately, no HTTP call) unless a human has enabled enforcement in
     # Settings -- see ml_policy.py's module docstring. "block" reuses 403,
@@ -272,7 +299,13 @@ async def request_code(request: Request, payload: OtpRequestPayload) -> Response
         return JSONResponse({"success": False, "error": "OTP not enabled for this site"}, status_code=404)
 
     address = client_ip(request)
+
+    def event(name: str) -> None:
+        shield_events.record(client, kind="otp", event=name, host=host,
+                             origin_id=config.get("origin_id", ""), client_ip=address, email=payload.email)
+
     if _request_rate_limited(client, address, payload.email):
+        event("otp_rate_limited")
         return JSONResponse({"success": False, "error": "too many requests, try again later"}, status_code=429)
 
     code_length = max(4, min(8, int(config.get("code_length", DEFAULT_CODE_LENGTH))))
@@ -291,12 +324,14 @@ async def request_code(request: Request, payload: OtpRequestPayload) -> Response
 
     sent = send_otp_email(payload.email, code)
     if not sent:
+        event("otp_send_failed")
         # Fail loud rather than claiming success with nowhere for the code
         # to actually go -- SMTP is not configured on this deployment yet.
         return JSONResponse(
             {"success": False, "error": "could not send verification email -- try again later"},
             status_code=502,
         )
+    event("otp_requested")
     return JSONResponse({"success": True, "challenge_id": challenge_id})
 
 
@@ -308,10 +343,19 @@ async def verify_code(request: Request, payload: OtpVerifyPayload) -> Response:
     host = normalize_host(payload.host)
     address = client_ip(request)
     key = f"waf:otp:challenge:{payload.challenge_id}"
+    config, _ = get_config(host, client)
+    record: dict = {}
+
+    def event(name: str) -> None:
+        # The email comes from the stored challenge, never from this request.
+        shield_events.record(client, kind="otp", event=name, host=host,
+                             origin_id=config.get("origin_id", ""), client_ip=address,
+                             email=str(record.get("email", "")))
 
     try:
         raw = client.get(key)
         if not raw:
+            event("otp_expired")
             return JSONResponse({"success": False, "error": "code expired"}, status_code=400)
         record = json.loads(raw)
     except Exception as exc:
@@ -323,11 +367,13 @@ async def verify_code(request: Request, payload: OtpVerifyPayload) -> Response:
         or record.get("ip_subnet") != subnet_identity(address)
         or record.get("ua_digest") != hashlib.sha256(user_agent(request).encode("utf-8", "ignore")).hexdigest()
     ):
+        event("otp_context_mismatch")
         return JSONResponse({"success": False, "error": "verification context mismatch"}, status_code=400)
 
     attempts = int(record.get("attempts", 0)) + 1
     if attempts > MAX_VERIFY_ATTEMPTS:
         client.delete(key)
+        event("otp_too_many_attempts")
         return JSONResponse({"success": False, "error": "too many attempts, request a new code"}, status_code=429)
 
     submitted_hash = hashlib.sha256(re.sub(r"\s+", "", payload.code).encode()).hexdigest()
@@ -335,10 +381,11 @@ async def verify_code(request: Request, payload: OtpVerifyPayload) -> Response:
         record["attempts"] = attempts
         ttl = client.ttl(key)
         client.setex(key, max(1, ttl), json.dumps(record, separators=(",", ":")))
+        event("otp_wrong_code")
         return JSONResponse({"success": False, "error": "incorrect code"}, status_code=400)
 
     client.delete(key)
-    config, _ = get_config(host, client)
+    event("otp_verified")
     ttl = max(900, min(43200, int(config.get("clearance_ttl", DEFAULT_CLEARANCE_TTL))))
     expiry = int(time.time()) + ttl
     message = "\x1f".join([subnet_identity(address), user_agent(request), host, str(expiry)])
