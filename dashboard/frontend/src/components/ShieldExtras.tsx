@@ -241,3 +241,39 @@ export function useShieldImpactCheck(originId: string) {
   )
   return { guard, dialog }
 }
+
+// ------------------------------------------------------------- OTP timing
+
+export interface TimeOption {
+  value: number // seconds
+  label: string
+}
+
+// Ranges match the backend (api/origins.py OtpShieldConfig) and control-api.
+export const OTP_CODE_TTL_OPTIONS: TimeOption[] = [
+  { value: 60, label: '1 minute' },
+  { value: 120, label: '2 minutes' },
+  { value: 300, label: '5 minutes' },
+  { value: 600, label: '10 minutes' },
+  { value: 900, label: '15 minutes' },
+  { value: 1800, label: '30 minutes' },
+]
+
+export const OTP_CLEARANCE_OPTIONS: TimeOption[] = [
+  { value: 900, label: '15 minutes' },
+  { value: 3600, label: '1 hour' },
+  { value: 4 * 3600, label: '4 hours' },
+  { value: 8 * 3600, label: '8 hours (a work day)' },
+  { value: 12 * 3600, label: '12 hours' },
+  { value: 86400, label: '1 day' },
+  { value: 3 * 86400, label: '3 days' },
+  { value: 7 * 86400, label: '7 days' },
+  { value: 30 * 86400, label: '30 days' },
+]
+
+/** Keep a saved value that isn't one of the presets selectable (shown as-is). */
+export function withCurrent(options: TimeOption[], current: number): TimeOption[] {
+  if (options.some((o) => o.value === current)) return options
+  const label = current % 3600 === 0 ? `${current / 3600} hours` : `${Math.round(current / 60)} minutes`
+  return [...options, { value: current, label: `${label} (current)` }].sort((a, b) => a.value - b.value)
+}
