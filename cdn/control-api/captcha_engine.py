@@ -152,10 +152,15 @@ def _cookie_valid(request: Request, host: str) -> bool:
         value = jar[COOKIE_NAME].value
     except (KeyError, ValueError):
         return False
-    parts = value.split(".", 2)
-    if len(parts) != 3:
+    # "<expiry>.<host>.<signature>": the host itself contains dots, so split
+    # the expiry off the front and the (hex, dot-free) signature off the end.
+    # split(".", 2) cut the host at its first dot, so no clearance cookie for a
+    # real hostname ever validated and every visitor looped back to the
+    # challenge right after passing it (seen in production 2026-09-29).
+    expiry, _, rest = value.partition(".")
+    cookie_host, _, signature = rest.rpartition(".")
+    if not cookie_host or not signature:
         return False
-    expiry, cookie_host, signature = parts
     if not expiry.isdigit() or int(expiry) <= int(time.time()):
         return False
     if normalize_host(cookie_host) != host:
@@ -168,8 +173,15 @@ def _cookie_valid(request: Request, host: str) -> bool:
 
 
 def access_decision(request: Request) -> str:
+    # Every method is gated, not only GET/HEAD: the old GET/HEAD-only check let a
+    # script POST credentials straight to a protected login path without ever
+    # seeing the challenge (found 2026-09-29: POST to a protected path returned
+    # 200 with no clearance cookie). shield_access answers non-GET requests with
+    # a plain 403 instead of the HTML page. OPTIONS stays open: a CORS preflight
+    # never carries cookies, so gating it would break a browser that already
+    # holds clearance.
     original_method = request.headers.get("x-original-method", request.method).upper()
-    if original_method not in {"GET", "HEAD"}:
+    if original_method == "OPTIONS":
         return "allow"
     host = normalize_host(request.headers.get("x-original-host") or request.headers.get("host", ""))
     path = urlsplit(request.headers.get("x-original-uri", "/")).path or "/"

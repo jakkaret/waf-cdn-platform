@@ -8,6 +8,7 @@ COPY captcha_engine.py ./
 COPY otp_engine.py ./
 COPY email_sender.py ./
 COPY ml_policy.py ./
+COPY shield_events.py ./
 
 EXPOSE 8070
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8070"]
