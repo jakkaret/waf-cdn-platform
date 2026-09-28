@@ -3,6 +3,7 @@ modsecurity/managed-rules/ (see services/managed_ruleset.py), scoped per
 origin via managed-00-hostmap.conf. No one can edit it through the API -- an
 origin's Admin can only choose auto/manual and, in manual mode, which
 published version to run, or ask for a check-now (platform admin)."""
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,7 +44,10 @@ async def set_mode(origin_id: str, body: ModeUpdate, origin: dict = Depends(veri
     if not _db.update_origin(origin_id, update):
         raise HTTPException(status_code=500, detail="failed to save origin setting")
     try:
-        mr.apply(_rule_manager, _db)
+        # apply() blocks on file I/O, a DynamoDB scan, and a docker-exec'd
+        # nginx -t/reload -- keep it off the event loop so it doesn't stall
+        # every other request this process is serving meanwhile.
+        await asyncio.to_thread(mr.apply, _rule_manager, _db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"setting saved but the WAF reload failed: {e}")
     return mr.status_for_origin(_db.get_origin_by_id(origin_id), catalog)
@@ -58,7 +62,7 @@ async def update_to_latest(origin_id: str, origin: dict = Depends(verify_origin_
     if not _db.update_origin(origin_id, {"managed_ruleset_version": latest}):
         raise HTTPException(status_code=500, detail="failed to save origin setting")
     try:
-        mr.apply(_rule_manager, _db)
+        await asyncio.to_thread(mr.apply, _rule_manager, _db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"version saved but the WAF reload failed: {e}")
     return mr.status_for_origin(_db.get_origin_by_id(origin_id), catalog)
@@ -79,13 +83,13 @@ async def publish_now(current_user: dict = Depends(require_admin)):
     version immediately, instead of waiting for the update worker's next
     tick. No-op (returns published: false) when the source hasn't changed."""
     try:
-        entry = mr.publish()
+        entry = await asyncio.to_thread(mr.publish)
     except mr.ManagedRulesetError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if entry is None:
         return {"published": False}
     try:
-        mr.apply(_rule_manager, _db)
+        await asyncio.to_thread(mr.apply, _rule_manager, _db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"published v{entry['version']} but the WAF reload failed: {e}")
     return {"published": True, "version": entry}

@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from services.rule_manager import escape_secrule_message, escape_secrule_string
+from services.rule_manager import escape_secrule_message
 from services.safe_regex import validate_regex_safety
 
 TENANT_ID_MIN, TENANT_ID_MAX = 2_000_000, 2_999_999
@@ -84,6 +84,12 @@ def validate(rule: dict) -> dict:
         raise TenantRuleError(f"message is required (max {MAX_MESSAGE_LENGTH} characters)")
     if _CONTROL.search(operator) or _CONTROL.search(message):
         raise TenantRuleError("line breaks and control characters are not allowed")
+    # render() escapes only `"` (as `\"`). libmodsecurity 3.0.16 treats a backslash
+    # pair as a unit when looking for the closing quote but does NOT unescape it, so
+    # a backslash directly before a quote (or ending the value) would either close
+    # the operator early or swallow the closing quote -- refuse those.
+    if value.endswith("\\") or '\\"' in value:
+        raise TenantRuleError('a backslash cannot be directly before a double quote or end the value')
     if op == "@rx":
         ok, reason = validate_regex_safety(value)
         if not ok:
@@ -128,7 +134,17 @@ def render(rule_id: int, origin_id: str, rule: dict) -> str:
         f'SecRule TX:waf_origin_id "@streq {origin_id}" '
         f'"id:{rule_id},{head},severity:{sev},msg:\'{msg}\',{tags},chain"'
     )
-    lines.append(f'    SecRule {rule["variable"]} "{escape_secrule_string(rule["operator"], chr(34))}"')
+    # The chained link needs an explicit actions string. Without one, libmodsecurity
+    # keeps "expecting an action" past the end of this file and, since every file in
+    # /opt/custom-rules is fed to one parser, swallows the next file's first line (its
+    # "# META" comment) as the action list -> "Expecting an action, got: # META ..." and
+    # nginx -t fails for the whole WAF. A single file passes on its own, so unit tests
+    # can't see it; found by loading several tenant files together in a real container.
+    # Only `"` is escaped: backslashes must reach the engine untouched, or a regex
+    # like union\\s+select arrives as the literal text `union\\\\s+select` (checked
+    # against libmodsecurity 3.0.16: `\\s` is not unescaped inside an operator string).
+    operator = rule["operator"].replace('"', '\\"')
+    lines.append(f'    SecRule {rule["variable"]} "{operator}" "t:none"')
     return "\n".join(lines) + "\n"
 
 

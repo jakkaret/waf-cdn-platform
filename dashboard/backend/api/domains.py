@@ -15,6 +15,13 @@ from services.dns_service import verify_domain_dns
 router = APIRouter(prefix="/api/domains", tags=["Domains"])
 db = DynamoDBService()
 
+# asyncio only holds a *weak* reference to a task created by create_task --
+# with nothing else referencing it, the task object can be garbage-collected
+# mid-run before it finishes. Keeping a strong reference here (discarded via
+# the done callback) is the standard workaround.
+# https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
+_background_tasks: set = set()
+
 
 def _refresh_managed_hostmap() -> None:
     """Best-effort: regenerate managed-00-hostmap.conf right away instead of
@@ -27,11 +34,16 @@ def _refresh_managed_hostmap() -> None:
         try:
             import services.managed_ruleset as mr
             from api.rules import rule_manager  # shared singleton -- same one every other writer uses
-            mr.apply(rule_manager, db)
+            # apply() does blocking file I/O, a DynamoDB scan, and a
+            # docker-exec'd nginx -t/reload -- run it off the event loop so
+            # it doesn't stall every other request this process is serving.
+            await asyncio.to_thread(mr.apply, rule_manager, db)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning("managed hostmap refresh after domain change failed: %s", exc)
-    asyncio.create_task(_run())
+    task = asyncio.create_task(_run())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 # Ruling R7 (task-11-brief.md): domain_name flows into tenant_service's
 # ClickHouse LIKE patterns (services/tenant_service.py -> api/analytics.py's

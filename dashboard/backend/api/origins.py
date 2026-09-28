@@ -278,6 +278,11 @@ async def update_origin(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+# See the identical set in api/domains.py: without a strong reference, a
+# create_task()'d task can be garbage-collected mid-run.
+_background_tasks: set = set()
+
+
 def _refresh_managed_hostmap() -> None:
     """Best-effort, non-blocking: an archived/restored origin's hosts drop
     out of (or return to) managed-00-hostmap.conf, so re-render it now
@@ -287,11 +292,15 @@ def _refresh_managed_hostmap() -> None:
         try:
             import services.managed_ruleset as mr
             from api.rules import rule_manager  # shared singleton -- same one every other writer uses
-            mr.apply(rule_manager, origin_service.db)
+            # apply() blocks on file I/O, a DynamoDB scan, and a docker-exec'd
+            # nginx -t/reload -- keep it off the event loop.
+            await asyncio.to_thread(mr.apply, rule_manager, origin_service.db)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning("managed hostmap refresh after origin change failed: %s", exc)
-    asyncio.create_task(_run())
+    task = asyncio.create_task(_run())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 @router.delete("/{origin_id}")

@@ -162,7 +162,15 @@ class MitigateCandidateRequest(BaseModel):
 # ==========================================
 
 @router.get("/")
-async def get_rules(current_user: dict = Depends(require_viewer_or_above)):
+async def get_rules(current_user: dict = Depends(require_admin)):
+    # Legacy global custom rules (custom-*.conf) apply to *every* origin on
+    # the WAF -- unlike managed rules (versioned, published from source) and
+    # tenant rules (scoped to one origin via tx.waf_origin_id), there is no
+    # per-origin ownership here to filter by. Any signed-in platform viewer
+    # could see every dashboard-authored rule regardless of which origin(s)
+    # they actually have access to; restricting to platform admin closes
+    # that gap (access-control audit, 2026-09-28). New rule types should go
+    # through api/managed_rules.py or api/tenant_rules.py instead of here.
     try:
         rules = rule_manager.list_rules()
         return {"rules": rules}
