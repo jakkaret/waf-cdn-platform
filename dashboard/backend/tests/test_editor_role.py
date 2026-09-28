@@ -111,16 +111,19 @@ def test_owner_passes_ownership_check(fake_get_origin):
     assert result["id"] == "origin-1"
 
 
-def test_an_editor_is_refused_the_ownership_only_check(fake_get_origin):
-    """The test advisor asked for explicitly: an editor must be refused on
-    delete/restore/viewer-management/editor-management -- Team Workspace
-    granting write access to *some* endpoints must never silently widen
-    the owner-only gate on the destructive ones. This is the test that
-    fails loudly if verify_origin_ownership were ever swapped out for
-    verify_origin_edit_access on one of those endpoints by mistake."""
+def test_an_editor_is_an_origin_admin(fake_get_origin):
+    """2026-09-28: origins have exactly two roles, Admin and Viewer. A user in
+    editor_user_ids is an Admin and passes the admin check (it used to be
+    creator-only)."""
+    fake_get_origin(_origin(admin="u1", editors=["u3"]))
+    result = rbac_module.verify_origin_ownership("origin-1", current_user={"user_id": "u3"})
+    assert result["id"] == "origin-1"
+
+
+def test_a_stranger_is_refused_the_admin_check(fake_get_origin):
     fake_get_origin(_origin(admin="u1", editors=["u3"]))
     with pytest.raises(HTTPException) as exc:
-        rbac_module.verify_origin_ownership("origin-1", current_user={"user_id": "u3"})
+        rbac_module.verify_origin_ownership("origin-1", current_user={"user_id": "u9"})
     assert exc.value.status_code == 403
 
 

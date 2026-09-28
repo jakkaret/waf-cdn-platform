@@ -393,6 +393,10 @@ async def remove_origin_editor(
     origin: dict = Depends(verify_origin_ownership),
     current_user: dict = Depends(get_current_user),
 ):
+    if editor_user_id == origin.get("admin_user_id"):
+        # The creator is the Admin that can never be removed, so an origin
+        # can never end up without one.
+        raise HTTPException(status_code=400, detail="The origin's creator cannot be removed")
     success = origin_service.db.remove_origin_editor(origin.get("id"), editor_user_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to remove editor")
