@@ -6,7 +6,7 @@ import uuid
 from services.gemini_service import gemini_service
 from services.clickhouse_service import ClickHouseService
 from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
-from services.rbac import get_current_user, verify_origin_ownership
+from services.rbac import get_current_user, verify_origin_access, verify_origin_ownership
 from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter, build_domain_pattern_sql
 from services import audit_log
 import logging
@@ -531,7 +531,7 @@ async def create_postmortem(
 
 @router.get("/postmortems/{origin_id}")
 async def list_postmortems(
-    origin: dict = Depends(verify_origin_ownership),
+    origin: dict = Depends(verify_origin_access),  # Admins and Viewers may read
 ):
     """No range key on waf_postmortems (HASH=id only) -- scan + filter +
     Python-side sort, the same shape services/audit_log.py's get_audit_log
@@ -577,7 +577,7 @@ async def list_postmortems(
 @router.get("/postmortems/{origin_id}/{postmortem_id}")
 async def get_postmortem(
     postmortem_id: str,
-    origin: dict = Depends(verify_origin_ownership),
+    origin: dict = Depends(verify_origin_access),
 ):
     try:
         item = db.postmortems_table.get_item(Key={"id": postmortem_id}).get("Item")

@@ -84,7 +84,7 @@ def test_owner_can_create_list_and_get_a_postmortem(client, register_user, auth_
     assert resp.json()["postmortem"]["id"] == pm_id
 
 
-def test_editor_viewer_and_stranger_cannot_create_a_postmortem(
+def test_postmortem_roles_admin_writes_viewer_reads_stranger_nothing(
     client, register_user, auth_header, fake_narrative,
 ):
     owner = register_user(email="pm-owner2@example.com", username="pm_owner2")
@@ -101,13 +101,15 @@ def test_editor_viewer_and_stranger_cannot_create_a_postmortem(
     client.post(f"/api/origins/{origin_id}/viewers", json={"email": "pm-viewer2@example.com"}, headers=owner_h)
 
     body = {"start_time": "2026-09-22 00:00:00", "end_time": "2026-09-22 06:00:00"}
-    for h in (editor_h, viewer_h, stranger_h):
-        resp = client.post(f"/api/ai/postmortems/{origin_id}", json=body, headers=h)
-        assert resp.status_code == 403
+    # An origin Admin (stored as editor) may create one; Viewers and strangers may not.
+    assert client.post(f"/api/ai/postmortems/{origin_id}", json=body, headers=editor_h).status_code == 200
+    for h in (viewer_h, stranger_h):
+        assert client.post(f"/api/ai/postmortems/{origin_id}", json=body, headers=h).status_code == 403
 
-    for h in (editor_h, viewer_h, stranger_h):
-        resp = client.get(f"/api/ai/postmortems/{origin_id}", headers=h)
-        assert resp.status_code == 403
+    # Reading is for anyone on the origin; strangers still get nothing.
+    for h in (editor_h, viewer_h):
+        assert client.get(f"/api/ai/postmortems/{origin_id}", headers=h).status_code == 200
+    assert client.get(f"/api/ai/postmortems/{origin_id}", headers=stranger_h).status_code == 403
 
 
 def test_a_gemini_failure_still_persists_and_returns_the_timeline(
