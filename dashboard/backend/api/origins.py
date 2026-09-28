@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 import ipaddress
-from pydantic import BaseModel, Field, field_validator
+import re
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Literal, Optional
 from services.rbac import get_current_user, verify_origin_ownership, verify_origin_access, verify_origin_edit_access
 import services.origin_service as origin_service
@@ -45,6 +46,9 @@ class OriginUpdate(BaseModel):
             cleaned.append(v)
         return cleaned
 
+_ALLOWED_EMAIL_RE = re.compile(r"^([a-z0-9._%+'-]+)?@[a-z0-9-]+(\.[a-z0-9-]+)+$")
+
+
 class OriginViewerGrant(BaseModel):
     email: str
 class CaptchaShieldConfig(BaseModel):
@@ -54,6 +58,18 @@ class CaptchaShieldConfig(BaseModel):
     clearance_ttl: int = Field(default=3600, ge=900, le=43200)
     bypass_ips: List[str] = Field(default_factory=list)
     pow_difficulty: int = Field(default=3, ge=1, le=5)
+    mode: Literal["enforce", "log_only"] = "enforce"
+    exclude_paths: List[str] = Field(default_factory=list)
+
+    @field_validator("exclude_paths")
+    @classmethod
+    def validate_exclude_paths(cls, values):
+        if len(values) > 20:
+            raise ValueError("exclude_paths can contain at most 20 paths")
+        for value in values:
+            if not isinstance(value, str) or not value.startswith("/") or len(value) > 200:
+                raise ValueError("exclude_paths must be absolute paths")
+        return [value.strip() for value in values]
 
     @field_validator("login_paths")
     @classmethod
@@ -86,6 +102,43 @@ class OtpShieldConfig(BaseModel):
     # cdn/control-api/email_sender.py); the field is here so the UI/API
     # contract doesn't need to change shape when a second channel ships.
     channel: Literal["email"] = "email"
+    mode: Literal["enforce", "log_only"] = "enforce"
+    exclude_paths: List[str] = Field(default_factory=list)
+    access_mode: Literal["open", "allowlist"] = "open"
+    allowed_emails: List[str] = Field(default_factory=list)
+
+    @field_validator("exclude_paths")
+    @classmethod
+    def validate_exclude_paths(cls, values):
+        if len(values) > 20:
+            raise ValueError("exclude_paths can contain at most 20 paths")
+        for value in values:
+            if not isinstance(value, str) or not value.startswith("/") or len(value) > 200:
+                raise ValueError("exclude_paths must be absolute paths")
+        return [value.strip() for value in values]
+
+    @field_validator("allowed_emails")
+    @classmethod
+    def validate_allowed_emails(cls, values):
+        if len(values) > 200:
+            raise ValueError("allowed_emails can contain at most 200 entries")
+        cleaned = []
+        for value in values:
+            entry = str(value).strip().lower()
+            if not entry:
+                continue
+            # "@kku.ac.th" (a whole domain) or "name@gmail.com" (one address)
+            if not _ALLOWED_EMAIL_RE.match(entry):
+                raise ValueError(f"not an email address or @domain: {value}")
+            if entry not in cleaned:
+                cleaned.append(entry)
+        return cleaned
+
+    @model_validator(mode="after")
+    def allowlist_needs_entries(self):
+        if self.enabled and self.access_mode == "allowlist" and not self.allowed_emails:
+            raise ValueError("allowlist mode needs at least one email address or @domain")
+        return self
 
     @field_validator("login_paths")
     @classmethod

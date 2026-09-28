@@ -87,7 +87,34 @@ def _default_config(host: str = "") -> dict:
         "code_length": DEFAULT_CODE_LENGTH,
         "code_ttl": DEFAULT_CODE_TTL,
         "channel": "email",
+        "mode": "enforce",          # or "log_only" -- see captcha_engine._default_config
+        "exclude_paths": [],
+        # "open": any inbox that can receive the code passes (bot friction).
+        # "allowlist": only allowed_emails -- exact addresses or "@domain.com".
+        "access_mode": "open",
+        "allowed_emails": [],
     }
+
+
+def email_allowed(config: dict, email: str) -> bool:
+    if config.get("access_mode") != "allowlist":
+        return True
+    email = (email or "").strip().lower()
+    if "@" not in email:
+        return False
+    for entry in config.get("allowed_emails") or []:
+        entry = str(entry).strip().lower()
+        if not entry:
+            continue
+        if entry.startswith("@") and email.endswith(entry):
+            return True
+        if entry == email:
+            return True
+    return False
+
+
+def _session_key(sid: str) -> str:
+    return f"waf:otp:session:{sid}"
 
 
 def get_config(host: str, client=None) -> tuple[dict, object | None]:
@@ -129,7 +156,7 @@ def _is_bypassed(address: str, bypass_ips: list[str]) -> bool:
     return False
 
 
-def _cookie_valid(request: Request, host: str) -> bool:
+def _cookie_valid(request: Request, host: str, config: dict | None = None, client=None) -> bool:
     jar = SimpleCookie()
     try:
         jar.load(request.headers.get("cookie", ""))
@@ -141,19 +168,36 @@ def _cookie_valid(request: Request, host: str) -> bool:
     # split(".", 2) cut the host at its first dot, so no clearance cookie for a
     # real hostname ever validated and every visitor looped back to the
     # challenge right after passing it (seen in production 2026-09-29).
+    # "<expiry>.<host>.<session id>.<signature>" -- host has dots, the other
+    # three parts never do.
     expiry, _, rest = value.partition(".")
-    cookie_host, _, signature = rest.rpartition(".")
-    if not cookie_host or not signature:
+    rest, _, signature = rest.rpartition(".")
+    cookie_host, _, sid = rest.rpartition(".")
+    if not cookie_host or not sid or not signature:
         return False
     if not expiry.isdigit() or int(expiry) <= int(time.time()):
         return False
     if normalize_host(cookie_host) != host:
         return False
-    message = "\x1f".join([subnet_identity(client_ip(request)), user_agent(request), host, expiry])
+    message = "\x1f".join([subnet_identity(client_ip(request)), user_agent(request), host, expiry, sid])
     expected = hmac.new(
         HMAC_SECRET.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
     ).hexdigest()
-    return hmac.compare_digest(signature, expected)
+    if not hmac.compare_digest(signature, expected):
+        return False
+    if (config or {}).get("access_mode") == "allowlist":
+        # Re-check the verified email against the *current* list on every
+        # request, so removing someone takes effect immediately instead of
+        # when their cookie expires.
+        try:
+            raw = client.get(_session_key(sid)) if client is not None else None
+            session = json.loads(raw) if raw else None
+        except Exception:
+            return False
+        if not session or session.get("host") != host:
+            return False
+        return email_allowed(config, session.get("email", ""))
+    return True
 
 
 def access_decision(request: Request) -> str:
@@ -168,9 +212,11 @@ def access_decision(request: Request) -> str:
         return "allow"
     if not _matches_path(path, config.get("login_paths", DEFAULT_PATHS)):
         return "allow"
+    if _matches_path(path, config.get("exclude_paths") or []):
+        return "allow"
     if _is_bypassed(client_ip(request), config.get("bypass_ips", [])):
         return "allow"
-    return "allow" if _cookie_valid(request, host) else "challenge"
+    return "allow" if _cookie_valid(request, host, config, client) else "challenge"
 
 
 async def otp_access(request: Request) -> Response:
@@ -185,20 +231,30 @@ async def otp_access(request: Request) -> Response:
     return Response(status_code=204)
 
 
-def _deny(request: Request, kind: str) -> Response:
+def _deny(request: Request, kind: str) -> Response | None:
     """GET/HEAD without clearance -> 401, which nginx turns into the challenge
     page. Any other method -> 403: a form or API POST can't be answered with an
     HTML page it will never render, and the request must not reach the origin.
-    nginx serves its normal 403 page for it (same path as a ModSecurity block)."""
+    nginx serves its normal 403 page for it (same path as a ModSecurity block).
+
+    In log_only mode the event is recorded as what *would* have happened and
+    None is returned: the request goes through (and the next gate is still
+    checked)."""
     method = request.headers.get("x-original-method", request.method).upper()
     host = normalize_host(request.headers.get("x-original-host") or request.headers.get("host", ""))
     path = urlsplit(request.headers.get("x-original-uri", "/")).path or "/"
     config, client = (captcha_get_config if kind == "captcha" else get_config)(host)
     blocked = method not in {"GET", "HEAD"}
+    log_only = config.get("mode") == "log_only"
+    event = "blocked_no_clearance" if blocked else "challenge_shown"
+    if log_only:
+        event = "would_block" if blocked else "would_challenge"
     shield_events.record(
-        client, kind=kind, event="blocked_no_clearance" if blocked else "challenge_shown",
+        client, kind=kind, event=event,
         host=host, origin_id=config.get("origin_id", ""), client_ip=client_ip(request), path=path,
     )
+    if log_only:
+        return None
     if blocked:
         return Response(
             status_code=403,
@@ -225,10 +281,11 @@ async def shield_access(request: Request) -> Response:
     # a response header (X-Shield-Type), and nginx forwards that header
     # (via auth_request_set + proxy_set_header) to the single challenge-page
     # route, which reads it and renders the right page.
-    if captcha_access_decision(request) == "challenge":
-        return _deny(request, "captcha")
-    if access_decision(request) == "challenge":
-        return _deny(request, "otp")
+    for kind, decide in (("captcha", captcha_access_decision), ("otp", access_decision)):
+        if decide(request) == "challenge":
+            denied = _deny(request, kind)
+            if denied is not None:
+                return denied
     # Gen3 roadmap 1.3: third branch, ML-driven. No-op ("pass" always,
     # immediately, no HTTP call) unless a human has enabled enforcement in
     # Settings -- see ml_policy.py's module docstring. "block" reuses 403,
@@ -308,6 +365,11 @@ async def request_code(request: Request, payload: OtpRequestPayload) -> Response
         event("otp_rate_limited")
         return JSONResponse({"success": False, "error": "too many requests, try again later"}, status_code=429)
 
+    # Not on the list: behave exactly as if a code was sent (same response,
+    # a stored challenge that can never verify) so the page can't be used to
+    # find out which addresses have access. No email goes out.
+    allowed = email_allowed(config, payload.email)
+
     code_length = max(4, min(8, int(config.get("code_length", DEFAULT_CODE_LENGTH))))
     code_ttl = max(60, min(900, int(config.get("code_ttl", DEFAULT_CODE_TTL))))
     code = "".join(secrets.choice("0123456789") for _ in range(code_length))
@@ -315,12 +377,17 @@ async def request_code(request: Request, payload: OtpRequestPayload) -> Response
     record = {
         "host": host,
         "email": payload.email,
-        "code_hash": hashlib.sha256(code.encode()).hexdigest(),
+        # never matches any submitted code when the address isn't allowed
+        "code_hash": hashlib.sha256(code.encode()).hexdigest() if allowed else secrets.token_hex(32),
         "attempts": 0,
         "ip_subnet": subnet_identity(address),
         "ua_digest": hashlib.sha256(user_agent(request).encode("utf-8", "ignore")).hexdigest(),
     }
     client.setex(f"waf:otp:challenge:{challenge_id}", code_ttl, json.dumps(record, separators=(",", ":")))
+
+    if not allowed:
+        event("otp_not_allowed")
+        return JSONResponse({"success": True, "challenge_id": challenge_id})
 
     sent = send_otp_email(payload.email, code)
     if not sent:
@@ -388,17 +455,21 @@ async def verify_code(request: Request, payload: OtpVerifyPayload) -> Response:
     event("otp_verified")
     ttl = max(900, min(43200, int(config.get("clearance_ttl", DEFAULT_CLEARANCE_TTL))))
     expiry = int(time.time()) + ttl
-    message = "\x1f".join([subnet_identity(address), user_agent(request), host, str(expiry)])
+    sid = secrets.token_hex(16)
+    client.setex(_session_key(sid), ttl, json.dumps({"email": record.get("email", ""), "host": host},
+                                                    separators=(",", ":")))
+    message = "\x1f".join([subnet_identity(address), user_agent(request), host, str(expiry), sid])
     signature = hmac.new(HMAC_SECRET.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
     response = JSONResponse({"success": True})
     response.set_cookie(
-        COOKIE_NAME, f"{expiry}.{host}.{signature}", max_age=ttl, expires=expiry,
+        COOKIE_NAME, f"{expiry}.{host}.{sid}.{signature}", max_age=ttl, expires=expiry,
         path="/", secure=True, httponly=True, samesite="lax",
     )
     return response
 
 
-def _challenge_html() -> str:
+def _challenge_html(allowlist: bool = False) -> str:
+    sent_prefix = "หากอีเมลนี้มีสิทธิ์เข้าใช้ เราได้ส่งรหัสไปที่ " if allowlist else "ส่งรหัสไปที่ "
     return """<!doctype html>
 <html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Verify it's you</title>
@@ -424,6 +495,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 </div>
 <p id="error"></p>
 </main><script>
+const SENT_PREFIX=""" + json.dumps(sent_prefix, ensure_ascii=False) + """;
 let challengeId=null;
 const emailStep=document.getElementById('email-step'),codeStep=document.getElementById('code-step'),
       errorEl=document.getElementById('error'),sendBtn=document.getElementById('send-btn'),
@@ -439,7 +511,7 @@ sendBtn.onclick=async()=>{
     const j=await r.json().catch(()=>({}));
     if(!r.ok||!j.success){errorEl.textContent=j.error||'ส่งรหัสไม่สำเร็จ';sendBtn.disabled=false;return;}
     challengeId=j.challenge_id;
-    document.getElementById('sent-to').textContent='ส่งรหัสไปที่ '+email+' แล้ว';
+    document.getElementById('sent-to').textContent=SENT_PREFIX+email+' แล้ว';
     emailStep.style.display='none';codeStep.style.display='block';
   }catch(e){errorEl.textContent='เกิดข้อผิดพลาด กรุณาลองใหม่';sendBtn.disabled=false;}
 };
@@ -466,4 +538,4 @@ async def issue_challenge_page(request: Request) -> Response:
         return Response(status_code=503, content="OTP service temporarily unavailable")
     if not config.get("enabled"):
         return Response(status_code=404, content="Not found")
-    return HTMLResponse(_challenge_html(), headers={"Cache-Control": "no-store, no-cache", "Pragma": "no-cache"})
+    return HTMLResponse(_challenge_html(config.get("access_mode") == "allowlist"), headers={"Cache-Control": "no-store, no-cache", "Pragma": "no-cache"})
