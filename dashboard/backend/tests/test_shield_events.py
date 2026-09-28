@@ -129,3 +129,105 @@ def test_admin_and_viewer_read_their_origin_only(client, accounts, fake_ch):
     before = len(fake_ch)
     assert client.get(f"/api/origins/{origin_id}/shield-events", headers=stranger_h).status_code == 403
     assert len(fake_ch) == before  # a stranger never reaches ClickHouse
+
+
+# ------------------------------------------------ config models and defaults
+
+from pydantic import ValidationError  # noqa: E402
+
+from api.origins import CaptchaShieldConfig, OtpShieldConfig  # noqa: E402
+from services import captcha_config, otp_config  # noqa: E402
+
+
+def test_allowlist_entries_are_normalised_and_validated():
+    cfg = OtpShieldConfig(enabled=True, access_mode="allowlist",
+                          allowed_emails=[" Boss@Gmail.com ", "@kku.ac.th", "boss@gmail.com", ""])
+    assert cfg.allowed_emails == ["boss@gmail.com", "@kku.ac.th"]
+    for bad in (["not-an-email"], ["@nodot"], ["a@b"], ["a b@c.com"]):
+        with pytest.raises(ValidationError):
+            OtpShieldConfig(enabled=True, access_mode="allowlist", allowed_emails=bad)
+
+
+def test_enabled_allowlist_needs_at_least_one_entry():
+    with pytest.raises(ValidationError):
+        OtpShieldConfig(enabled=True, access_mode="allowlist", allowed_emails=[])
+    OtpShieldConfig(enabled=False, access_mode="allowlist", allowed_emails=[])  # a draft is fine
+
+
+def test_exclude_paths_must_be_absolute():
+    with pytest.raises(ValidationError):
+        CaptchaShieldConfig(exclude_paths=["wp-admin/admin-ajax.php"])
+    assert CaptchaShieldConfig(exclude_paths=["/wp-admin/admin-ajax.php "]).exclude_paths == ["/wp-admin/admin-ajax.php"]
+
+
+class _KV:
+    def __init__(self, data):
+        self.data = data
+
+    def get(self, key):
+        return self.data.get(key)
+
+
+@pytest.mark.parametrize("module", [captcha_config, otp_config])
+def test_new_config_starts_in_log_only_but_saved_one_keeps_enforcing(module, monkeypatch):
+    store = {}
+    monkeypatch.setattr(module, "_client", lambda: _KV(store))
+    assert module.get_origin_config("fresh")["mode"] == "log_only"
+    store[module._key_origin("old")] = json.dumps({"enabled": True, "login_paths": ["/login*"]})
+    assert module.get_origin_config("old")["mode"] == "enforce"
+    store[module._key_origin("chosen")] = json.dumps({"enabled": True, "mode": "log_only"})
+    assert module.get_origin_config("chosen")["mode"] == "log_only"
+
+
+# ---------------------------------------------------------------- preview
+
+
+def test_preview_builds_a_parameterised_query_scoped_to_the_hosts():
+    seen = []
+    ch = MagicMock()
+
+    def query(sql, parameters=None):
+        seen.append((sql, parameters))
+        if "GROUP BY user_agent" in sql:
+            return MagicMock(result_rows=[("okhttp/4.9", 7)])
+        return MagicMock(result_rows=[(20, 12, 8, 7)])
+
+    ch.client.query.side_effect = query
+    out = se.preview_for_paths(ch, ["a.test"], ["/wp-admin*", "/wp-login.php"], ["/wp-admin/admin-ajax.php"], 168)
+    assert out == {"hours": 168, "total": 20, "get_head": 12, "other_methods": 8, "non_browser": 7,
+                   "top_non_browser": [{"user_agent": "okhttp/4.9", "count": 7}]}
+    sql, params = seen[0]
+    assert params["hosts"] == ["a.test"]
+    assert params["p0"] == "/wp-admin%" and params["p1"] == "/wp-login.php"
+    assert params["x0"] == "/wp-admin/admin-ajax.php"
+    assert "a.test" not in sql and "wp-admin" not in sql  # values only ever travel as parameters
+
+
+def test_preview_with_no_verified_domain_never_queries():
+    ch = MagicMock()
+    assert se.preview_for_paths(ch, [], ["/login*"], [], 168)["total"] == 0
+    ch.client.query.assert_not_called()
+
+
+def test_like_escapes_sql_wildcards():
+    assert se._like("/a_b%*") == "/a\\_b\\%%"
+
+
+def test_preview_endpoint_is_for_origin_admins(client, accounts, monkeypatch):
+    origin_id, admin_h, viewer_h, stranger_h = accounts
+    ch = MagicMock()
+    ch.connected = True
+    monkeypatch.setattr(shield_events_api, "ch", ch)
+    captured = {}
+    monkeypatch.setattr(shield_events_api, "preview_for_paths",
+                        lambda _ch, hosts, paths, excl, hours: captured.update(hosts=hosts) or {"total": 0})
+    import services.origin_service as origin_service_module
+    origin_service_module.db.domains_table.put_item(Item={"id": "d-ok", "origin_id": origin_id, "domain_name": "Shop.Example.com", "dns_verified": True})
+    origin_service_module.db.domains_table.put_item(Item={"id": "d-no", "origin_id": origin_id, "domain_name": "pending.example.com", "dns_verified": False})
+    body = {"login_paths": ["/login*"]}
+    url = f"/api/origins/{origin_id}/shield-events/preview"
+    assert client.post(url, json=body, headers=admin_h).status_code == 200
+    assert captured["hosts"] == ["shop.example.com"]  # verified domains only
+    assert client.post(url, json=body, headers=viewer_h).status_code == 403
+    assert client.post(url, json=body, headers=stranger_h).status_code == 403
+    assert client.post(url, json={"login_paths": ["login"]}, headers=admin_h).status_code == 400

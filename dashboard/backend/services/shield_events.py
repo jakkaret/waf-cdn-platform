@@ -32,7 +32,63 @@ EVENT_LABELS = {
     "otp_too_many_attempts": "Too many wrong codes",
     "otp_expired": "Expired / unknown code",
     "otp_context_mismatch": "Different device/network",
+    "otp_not_allowed": "Email not on the allowlist",
+    "would_challenge": "Would challenge (log only)",
+    "would_block": "Would block non-GET (log only)",
 }
+
+# User-Agents that are not a browser a person can solve a challenge in:
+# scripts, HTTP libraries and native mobile apps (iOS CFNetwork, Android okhttp).
+NON_BROWSER_UA_RE = (
+    "(?i)(curl|wget|python|okhttp|go-http|java/|axios|node-fetch|undici|postman|insomnia|httpie|"
+    "libwww|scrapy|aiohttp|dart|cfnetwork|guzzle|ruby|php/|powershell)"
+)
+
+
+def _like(pattern: str) -> str:
+    """fnmatch pattern (what control-api matches paths with) -> SQL LIKE."""
+    out = pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return out.replace("*", "%").replace("?", "_")
+
+
+def preview_for_paths(ch, hosts: List[str], login_paths: List[str], exclude_paths: List[str], hours: int = 168) -> dict:
+    """What the last `hours` of real traffic to these hosts would have met on
+    these paths: how many requests are GET/HEAD (-> challenge page), how many
+    use another method (-> blocked with 403) and how many come from something
+    that isn't a browser (can't solve any challenge)."""
+    if not hosts or not login_paths:
+        return {"hours": hours, "total": 0, "get_head": 0, "other_methods": 0, "non_browser": 0, "top_non_browser": []}
+    params = {"hosts": list(hosts), "hours": int(hours), "ua_re": NON_BROWSER_UA_RE}
+    path = "splitByChar('?', url)[1]"
+    match = []
+    for i, pattern in enumerate(login_paths[:20]):
+        params[f"p{i}"] = _like(pattern)
+        match.append(f"{path} LIKE {{p{i}:String}}")
+    exclude = []
+    for i, pattern in enumerate((exclude_paths or [])[:20]):
+        params[f"x{i}"] = _like(pattern)
+        exclude.append(f"{path} LIKE {{x{i}:String}}")
+    where = (
+        "host IN {hosts:Array(String)} AND timestamp > now() - INTERVAL {hours:UInt32} HOUR "
+        f"AND ({' OR '.join(match)})"
+        + (f" AND NOT ({' OR '.join(exclude)})" if exclude else "")
+    )
+    non_browser = "(user_agent = '' OR match(user_agent, {ua_re:String}))"
+    total, get_head, other, nb = ch.client.query(
+        f"SELECT count(), countIf(method IN ('GET','HEAD')), countIf(method NOT IN ('GET','HEAD','OPTIONS')), "
+        f"countIf({non_browser}) FROM access_logs WHERE {where}",
+        parameters=params,
+    ).result_rows[0]
+    top = ch.client.query(
+        f"SELECT user_agent, count() c FROM access_logs WHERE {where} AND {non_browser} "
+        "GROUP BY user_agent ORDER BY c DESC LIMIT 5",
+        parameters=params,
+    ).result_rows
+    return {
+        "hours": int(hours), "total": int(total), "get_head": int(get_head),
+        "other_methods": int(other), "non_browser": int(nb),
+        "top_non_browser": [{"user_agent": ua or "(empty)", "count": int(c)} for ua, c in top],
+    }
 
 
 def _redis_client():
