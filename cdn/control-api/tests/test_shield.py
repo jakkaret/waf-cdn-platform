@@ -93,7 +93,7 @@ def redis_(monkeypatch):
 @pytest.fixture()
 def sent(monkeypatch):
     codes = []
-    monkeypatch.setattr(otp_engine, "send_otp_email", lambda to, code: codes.append((to, code)) or True)
+    monkeypatch.setattr(otp_engine, "send_otp_email", lambda to, code, ttl=None: codes.append((to, code)) or True)
     return codes
 
 
@@ -337,3 +337,40 @@ def test_old_three_part_cookie_is_rejected(client, redis_):
 def test_challenge_page_wording_in_allowlist_mode():
     assert "หากอีเมลนี้มีสิทธิ์" in otp_engine._challenge_html(True)
     assert "หากอีเมลนี้มีสิทธิ์" not in otp_engine._challenge_html(False)
+
+
+def test_admin_chosen_times_are_used_and_clamped(client, redis_, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(otp_engine, "send_otp_email", lambda to, code, ttl=None: seen.update(code=code, ttl=ttl) or True)
+    enable(redis_, "otp", code_ttl=1200, clearance_ttl=7 * 86400)
+    challenge = _request_code(client).json()["challenge_id"]
+    assert seen["ttl"] == 1200  # the email states the configured validity
+    ok = _verify(client, challenge, seen["code"])
+    assert int(ok.headers["set-cookie"].split("Max-Age=")[1].split(";")[0]) == 7 * 86400
+
+    enable(redis_, "otp", code_ttl=99999, clearance_ttl=999 * 86400)
+    challenge = _request_code(client, "b@gmail.com").json()["challenge_id"]
+    assert seen["ttl"] == otp_engine.CODE_TTL_RANGE[1]
+    ok = _verify(client, challenge, seen["code"])
+    assert int(ok.headers["set-cookie"].split("Max-Age=")[1].split(";")[0]) == otp_engine.CLEARANCE_TTL_RANGE[1]
+
+
+def test_email_states_the_validity(monkeypatch):
+    import email_sender
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self): pass
+        def login(self, *a): pass
+        def sendmail(self, _f, _t, msg): sent["msg"] = msg
+
+    for name, value in (("SMTP_HOST", "h"), ("SMTP_USER", "u"), ("SMTP_PASS", "p"), ("SMTP_FROM", "f@x.com")):
+        monkeypatch.setattr(email_sender, name, value)
+    monkeypatch.setattr(email_sender.smtplib, "SMTP", FakeSMTP)
+    assert email_sender.send_otp_email("a@b.com", "123456", 600)
+    import base64, email
+    body = email.message_from_string(sent["msg"]).get_payload(decode=True).decode()
+    assert "expires in 10 minutes" in body

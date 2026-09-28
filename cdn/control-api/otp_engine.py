@@ -51,6 +51,10 @@ DEFAULT_PATHS = ["/login*", "/admin*", "/wp-login.php", "/administrator*", "/use
 DEFAULT_CLEARANCE_TTL = 3600
 DEFAULT_CODE_LENGTH = 6
 DEFAULT_CODE_TTL = 300
+# Admin-adjustable ranges (seconds). A clearance longer than 12 h is meant for
+# allowlist mode, where removing someone still revokes them immediately.
+CODE_TTL_RANGE = (60, 1800)
+CLEARANCE_TTL_RANGE = (900, 30 * 86400)
 MAX_VERIFY_ATTEMPTS = 5
 REQUEST_RATE_LIMIT_PER_10MIN = 3
 HMAC_SECRET = (
@@ -371,7 +375,7 @@ async def request_code(request: Request, payload: OtpRequestPayload) -> Response
     allowed = email_allowed(config, payload.email)
 
     code_length = max(4, min(8, int(config.get("code_length", DEFAULT_CODE_LENGTH))))
-    code_ttl = max(60, min(900, int(config.get("code_ttl", DEFAULT_CODE_TTL))))
+    code_ttl = max(CODE_TTL_RANGE[0], min(CODE_TTL_RANGE[1], int(config.get("code_ttl", DEFAULT_CODE_TTL))))
     code = "".join(secrets.choice("0123456789") for _ in range(code_length))
     challenge_id = str(uuid.uuid4())
     record = {
@@ -389,7 +393,7 @@ async def request_code(request: Request, payload: OtpRequestPayload) -> Response
         event("otp_not_allowed")
         return JSONResponse({"success": True, "challenge_id": challenge_id})
 
-    sent = send_otp_email(payload.email, code)
+    sent = send_otp_email(payload.email, code, code_ttl)
     if not sent:
         event("otp_send_failed")
         # Fail loud rather than claiming success with nowhere for the code
@@ -453,7 +457,7 @@ async def verify_code(request: Request, payload: OtpVerifyPayload) -> Response:
 
     client.delete(key)
     event("otp_verified")
-    ttl = max(900, min(43200, int(config.get("clearance_ttl", DEFAULT_CLEARANCE_TTL))))
+    ttl = max(CLEARANCE_TTL_RANGE[0], min(CLEARANCE_TTL_RANGE[1], int(config.get("clearance_ttl", DEFAULT_CLEARANCE_TTL))))
     expiry = int(time.time()) + ttl
     sid = secrets.token_hex(16)
     client.setex(_session_key(sid), ttl, json.dumps({"email": record.get("email", ""), "host": host},

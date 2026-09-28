@@ -94,10 +94,12 @@ class CaptchaShieldConfig(BaseModel):
 class OtpShieldConfig(BaseModel):
     enabled: bool = False
     login_paths: List[str] = Field(default_factory=lambda: list(OTP_DEFAULT_CONFIG["login_paths"]))
-    clearance_ttl: int = Field(default=3600, ge=900, le=43200)
+    # 15 min - 30 days: how long a verified visitor is remembered (cdn/control-api
+    # otp_engine.CLEARANCE_TTL_RANGE). CAPTCHA above stays capped at 12 h.
+    clearance_ttl: int = Field(default=3600, ge=900, le=30 * 86400)
     bypass_ips: List[str] = Field(default_factory=list)
     code_length: int = Field(default=6, ge=4, le=8)
-    code_ttl: int = Field(default=300, ge=60, le=900)
+    code_ttl: int = Field(default=300, ge=60, le=1800)
     # Only "email" is implemented server-side right now (see
     # cdn/control-api/email_sender.py); the field is here so the UI/API
     # contract doesn't need to change shape when a second channel ships.

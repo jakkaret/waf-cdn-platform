@@ -24,16 +24,18 @@ def is_configured() -> bool:
     return bool(SMTP_HOST and SMTP_USER and SMTP_PASS and SMTP_FROM)
 
 
-def send_otp_email(to_addr: str, code: str) -> bool:
+def send_otp_email(to_addr: str, code: str, ttl_seconds: int | None = None) -> bool:
     if not is_configured():
         logger.warning(
             "OTP email not sent to %s -- SMTP_HOST/USER/PASS/FROM not configured", to_addr
         )
         return False
 
+    minutes = max(1, round(ttl_seconds / 60)) if ttl_seconds else None
+    expires = f"This code expires in {minutes} minute{'s' if minutes != 1 else ''}." if minutes else "This code expires in a few minutes."
     body = (
         f"Your verification code is: {code}\n\n"
-        "This code expires in a few minutes. If you did not request this, "
+        f"{expires} If you did not request this, "
         "you can ignore this email."
     )
     message = MIMEText(body, "plain", "utf-8")

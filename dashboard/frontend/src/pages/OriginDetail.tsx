@@ -28,6 +28,9 @@ import {
   ShieldMode,
   OtpAccessMode,
   useShieldImpactCheck,
+  OTP_CODE_TTL_OPTIONS,
+  OTP_CLEARANCE_OPTIONS,
+  withCurrent,
 } from '../components/ShieldExtras'
 import { toast } from 'react-hot-toast'
 import { WafRule, Domain, CaptchaShieldConfig, OtpShieldConfig } from '../types'
@@ -1433,58 +1436,45 @@ export const OriginDetail: React.FC = () => {
                     <h3 className="text-[13px] font-bold text-[var(--text-primary)] font-mono m-0">
                       Code expires in
                     </h3>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={1}
-                        max={15}
-                        className="w-20 dash-input font-mono text-[12px]"
-                        value={Math.round(otpForm.codeTtl / 60)}
-                        onChange={(e) =>
-                          setOtpForm((f) =>
-                            f
-                              ? {
-                                  ...f,
-                                  codeTtl: Math.min(900, Math.max(60, Number(e.target.value) * 60 || 0)),
-                                }
-                              : f
-                          )
-                        }
-                      />
-                      <span className="text-[12px] font-mono text-[var(--text-muted)]">minutes</span>
-                    </div>
+                    <select
+                      aria-label="Code expires in"
+                      className="w-full dash-input font-mono text-[12px]"
+                      value={otpForm.codeTtl}
+                      onChange={(e) => setOtpForm((f) => (f ? { ...f, codeTtl: Number(e.target.value) } : f))}
+                    >
+                      {withCurrent(OTP_CODE_TTL_OPTIONS, otpForm.codeTtl).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0">
+                      How long the emailed code works. The email states this time.
+                    </p>
                   </div>
                 </div>
 
-                <div className="dash-card p-5 space-y-4">
+                <div className="dash-card p-5 space-y-3">
                   <h3 className="text-[13px] font-bold text-[var(--text-primary)] font-mono m-0">
-                    Clearance lifetime
+                    Remember a verified visitor for
                   </h3>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={15}
-                      max={720}
-                      className="w-24 dash-input font-mono text-[12px]"
-                      value={Math.round(otpForm.clearanceTtl / 60)}
-                      onChange={(e) =>
-                        setOtpForm((f) =>
-                          f
-                            ? {
-                                ...f,
-                                clearanceTtl: Math.min(
-                                  43200,
-                                  Math.max(900, Number(e.target.value) * 60 || 0)
-                                ),
-                              }
-                            : f
-                        )
-                      }
-                    />
-                    <span className="text-[12px] font-mono text-[var(--text-muted)]">
-                      minutes before a verified visitor is challenged again
-                    </span>
-                  </div>
+                  <select
+                    aria-label="Remember a verified visitor for"
+                    className="w-full md:w-72 dash-input font-mono text-[12px]"
+                    value={otpForm.clearanceTtl}
+                    onChange={(e) => setOtpForm((f) => (f ? { ...f, clearanceTtl: Number(e.target.value) } : f))}
+                  >
+                    {withCurrent(OTP_CLEARANCE_OPTIONS, otpForm.clearanceTtl).map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0">
+                    After this, the visitor gets a new code. Changing network (Wi-Fi to 4G) or browser also asks
+                    again. Days-long values suit &quot;Only these emails&quot; mode, where removing someone takes
+                    effect immediately.
+                  </p>
                 </div>
 
                 <div className="dash-card p-5 space-y-4">
