@@ -9,7 +9,6 @@ import { getOriginViewers, addOriginViewer, removeOriginViewer } from '../api/or
 import { getOriginEditors, addOriginEditor, removeOriginEditor } from '../api/origin_editors'
 import { getOriginAuditLog } from '../api/origin_audit_log'
 import { createPostmortem, getPostmortems, getPostmortem } from '../api/postmortems'
-import { rulesApi } from '../api/rules'
 import { useAuthStore } from '../store/authStore'
 import { tunnelConnectivityBadge } from '../lib/tunnelStatus'
 import { Badge } from '../components/ui/Badge'
@@ -18,6 +17,7 @@ import { LoadingSpinner } from '../components/ui/LoadingSpinner'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState } from '../components/ui/EmptyState'
 import { DomainSetupWizard } from '../components/DomainSetupWizard'
+import { OriginWafRules } from '../components/OriginWafRules'
 import { ShieldActivity } from '../components/ShieldActivity'
 import {
   ModeSelector,
@@ -33,7 +33,7 @@ import {
   withCurrent,
 } from '../components/ShieldExtras'
 import { toast } from 'react-hot-toast'
-import { WafRule, Domain, CaptchaShieldConfig, OtpShieldConfig } from '../types'
+import { Domain, CaptchaShieldConfig, OtpShieldConfig } from '../types'
 import { parseListInput, formatListInput } from '../lib/captchaForm'
 import {
   ArrowLeft,
@@ -70,14 +70,6 @@ export const OriginDetail: React.FC = () => {
   const [isDomainWizardOpen, setIsDomainWizardOpen] = useState(false)
   const [domainToDelete, setDomainToDelete] = useState<string | null>(null)
   const [verifyingDomainId, setVerifyingDomainId] = useState<string | null>(null)
-  const [showAddRule, setShowAddRule] = useState(false)
-  const [newRule, setNewRule] = useState<{
-    id: string
-    variable: WafRule['variable']
-    operator: string
-    severity: WafRule['severity']
-    message: string
-  }>({ id: '', variable: 'REQUEST_URI', operator: '', severity: 'HIGH', message: '' })
   const queryClient = useQueryClient()
   const impactCheck = useShieldImpactCheck(id || '')
 
@@ -91,31 +83,6 @@ export const OriginDetail: React.FC = () => {
     queryKey: ['domains', id],
     queryFn: () => getDomains(id!),
     enabled: !!id,
-  })
-
-  const { data: rulesData, isLoading: rulesLoading } = useQuery({
-    queryKey: ['waf-rules'],
-    queryFn: () => rulesApi.getRules(),
-  })
-
-  const deleteRuleMutation = useMutation({
-    mutationFn: (ruleId: string) => rulesApi.deleteRule(ruleId),
-    onSuccess: () => {
-      toast.success('Rule deleted')
-      queryClient.invalidateQueries({ queryKey: ['waf-rules'] })
-    },
-    onError: () => toast.error('Failed to delete rule'),
-  })
-
-  const createRuleMutation = useMutation({
-    mutationFn: (rule: typeof newRule) => rulesApi.createRule(rule),
-    onSuccess: () => {
-      toast.success('Rule created successfully')
-      queryClient.invalidateQueries({ queryKey: ['waf-rules'] })
-      setShowAddRule(false)
-      setNewRule({ id: '', variable: 'REQUEST_URI', operator: '', severity: 'HIGH', message: '' })
-    },
-    onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to create rule'),
   })
 
   const { data: captchaData, isLoading: captchaLoading } = useQuery({
@@ -322,11 +289,15 @@ export const OriginDetail: React.FC = () => {
   const verifiedDomainCount = domains.filter((d: Domain) => d.verification_status === 'verified').length
 
   const isOwner = !!origin && !!currentUser && origin.admin_user_id === currentUser.user_id
+  // Origin "Admin": the creator or anyone granted Admin (stored as editor_user_ids).
+  // The backend gives every Admin the same rights, so the UI gates on this,
+  // not on isOwner (creator only).
+  const isAdmin = isOwner || (!!origin && !!currentUser && (origin.editor_user_ids ?? []).includes(currentUser.user_id))
 
   const { data: viewersData, isLoading: viewersLoading } = useQuery({
     queryKey: ['origin-viewers', id],
     queryFn: () => getOriginViewers(id!),
-    enabled: !!id && isOwner,
+    enabled: !!id && isAdmin,
   })
   const viewers = viewersData?.data?.viewers || []
 
@@ -356,7 +327,7 @@ export const OriginDetail: React.FC = () => {
   const { data: editorsData, isLoading: editorsLoading } = useQuery({
     queryKey: ['origin-editors', id],
     queryFn: () => getOriginEditors(id!),
-    enabled: !!id && isOwner,
+    enabled: !!id && isAdmin,
   })
   const editors = editorsData?.data?.editors || []
 
@@ -373,7 +344,7 @@ export const OriginDetail: React.FC = () => {
   const removeEditorMutation = useMutation({
     mutationFn: (editorId: string) => removeOriginEditor(id!, editorId),
     onSuccess: () => {
-      toast.success('Editor access removed')
+      toast.success('Admin access removed')
       queryClient.invalidateQueries({ queryKey: ['origin-editors', id] })
     },
     onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to remove editor'),
@@ -395,7 +366,7 @@ export const OriginDetail: React.FC = () => {
   const { data: postmortemsData, isLoading: postmortemsLoading } = useQuery({
     queryKey: ['origin-postmortems', id],
     queryFn: () => getPostmortems(id!),
-    enabled: !!id && isOwner && activeTab === 'postmortem',
+    enabled: !!id && isAdmin && activeTab === 'postmortem',
   })
   const postmortems = postmortemsData?.data?.postmortems || []
 
@@ -664,7 +635,7 @@ export const OriginDetail: React.FC = () => {
               </div>
             </div>
 
-            {isOwner && (
+            {isAdmin && (
               <div className="dash-card p-5 space-y-4 md:col-span-2">
                 <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)]">
                   Tech Stack Tags
@@ -853,169 +824,7 @@ export const OriginDetail: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'waf' && (
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">
-                  WAF Security Policies
-                </h2>
-                <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-                  ModSecurity CRS & custom filtering rules
-                </p>
-              </div>
-              <Button
-                variant={showAddRule ? 'secondary' : 'brand'}
-                onClick={() => setShowAddRule(!showAddRule)}
-              >
-                {showAddRule ? 'Cancel' : '+ Add SecRule'}
-              </Button>
-            </div>
-
-            {showAddRule && (
-              <div className="dash-card p-5 border-l-2 border-l-orange-500 bg-orange-500/[0.02]">
-                <h3 className="text-[13.5px] font-bold text-orange-500 font-mono mb-4">
-                  Define New ModSecurity Rule
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[12px]">
-                  <div>
-                    <label className="text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block uppercase">
-                      Rule ID
-                    </label>
-                    <input
-                      className="w-full dash-input font-mono"
-                      placeholder="e.g. 100010"
-                      value={newRule.id}
-                      onChange={(e) => setNewRule((r) => ({ ...r, id: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block uppercase">
-                      Variable
-                    </label>
-                    <select
-                      className="w-full dash-input font-mono"
-                      value={newRule.variable}
-                      onChange={(e) =>
-                        setNewRule((r) => ({ ...r, variable: e.target.value as WafRule['variable'] }))
-                      }
-                    >
-                      <option value="REQUEST_URI">REQUEST_URI</option>
-                      <option value="ARGS">ARGS</option>
-                      <option value="REQUEST_HEADERS">REQUEST_HEADERS</option>
-                      <option value="REQUEST_BODY">REQUEST_BODY</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block uppercase">
-                      Pattern Operator
-                    </label>
-                    <input
-                      className="w-full dash-input font-mono"
-                      placeholder="e.g. @rx (select|union)"
-                      value={newRule.operator}
-                      onChange={(e) => setNewRule((r) => ({ ...r, operator: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block uppercase">
-                      Severity
-                    </label>
-                    <select
-                      className="w-full dash-input font-mono"
-                      value={newRule.severity}
-                      onChange={(e) =>
-                        setNewRule((r) => ({ ...r, severity: e.target.value as WafRule['severity'] }))
-                      }
-                    >
-                      <option value="CRITICAL">CRITICAL (403)</option>
-                      <option value="HIGH">HIGH (403)</option>
-                      <option value="MEDIUM">MEDIUM (Warn)</option>
-                      <option value="LOW">LOW (Notice)</option>
-                    </select>
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block uppercase">
-                      Rule Message
-                    </label>
-                    <input
-                      className="w-full dash-input font-mono"
-                      placeholder="e.g. Block SQL injection payload"
-                      value={newRule.message}
-                      onChange={(e) => setNewRule((r) => ({ ...r, message: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end mt-4">
-                  <Button
-                    variant="brand"
-                    onClick={() => createRuleMutation.mutate(newRule)}
-                    disabled={!newRule.id || !newRule.operator || !newRule.message || createRuleMutation.isPending}
-                    isLoading={createRuleMutation.isPending}
-                  >
-                    Save Rule
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <div className="dash-card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="dash-table">
-                  <thead>
-                    <tr>
-                      <th>Rule ID</th>
-                      <th>Variable</th>
-                      <th>Operator</th>
-                      <th>Severity</th>
-                      <th>Message</th>
-                      <th className="text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rulesLoading ? (
-                      <tr>
-                        <td colSpan={6} className="py-8 text-center text-[var(--text-muted)] font-mono text-[12px]">
-                          Loading rules...
-                        </td>
-                      </tr>
-                    ) : !rulesData || rulesData.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="py-8 text-center text-[var(--text-muted)] font-mono text-[12px]">
-                          No custom rules configured.
-                        </td>
-                      </tr>
-                    ) : (
-                      rulesData.map((rule: WafRule) => (
-                        <tr key={rule.id}>
-                          <td className="font-mono font-bold text-orange-500">{rule.id}</td>
-                          <td>
-                            <Badge color="gray">{rule.variable}</Badge>
-                          </td>
-                          <td className="font-mono text-[11.5px] max-w-[200px] truncate">{rule.operator}</td>
-                          <td>
-                            <Badge color={rule.severity === 'CRITICAL' ? 'danger' : 'warning'}>
-                              {rule.severity}
-                            </Badge>
-                          </td>
-                          <td className="text-[12px] text-[var(--text-secondary)]">{rule.message}</td>
-                          <td className="text-right">
-                            <button
-                              onClick={() => deleteRuleMutation.mutate(rule.id)}
-                              className="text-red-500 hover:text-red-400 font-mono text-[11px] font-semibold cursor-pointer"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
+        {activeTab === 'waf' && id && <OriginWafRules originId={id} canEdit={isAdmin} />}
 
         {activeTab === 'ssl' && (
           <div className="space-y-4">
@@ -1513,7 +1322,7 @@ export const OriginDetail: React.FC = () => {
 
         {activeTab === 'team' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {isOwner && (
+            {isAdmin && (
               <div className="dash-card p-5 space-y-4">
                 <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
                   <Users size={14} /> Viewer Access
@@ -1571,15 +1380,16 @@ export const OriginDetail: React.FC = () => {
               </div>
             )}
 
-            {isOwner && (
+            {isAdmin && (
               <div className="dash-card p-5 space-y-4">
                 <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
-                  <Users size={14} /> Editor Access
+                  <Users size={14} /> Admin Access
                 </h3>
                 <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                  An editor can rename this origin, change its IP/port, configure the
-                  CAPTCHA/OTP shield, and add or remove domains -- but cannot archive/restore
-                  this origin or manage viewer/editor access.
+                  An Admin has full control of this origin: rename it, change its IP/port,
+                  configure the CAPTCHA/OTP shield, manage domains and WAF rules, and grant or
+                  revoke Viewer/Admin access -- except they cannot remove the origin's creator
+                  or archive/restore the origin itself.
                 </p>
                 <div className="flex gap-2">
                   <input
@@ -1595,14 +1405,14 @@ export const OriginDetail: React.FC = () => {
                     onClick={() => editorEmailInput.trim() && addEditorMutation.mutate(editorEmailInput.trim())}
                     disabled={!editorEmailInput.trim() || addEditorMutation.isPending}
                   >
-                    Add Editor
+                    Add Admin
                   </Button>
                 </div>
                 {editorsLoading ? (
                   <LoadingSpinner />
                 ) : editors.length === 0 ? (
                   <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                    No editors granted yet.
+                    No additional Admins granted yet.
                   </p>
                 ) : (
                   <div className="space-y-2 font-mono text-[12px]">
@@ -1618,7 +1428,7 @@ export const OriginDetail: React.FC = () => {
                           onClick={() => removeEditorMutation.mutate(ed.user_id)}
                           disabled={removeEditorMutation.isPending}
                           className="text-red-500 hover:text-red-400"
-                          title="Revoke editor access"
+                          title="Revoke Admin access"
                         >
                           <Trash2 size={14} />
                         </button>
@@ -1629,7 +1439,7 @@ export const OriginDetail: React.FC = () => {
               </div>
             )}
 
-            <div className={`dash-card p-5 space-y-4 ${isOwner ? 'md:col-span-2' : 'md:col-span-2'}`}>
+            <div className={`dash-card p-5 space-y-4 ${isAdmin ? 'md:col-span-2' : 'md:col-span-2'}`}>
               <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
                 <Code size={14} /> Audit Log
               </h3>
@@ -1668,11 +1478,11 @@ export const OriginDetail: React.FC = () => {
 
         {activeTab === 'postmortem' && (
           <div className="space-y-5">
-            {!isOwner ? (
+            {!isAdmin ? (
               <EmptyState
                 icon={<FileText size={24} />}
-                title="Owner only"
-                subtitle="Incident Postmortem reports are visible to the origin owner only -- they can include system-wide settings changes, not just this origin's own activity."
+                title="Admin only"
+                subtitle="Incident Postmortem reports are visible to this origin's Admins only -- they can include system-wide settings changes, not just this origin's own activity."
               />
             ) : (
               <>

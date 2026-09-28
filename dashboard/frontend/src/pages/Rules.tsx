@@ -48,10 +48,16 @@ export const Rules: React.FC = () => {
   const [blastRadiusResult, setBlastRadiusResult] = useState<any | null>(null)
 
   // Fetch Rules
+  // GET /api/rules/ lists the legacy *global* rules, which apply to every
+  // origin on the WAF -- the backend restricts it to platform admins (an
+  // origin's own Admin/Viewer manages that origin's rules from its WAF Rules
+  // tab instead). Don't fire the request at all for anyone else: it would
+  // 403 on every 10s refetch.
   const { data: rules = [], isLoading, isFetching, refetch } = useQuery({
     queryKey: ['waf-rules'],
     queryFn: () => rulesApi.getRules(),
     refetchInterval: 10000,
+    enabled: isAdmin,
   })
 
   // Mutations
@@ -234,6 +240,26 @@ export const Rules: React.FC = () => {
     const msg = editingRule?.message || 'Custom rule mitigation'
     return `SecRule ${variable} "${op}" "id:${rawId},phase:2,deny,status:${status},msg:'${msg}'"`
   }, [editingRule])
+
+  if (!isAdmin) {
+    return (
+      <div className="animate-fade-in pb-10">
+        <TopBar
+          title="WAF Rules"
+          subtitle="Global rule policies are managed by the platform administrator"
+        />
+        <div className="dash-card p-5 mt-3.5 font-mono text-[12px] text-[var(--text-muted)] space-y-2">
+          <p className="m-0 text-[var(--text-primary)] font-bold">
+            Your rules live on each origin.
+          </p>
+          <p className="m-0">
+            Open an origin and use its <strong>WAF Rules</strong> tab to see the managed ruleset
+            version, update it, and create rules that apply only to that origin's domains.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="animate-fade-in pb-10">
