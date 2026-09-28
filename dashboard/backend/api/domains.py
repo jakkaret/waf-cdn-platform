@@ -15,6 +15,24 @@ from services.dns_service import verify_domain_dns
 router = APIRouter(prefix="/api/domains", tags=["Domains"])
 db = DynamoDBService()
 
+
+def _refresh_managed_hostmap() -> None:
+    """Best-effort: regenerate managed-00-hostmap.conf right away instead of
+    waiting for the managed_ruleset_worker's next tick, so a domain that just
+    got DNS-verified (or removed) starts (or stops) matching tenant/managed
+    rules without a several-minute gap. Never blocks or fails the request
+    that triggered it -- the worker will catch up on its own next tick if
+    this fails."""
+    async def _run():
+        try:
+            import services.managed_ruleset as mr
+            from api.rules import rule_manager  # shared singleton -- same one every other writer uses
+            mr.apply(rule_manager, db)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("managed hostmap refresh after domain change failed: %s", exc)
+    asyncio.create_task(_run())
+
 # Ruling R7 (task-11-brief.md): domain_name flows into tenant_service's
 # ClickHouse LIKE patterns (services/tenant_service.py -> api/analytics.py's
 # _build_domain_pattern_sql -> raw f-string interpolation into ClickHouse),
@@ -162,6 +180,7 @@ async def delete_domain(domain_id: str, current_user: dict = Depends(get_current
     try:
         db.domains_table.delete_item(Key={"id": domain_id})
         invalidate_ssl_allowed_snapshot()
+        _refresh_managed_hostmap()
         audit_log.write_audit_event(
             scope_id=domain["origin_id"],
             actor_user_id=current_user.get("user_id"),
@@ -202,6 +221,7 @@ async def verify_domain_now(domain_id: str, current_user: dict = Depends(get_cur
         )
         sync_domain_config(domain["origin_id"], domain_name)
         invalidate_ssl_allowed_snapshot()
+        _refresh_managed_hostmap()
         return {
             "status": "success",
             "dns_verified": True,
@@ -559,6 +579,7 @@ async def verify_domain_now_under_origin(origin_id: str, domain_id: str, current
             }
         )
         sync_domain_config(domain["origin_id"], domain_name)
+        _refresh_managed_hostmap()
         return {
             "status": "verified",
             "message": "Domain successfully verified!"
@@ -581,6 +602,7 @@ async def delete_domain_under_origin(origin_id: str, domain_id: str, current_use
     try:
         db.domains_table.delete_item(Key={"id": domain_id})
         invalidate_ssl_allowed_snapshot()
+        _refresh_managed_hostmap()
         audit_log.write_audit_event(
             scope_id=origin_id,
             actor_user_id=current_user.get("user_id"),

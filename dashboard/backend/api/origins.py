@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+import asyncio
 import ipaddress
 import re
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -277,10 +278,27 @@ async def update_origin(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+def _refresh_managed_hostmap() -> None:
+    """Best-effort, non-blocking: an archived/restored origin's hosts drop
+    out of (or return to) managed-00-hostmap.conf, so re-render it now
+    instead of waiting for the managed_ruleset_worker's next tick. See the
+    identical helper in api/domains.py for the same reasoning."""
+    async def _run():
+        try:
+            import services.managed_ruleset as mr
+            from api.rules import rule_manager  # shared singleton -- same one every other writer uses
+            mr.apply(rule_manager, origin_service.db)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("managed hostmap refresh after origin change failed: %s", exc)
+    asyncio.create_task(_run())
+
+
 @router.delete("/{origin_id}")
 async def delete_origin(origin_id: str, origin: dict = Depends(verify_origin_ownership)):
     success = origin_service.delete_origin(origin_id)
     if success:
+        _refresh_managed_hostmap()
         return {"status": "success", "message": "Origin deleted successfully"}
     raise HTTPException(status_code=500, detail="Failed to delete origin")
 
@@ -293,6 +311,7 @@ async def restore_origin(origin_id: str, current_user: dict = Depends(get_curren
         raise HTTPException(status_code=400, detail="Cannot restore. Active origin quota exceeded.")
     success = origin_service.restore_origin(origin_id)
     if success:
+        _refresh_managed_hostmap()
         return {"status": "success", "message": "Origin restored successfully"}
     raise HTTPException(status_code=500, detail="Failed to restore origin")
 
