@@ -108,6 +108,29 @@ the router prefix is `/api/ml-rules` (`api/ml_rules.py`), so the real path is
 `POST /api/ml-rules/{rule_id}/approve` (still `require_admin`). The safety
 statement itself (no auto-deploy path) remains true. CLAUDE.md corrected.
 
+## 10. Cross-tenant data in five viewer endpoints — RESOLVED 2026-09-28
+
+Access-control audit of every endpoint a non-admin can call. Logs, analytics,
+alerts, notification feed, origins, domains and tunnels were already scoped.
+These were not:
+
+| Endpoint | Leak | Fix |
+|---|---|---|
+| `POST /api/rules/blast-radius`, `/export` | replayed every tenant's real traffic and returned sample URLs and client IPs to any viewer | `require_admin` (rules are admin-managed; the UI shows it to admins only) |
+| `GET /api/cdn/stats` | tenant filter was `url LIKE '%domain%'` (no host in the URL): wrong totals, other tenants' rows counted when their URL contained the string, unfiltered totals for a tenant with no domain list | `build_tenant_origin_filter` on `host` |
+| `GET /api/rate-limits/throttled` | every tenant's throttled client IPs | buckets are per-IP only, so non-admins get an empty list |
+| `GET /api/threshold-proposals/`, `/{id}` | evidence listed every tenant's hostname with request volume and block rate | non-admins see only their own origins' rows (+ `hidden_origin_count`) |
+| `GET /api/logs/explain/{log_id}` | any log id was accepted (query currently fails on missing columns, so no data was returned, but the lookup was unscoped) | tenant filter added; no domains = no query |
+
+Tests: `tests/test_access_control_audit.py` (two real accounts through the
+API); full suite 733 passed.
+
+Still by design, not changed: WAF custom rules, IP rules, rate-limit rules,
+BOLA policies and global settings are platform-wide. Every viewer can read the
+same list (only admins can change them) and tenants cannot own rules of their
+own. `GET /api/logs/filters` returns the distinct status codes/methods across
+all traffic (no hostnames or IPs).
+
 ## Handling
 
 Re-check the relevant runtime evidence before acting. Update this register when the
