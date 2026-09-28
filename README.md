@@ -2,7 +2,7 @@
 
 **Multi-tenant Web Application Firewall + CDN Platform** พร้อมเลเยอร์ตรวจจับภัยคุกคามด้วย Machine Learning และ AI Copilot สำหรับวิเคราะห์เหตุการณ์ความปลอดภัยแบบเรียลไทม์
 
-โปรเจกต์จบสาขา Cybersecurity มหาวิทยาลัยขอนแก่น
+โปรเจกต์จบสาขา Information​ Technology​ มหาวิทยาลัยขอนแก่น
 
 > **สถานะโปรเจกต์:** Advanced Prototype / Demo — ระบบผ่านการทดสอบใช้งานจริงในระดับหนึ่งแล้ว (ไม่ใช่ production hardening เต็มรูปแบบ) รายละเอียดสถานะแต่ละฟีเจอร์อยู่ในหัวข้อ [Roadmap & ข้อจำกัดที่ทราบ](#-roadmap--ข้อจำกัดที่ทราบ) ด้านล่าง — เขียนไว้ตรงไปตรงมาโดยเจตนา
 
