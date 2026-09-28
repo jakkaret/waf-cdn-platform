@@ -12,7 +12,7 @@ import pathlib as _pathlib
 
 from services.rbac import require_viewer_or_above, require_admin
 from services.dynamodb_service import DynamoDBService
-from services.clickhouse_service import ClickHouseService, escape_like_value
+from services.clickhouse_service import ClickHouseService
 from services.cdn_log_forward import normalize_cdn_access
 from services.telegram_listener import dispatch_telegram_alert
 from services.pii_masker import pii_masker
@@ -223,13 +223,16 @@ async def cdn_stats(current_user: dict = Depends(require_viewer_or_above)):
         return _empty_cdn_stats()
 
     where_clauses = ["timestamp >= now() - INTERVAL 24 HOUR"]
-    if not is_admin and user_domains:
-        domain_patterns = []
-        for d in user_domains:
-            escaped = escape_like_value(d)
-            domain_patterns.append(f"url LIKE '%{escaped}%'")
-        if domain_patterns:
-            where_clauses.append(f"({' OR '.join(domain_patterns)})")
+    if not is_admin:
+        # Same tenant filter as logs/analytics (host = registered domain).
+        # This used to be url LIKE '%domain%': the URL has no host in it, so a
+        # tenant's own traffic barely matched, while any other tenant's request
+        # whose path or query happened to contain the string was counted, and
+        # a tenant with origins but no domain list got the unfiltered totals.
+        origin_clause = build_tenant_origin_filter("ALL", user_domains, is_admin)
+        if origin_clause == "1=0":
+            return _empty_cdn_stats()
+        where_clauses.append(origin_clause)
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}"
 

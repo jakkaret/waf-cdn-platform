@@ -102,6 +102,11 @@ async def delete_rate_rule(
 async def get_throttled_clients(
     current_user: dict = Depends(require_viewer_or_above),
 ):
+    # Buckets are keyed by client IP alone, with no host/tenant, so they cannot
+    # be scoped per tenant; only admins see them (2026-09-28: every viewer used
+    # to get every tenant's throttled client IPs).
+    if current_user.get("role") != "admin":
+        return {"throttled_clients": []}
     try:
         clients = service.get_throttled_clients()
         return {"throttled_clients": clients}
