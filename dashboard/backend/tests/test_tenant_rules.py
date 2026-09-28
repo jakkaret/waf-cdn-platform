@@ -66,6 +66,29 @@ def test_render_disabled_rule_has_no_secrule():
     assert "SecRule" not in text
 
 
+def test_render_keeps_backslashes_untouched_in_a_regex():
+    # libmodsecurity does not unescape `\\` inside an operator string, so
+    # doubling backslashes (as the legacy escaper does) would turn \s into a
+    # literal `\\s` that never matches. Checked against a real container.
+    clean = validate({"variable": "ARGS", "operator": r"@rx (?i)union\s+select", "message": "m"})
+    text = render(2000001, "origin-a", clean)
+    assert r'"@rx (?i)union\s+select"' in text
+    assert r"\\s" not in text.split("\n", 1)[1]
+
+
+def test_validate_rejects_backslash_before_quote_or_at_end():
+    for bad in ('@contains a\\"b', "@contains trailing\\"):
+        with pytest.raises(TenantRuleError, match="backslash"):
+            validate({"variable": "REQUEST_URI", "operator": bad, "message": "m"})
+
+
+def test_chained_link_has_an_explicit_actions_string():
+    # Without one, libmodsecurity swallows the next file's first line as the
+    # action list and nginx -t fails for the whole WAF.
+    text = render(2000001, "origin-a", validate({"variable": "REQUEST_URI", "operator": "@contains /x", "message": "m"}))
+    assert text.rstrip("\n").endswith('"t:none"')
+
+
 def test_render_escapes_a_quote_in_the_operator_value():
     clean = validate({"variable": "REQUEST_URI", "operator": '@contains "; drop', "message": "m"})
     text = render(2000001, "origin-a", clean)

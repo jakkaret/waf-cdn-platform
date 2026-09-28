@@ -793,8 +793,12 @@ def test_viewer_forbidden_from_deleting_deceive_rule(client: TestClient, registe
     assert resp.json()["detail"] == "Admin access required"
 
 
-def test_viewer_allowed_to_view_deceive_rules(client: TestClient, register_user, auth_header):
-    """TC-RBAC-04: Viewer role has read-only permission (HTTP 200) to view deception rules."""
+def test_platform_viewer_forbidden_admin_can_view_deceive_rules(client: TestClient, register_user, auth_header):
+    """TC-RBAC-04 (revised 2026-09-28, access-control audit): legacy global
+    custom rules apply to every origin on the WAF with no per-origin
+    ownership to filter by, so GET /api/rules/ was tightened to platform
+    admin only -- a plain platform viewer used to see every dashboard-
+    authored rule (including ones for origins they have no access to)."""
     admin = register_user(email="admin-rbac4@example.com", username="admin_rbac4")
     admin_headers = auth_header(admin["access_token"])
 
@@ -815,7 +819,9 @@ def test_viewer_allowed_to_view_deceive_rules(client: TestClient, register_user,
     viewer = register_user(email="viewer-rbac4@example.com", username="viewer_rbac4", role="viewer")
     viewer_headers = auth_header(viewer["access_token"])
 
-    resp = client.get("/api/rules/", headers=viewer_headers)
+    assert client.get("/api/rules/", headers=viewer_headers).status_code == 403
+
+    resp = client.get("/api/rules/", headers=admin_headers)
     assert resp.status_code == 200
     rules = resp.json()["rules"]
     deceive_rules = [r for r in rules if r.get("action") == "DECEIVE"]

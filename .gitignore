@@ -59,3 +59,11 @@ dashboard/backend/data/geoip/
 docs/node_modules
 docs/diagrams/rendered/
 docs/site/.vitepress/cache/
+
+# Generated at runtime by dashboard/backend/services/managed_ruleset.py and
+# tenant_rules.py -- tenant rules are customer data (and this repo is public),
+# the catalog is the published-version ledger. Source of truth for managed
+# rules is modsecurity/managed-rules/ (tracked).
+modsecurity/custom-rules/managed-*.conf
+modsecurity/custom-rules/tenant-*.conf
+dashboard/backend/data/managed_ruleset.json

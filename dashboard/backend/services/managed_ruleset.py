@@ -360,8 +360,13 @@ async def managed_ruleset_worker(rule_manager=None, db=None, interval: int = UPD
     logger.info("managed ruleset worker starting (interval=%ss)", interval)
     while True:
         try:
-            publish(SOURCE_DIR, CATALOG_PATH)
-            apply(rule_manager, db, CATALOG_PATH)
+            # publish()/apply() do blocking file I/O, a DynamoDB scan, and a
+            # docker-exec'd `nginx -t`/reload -- running them directly on the
+            # event loop would stall every other request this process is
+            # handling for the duration (same bug class as b8dd3f0's
+            # blocking boto3 calls in the Telegram dispatcher).
+            await asyncio.to_thread(publish, SOURCE_DIR, CATALOG_PATH)
+            await asyncio.to_thread(apply, rule_manager, db, CATALOG_PATH)
         except Exception:
             logger.exception("managed ruleset worker tick failed")
         await asyncio.sleep(interval)
