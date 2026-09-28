@@ -5,6 +5,18 @@ map $http_upgrade $connection_upgrade {
     '' close;
 }
 
+# The visitor's real IP for the CAPTCHA/OTP gate and the rate limiter.
+# Traffic from the CDN edges arrives with $remote_addr = the edge's IP; the
+# edge puts the client it saw in X-Real-IP (Caddy drops any X-Forwarded-For /
+# X-Real-IP the client sends, checked 2026-09-29), so that header is trusted
+# from the edge IPs below and nowhere else -- a client connecting to this
+# server directly can't choose its own IP by sending the header.
+map $remote_addr $waf_client_ip {
+    default         $remote_addr;
+    45.154.26.91    $http_x_real_ip;   # edge-th
+    57.158.25.236   $http_x_real_ip;   # edge-asia
+}
+
 upstream dvwa_backend {
     server dvwa:80;
 }
@@ -86,8 +98,10 @@ server {
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
         proxy_set_header X-Original-URI $request_uri;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # api/limiter.py keys on the first X-Forwarded-For entry; send only the
+        # trusted client IP so a direct client can't pick its own bucket.
+        proxy_set_header X-Real-IP $waf_client_ip;
+        proxy_set_header X-Forwarded-For $waf_client_ip;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header Host $host;
     }
@@ -190,8 +204,10 @@ server {
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
         proxy_set_header X-Original-URI $request_uri;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # api/limiter.py keys on the first X-Forwarded-For entry; send only the
+        # trusted client IP so a direct client can't pick its own bucket.
+        proxy_set_header X-Real-IP $waf_client_ip;
+        proxy_set_header X-Forwarded-For $waf_client_ip;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header Host $host;
     }
@@ -293,8 +309,10 @@ server {
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
         proxy_set_header X-Original-URI $request_uri;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # api/limiter.py keys on the first X-Forwarded-For entry; send only the
+        # trusted client IP so a direct client can't pick its own bucket.
+        proxy_set_header X-Real-IP $waf_client_ip;
+        proxy_set_header X-Forwarded-For $waf_client_ip;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header Host $host;
     }
@@ -433,8 +451,10 @@ server {
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
         proxy_set_header X-Original-URI $request_uri;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # api/limiter.py keys on the first X-Forwarded-For entry; send only the
+        # trusted client IP so a direct client can't pick its own bucket.
+        proxy_set_header X-Real-IP $waf_client_ip;
+        proxy_set_header X-Forwarded-For $waf_client_ip;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header Host $host;
     }
@@ -510,8 +530,10 @@ server {
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
         proxy_set_header X-Original-URI $request_uri;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # api/limiter.py keys on the first X-Forwarded-For entry; send only the
+        # trusted client IP so a direct client can't pick its own bucket.
+        proxy_set_header X-Real-IP $waf_client_ip;
+        proxy_set_header X-Forwarded-For $waf_client_ip;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header Host $host;
     }
