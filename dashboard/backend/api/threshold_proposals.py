@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from services.clickhouse_service import ClickHouseService
 from services.rbac import require_admin, require_viewer_or_above
 from services.settings_service import SettingsService
+from services.tenant_service import get_user_origins_and_domains, is_origin_owned
 from services.threshold_proposal_service import (
     ThresholdProposalStore,
     generate_threshold_proposal,
@@ -48,9 +49,27 @@ async def generate_proposal(lookback_hours: int = 24, current_user: dict = Depen
     return {"proposal": created}
 
 
+def _scope_for_viewer(proposal: dict, current_user: dict) -> dict:
+    """Admins see the full evidence. Anyone else sees only their own origins'
+    rows: the evidence lists every tenant's hostname with request volume and
+    block rate, which is not theirs to see (2026-09-28)."""
+    if current_user.get("role") == "admin" or not isinstance(proposal, dict):
+        return proposal
+    _ids, _origins, user_domains = get_user_origins_and_domains(current_user.get("user_id"))
+    evidence = dict(proposal.get("evidence") or {})
+    rows = evidence.get("origins") or []
+    own = [r for r in rows if is_origin_owned(str(r.get("origin", "")), user_domains)]
+    evidence["origins"] = own
+    evidence["corroborating_origins"] = [
+        o for o in evidence.get("corroborating_origins") or [] if is_origin_owned(str(o), user_domains)
+    ]
+    evidence["hidden_origin_count"] = len(rows) - len(own)
+    return {**proposal, "evidence": evidence}
+
+
 @router.get("/")
 async def list_proposals(status: Optional[str] = None, current_user: dict = Depends(require_viewer_or_above)):
-    return {"proposals": store.list(status)}
+    return {"proposals": [_scope_for_viewer(p, current_user) for p in store.list(status)]}
 
 
 @router.get("/{proposal_id}")
@@ -58,7 +77,7 @@ async def get_proposal(proposal_id: str, current_user: dict = Depends(require_vi
     proposal = store.get(proposal_id)
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
-    return proposal
+    return _scope_for_viewer(proposal, current_user)
 
 
 @router.post("/{proposal_id}/approve")

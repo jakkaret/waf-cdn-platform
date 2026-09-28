@@ -286,9 +286,12 @@ async def sync_rules_to_edges(request: Request, current_user: dict = Depends(req
 # ==========================================
 
 @router.post("/blast-radius")
-async def simulate_blast_radius(payload: BlastRadiusRequest, current_user: dict = Depends(require_viewer_or_above)):
+async def simulate_blast_radius(payload: BlastRadiusRequest, current_user: dict = Depends(require_admin)):
     """
     Replays historical traffic against candidate rule to estimate false positives and blast radius.
+
+    Admin only (2026-09-28): the replay covers every tenant's real traffic and
+    returns sample URLs and client IPs; rules themselves are admin-managed.
     Supports Multi-Variable rules, Multi-CIDR @ipMatch operators, and Domain/Tenant filtering.
     """
     try:
@@ -318,7 +321,7 @@ async def simulate_blast_radius(payload: BlastRadiusRequest, current_user: dict 
 
 
 @router.post("/blast-radius/export")
-async def export_blast_radius_audit(payload: BlastRadiusRequest, current_user: dict = Depends(require_viewer_or_above)):
+async def export_blast_radius_audit(payload: BlastRadiusRequest, current_user: dict = Depends(require_admin)):
     """
     Generates and exports an Enterprise SecOps Compliance Audit Report for the simulated rule.
     """

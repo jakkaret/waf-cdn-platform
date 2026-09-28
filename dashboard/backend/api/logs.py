@@ -8,7 +8,7 @@ from services.rbac import require_viewer_or_above
 from services.pii_masker import pii_masker, zk_hash
 from services.explainability_service import explainability_service
 from services.fetch_logs import get_recent_logs
-from services.tenant_service import _normalize_origin_key, get_user_origins_and_domains, is_origin_owned
+from services.tenant_service import _normalize_origin_key, build_tenant_origin_filter, get_user_origins_and_domains, is_origin_owned
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 ch = ClickHouseService()
@@ -199,9 +199,15 @@ async def explain_log_by_id(
     current_user: dict = Depends(require_viewer_or_above)
 ):
     """Retrieve deep token attribution and explainability for a specific log by ID"""
-    if ch.connected:
+    # Tenant scope, like every other log read: a log id from another tenant
+    # must not be explainable (the id is not a secret -- it is the request id).
+    is_admin = current_user.get("role") == "admin"
+    _ids, _origins, user_domains = get_user_origins_and_domains(current_user.get("user_id"))
+    scope = build_tenant_origin_filter("ALL", user_domains, is_admin)
+    scope_sql = f" AND {scope}" if scope else ""
+    if ch.connected and scope != "1=0":
         try:
-            query = "SELECT toString(id) as log_id, url, method, status_code as status, rule_id, attack_type, matched_token, root_cause_explanation, remediation_hint, confidence_score, category FROM access_logs WHERE toString(id) = {log_id:String} LIMIT 1"
+            query = "SELECT toString(id) as log_id, url, method, status_code as status, rule_id, attack_type, matched_token, root_cause_explanation, remediation_hint, confidence_score, category FROM access_logs WHERE toString(id) = {log_id:String}" + scope_sql + " LIMIT 1"
             rows = ch.client.query(query, parameters={"log_id": log_id}).result_rows
             if rows:
                 cols = ['log_id', 'url', 'method', 'status', 'rule_id', 'attack_type', 'matched_token', 'root_cause_explanation', 'remediation_hint', 'confidence_score', 'category']
