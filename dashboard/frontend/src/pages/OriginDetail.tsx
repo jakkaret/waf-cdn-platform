@@ -18,6 +18,7 @@ import { LoadingSpinner } from '../components/ui/LoadingSpinner'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState } from '../components/ui/EmptyState'
 import { DomainSetupWizard } from '../components/DomainSetupWizard'
+import { ShieldActivity } from '../components/ShieldActivity'
 import { toast } from 'react-hot-toast'
 import { WafRule, Domain, CaptchaShieldConfig, OtpShieldConfig } from '../types'
 import { parseListInput, formatListInput } from '../lib/captchaForm'
@@ -1401,6 +1402,8 @@ export const OriginDetail: React.FC = () => {
                 </div>
               </>
             )}
+
+            {id && <ShieldActivity originId={id} />}
           </div>
         )}
 

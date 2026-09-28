@@ -197,6 +197,7 @@ from api import threat_intel as threat_intel_api
 from api import public_status as public_status_api
 from api import onboarding as onboarding_api
 from api import deception as deception_api
+from api import shield_events as shield_events_api
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
@@ -215,6 +216,7 @@ app.include_router(threat_intel_api.router)
 app.include_router(public_status_api.router)
 app.include_router(onboarding_api.router)
 app.include_router(deception_api.router)
+app.include_router(shield_events_api.router)
 
 # Error Handlers
 from fastapi import Request
@@ -292,6 +294,11 @@ async def startup_event():
     if not hasattr(app.state, "public_status_history_task"):
         from services.public_status import public_status_history_worker
         app.state.public_status_history_task = asyncio.create_task(public_status_history_worker())
+    # OTP / CAPTCHA events queued in Redis by control-api -> ClickHouse
+    # shield_events, shown per origin on the Bot & Login Shield tab.
+    if not hasattr(app.state, "shield_events_task"):
+        from services.shield_events import shield_events_worker
+        app.state.shield_events_task = asyncio.create_task(shield_events_worker(ch))
 
 
 @app.on_event("shutdown")

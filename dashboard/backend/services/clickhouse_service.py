@@ -184,6 +184,25 @@ class ClickHouseService:
                 ) ENGINE = MergeTree()
                 ORDER BY (timestamp, rule_id)
             ''')
+            # OTP / CAPTCHA shield events (control-api -> Redis -> services/
+            # shield_events.py). origin_id is on every row so an origin's
+            # Admins/Viewers read only their own; email is masked + hashed
+            # upstream, the full address is never stored.
+            self.client.command('''
+                CREATE TABLE IF NOT EXISTS shield_events (
+                    timestamp DateTime,
+                    origin_id String,
+                    host String,
+                    kind LowCardinality(String),
+                    event LowCardinality(String),
+                    client_ip String,
+                    email_masked String,
+                    email_hash String,
+                    path String
+                ) ENGINE = MergeTree()
+                ORDER BY (origin_id, timestamp)
+                TTL timestamp + INTERVAL 90 DAY
+            ''')
             print("✅ ClickHouse tables initialized.")
         except ClickHouseError as e:
             print(f"⚠️ Error initializing ClickHouse tables: {e}")
