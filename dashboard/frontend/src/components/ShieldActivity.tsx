@@ -11,7 +11,7 @@ const RANGES = [
 ]
 
 // Which outcomes read as a problem (wrong codes, blocked scripts) vs normal.
-const BAD = new Set(['blocked_no_clearance', 'otp_wrong_code', 'otp_too_many_attempts', 'otp_rate_limited', 'otp_send_failed'])
+const BAD = new Set(['blocked_no_clearance', 'otp_wrong_code', 'otp_too_many_attempts', 'otp_rate_limited', 'otp_send_failed', 'otp_not_allowed'])
 
 export const ShieldActivity: React.FC<{ originId: string }> = ({ originId }) => {
   const [hours, setHours] = useState(24)

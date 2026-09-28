@@ -242,6 +242,8 @@ export interface CaptchaShieldConfig {
   clearance_ttl: number
   bypass_ips: string[]
   pow_difficulty: number
+  mode: 'enforce' | 'log_only'
+  exclude_paths: string[]
   updated_at?: string
 }
 
@@ -255,6 +257,12 @@ export interface OtpShieldConfig {
   code_ttl: number
   // Only "email" is implemented server-side today (cdn/control-api/email_sender.py).
   channel: 'email'
+  mode: 'enforce' | 'log_only'
+  exclude_paths: string[]
+  // 'open': anyone who receives the code; 'allowlist': only allowed_emails
+  // (exact addresses or '@domain' entries).
+  access_mode: 'open' | 'allowlist'
+  allowed_emails: string[]
   updated_at?: string
 }
 
