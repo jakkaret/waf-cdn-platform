@@ -5,16 +5,30 @@ map $http_upgrade $connection_upgrade {
     '' close;
 }
 
-# The visitor's real IP for the CAPTCHA/OTP gate and the rate limiter.
-# Traffic from the CDN edges arrives with $remote_addr = the edge's IP; the
-# edge puts the client it saw in X-Real-IP (Caddy drops any X-Forwarded-For /
-# X-Real-IP the client sends, checked 2026-09-29), so that header is trusted
-# from the edge IPs below and nowhere else -- a client connecting to this
-# server directly can't choose its own IP by sending the header.
-map $remote_addr $waf_client_ip {
-    default         $remote_addr;
-    45.154.26.91    $http_x_real_ip;   # edge-th
-    57.158.25.236   $http_x_real_ip;   # edge-asia
+# The visitor's real IP ($waf_client_ip) for the CAPTCHA/OTP gate, the rate
+# limiter and the X-Real-IP sent to origins.
+#
+# Requests reach this server through a proxy of ours that has already put the
+# client it saw in X-Real-IP, overwriting anything the client sent (checked
+# 2026-09-29): the CDN edges, and the Caddy container on this host (ports
+# 80/443, "header_up X-Real-IP {remote_host}" in nginx/Caddyfile). Only from
+# those sources is the header believed. 172.18.0.1 is the docker gateway, the
+# address traffic has when it comes in through docker-proxy (e.g. published
+# ports over IPv6), so it is excluded from the network range.
+#
+# This list is also the allow-list for port 8080 in the host firewall
+# (/etc/ufw/after.rules, DOCKER-USER): a new edge must be added in both places.
+geo $from_trusted_proxy {
+    default         0;
+    45.154.26.91    1;   # edge-th
+    57.158.25.236   1;   # edge-asia
+    172.18.0.0/16   1;   # waf-net containers (Main's Caddy)
+    172.18.0.1      0;   # docker gateway / docker-proxy
+}
+
+map $from_trusted_proxy $waf_client_ip {
+    1       $http_x_real_ip;
+    default $remote_addr;
 }
 
 upstream dvwa_backend {
@@ -54,7 +68,7 @@ server {
         proxy_pass http://frp_tunnel_router;
         proxy_set_header Host $host;
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
@@ -82,7 +96,7 @@ server {
         proxy_pass http://frp_tunnel_router;
         proxy_set_header Host $host;
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
@@ -121,7 +135,7 @@ server {
         proxy_read_timeout 3s;
         proxy_set_header X-Internal-Deception-Key ${DECEPTION_INTERNAL_KEY};
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Original-URI $request_uri;
         proxy_set_header X-Original-Method $request_method;
         proxy_set_header X-Original-Host $host;
@@ -160,7 +174,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header Accept-Encoding "";
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
@@ -189,7 +203,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header Accept-Encoding "";
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
@@ -227,7 +241,7 @@ server {
         proxy_read_timeout 3s;
         proxy_set_header X-Internal-Deception-Key ${DECEPTION_INTERNAL_KEY};
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Original-URI $request_uri;
         proxy_set_header X-Original-Method $request_method;
         proxy_set_header X-Original-Host $host;
@@ -265,7 +279,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header Accept-Encoding "";
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
@@ -294,7 +308,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header Accept-Encoding "";
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
@@ -332,7 +346,7 @@ server {
         proxy_read_timeout 3s;
         proxy_set_header X-Internal-Deception-Key ${DECEPTION_INTERNAL_KEY};
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Original-URI $request_uri;
         proxy_set_header X-Original-Method $request_method;
         proxy_set_header X-Original-Host $host;
@@ -376,7 +390,7 @@ server {
         proxy_read_timeout 3s;
         proxy_set_header X-Internal-Deception-Key ${DECEPTION_INTERNAL_KEY};
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Original-URI $request_uri;
         proxy_set_header X-Original-Method $request_method;
         proxy_set_header X-Original-Host $host;
@@ -402,7 +416,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header Accept-Encoding "";
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
@@ -437,7 +451,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header Accept-Encoding "";
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
@@ -486,7 +500,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header Accept-Encoding "";
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
@@ -515,7 +529,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header Accept-Encoding "";
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
@@ -553,7 +567,7 @@ server {
         proxy_read_timeout 3s;
         proxy_set_header X-Internal-Deception-Key ${DECEPTION_INTERNAL_KEY};
         proxy_set_header X-Request-ID $request_id;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $waf_client_ip;
         proxy_set_header X-Original-URI $request_uri;
         proxy_set_header X-Original-Method $request_method;
         proxy_set_header X-Original-Host $host;
