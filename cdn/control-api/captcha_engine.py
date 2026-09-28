@@ -103,6 +103,11 @@ def _default_config(host: str = "") -> dict:
         "clearance_ttl": DEFAULT_CLEARANCE_TTL,
         "bypass_ips": [],
         "pow_difficulty": 3,
+        # "enforce" or "log_only" (record what would happen, let the request
+        # through). Configs saved before this field existed have no key and
+        # keep enforcing.
+        "mode": "enforce",
+        "exclude_paths": [],
     }
 
 
@@ -189,6 +194,8 @@ def access_decision(request: Request) -> str:
     if client is None or not config.get("enabled") or config.get("engine", "native") != "native":
         return "allow"
     if not _matches_path(path, config.get("login_paths", DEFAULT_PATHS)):
+        return "allow"
+    if _matches_path(path, config.get("exclude_paths") or []):
         return "allow"
     if _is_bypassed(client_ip(request), config.get("bypass_ips", [])):
         return "allow"

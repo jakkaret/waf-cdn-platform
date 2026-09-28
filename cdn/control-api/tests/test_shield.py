@@ -116,9 +116,9 @@ def client():
     return TestClient(app)
 
 
-def enable(r, kind):
+def enable(r, kind, **extra):
     key = f"waf:{kind}:domain:{HOST}"
-    r.set(key, json.dumps({"enabled": True, "origin_id": ORIGIN, "login_paths": ["/login*"]}))
+    r.set(key, json.dumps({"enabled": True, "origin_id": ORIGIN, "login_paths": ["/login*"], **extra}))
 
 
 def check(client, method, path="/login", cookie=""):
@@ -243,3 +243,97 @@ def test_captcha_cookie_for_a_dotted_host_validates(redis_, monkeypatch):
     assert captcha_engine._cookie_valid(request, HOST)
     tampered = [(b"cookie", f"{captcha_engine.COOKIE_NAME}={expiry}.evil.example.com.{sig}".encode())] + headers[1:]
     assert not captcha_engine._cookie_valid(StarletteRequest({"type": "http", "headers": tampered, "method": "GET", "path": "/"}), HOST)
+
+
+# ------------------------------------------------ exclusions and log-only
+
+
+def test_excluded_path_is_not_gated(client, redis_):
+    enable(redis_, "otp", login_paths=["/wp-admin*"], exclude_paths=["/wp-admin/admin-ajax.php"])
+    assert check(client, "POST", "/wp-admin/admin-ajax.php").status_code == 204
+    assert check(client, "GET", "/wp-admin/").status_code == 401
+
+
+@pytest.mark.parametrize("kind", ["otp", "captcha"])
+def test_log_only_lets_requests_through_and_records_what_would_happen(client, redis_, kind):
+    enable(redis_, kind, mode="log_only")
+    assert check(client, "GET").status_code == 204
+    assert check(client, "POST").status_code == 204
+    assert [e["event"] for e in events(redis_)] == ["would_challenge", "would_block"]
+
+
+def test_captcha_in_log_only_still_checks_otp(client, redis_):
+    enable(redis_, "captcha", mode="log_only")
+    enable(redis_, "otp")
+    resp = check(client, "GET")
+    assert (resp.status_code, resp.headers["X-Shield-Type"]) == (401, "otp")
+    assert [(e["kind"], e["event"]) for e in events(redis_)] == [("captcha", "would_challenge"), ("otp", "challenge_shown")]
+
+
+# ---------------------------------------------------------------- allowlist
+
+
+ALLOWLIST = {"access_mode": "allowlist", "allowed_emails": ["boss@gmail.com", "@kku.ac.th"]}
+
+
+def _cookie_for(client, sent, email):
+    challenge = _request_code(client, email).json()["challenge_id"]
+    ok = _verify(client, challenge, sent[-1][1])
+    assert ok.status_code == 200, ok.text
+    return f"{otp_engine.COOKIE_NAME}={ok.cookies[otp_engine.COOKIE_NAME]}"
+
+
+def _access(client, cookie):
+    headers = {"X-Original-Method": "GET", "X-Original-URI": "/login", "X-Original-Host": HOST,
+               "User-Agent": "pytest", "X-Original-User-Agent": "pytest", "Cookie": cookie}
+    return client.get("/api/shield/access", headers=headers)
+
+
+@pytest.mark.parametrize("email", ["boss@gmail.com", "BOSS@gmail.com", "staff@kku.ac.th"])
+def test_allowlisted_email_gets_a_code_and_clearance(client, redis_, sent, email):
+    enable(redis_, "otp", **ALLOWLIST)
+    cookie = _cookie_for(client, sent, email)
+    assert _access(client, cookie).status_code == 204
+
+
+def test_unlisted_email_looks_identical_but_never_gets_in(client, redis_, sent):
+    enable(redis_, "otp", **ALLOWLIST)
+    resp = _request_code(client, "stranger@gmail.com")
+    assert resp.status_code == 200 and resp.json()["success"] is True  # same answer as a listed address
+    assert sent == []  # but nothing was emailed
+    challenge = resp.json()["challenge_id"]
+    wrong = _verify(client, challenge, "123456")
+    assert wrong.json()["error"] == "incorrect code"  # not "code expired": no way to tell it apart
+    assert [e["event"] for e in events(redis_)] == ["otp_not_allowed", "otp_wrong_code"]
+
+
+def test_domain_entry_does_not_match_a_lookalike(client, redis_, sent):
+    enable(redis_, "otp", **ALLOWLIST)
+    _request_code(client, "x@evilkku.ac.th")
+    _request_code(client, "x@kku.ac.th.evil.com")
+    assert sent == []
+
+
+def test_removing_an_email_revokes_its_cookie_immediately(client, redis_, sent):
+    enable(redis_, "otp", **ALLOWLIST)
+    cookie = _cookie_for(client, sent, "boss@gmail.com")
+    assert _access(client, cookie).status_code == 204
+    enable(redis_, "otp", access_mode="allowlist", allowed_emails=["@kku.ac.th"])
+    assert _access(client, cookie).status_code == 401
+
+
+def test_open_mode_cookie_needs_no_session_lookup(client, redis_, sent):
+    enable(redis_, "otp")
+    cookie = _cookie_for(client, sent, "anyone@gmail.com")
+    redis_.kv = {k: v for k, v in redis_.kv.items() if not k.startswith("waf:otp:session:")}
+    assert _access(client, cookie).status_code == 204
+
+
+def test_old_three_part_cookie_is_rejected(client, redis_):
+    enable(redis_, "otp")
+    assert _access(client, f"{otp_engine.COOKIE_NAME}=9999999999.{HOST}.deadbeef").status_code == 401
+
+
+def test_challenge_page_wording_in_allowlist_mode():
+    assert "หากอีเมลนี้มีสิทธิ์" in otp_engine._challenge_html(True)
+    assert "หากอีเมลนี้มีสิทธิ์" not in otp_engine._challenge_html(False)

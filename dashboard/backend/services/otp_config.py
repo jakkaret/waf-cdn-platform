@@ -20,6 +20,18 @@ DEFAULT_CONFIG = {
     # The field exists now so adding a channel later (SMS, etc.) is a new
     # value here plus a new sender module, not a config schema change.
     "channel": "email",
+    # "log_only" records what the gate would do and lets the request through.
+    # A fresh config starts there so an Admin can watch the effect before
+    # enforcing; a config saved before this field existed keeps "enforce"
+    # (see get_origin_config), matching what control-api does with it.
+    "mode": "log_only",
+    "exclude_paths": [],
+    # "open": any inbox that receives the code passes (bot friction for public
+    # login pages). "allowlist": only allowed_emails -- exact addresses or
+    # "@domain" entries -- for staff/admin pages. Enforced in
+    # cdn/control-api/otp_engine.py.
+    "access_mode": "open",
+    "allowed_emails": [],
 }
 
 
@@ -61,6 +73,8 @@ def get_origin_config(origin_id: str) -> dict:
         raise RuntimeError("OTP configuration store is unavailable") from exc
     result = dict(DEFAULT_CONFIG)
     result.update(value)
+    if value and "mode" not in value:
+        result["mode"] = "enforce"
     result["origin_id"] = origin_id
     return result
 
