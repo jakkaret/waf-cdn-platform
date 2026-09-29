@@ -53,11 +53,36 @@ os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 # instantly with "connection refused" instead of reaching real AWS.
 os.environ["DYNAMODB_ENDPOINT_URL"] = "http://127.0.0.1:1"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-pytest-only"
+os.environ["FRP_AUTH_TOKEN"] = "test-frp-token-for-pytest-only"
 os.environ["WAF_CONTAINER_NAME"] = "test-waf-container-does-not-exist"
 os.environ["GEMINI_API_KEY"] = ""
 os.environ.setdefault("ORIGINS_QUOTA_DEFAULT", "5")
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+# ---------------------------------------------------------------------------
+# 1b. Redis: every redis.Redis(...) the application builds -- including the
+#     module-level ones created at import (rate_limit_service, rate_limiter) --
+#     gets an in-memory fakeredis sharing one server, emptied before each test.
+#     Without this the suite silently used whatever Redis answered on
+#     127.0.0.1:6379: on the production host that was the live Redis
+#     (found 2026-09-29 when 10 tests failed in a clean container).
+# ---------------------------------------------------------------------------
+import fakeredis  # noqa: E402
+import redis as _redis_module  # noqa: E402
+
+_FAKE_REDIS_SERVER = fakeredis.FakeServer()
+
+
+class _SharedFakeRedis(fakeredis.FakeRedis):
+    def __init__(self, *args, **kwargs):
+        kwargs["server"] = _FAKE_REDIS_SERVER
+        super().__init__(*args, **kwargs)
+
+
+_redis_module.Redis = _SharedFakeRedis
+_redis_module.StrictRedis = _SharedFakeRedis
+
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
@@ -353,6 +378,7 @@ class FakeDynamoDBService(DynamoDBService):
 @pytest.fixture(autouse=True)
 def fake_infrastructure(monkeypatch, tmp_path):
     """Patch every external-store singleton at its service boundary (Ruling R3)."""
+    _SharedFakeRedis().flushall()
     _STORE.clear()
 
     # DynamoDB: patch the class itself so any fresh construction (e.g. the
