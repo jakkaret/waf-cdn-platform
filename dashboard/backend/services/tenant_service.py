@@ -116,6 +116,28 @@ def build_tenant_origin_filter(origin: Optional[str], user_domains: List[str], i
     return f"({' OR '.join(clauses)})" if clauses else "1=0"
 
 
+def verified_scope_keywords(origins: List[Dict], domain_rows: List[Dict]) -> set:
+    """Hostnames allowed to scope a tenant's log / analytics / alert rows.
+
+    Only provably-owned channels count: domain rows proven through DNS
+    verification (``dns_verified``) and ``tunnel_domains`` recorded on the
+    origin by the tunnel gatekeeper. An origin's self-typed ``ip`` and the
+    ``(domain)`` inside its ``label`` are deliberately excluded -- both are
+    free text the tenant controls, so trusting them lets one tenant type
+    another tenant's hostname into their own origin and read that tenant's
+    rows. Mirrors the SSL allowlist (api/domains.py::_load_ssl_allowed_from_db).
+    """
+    kw = set()
+    for d in domain_rows or []:
+        if d.get("domain_name") and d.get("dns_verified", False):
+            kw.add(str(d["domain_name"]).strip().lower())
+    for o in origins or []:
+        for td in (o.get("tunnel_domains") or []):
+            if td:
+                kw.add(str(td).strip().lower())
+    return kw
+
+
 def get_user_origins_and_domains(user_id: str) -> Tuple[List[str], List[Dict], List[str]]:
     """
     Retrieve strictly isolated origins and domains owned by a specific user,
@@ -159,32 +181,16 @@ def get_user_origins_and_domains(user_id: str) -> Tuple[List[str], List[Dict], L
         # scan it replaces both read every other tenant's rows and silently
         # truncated at DynamoDB's 1MB response cap without paginating.
         try:
-            user_registered_domains = [
-                str(d.get("domain_name")).strip().lower()
-                for d in db.get_domains_by_origin_ids(origin_ids)
-                if d.get("domain_name")
-            ]
+            domain_rows = db.get_domains_by_origin_ids(origin_ids)
         except Exception:
-            user_registered_domains = []
+            domain_rows = []
 
-        # Extract domains/IPs from origin ip/label
-        domain_keywords = set(user_registered_domains)
-        for o in active_origins:
-            ip_val = str(o.get("ip", "")).strip().lower()
-            label_val = str(o.get("label", "")).strip().lower()
+        # Scope keywords come only from DNS-verified domains and tunnel
+        # domains -- never the origin's self-typed ip/label, which a tenant
+        # could set to another tenant's hostname to read their rows.
+        domain_keywords = verified_scope_keywords(active_origins, domain_rows)
 
-            if ip_val:
-                domain_keywords.add(ip_val)
-
-            if "(" in label_val and ")" in label_val:
-                try:
-                    extracted = label_val.split("(")[1].split(")")[0].strip()
-                    if "." in extracted:
-                        domain_keywords.add(extracted.lower())
-                except Exception:
-                    pass
-
-        result = (origin_ids, active_origins, list(domain_keywords))
+        result = (origin_ids, active_origins, sorted(domain_keywords))
         _TENANT_CACHE[user_id] = (now, result)
         return result
 

@@ -95,7 +95,7 @@ def test_account_with_an_origin_gets_a_query_scoped_to_their_own_domain(
     # with everything else, same as reading it back via
     # get_user_origins_and_domains's own db.domains_table.scan() would see.
     ai_summary_module.db.domains_table.put_item(Item={
-        "id": "domain-1", "origin_id": origin_id, "domain_name": "myapp.example.com",
+        "id": "domain-1", "origin_id": origin_id, "domain_name": "myapp.example.com", "dns_verified": True,
     })
 
     resp = client.post(
@@ -111,6 +111,9 @@ def test_account_with_an_origin_gets_a_query_scoped_to_their_own_domain(
     # keyword rather than reading the whole table.
     for call in query_spy.call_args_list:
         query_text = call.args[0] if call.args else call.kwargs.get("query", "")
-        assert "myapp" in query_text.lower() or "203.0.113.90" in query_text, (
-            f"query was not scoped to the owner's domain/ip: {query_text}"
+        assert "myapp" in query_text.lower(), (
+            f"query was not scoped to the owner's verified domain: {query_text}"
+        )
+        assert "203.0.113.90" not in query_text, (
+            "the origin's self-typed ip must never scope data -- only verified domains"
         )

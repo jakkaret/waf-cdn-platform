@@ -383,28 +383,18 @@ def _build_origin_scope_sql(origin: Dict[str, Any]) -> str:
     get_user_origins_and_domains, scoped to a single origin instead of
     every origin a user can see."""
     origin_id = str(origin.get("id") or "")
-    keywords = set()
     try:
         # origin_id-index query, not a full-table scan: same reasoning as
         # tenant_service.get_user_origins_and_domains -- an unpaginated
         # scan() silently stops at DynamoDB's 1MB cap, which here would
         # drop domains out of this origin's own scope filter.
-        for d in db.get_domains_by_origin_ids([origin_id]):
-            if d.get("domain_name"):
-                keywords.add(str(d["domain_name"]).strip().lower())
+        domain_rows = db.get_domains_by_origin_ids([origin_id])
     except Exception:
-        pass
-    ip_val = str(origin.get("ip", "")).strip().lower()
-    if ip_val:
-        keywords.add(ip_val)
-    label_val = str(origin.get("label", "")).strip().lower()
-    if "(" in label_val and ")" in label_val:
-        try:
-            extracted = label_val.split("(")[1].split(")")[0].strip()
-            if "." in extracted:
-                keywords.add(extracted)
-        except Exception:
-            pass
+        domain_rows = []
+    # Only DNS-verified domains and tunnel domains scope this origin's data,
+    # never its self-typed ip/label (see tenant_service.verified_scope_keywords).
+    from services.tenant_service import verified_scope_keywords
+    keywords = verified_scope_keywords([origin], domain_rows)
     clauses = [build_domain_pattern_sql(k) for k in keywords]
     clauses = [c for c in clauses if c]
     return f"({' OR '.join(clauses)})" if clauses else "1=0"
