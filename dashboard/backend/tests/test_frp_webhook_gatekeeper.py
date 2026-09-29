@@ -291,3 +291,18 @@ def test_unknown_op_fails_closed_not_open():
     req = {"op": "SomeFutureOpNobodyHandlesYet", "content": {}}
     result = _run(frp_webhook_gatekeeper(req))
     assert result["reject"] is True
+
+
+def test_no_legacy_login_when_the_token_is_not_configured(monkeypatch):
+    """With FRP_AUTH_TOKEN unset the shared-token path must be off -- an empty
+    privilege_key/user must not match an empty token."""
+    import api.tunnels as tunnels
+    monkeypatch.setattr(tunnels, "LEGACY_STATIC_TOKEN", "")
+    assert tunnels._resolve_frp_identity("", "", 0)[0] != "legacy"
+    assert tunnels._resolve_frp_identity("", "d41d8cd98f00b204e9800998ecf8427e", 1)[0] != "legacy"
+
+
+def test_repository_no_longer_carries_a_default_frp_token():
+    import pathlib, re
+    src = pathlib.Path(__file__).resolve().parents[1].joinpath("api", "tunnels.py").read_text()
+    assert not re.search(r'getenv\("FRP_AUTH_TOKEN",\s*"[0-9a-f]{16,}"', src)

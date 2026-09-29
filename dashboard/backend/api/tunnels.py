@@ -21,7 +21,11 @@ auth_service = AuthService()
 FRP_DASHBOARD_URL = os.getenv("FRP_DASHBOARD_URL", "http://127.0.0.1:7500/api/proxy/http")
 FRP_ADMIN_USER = os.getenv("FRP_ADMIN_USER", "admin")
 FRP_ADMIN_PASS = os.getenv("FRP_ADMIN_PASS", "admin1234")
-LEGACY_STATIC_TOKEN = os.getenv("FRP_AUTH_TOKEN", "28cda1cc8790af9e459528ec6e325bcc4adf2ceb3f4b6f74de1f9c0a9a58b277")
+# The frps connection secret. Must come from the environment: the value that
+# used to be hard-coded here as a fallback was published with the repository
+# (2026-09-29), so it can no longer be treated as a secret. Empty = the legacy
+# shared-token login path is disabled entirely (see _resolve_frp_identity).
+LEGACY_STATIC_TOKEN = os.getenv("FRP_AUTH_TOKEN", "")
 # A tunnel token authenticates a persistent connection (Restart=always,
 # meant to run unattended for months), not a browser login session -- see
 # the 2026-09-20 fix notes on create_tunnel_token/get_tunnel_config below.
@@ -422,11 +426,12 @@ def _resolve_frp_identity(raw_token: str, priv_key: str = "", ts: int = 0) -> Tu
     NewProxy (which additionally needs the decoded payload to check the
     domain claim -- see the docstring on frp_webhook_gatekeeper).
     """
-    if priv_key == LEGACY_STATIC_TOKEN or raw_token == LEGACY_STATIC_TOKEN:
+    if LEGACY_STATIC_TOKEN and (priv_key == LEGACY_STATIC_TOKEN or raw_token == LEGACY_STATIC_TOKEN):
         return "legacy", None
-    if priv_key and ts:
+    if LEGACY_STATIC_TOKEN and priv_key and ts:
         for delta in (0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5):
-            expected_hash = hashlib.md5((LEGACY_STATIC_TOKEN + str(ts + delta)).encode()).hexdigest()
+            # frp's own login scheme (privilege_key = md5(token + timestamp)); not our choice of hash.
+            expected_hash = hashlib.md5((LEGACY_STATIC_TOKEN + str(ts + delta)).encode(), usedforsecurity=False).hexdigest()
             if expected_hash.lower() == priv_key.lower():
                 return "legacy", None
     if raw_token:
