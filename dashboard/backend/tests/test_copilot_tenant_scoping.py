@@ -109,7 +109,7 @@ def test_account_with_an_origin_gets_a_query_scoped_to_their_own_domain(
     # router isn't mounted here, write the domain directly into the shared
     # fake store get_user_origins_and_domains reads from.
     tenant_service_module.db.domains_table.put_item(Item={
-        "id": "domain-copilot-1", "origin_id": origin_id, "domain_name": "mycopilotapp.example.com",
+        "id": "domain-copilot-1", "origin_id": origin_id, "domain_name": "mycopilotapp.example.com", "dns_verified": True,
     })
 
     with patch("api.copilot.httpx.AsyncClient", return_value=_failing_gemini_client()):
@@ -123,6 +123,9 @@ def test_account_with_an_origin_gets_a_query_scoped_to_their_own_domain(
     assert query_spy.call_count > 0, "an account with a real origin should still query ClickHouse"
     for call in query_spy.call_args_list:
         query_text = call.args[0] if call.args else call.kwargs.get("query", "")
-        assert "mycopilotapp" in query_text.lower() or "203.0.113.91" in query_text, (
-            f"query was not scoped to the owner's domain/ip: {query_text}"
+        assert "mycopilotapp" in query_text.lower(), (
+            f"query was not scoped to the owner's verified domain: {query_text}"
+        )
+        assert "203.0.113.91" not in query_text, (
+            "the origin's self-typed ip must never scope data -- only verified domains"
         )

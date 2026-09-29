@@ -15,7 +15,7 @@ who else can see it) rests on.
 from fastapi.testclient import TestClient
 
 
-def _create_origin(client: TestClient, owner_headers: dict, label="Origin A", ip="10.0.0.1", port=8080) -> dict:
+def _create_origin(client: TestClient, owner_headers: dict, label="Origin A", ip="203.0.113.10", port=8080) -> dict:
     resp = client.post("/api/origins", json={"label": label, "ip": ip, "port": port}, headers=owner_headers)
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -38,7 +38,7 @@ def test_a_second_unrelated_account_sees_nothing_by_default(client: TestClient, 
     other = register_user(email="other@example.com", username="other")
     owner_headers = auth_header(owner["access_token"])
     other_headers = auth_header(other["access_token"])
-    origin = _create_origin(client, owner_headers, ip="10.0.0.2")
+    origin = _create_origin(client, owner_headers, ip="203.0.113.2")
 
     assert client.get("/api/origins", headers=other_headers).json()["origins"] == []
     resp = client.get(f"/api/origins/{origin['id']}", headers=other_headers)
@@ -50,7 +50,7 @@ def test_owner_grants_viewer_access_by_email(client: TestClient, register_user, 
     viewer = register_user(email="viewer3@example.com", username="viewer3")
     owner_headers = auth_header(owner["access_token"])
     viewer_headers = auth_header(viewer["access_token"])
-    origin = _create_origin(client, owner_headers, ip="10.0.0.3")
+    origin = _create_origin(client, owner_headers, ip="203.0.113.3")
 
     resp = client.post(
         f"/api/origins/{origin['id']}/viewers",
@@ -72,7 +72,7 @@ def test_viewer_cannot_write_only_read(client: TestClient, register_user, auth_h
     viewer = register_user(email="viewer4@example.com", username="viewer4")
     owner_headers = auth_header(owner["access_token"])
     viewer_headers = auth_header(viewer["access_token"])
-    origin = _create_origin(client, owner_headers, ip="10.0.0.4")
+    origin = _create_origin(client, owner_headers, ip="203.0.113.4")
     client.post(f"/api/origins/{origin['id']}/viewers", json={"email": "viewer4@example.com"}, headers=owner_headers)
 
     resp = client.put(f"/api/origins/{origin['id']}", json={"label": "Hijacked"}, headers=viewer_headers)
@@ -93,7 +93,7 @@ def test_viewer_cannot_write_only_read(client: TestClient, register_user, auth_h
 def test_granting_a_nonexistent_email_is_rejected(client: TestClient, register_user, auth_header):
     owner = register_user(email="owner5@example.com", username="owner5")
     owner_headers = auth_header(owner["access_token"])
-    origin = _create_origin(client, owner_headers, ip="10.0.0.5")
+    origin = _create_origin(client, owner_headers, ip="203.0.113.5")
 
     resp = client.post(
         f"/api/origins/{origin['id']}/viewers",
@@ -106,7 +106,7 @@ def test_granting_a_nonexistent_email_is_rejected(client: TestClient, register_u
 def test_granting_yourself_the_owner_is_rejected(client: TestClient, register_user, auth_header):
     owner = register_user(email="owner6@example.com", username="owner6")
     owner_headers = auth_header(owner["access_token"])
-    origin = _create_origin(client, owner_headers, ip="10.0.0.6")
+    origin = _create_origin(client, owner_headers, ip="203.0.113.6")
 
     resp = client.post(
         f"/api/origins/{origin['id']}/viewers",
@@ -121,7 +121,7 @@ def test_revoking_a_viewer_removes_their_access_immediately(client: TestClient, 
     viewer = register_user(email="viewer7@example.com", username="viewer7")
     owner_headers = auth_header(owner["access_token"])
     viewer_headers = auth_header(viewer["access_token"])
-    origin = _create_origin(client, owner_headers, ip="10.0.0.7")
+    origin = _create_origin(client, owner_headers, ip="203.0.113.7")
     client.post(f"/api/origins/{origin['id']}/viewers", json={"email": "viewer7@example.com"}, headers=owner_headers)
     assert client.get(f"/api/origins/{origin['id']}", headers=viewer_headers).status_code == 200
 
@@ -138,7 +138,7 @@ def test_viewer_list_endpoint_is_owner_only(client: TestClient, register_user, a
     viewer = register_user(email="viewer8@example.com", username="viewer8")
     owner_headers = auth_header(owner["access_token"])
     viewer_headers = auth_header(viewer["access_token"])
-    origin = _create_origin(client, owner_headers, ip="10.0.0.8")
+    origin = _create_origin(client, owner_headers, ip="203.0.113.8")
     client.post(f"/api/origins/{origin['id']}/viewers", json={"email": "viewer8@example.com"}, headers=owner_headers)
 
     resp = client.get(f"/api/origins/{origin['id']}/viewers", headers=owner_headers)

@@ -2,6 +2,7 @@ import uuid
 import re
 import os
 import time
+import ipaddress
 import httpx
 import logging
 from typing import List, Dict, Optional, Any, Set, Tuple
@@ -120,19 +121,53 @@ async def get_live_online_proxy_names(force: bool = False) -> Set[str]:
     return {p.get("name") for p in proxies if p.get("status") == "online" and p.get("name")}
 
 
+# Literal IPs an origin address may point at even though they are otherwise
+# non-public. Comma-separated CIDRs in ORIGIN_ALLOW_PRIVATE_CIDRS; defaults to
+# the QA echo container on waf-net so the integration suite can register it.
+_ALLOWED_PRIVATE_NETS = []
+for _c in os.getenv("ORIGIN_ALLOW_PRIVATE_CIDRS", "172.18.0.250/32").split(","):
+    _c = _c.strip()
+    if not _c:
+        continue
+    try:
+        _ALLOWED_PRIVATE_NETS.append(ipaddress.ip_network(_c, strict=False))
+    except ValueError:
+        logger.warning("Ignoring invalid CIDR in ORIGIN_ALLOW_PRIVATE_CIDRS: %r", _c)
+
+# RFC 5737 documentation ranges: globally non-routable but NOT internal, so they
+# raise no SSRF concern as an origin address -- and they are the repo's
+# test-fixture convention for a "safe fake public IP". Always allowed.
+_SAFE_NONINTERNAL_NETS = [
+    ipaddress.ip_network(c) for c in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")
+]
+
+
 def validate_ip(ip: str) -> bool:
+    """Validate an origin address (literal IP or hostname).
+
+    Literal IPs must be public routable addresses. Loopback, private, link-
+    local, multicast, reserved and unspecified ranges are rejected unless
+    explicitly allowlisted via ORIGIN_ALLOW_PRIVATE_CIDRS -- otherwise an
+    origin address could point the WAF's own upstream at internal services
+    (SSRF). Hostnames are still accepted (tunnel/DNS origins resolve later);
+    the bare label "localhost" is not.
+    """
     if not ip or not isinstance(ip, str):
         return False
     ip_str = ip.strip()
-    if ip_str.lower() in ("localhost", "127.0.0.1", "::1"):
-        return True
-    ipv4_pattern = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
-    if ipv4_pattern.match(ip_str):
-        parts = ip_str.split('.')
-        try:
-            return all(0 <= int(p) <= 255 for p in parts)
-        except ValueError:
-            return False
+    try:
+        addr = ipaddress.ip_address(ip_str)
+    except ValueError:
+        addr = None
+    if addr is not None:
+        if any(addr in net for net in _ALLOWED_PRIVATE_NETS):
+            return True
+        if any(addr in net for net in _SAFE_NONINTERNAL_NETS):
+            return True
+        return not (
+            addr.is_loopback or addr.is_private or addr.is_link_local
+            or addr.is_multicast or addr.is_reserved or addr.is_unspecified
+        )
     domain_pattern = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
     return bool(domain_pattern.match(ip_str))
 
