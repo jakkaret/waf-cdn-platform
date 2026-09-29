@@ -119,7 +119,8 @@ async def system_status(current_user: dict = Depends(require_viewer_or_above)):
     db_status, db_detail = "offline", "unreachable"
     try:
         from services.dynamodb_service import DynamoDBService
-        DynamoDBService().domains_table.table_status
+        # Reading table_status makes a DescribeTable call -- the reachability probe.
+        _ = DynamoDBService().domains_table.table_status
         db_status, db_detail = "online", "DynamoDB reachable"
     except Exception as exc:
         db_detail = f"DynamoDB error: {exc}"[:200]

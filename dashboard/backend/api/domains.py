@@ -394,7 +394,7 @@ def format_domain(domain_data: dict) -> dict:
     }
 
 @origins_domains_router.get("/{origin_id}/domains")
-async def list_domains_by_origin(origin_id: str, current_user: dict = Depends(get_current_user)):
+async def list_domains_under_origin(origin_id: str, current_user: dict = Depends(get_current_user)):
     # Owner or editor (Team Workspace, 2026-09-22)
     verify_origin_edit_access(origin_id, current_user)
 

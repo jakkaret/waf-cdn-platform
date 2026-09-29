@@ -2,7 +2,6 @@ import boto3
 import os
 import time
 import uuid
-from dotenv import load_dotenv
 from typing import List, Dict, Any
 from datetime import datetime
 from decimal import Decimal
