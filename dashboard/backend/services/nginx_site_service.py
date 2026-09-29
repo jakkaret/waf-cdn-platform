@@ -1,4 +1,6 @@
 import os
+import re
+import ipaddress
 import logging
 import subprocess
 from pathlib import Path
@@ -18,10 +20,39 @@ PERSISTENT_SITES_DIR = BASE_DIR / "nginx" / "custom_sites"
 PERSISTENT_SITES_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# Everything below is written into an nginx config file and used as a file name
+# inside the nginx container, so it is validated here rather than trusted from
+# the caller: a newline or ";" in a value would add nginx directives, and a "/"
+# or ".." in the domain would write outside conf.d.
+_HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$")
+
+
+def _safe_domain(domain_name: str) -> str:
+    domain = str(domain_name or "").strip().lower().rstrip(".")
+    if not _HOSTNAME_RE.match(domain):
+        raise ValueError(f"invalid domain name: {domain_name!r}")
+    return domain
+
+
+def _safe_upstream(origin: Dict[str, Any]) -> tuple:
+    ip_or_host = str(origin.get("ip", "")).strip().lower()
+    try:
+        ipaddress.ip_address(ip_or_host)
+    except ValueError:
+        if not _HOSTNAME_RE.match(ip_or_host):
+            raise ValueError(f"invalid origin address: {origin.get('ip')!r}")
+    try:
+        port = int(origin.get("port", 80))
+    except (TypeError, ValueError):
+        raise ValueError(f"invalid origin port: {origin.get('port')!r}")
+    if not 1 <= port <= 65535:
+        raise ValueError(f"invalid origin port: {port}")
+    return ip_or_host, port
+
+
 def generate_site_nginx_config(domain_name: str, origin: Dict[str, Any]) -> str:
-    domain = domain_name.strip().lower()
-    ip_or_host = str(origin.get("ip", "")).strip()
-    port = int(origin.get("port", 80))
+    domain = _safe_domain(domain_name)
+    ip_or_host, port = _safe_upstream(origin)
 
     # Check if origin is HTTPS (Port 443 or FQDN on HTTPS)
     is_https = (port == 443) or (not ip_or_host.replace(".", "").isdigit() and port == 443)
@@ -114,7 +145,7 @@ server {{
 
 
 def deploy_site_route(domain_name: str, origin: Dict[str, Any]) -> bool:
-    domain = domain_name.strip().lower()
+    domain = _safe_domain(domain_name)
     filename = f"site-{domain}.conf"
     config_content = generate_site_nginx_config(domain, origin)
 
@@ -124,7 +155,8 @@ def deploy_site_route(domain_name: str, origin: Dict[str, Any]) -> bool:
 
     # 2. Write into nginx container /etc/nginx/conf.d/
     container_path = f"/etc/nginx/conf.d/{filename}"
-    write_cmd = ["docker", "exec", "-i", CONTAINER_NAME, "sh", "-c", f"cat > {container_path}"]
+    # tee with an argument list -- no shell, so the path is never interpreted.
+    write_cmd = ["docker", "exec", "-i", CONTAINER_NAME, "tee", container_path]
     res = subprocess.run(write_cmd, input=config_content.encode("utf-8"), capture_output=True)
     if res.returncode != 0:
         logger.error(f"Failed to write config into nginx container: {res.stderr.decode()}")
@@ -159,7 +191,7 @@ def deploy_site_route(domain_name: str, origin: Dict[str, Any]) -> bool:
 
 
 def remove_site_route(domain_name: str) -> bool:
-    domain = domain_name.strip().lower()
+    domain = _safe_domain(domain_name)
     filename = f"site-{domain}.conf"
     host_file = PERSISTENT_SITES_DIR / filename
     if host_file.exists():
