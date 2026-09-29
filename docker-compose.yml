@@ -121,6 +121,12 @@ services:
       SMTP_USER: "${SMTP_USER:-}"
       SMTP_PASS: "${SMTP_PASS:-}"
       SMTP_FROM: "${SMTP_FROM:-}"
+      # Integration tests: OTP mail to these recipient domains goes to the
+      # qa-mailpit capture container (scripts/qa/infra.sh) instead of the
+      # real relay. Empty QA_MAIL_DOMAINS turns this off.
+      QA_MAIL_DOMAINS: "${QA_MAIL_DOMAINS:-qa.waf-it-kku.online}"
+      QA_SMTP_HOST: "${QA_SMTP_HOST:-mailpit}"
+      QA_SMTP_PORT: "${QA_SMTP_PORT:-1025}"
     restart: unless-stopped
     extra_hosts:
       # Gen3 1.3: ml_policy.py relays to dashboard-backend's existing
