@@ -2,9 +2,11 @@ name: CI — WAF Dashboard
 
 on:
   push:
-    branches: [main, develop, backend]
+    # The real branch is "Backend" (capital B); the old list only had
+    # "backend", so this workflow never ran on a push (found 2026-09-29).
+    branches: [main, develop, backend, Backend]
   pull_request:
-    branches: [main, develop, backend]
+    branches: [main, develop, backend, Backend]
 
 env:
   PYTHON_VERSION: "3.11"
@@ -30,8 +32,16 @@ jobs:
       - name: Install ruff
         run: pip install ruff
 
-      - name: Run ruff
-        run: ruff check . --output-format=github
+      # Blocking: rule classes that are real bugs (syntax errors, undefined
+      # names, redefinitions, statements with no effect). The full default
+      # rule set has ~1,400 style findings; it runs below as a report only
+      # until that backlog is cleaned up.
+      - name: Run ruff (bug classes, blocking)
+        run: ruff check . --select E9,F63,F7,F82,F811,B018 --output-format=github
+
+      - name: Run ruff (full, report only)
+        continue-on-error: true
+        run: ruff check . --output-format=github --exit-zero --statistics
 
   # ── Job 2: Frontend Type Check + Lint ──────────────────────────────────
   lint-frontend:
@@ -90,31 +100,15 @@ jobs:
           retention-days: 7
 
   # ── Job 4: Backend Unit Tests ───────────────────────────────────────────
+  # tests/conftest.py fakes DynamoDB/ClickHouse/Redis/docker at their service
+  # boundary, so no LocalStack is needed. Not gated on lint: a style finding
+  # must not hide a failing test.
   test-backend:
     name: "Test: Backend (pytest)"
     runs-on: ubuntu-latest
-    needs: [lint-backend]
     defaults:
       run:
         working-directory: dashboard/backend
-
-    # Mock DynamoDB via LocalStack
-    services:
-      localstack:
-        image: localstack/localstack:latest
-        ports:
-          - 4566:4566
-        env:
-          SERVICES: dynamodb
-          DEFAULT_REGION: ap-southeast-1
-
-    env:
-      AWS_ACCESS_KEY_ID: test
-      AWS_SECRET_ACCESS_KEY: test
-      AWS_REGION: ap-southeast-1
-      DYNAMODB_ENDPOINT_URL: http://localhost:4566
-      JWT_SECRET_KEY: ***REDACTED***
-      ORIGINS_QUOTA_DEFAULT: "5"
 
     steps:
       - uses: actions/checkout@v4
@@ -126,17 +120,81 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest httpx pytest-asyncio
+        run: pip install -r requirements.txt pytest httpx pytest-asyncio pytest-cov fakeredis
 
-      - name: Wait for LocalStack DynamoDB
-        run: |
-          for i in {1..10}; do
-            curl -sf http://localhost:4566/health | grep -q '"dynamodb": "available"' && break
-            echo "Waiting for LocalStack..." && sleep 3
-          done
+      - name: Run pytest with coverage
+        run: pytest tests/ -q --tb=short --cov=. --cov-report=term-missing:skip-covered --cov-report=xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: dashboard/backend/coverage.xml
+          retention-days: 14
+
+  # ── Job 4b: control-api Tests (CAPTCHA / OTP shield) ───────────────────
+  test-control-api:
+    name: "Test: control-api (pytest)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cdn/control-api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
 
       - name: Run pytest
-        run: pytest tests/ -v --tb=short
+        run: python -m pytest tests -q --tb=short
+
+  # ── Job 4c: Security scans ──────────────────────────────────────────────
+  # Blocking: bandit HIGH findings. Report only for now (known backlog,
+  # tracked in docs/KNOWN_ISSUES.md): dependency CVEs (starlette via the
+  # fastapi pin), semgrep ERROR findings, and secrets in git history.
+  security:
+    name: "Security: bandit / pip-audit / semgrep / gitleaks"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install scanners
+        run: pip install bandit pip-audit semgrep
+
+      - name: bandit (HIGH severity, blocking)
+        run: bandit -q -r dashboard/backend cdn/control-api -x '*/tests/*' -lll
+
+      - name: pip-audit (report only)
+        continue-on-error: true
+        run: |
+          pip-audit -r dashboard/backend/requirements.txt
+          pip-audit -r cdn/control-api/requirements.txt
+
+      - name: semgrep (report only)
+        continue-on-error: true
+        run: semgrep --config p/python --config p/security-audit --severity ERROR --metrics off --error dashboard/backend cdn/control-api --exclude tests
+
+      - name: gitleaks (report only)
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── Job 5: ML Unit Tests (pytest) ───────────────────────────────────────
   test-ml:
