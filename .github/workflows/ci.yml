@@ -211,11 +211,12 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        # Deliberately minimal (R1): scikit-learn, pandas, numpy, pytest only.
-        # No requirements.txt -- keep this separate from the backend pytest
-        # job, which does not install scikit-learn. Model artifacts are
-        # already committed under ml/models/, so nothing else is needed.
-        run: pip install scikit-learn pandas numpy pytest
+        # ml/tests import ml.ml_api, which pulls in fastapi, joblib and the
+        # backend's other runtime packages; the old minimal set
+        # (scikit-learn, pandas, numpy) failed at collection on the first CI
+        # run that actually executed (2026-09-29). Model artifacts are
+        # committed under ml/models/.
+        run: pip install -r dashboard/backend/requirements.txt scikit-learn pandas numpy joblib pytest
 
       - name: Run pytest
         run: python -m pytest ml/tests/ -v
@@ -255,20 +256,10 @@ jobs:
           name: frontend-dist
           path: dashboard/frontend/dist/
 
-      - name: Serve built frontend (background)
-        run: npx vite preview --port 5173 &
-        # Give preview server a moment to start
-      
-      - name: Wait for frontend server
-        run: |
-          for i in {1..10}; do
-            curl -sf http://localhost:5173 && break
-            echo "Waiting for preview server..." && sleep 2
-          done
-
       - name: Run Playwright tests
+        # playwright.config.ts serves dist/ with vite preview itself; only
+        # tests/smoke.spec.ts runs here (e2e.spec.ts needs E2E_BASE_URL).
         run: npx playwright test --reporter=list
-        # Note: E2E tests that require backend API will skip gracefully
 
       - name: Upload Playwright report
         if: always()
