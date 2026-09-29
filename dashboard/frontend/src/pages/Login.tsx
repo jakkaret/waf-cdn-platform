@@ -141,7 +141,7 @@ export const Login: React.FC = () => {
 
                 <form onSubmit={handleSubmit} className="space-y-4 text-[13px]">
                   <div>
-                    <label className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
+                    <label htmlFor="login-identifier" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
                       Email or username
                     </label>
                     <div className="relative">
@@ -149,6 +149,7 @@ export const Login: React.FC = () => {
                       <input
                         type="text"
                         required
+                        id="login-identifier"
                         autoComplete="username"
                         placeholder="operator@example.com"
                         className="w-full dash-input pl-9 pr-3 py-2 text-[13px]"
@@ -159,7 +160,7 @@ export const Login: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
+                    <label htmlFor="login-password" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
                       Password
                     </label>
                     <div className="relative">
@@ -167,6 +168,7 @@ export const Login: React.FC = () => {
                       <input
                         type={showPassword ? 'text' : 'password'}
                         required
+                        id="login-password"
                         autoComplete="current-password"
                         placeholder="Password"
                         className="w-full dash-input pl-9 pr-10 py-2 text-[13px]"

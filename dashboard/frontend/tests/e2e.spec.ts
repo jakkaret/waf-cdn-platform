@@ -1,5 +1,10 @@
 import { test, expect, Page } from '@playwright/test'
 
+// Full user journeys: need a running backend. Skipped unless E2E_BASE_URL
+// points at a live system (the CI job only serves the static build; the
+// backend-free checks live in smoke.spec.ts).
+test.skip(!process.env.E2E_BASE_URL, 'needs a running backend: set E2E_BASE_URL')
+
 // ── Test Credentials ──────────────────────────────────────────────────────
 const TEST_EMAIL    = `e2e_test_${Date.now()}@e2e-test.example.com`
 const TEST_USERNAME = `e2e_user_${Date.now()}`
@@ -9,17 +14,18 @@ const API_BASE      = 'http://localhost:8000'
 // ── Helpers ───────────────────────────────────────────────────────────────
 async function register(page: Page, email: string, username: string, password: string) {
   await page.goto('/register')
-  await page.getByPlaceholder(/email/i).fill(email)
-  await page.getByPlaceholder(/username/i).fill(username)
-  await page.getByPlaceholder(/password/i).fill(password)
-  await page.getByRole('button', { name: /register|sign up/i }).click()
+  await page.getByLabel('Username', { exact: true }).fill(username)
+  await page.getByLabel('Email', { exact: true }).fill(email)
+  await page.getByLabel('Password', { exact: true }).fill(password)
+  await page.getByLabel(/confirm password/i).fill(password)
+  await page.getByRole('button', { name: /create account/i }).click()
 }
 
 async function login(page: Page, email: string, password: string) {
   await page.goto('/login')
-  await page.getByPlaceholder(/email/i).fill(email)
-  await page.getByPlaceholder(/password/i).fill(password)
-  await page.getByRole('button', { name: /login|sign in/i }).click()
+  await page.getByLabel(/email or username/i).fill(email)
+  await page.getByLabel('Password', { exact: true }).fill(password)
+  await page.getByRole('button', { name: /sign in to console/i }).click()
 }
 
 // ── Test Suite ────────────────────────────────────────────────────────────

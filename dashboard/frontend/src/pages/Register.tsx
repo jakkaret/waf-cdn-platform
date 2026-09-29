@@ -216,12 +216,13 @@ export const Register: React.FC = () => {
 
                 <form onSubmit={handleSubmit} className="space-y-4 text-[13px]">
                   <div>
-                    <label className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
+                    <label htmlFor="register-username" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
                       Username
                     </label>
                     <div className="relative">
                       <User className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
                       <input
+                        id="register-username"
                         type="text"
                         required
                         autoComplete="username"
@@ -234,12 +235,13 @@ export const Register: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
+                    <label htmlFor="register-email" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
                       Email
                     </label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
                       <input
+                        id="register-email"
                         type="email"
                         required
                         autoComplete="email"
@@ -252,12 +254,13 @@ export const Register: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
+                    <label htmlFor="register-password" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
                       Password
                     </label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
                       <input
+                        id="register-password"
                         type={showPassword ? 'text' : 'password'}
                         required
                         autoComplete="new-password"
@@ -305,12 +308,13 @@ export const Register: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
+                    <label htmlFor="register-confirm-password" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
                       Confirm password
                     </label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
                       <input
+                        id="register-confirm-password"
                         type={showPassword ? 'text' : 'password'}
                         required
                         autoComplete="new-password"
