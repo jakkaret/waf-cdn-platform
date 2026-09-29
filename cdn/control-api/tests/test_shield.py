@@ -374,3 +374,33 @@ def test_email_states_the_validity(monkeypatch):
     import base64, email
     body = email.message_from_string(sent["msg"]).get_payload(decode=True).decode()
     assert "expires in 10 minutes" in body
+
+
+def test_qa_recipients_go_to_the_capture_server_only(monkeypatch):
+    import email_sender
+    used = []
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=None): used.append((host, port))
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self): used.append("starttls")
+        def login(self, *a): used.append("login")
+        def sendmail(self, *a): pass
+
+    monkeypatch.setattr(email_sender.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(email_sender, "QA_MAIL_DOMAINS", {"qa.waf-it-kku.online"})
+    monkeypatch.setattr(email_sender, "QA_SMTP_HOST", "mailpit")
+    monkeypatch.setattr(email_sender, "QA_SMTP_PORT", 1025)
+    for name, value in (("SMTP_HOST", "smtp.real"), ("SMTP_USER", "u"), ("SMTP_PASS", "p"), ("SMTP_FROM", "f@x.com")):
+        monkeypatch.setattr(email_sender, name, value)
+
+    assert email_sender.send_otp_email("qa-admin@QA.waf-it-kku.online", "123456", 300)
+    assert used == [("mailpit", 1025)]  # no TLS, no login, not the real relay
+    used.clear()
+    assert email_sender.send_otp_email("someone@gmail.com", "123456", 300)
+    assert used[0] == ("smtp.real", 587) and "login" in used
+    used.clear()
+    # a lookalike domain is not a QA domain
+    assert email_sender.send_otp_email("x@qa.waf-it-kku.online.evil.com", "123456", 300)
+    assert used[0] == ("smtp.real", 587)
