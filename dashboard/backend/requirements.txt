@@ -1,5 +1,10 @@
 # FastAPI Framework
-fastapi==0.104.1
+# 2026-09-30: bumped from 0.104.1 to clear starlette CVEs (0.27.0 had the
+# multipart DoS + the 2026 PYSEC advisories). fastapi 0.142.1 only pins
+# starlette>=0.46.0, so starlette is pinned explicitly to a fully-patched
+# release (1.3.1); it needs anyio>=3.6.2, satisfied by the existing anyio.
+fastapi==0.142.1
+starlette==1.3.1
 uvicorn[standard]==0.24.0
 
 # HTTP Requests (สำหรับ Telegram API)
