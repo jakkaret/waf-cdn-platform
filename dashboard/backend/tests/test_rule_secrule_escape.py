@@ -107,21 +107,61 @@ def test_message_round_trips_through_written_rule_file(client, register_user, au
         )
 
 
+# The OPERATOR field is parsed differently from the msg field: libmodsecurity
+# 3.0.16 does NOT unescape `\\` inside an operator string (Known Issue #11), so
+# only the escaped double quote is reversed there -- backslashes are literal.
+def _secrule_operator_unescape(s: str) -> str:
+    return s.replace('\\"', '"')
+
+
+# Operator values that must survive verbatim. Includes regex metaclasses (the
+# #11 core: \s / \d must reach the engine as a single backslash) and a raw
+# double quote (escaped to \" and reversed on read-back).
+OPERATOR_STRINGS = [
+    "@rx union\\s+select",
+    "@rx a\\d{3}\\.example",
+    "@contains needle",
+    '@rx has"a"quote',
+    "plain-no-metachars",
+]
+
+
 def test_operator_round_trips_through_written_rule_file(client, register_user, auth_header, tmp_path):
     admin = register_user(email="rule-escape-op@example.com", username="rule_escape_op")
     headers = auth_header(admin["access_token"])
 
-    for i, attack in enumerate(ATTACK_STRINGS):
+    for i, op in enumerate(OPERATOR_STRINGS):
         rule_id = f"90200{i}"
-        _create_rule(client, headers, rule_id, attack, "benign message")
+        _create_rule(client, headers, rule_id, op, "benign message")
 
         rule_text = (tmp_path / f"custom-{rule_id}.conf").read_text(encoding="utf-8")
         raw_operator_field = _quoted_field_after(rule_text, "ARGS ", '"')
-        decoded = _secrule_unescape(raw_operator_field)
-        assert decoded == attack, (
-            f"operator {attack!r} did not round-trip through the written rule "
+        decoded = _secrule_operator_unescape(raw_operator_field)
+        assert decoded == op, (
+            f"operator {op!r} did not round-trip through the written rule "
             f"file: got {decoded!r} back (rule_text={rule_text!r})"
         )
+
+
+def test_operator_regex_backslash_is_not_doubled():
+    """The actual #11 bug: a regex metaclass must be written with ONE backslash,
+    not two -- `\\s` doubled to `\\\\s` compiled as the literal characters."""
+    from services.rule_manager import escape_secrule_operator
+    out = escape_secrule_operator("union\\s+select")
+    assert out == "union\\s+select", out          # single backslash, unchanged
+    assert "\\\\" not in out, f"backslash was doubled: {out!r}"
+    # A raw double quote is still escaped so it cannot close the field early.
+    assert escape_secrule_operator('a"b') == 'a\\"b'
+
+
+def test_operator_rejects_backslash_before_quote_or_trailing():
+    """A backslash directly before the closing quote, or ending the value, would
+    consume the escaping quote and let the operator break out -- rejected."""
+    from services.rule_manager import escape_secrule_operator
+    import pytest as _pytest
+    for bad in ("ends-with-backslash\\", 'has\\"escaped-quote'):
+        with _pytest.raises(ValueError):
+            escape_secrule_operator(bad)
 
 
 def test_message_round_trips_through_updated_rule_file(client, register_user, auth_header, tmp_path):

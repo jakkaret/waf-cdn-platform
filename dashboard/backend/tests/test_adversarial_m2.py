@@ -21,7 +21,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from services.rule_manager import RuleManager, escape_secrule_string, _build_secrule_directives
+from services.rule_manager import RuleManager, escape_secrule_string, escape_secrule_operator, _build_secrule_directives
 from sync_waf_rules import rules_to_modsecurity_conf
 
 
@@ -220,7 +220,7 @@ class TestComplexOperatorChallenges:
         rm.test_nginx = lambda: None
         rm.reload_nginx = lambda: None
 
-        op = r"@rx (?i)\b(select|union)\b.*['\"].*"
+        op = "@rx (?i)\\b(select|union)\\b.*['\"].*"  # char class [' "] with a raw double quote
         msg = r"Detected SQLi with regex \d+ and quotes \"'"
         rm.add_rule({
             "id": "200001",
@@ -237,7 +237,10 @@ class TestComplexOperatorChallenges:
         content = conf_file.read_text(encoding="utf-8")
 
         # Escaped operator must have backslashes escaped and double quotes escaped
-        assert escape_secrule_string(op, '"') in content
+        # Operator now escapes only the double quote; the regex \b metaclass
+        # must survive as a single backslash (Known Issue #11).
+        assert escape_secrule_operator(op) in content
+        assert '\\\\b' not in content  # \b not doubled to \\b
 
 
 
@@ -260,7 +263,10 @@ class TestComplexOperatorChallenges:
         })
 
         content = (tmp_path / "custom-200002.conf").read_text(encoding="utf-8")
-        assert r"C:\\Windows\\System32\\cmd.exe" in content
+        # #11 fix: backslashes are written verbatim (single), not doubled --
+        # @streq must compare against the literal path the admin typed.
+        assert "C:\\Windows\\System32\\cmd.exe" in content
+        assert "C:\\\\Windows" not in content  # not doubled
 
     def test_operator_with_literal_newlines(self, tmp_path):
         """Defect finding: Neither validate_rule nor escape_secrule_string removes or escapes
