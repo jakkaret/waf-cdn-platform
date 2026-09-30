@@ -200,9 +200,9 @@ def verify_and_decode_jwt(token: str, secret_key: str = JWT_SECRET_KEY) -> Tuple
     except Exception:
         return unverified_payload, False, "INVALID_HEADER_ENCODING"
 
-    # Cryptographic verification using jose with strict key-algorithm alignment
+    # Cryptographic verification using PyJWT with strict key-algorithm alignment
     try:
-        from jose import jwt as jose_jwt
+        import jwt as pyjwt
         if alg.startswith("HS"):
             verification_key = secret_key
             allowed_algs = [alg]
@@ -214,7 +214,7 @@ def verify_and_decode_jwt(token: str, secret_key: str = JWT_SECRET_KEY) -> Tuple
         else:
             return unverified_payload, False, f"UNSUPPORTED_ALGORITHM_FAMILY_{alg}"
 
-        payload = jose_jwt.decode(
+        payload = pyjwt.decode(
             token,
             verification_key,
             algorithms=allowed_algs,
