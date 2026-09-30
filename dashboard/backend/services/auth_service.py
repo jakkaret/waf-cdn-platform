@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import boto3
 import requests
 from dotenv import load_dotenv, find_dotenv
-from jose import jwt, JWTError
+import jwt  # PyJWT (replaced python-jose 2026-09-30 to drop the ecdsa CVE dep)
 from boto3.dynamodb.conditions import Attr, Key
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ class AuthService:
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             return payload
-        except JWTError:
+        except jwt.PyJWTError:
             return None
 
     def get_user_by_id(self, user_id: str) -> Optional[Dict]:

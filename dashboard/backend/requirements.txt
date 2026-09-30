@@ -23,7 +23,11 @@ boto3==1.34.34
 # Telegram API Client
 telethon==1.34.0
 # JWT Authentication
-python-jose[cryptography]==3.3.0
+# 2026-09-30: replaced python-jose[cryptography]==3.3.0 with PyJWT. python-jose
+# pulled `ecdsa`, which has CVE-2024-23342 (Minerva timing) with no upstream
+# fix. We only ever sign/verify HS256 (and optional RS via bola_guard); PyJWT
+# covers both. [crypto] pulls `cryptography` for the RS path.
+PyJWT[crypto]==2.10.1
 
 # Password Hashing
 argon2-cffi==25.1.0
