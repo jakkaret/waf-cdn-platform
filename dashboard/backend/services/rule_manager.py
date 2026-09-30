@@ -24,6 +24,29 @@ def escape_secrule_string(value: str, quote_char: str) -> str:
     return str(value).replace("\\", "\\\\").replace(quote_char, "\\" + quote_char)
 
 
+def escape_secrule_operator(value: str) -> str:
+    """Prepare a rule *operator* (e.g. ``@rx union\\s+select``) for its
+    double-quoted SecRule field.
+
+    Unlike escape_secrule_string, backslashes are left INTACT and only the
+    field's own double quote is escaped. libmodsecurity 3.0.16 does not
+    unescape ``\\\\`` inside an operator string (verified against the engine,
+    Known Issue #11), so doubling the backslash made a regex metaclass such as
+    ``\\s`` compile as the literal two characters ``\\s`` -- the rule silently
+    stopped matching what the admin typed. A backslash directly before the
+    closing quote, or at the very end of the value, would still consume the
+    escaping quote and let the value break out of its field, so those are
+    rejected rather than escaped (the same guard as
+    services/tenant_rules.render). Callers surface the ValueError as a 4xx.
+    """
+    s = str(value)
+    if s.endswith("\\") or '\\"' in s:
+        raise ValueError(
+            "operator: a backslash may not directly precede a double quote or end the value"
+        )
+    return s.replace('"', '\\"')
+
+
 _CONTROL_CHARS = re.compile(r"[\r\n\x00]")
 
 
@@ -159,7 +182,10 @@ class RuleManager:
             if sec_rule_match:
                 variable = sec_rule_match.group(1)
                 raw_operator = sec_rule_match.group(2)
-                operator = raw_operator.replace('\\"', '"').replace("\\\\", "\\")
+                # Operators are written with only the double quote escaped
+                # (escape_secrule_operator) -- backslashes are left intact, so
+                # reversing only \" reconstructs a regex like \s+ correctly.
+                operator = raw_operator.replace('\\"', '"')
                 actions = sec_rule_match.group(3)
 
                 sev_match = re.search(r"severity:([A-Za-z]+)", actions)
@@ -289,7 +315,7 @@ class RuleManager:
         filename = f"custom-{rule_id}.conf"
         filepath = os.path.join(self.rules_dir, filename)
 
-        safe_operator = escape_secrule_string(rule_data['operator'], '"')
+        safe_operator = escape_secrule_operator(rule_data['operator'])
         safe_message = escape_secrule_message(rule_data['message'])
         action_directives = _build_secrule_directives(
             rule_id=rule_id,
@@ -370,7 +396,7 @@ class RuleManager:
             raise FileNotFoundError(f"Rule {rule_id} ไม่พบในระบบ")
 
         rule["severity"] = rule["severity"].upper()
-        safe_operator = escape_secrule_string(rule['operator'], '"')
+        safe_operator = escape_secrule_operator(rule['operator'])
         safe_message = escape_secrule_message(rule['message'])
         action_directives = _build_secrule_directives(
             rule_id=rule['id'],
