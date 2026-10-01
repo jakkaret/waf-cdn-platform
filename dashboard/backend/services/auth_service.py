@@ -20,7 +20,11 @@ from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHas
 
 load_dotenv(find_dotenv())
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-secret-in-production")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+if not SECRET_KEY:
+    # A built-in fallback secret is public (this repo is public), so anyone
+    # could sign an admin token. Refuse to start instead.
+    raise RuntimeError("JWT_SECRET_KEY is not set")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 
