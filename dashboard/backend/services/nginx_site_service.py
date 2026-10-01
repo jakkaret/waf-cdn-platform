@@ -50,6 +50,45 @@ def _safe_upstream(origin: Dict[str, Any]) -> tuple:
     return ip_or_host, port
 
 
+_DECEPTION_KEY_RE = re.compile(r"[A-Za-z0-9_-]{16,256}")
+
+
+def _deception_locations() -> str:
+    """Same @deception handling as the main server blocks in
+    nginx/templates/conf.d/default.conf.template, so a tenant DECEIVE rule
+    (status 418) returns the deception response instead of a bare 418. The
+    template gets DECEPTION_INTERNAL_KEY from envsubst at container start;
+    these files are written at runtime, so the key comes from this process's
+    environment. Without a well-formed key the block is left out."""
+    key = os.getenv("DECEPTION_INTERNAL_KEY", "")
+    if not _DECEPTION_KEY_RE.fullmatch(key):
+        return ""
+    return f"""
+    error_page 418 = @deception;
+    location @deception {{
+        rewrite ^ /api/deception/respond break;
+        proxy_pass http://host.docker.internal:8000;
+        proxy_connect_timeout 1s;
+        proxy_read_timeout 3s;
+        proxy_set_header X-Internal-Deception-Key {key};
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Real-IP $waf_client_ip;
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header X-Original-Host $host;
+        proxy_set_header X-Deception-Template "";
+        proxy_set_header X-Matched-Rule-ID "";
+        proxy_hide_header X-Deception-Engine;
+        proxy_intercept_errors on;
+        error_page 502 504 = @deception_static;
+    }}
+    location @deception_static {{
+        default_type text/plain;
+        return 200 "root:x:0:0:root:/root:/bin/bash\\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\\n";
+    }}
+"""
+
+
 def generate_site_nginx_config(domain_name: str, origin: Dict[str, Any]) -> str:
     domain = _safe_domain(domain_name)
     ip_or_host, port = _safe_upstream(origin)
@@ -136,7 +175,7 @@ server {{
         add_header Content-Type text/plain always;
         return 429 "Too Many Requests. Rate limit exceeded. Please try again later.";
     }}
-
+{_deception_locations()}
     error_page 403 /403.html;
     location = /403.html {{ root /usr/share/nginx/html; internal; }}
 }}

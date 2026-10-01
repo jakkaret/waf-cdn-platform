@@ -58,3 +58,22 @@ def test_deploy_writes_without_a_shell(monkeypatch, tmp_path):
     assert nss.deploy_site_route("shop.example.com", ORIGIN)
     assert calls[0][-2:] == ["tee", "/etc/nginx/conf.d/site-shop.example.com.conf"]
     assert "sh" not in calls[0] and "-c" not in calls[0]
+
+
+# --- tenant DECEIVE on Mode A sites -----------------------------------------
+
+def test_site_config_routes_418_to_the_deception_engine_when_the_key_is_set(monkeypatch):
+    from services.nginx_site_service import generate_site_nginx_config
+    monkeypatch.setenv("DECEPTION_INTERNAL_KEY", "k" * 32)
+    conf = generate_site_nginx_config("www.example.com", {"ip": "127.0.0.1", "port": 8081})
+    assert "error_page 418 = @deception;" in conf
+    assert "proxy_set_header X-Internal-Deception-Key " + "k" * 32 + ";" in conf
+    assert "location @deception_static" in conf
+
+
+def test_site_config_leaves_deception_out_without_a_well_formed_key(monkeypatch):
+    from services.nginx_site_service import generate_site_nginx_config
+    for bad in ("", "short", 'x" ; return 200 "pwned', "a" * 20 + "; include /etc/passwd"):
+        monkeypatch.setenv("DECEPTION_INTERNAL_KEY", bad)
+        conf = generate_site_nginx_config("www.example.com", {"ip": "127.0.0.1", "port": 8081})
+        assert "@deception" not in conf, bad
