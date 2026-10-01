@@ -67,7 +67,7 @@ const cveSeverityClass = (sev: string): string => {
     case 'LOW':
       return 'bg-sky-500/15 text-sky-500 border-sky-500/30'
     default:
-      return 'bg-[var(--bg-surface-2)] text-[var(--text-muted)] border-[var(--bg-border-subtle)]'
+      return 'bg-[var(--bg-surface-elevated)] text-[var(--text-muted)] border-[var(--bg-border-subtle)]'
   }
 }
 
@@ -692,7 +692,7 @@ export const OriginDetail: React.FC = () => {
                       }
                     }}
                     placeholder="e.g. nginx, wordpress, php 8.1"
-                    className="flex-1 bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
+                    className="flex-1 bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
                   />
                   <Button
                     size="sm"
@@ -720,7 +720,7 @@ export const OriginDetail: React.FC = () => {
                     {(origin.tech_stack_tags || []).map((tag) => (
                       <span
                         key={tag}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] text-[12px] font-mono text-[var(--text-primary)]"
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] text-[12px] font-mono text-[var(--text-primary)]"
                       >
                         {tag}
                         <button
@@ -776,10 +776,15 @@ export const OriginDetail: React.FC = () => {
                 </p>
               ) : (
                 <div className="space-y-2">
+                  {(cveData?.data?.total ?? 0) > originCves.length && (
+                    <p className="text-[11px] text-[var(--text-muted)] font-mono m-0">
+                      Showing the {originCves.length} highest CVSS scores of {cveData?.data?.total} matches.
+                    </p>
+                  )}
                   {originCves.map((cve) => (
                     <div
                       key={cve.cve_id}
-                      className="flex flex-col gap-2 p-3 rounded bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)]"
+                      className="flex flex-col gap-2 p-3 rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)]"
                     >
                       <div className="flex items-center gap-2 flex-wrap">
                         <span
@@ -1443,7 +1448,7 @@ export const OriginDetail: React.FC = () => {
                     value={viewerEmailInput}
                     onChange={(e) => setViewerEmailInput(e.target.value)}
                     placeholder="teammate@example.com"
-                    className="flex-1 bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
+                    className="flex-1 bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
                   />
                   <Button
                     size="sm"
@@ -1502,7 +1507,7 @@ export const OriginDetail: React.FC = () => {
                     value={editorEmailInput}
                     onChange={(e) => setEditorEmailInput(e.target.value)}
                     placeholder="teammate@example.com"
-                    className="flex-1 bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
+                    className="flex-1 bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
                   />
                   <Button
                     size="sm"
@@ -1608,7 +1613,7 @@ export const OriginDetail: React.FC = () => {
                         type="datetime-local"
                         value={pmStart}
                         onChange={(e) => setPmStart(e.target.value)}
-                        className="bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
+                        className="bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
                       />
                     </div>
                     <div className="space-y-1">
@@ -1617,7 +1622,7 @@ export const OriginDetail: React.FC = () => {
                         type="datetime-local"
                         value={pmEnd}
                         onChange={(e) => setPmEnd(e.target.value)}
-                        className="bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
+                        className="bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
                       />
                     </div>
                     <Button
@@ -1714,7 +1719,7 @@ export const OriginDetail: React.FC = () => {
                             {selectedPostmortem.ai_narrative_degraded && (
                               <Badge color="warning">AI summary may be truncated</Badge>
                             )}
-                            <div className="whitespace-pre-wrap text-[12.5px] font-mono text-[var(--text-primary)] bg-[var(--bg-surface-2)] rounded p-4 leading-relaxed">
+                            <div className="whitespace-pre-wrap text-[12.5px] font-mono text-[var(--text-primary)] bg-[var(--bg-surface-elevated)] rounded p-4 leading-relaxed">
                               {selectedPostmortem.ai_narrative}
                             </div>
                           </div>
