@@ -23,7 +23,9 @@ from typing import Dict, Any, List, Optional, Tuple, Set
 logger = logging.getLogger(__name__)
 
 # System JWT Secret Key for signature verification
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-secret-in-production")
+# Empty when unset: verify_and_decode_jwt() then rejects every token rather
+# than trusting a public default secret.
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 RSA_PUBLIC_KEY = os.getenv("JWT_RSA_PUBLIC_KEY", "")
 ALLOWED_JWT_ALGORITHMS = ["HS256", "RS256"]
@@ -170,6 +172,8 @@ def verify_and_decode_jwt(token: str, secret_key: str = JWT_SECRET_KEY) -> Tuple
     """
     if not token or not isinstance(token, str):
         return {}, False, "EMPTY_TOKEN"
+    if not secret_key:
+        return {}, False, "NO_VERIFICATION_KEY"
 
     token = token.strip()
     parts = token.split(".")
