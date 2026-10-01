@@ -5,7 +5,7 @@ from typing import Optional
 from services.ml_rule_service import MLRuleService
 from services.rbac import require_admin
 from services import audit_log
-from services.cve_feed import fetch_recent_cves, match_cves_to_origins
+from services.cve_feed import fetch_recent_cves, match_cves_to_origins, select_search_terms
 from services.gemini_service import gemini_service
 from services.rule_manager import escape_secrule_string
 
@@ -121,7 +121,6 @@ async def run_cve_scan(
     this path -- protection starts when a human approves it.
     """
     window_days = days or CVE_SCAN_DEFAULT_WINDOW_DAYS
-    vulnerabilities = await fetch_recent_cves(days=window_days)
 
     try:
         all_origins = rule_service.db.origins_table.scan().get("Items", [])
@@ -132,6 +131,8 @@ async def run_cve_scan(
         o for o in all_origins
         if o.get("status") not in ("archived", "deleted") and o.get("tech_stack_tags")
     ]
+    keywords_searched, keywords_skipped = select_search_terms(tagged_origins)
+    vulnerabilities = await fetch_recent_cves(keywords_searched, days=window_days)
     matches = match_cves_to_origins(vulnerabilities, tagged_origins)
 
     # Dedup against the FULL queue (any status) -- a CVE that was already
@@ -210,6 +211,8 @@ async def run_cve_scan(
         details={
             "window_days": window_days,
             "cves_scanned": len(vulnerabilities),
+            "keywords_searched": keywords_searched,
+            "keywords_skipped": keywords_skipped,
             "matches_found": len(matches),
             "proposals_created": len(proposals_created),
             "skipped_duplicate": skipped_duplicate,
@@ -220,6 +223,8 @@ async def run_cve_scan(
     return {
         "status": "success",
         "cves_scanned": len(vulnerabilities),
+        "keywords_searched": keywords_searched,
+        "keywords_skipped": keywords_skipped,
         "matches_found": len(matches),
         "proposals_created": len(proposals_created),
         "skipped_duplicate": skipped_duplicate,
