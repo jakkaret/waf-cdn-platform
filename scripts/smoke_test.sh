@@ -81,12 +81,12 @@ check_not inv "/testimonials not blocked"  403 "$(code "https://$SITE_HOST/testi
 echo "${c_dim}-- Dashboard reachability --------------------------------${c_off}"
 check inv "Dashboard root over HTTPS"       200 "$(code "https://$DASH_HOST/")"
 check inv "Dashboard over direct IP"        200 "$(code "http://$MAIN_IP/")"
-check inv "Backend API docs reachable"      200 "$(code "http://$MAIN_IP:8000/docs")"
-check inv "Backend health endpoint"         200 "$(code "http://$MAIN_IP:8000/api/health")"
+check inv "Backend API docs reachable"      200 "$(code "https://$DASH_HOST/docs")"
+check inv "Backend health endpoint"         200 "$(code "https://$DASH_HOST/api/health")"
 
 echo "${c_dim}-- Auth is enforced --------------------------------------${c_off}"
-check inv "GET /api/origins without token"  401 "$(code "http://$MAIN_IP:8000/api/origins")"
-check inv "GET /api/rules/ without token"   401 "$(code "http://$MAIN_IP:8000/api/rules/")"
+check inv "GET /api/origins without token"  401 "$(code "https://$DASH_HOST/api/origins")"
+check inv "GET /api/rules/ without token"   401 "$(code "https://$DASH_HOST/api/rules/")"
 
 echo "${c_dim}-- Edge behaviour ----------------------------------------${c_off}"
 check inv "Edge healthz"                    200 "$(code "https://$SITE_HOST/healthz")"
@@ -120,8 +120,8 @@ echo "${c_dim}-- Public status page leaks no internal topology -----------${c_of
 # result (real edge IPs, a loopback health_url, lat/lng). This is the actual
 # proof of that, not a reading of the code -- same principle as T5 below,
 # applied to this endpoint's payload instead of the JS bundle.
-check inv "Public status endpoint reachable, no auth" 200 "$(code "http://$MAIN_IP:8000/api/status/public")"
-status_body="$("$CURL" -sk -m "$TIMEOUT" "http://$MAIN_IP:8000/api/status/public" 2>/dev/null)"
+check inv "Public status endpoint reachable, no auth" 200 "$(code "https://$DASH_HOST/api/status/public")"
+status_body="$("$CURL" -sk -m "$TIMEOUT" "https://$DASH_HOST/api/status/public" 2>/dev/null)"
 leak_hits=0
 for needle in "$EDGE_IP" "$ASIA_IP" "$MAIN_IP" "127.0.0.1" "healthz" "8080"; do
   hits="$(printf '%s' "$status_body" | grep -c "$needle" || true)"
@@ -136,12 +136,15 @@ echo "${c_dim}-- Control plane must not be reachable from the internet --${c_off
 check_not gate "T4: /api/sync/bundle not public"  200 "$(code "http://$MAIN_IP:8070/api/sync/bundle")"
 check_not gate "T4: /api/blocklist not public"    200 "$(code "http://$MAIN_IP:8070/api/blocklist")"
 check_not gate "T4: control-api /docs not public" 200 "$(code "http://$MAIN_IP:8070/docs")"
+# The dashboard backend is reached through Caddy (https://$DASH_HOST); its own
+# port is firewalled to the edges and the docker network only.
+check_not gate "T4: backend :8000 not public"     200 "$(code "http://$MAIN_IP:8000/api/health")"
 
 echo "${c_dim}-- No secrets in the public JS bundle ---------------------${c_off}"
-bundle_path="$("$CURL" -sk -m "$TIMEOUT" "http://$MAIN_IP:8000/" 2>/dev/null \
+bundle_path="$("$CURL" -sk -m "$TIMEOUT" "https://$DASH_HOST/" 2>/dev/null \
   | grep -oE '/assets/[A-Za-z0-9._-]+\.js' | head -1)"
 if [ -n "$bundle_path" ]; then
-  bundle="$("$CURL" -sk -m 30 "http://$MAIN_IP:8000$bundle_path" 2>/dev/null)"
+  bundle="$("$CURL" -sk -m 30 "https://$DASH_HOST$bundle_path" 2>/dev/null)"
   for secret in WAF_SECURE_TUNNEL_2026_TOKEN cdn-secret-token; do
     hits="$(printf '%s' "$bundle" | grep -c "$secret" || true)"
     check gate "T5: '$secret' absent from bundle" 0 "$hits"
@@ -159,7 +162,7 @@ echo "${c_dim}-- Injection guard ---------------------------------------${c_off}
 sqli_code="$("$CURL" -sk -m "$TIMEOUT" -o /dev/null -w '%{http_code}' \
   -X POST -H 'Content-Type: application/json' \
   -d '{"start_time":"2026-01-01 00:00:00'"'"'","end_time":"2026-01-02 00:00:00"}' \
-  "http://$MAIN_IP:8000/api/ai/summarize-range" 2>/dev/null)"
+  "https://$DASH_HOST/api/ai/summarize-range" 2>/dev/null)"
 check_not gate "T6: quote in time range does not 500" 500 "$sqli_code"
 
 # --------------------------------------------------------------------- TOTAL
