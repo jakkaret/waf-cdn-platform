@@ -235,6 +235,15 @@ def test_a_stranger_sees_nothing_for_this_origin(client, accounts):
     origin_id, _admin_h, _viewer_h, stranger_h = accounts
     assert client.get(f"/api/origins/{origin_id}/waf-rules/", headers=stranger_h).status_code == 403
     assert client.post(f"/api/origins/{origin_id}/waf-rules/", json=RULE, headers=stranger_h).status_code == 403
+    assert client.get(f"/api/origins/{origin_id}/waf-rules/options", headers=stranger_h).status_code == 403
+
+
+def test_origin_members_can_read_the_rule_builder_options(client, accounts):
+    origin_id, admin_h, viewer_h, _stranger_h = accounts
+    for h in (admin_h, viewer_h):
+        resp = client.get(f"/api/origins/{origin_id}/waf-rules/options", headers=h)
+        assert resp.status_code == 200
+        assert "operators" in resp.json()
 
 
 def test_invalid_rule_body_is_rejected_with_400(client, accounts):
