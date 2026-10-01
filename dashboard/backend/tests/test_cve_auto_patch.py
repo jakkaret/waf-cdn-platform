@@ -308,11 +308,20 @@ def test_search_terms_over_the_cap_are_reported_as_skipped_not_dropped_silently(
     assert skipped == tags[NVD_MAX_SEARCH_TERMS:]
 
 
+@pytest.fixture(autouse=True)
+def _empty_keyword_cache():
+    cve_feed_module._keyword_cache.clear()
+    yield
+    cve_feed_module._keyword_cache.clear()
+
+
+_REAL_ASYNC_CLIENT = httpx.AsyncClient
+
+
 def _run_fetch(monkeypatch, handler, keywords):
-    real_client = httpx.AsyncClient
     monkeypatch.setattr(
         cve_feed_module.httpx, "AsyncClient",
-        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+        lambda **kw: _REAL_ASYNC_CLIENT(transport=httpx.MockTransport(handler), **kw),
     )
     monkeypatch.setattr(cve_feed_module.asyncio, "sleep", AsyncMock())
     return asyncio.run(fetch_recent_cves(keywords, days=14))
@@ -363,3 +372,86 @@ def test_scan_searches_only_tag_keywords_and_reports_them(
     body = resp.json()
     assert body["keywords_searched"] == ["nginx", "php"]
     assert body["keywords_skipped"] == []
+
+
+def test_fetch_reuses_cached_results_instead_of_asking_nvd_again(monkeypatch):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.params["keywordSearch"])
+        return httpx.Response(200, json={"totalResults": 1, "vulnerabilities": [_cve("CVE-2026-0001")]})
+
+    _run_fetch(monkeypatch, handler, ["nginx"])
+    again = _run_fetch(monkeypatch, handler, ["nginx"])
+    assert calls == ["nginx"]
+    assert [v["cve"]["id"] for v in again] == ["CVE-2026-0001"]
+
+
+def test_a_failed_keyword_is_not_cached(monkeypatch):
+    responses = iter([httpx.Response(503), httpx.Response(200, json={"totalResults": 1, "vulnerabilities": [_cve()]})])
+    _run_fetch(monkeypatch, lambda r: next(responses), ["nginx"])
+    assert len(_run_fetch(monkeypatch, lambda r: next(responses), ["nginx"])) == 1
+
+
+# --- GET /api/origins/{id}/cves ---------------------------------------------
+
+from api import origins as origins_module  # noqa: E402
+
+
+@pytest.fixture()
+def origins_client(monkeypatch, fake_infrastructure):
+    from tests.conftest import FakeDynamoDBService, _STORE
+    _STORE["waf_audit_log"] = []
+    monkeypatch.setattr(audit_log_module, "db", FakeDynamoDBService())
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.include_router(auth_module.router)
+    app.include_router(origins_module.router)
+    return TestClient(app)
+
+
+def _origin_with_tags(client, auth_header, token, tags):
+    resp = client.post("/api/origins", json={"label": "cve-origin", "ip": "203.0.113.60", "port": 8080}, headers=auth_header(token))
+    assert resp.status_code == 200, resp.text
+    origin_id = resp.json()["id"]
+    upd = client.put(f"/api/origins/{origin_id}", json={"tech_stack_tags": tags}, headers=auth_header(token))
+    assert upd.status_code == 200, upd.text
+    return origin_id
+
+
+def test_origin_cves_lists_matches_highest_score_first_for_a_viewer(
+    origins_client, register_user, auth_header, monkeypatch,
+):
+    owner = register_user(email="cve-owner@example.com", username="cve_owner")
+    viewer = register_user(email="cve-viewer@example.com", username="cve_viewer")
+    origin_id = _origin_with_tags(origins_client, auth_header, owner["access_token"], ["nginx"])
+    grant = origins_client.post(f"/api/origins/{origin_id}/viewers", json={"email": "cve-viewer@example.com"}, headers=auth_header(owner["access_token"]))
+    assert grant.status_code == 200, grant.text
+    fetch = AsyncMock(return_value=[
+        _cve("CVE-2026-0001", score=5.0, severity="MEDIUM"),
+        _cve("CVE-2026-0002", score=9.8, severity="CRITICAL"),
+        _cve("CVE-2026-0003", vendor="microsoft", product="iis"),
+    ])
+    monkeypatch.setattr(origins_module, "fetch_recent_cves", fetch)
+
+    resp = origins_client.get(f"/api/origins/{origin_id}/cves", headers=auth_header(viewer["access_token"]))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [c["cve_id"] for c in body["cves"]] == ["CVE-2026-0002", "CVE-2026-0001"]
+    assert body["keywords_searched"] == ["nginx"]
+    assert fetch.call_args.args[0] == ["nginx"]
+
+
+def test_origin_cves_is_refused_to_a_user_without_access(
+    origins_client, register_user, auth_header, monkeypatch,
+):
+    owner = register_user(email="cve-owner2@example.com", username="cve_owner2")
+    stranger = register_user(email="cve-stranger@example.com", username="cve_stranger")
+    origin_id = _origin_with_tags(origins_client, auth_header, owner["access_token"], ["nginx"])
+    fetch = AsyncMock(return_value=[])
+    monkeypatch.setattr(origins_module, "fetch_recent_cves", fetch)
+
+    resp = origins_client.get(f"/api/origins/{origin_id}/cves", headers=auth_header(stranger["access_token"]))
+    assert resp.status_code in (403, 404)
+    fetch.assert_not_called()

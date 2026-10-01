@@ -5,7 +5,7 @@ from typing import Optional
 from services.ml_rule_service import MLRuleService
 from services.rbac import require_admin
 from services import audit_log
-from services.cve_feed import fetch_recent_cves, match_cves_to_origins, select_search_terms
+from services.cve_feed import DEFAULT_WINDOW_DAYS, fetch_recent_cves, match_cves_to_origins, select_search_terms
 from services.gemini_service import gemini_service
 from services.rule_manager import escape_secrule_string
 
@@ -19,7 +19,7 @@ AUDIT_SCOPE_GLOBAL = "global"
 # the product worse, not better. Approval is the real bottleneck here, not
 # proposal generation.
 CVE_SCAN_MAX_PROPOSALS = 5
-CVE_SCAN_DEFAULT_WINDOW_DAYS = 14
+CVE_SCAN_DEFAULT_WINDOW_DAYS = DEFAULT_WINDOW_DAYS
 
 class RuleRejectRequest(BaseModel):
     reason: Optional[str] = ""

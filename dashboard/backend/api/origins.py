@@ -13,6 +13,7 @@ from services.otp_config import (
     save_origin_config as save_otp_origin_config,
 )
 from services import audit_log
+from services.cve_feed import DEFAULT_WINDOW_DAYS, fetch_recent_cves, match_cves_to_origins, select_search_terms
 
 router = APIRouter(prefix="/api/origins", tags=["Origins"])
 
@@ -247,6 +248,24 @@ async def get_origin(origin: dict = Depends(verify_origin_access)):
     online_names = await origin_service.get_live_online_proxy_names()
     o = _attach_live_status([origin], online_names)[0]
     return o
+
+@router.get("/{origin_id}/cves")
+async def get_origin_cves(origin: dict = Depends(verify_origin_access)):
+    """CVEs from the NVD feed matching this origin's tech_stack_tags.
+    Advisory only: nothing here blocks traffic. Any role that can read the
+    origin can read this."""
+    searched, skipped = select_search_terms([origin])
+    vulnerabilities = await fetch_recent_cves(searched, days=DEFAULT_WINDOW_DAYS)
+    matches = match_cves_to_origins(vulnerabilities, [origin])
+    matches.sort(key=lambda m: (m.get("cvss_score") is None, -(m.get("cvss_score") or 0)))
+    fields = ("cve_id", "severity", "cvss_score", "matched_tag", "description", "published", "last_modified")
+    return {
+        "cves": [{k: m.get(k) for k in fields} for m in matches],
+        "keywords_searched": searched,
+        "keywords_skipped": skipped,
+        "window_days": DEFAULT_WINDOW_DAYS,
+    }
+
 
 @router.put("/{origin_id}")
 async def update_origin(

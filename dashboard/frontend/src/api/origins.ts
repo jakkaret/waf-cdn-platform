@@ -1,5 +1,5 @@
 import { api } from './axios'
-import { Origin } from '../types'
+import { Origin, OriginCveReport } from '../types'
 
 export const getOrigins = (opts?: { forceRefreshStatus?: boolean }) =>
   api.get<{ origins: Origin[] }>('/origins', {
@@ -20,3 +20,9 @@ export const getOrigin = (id: string) =>
 
 export const restoreOrigin = (id: string) =>
   api.post<{ status: string; message: string }>(`/origins/${id}/restore`)
+
+// Advisory: CVEs from the NVD feed matching the origin's tech stack tags.
+// The first call for a new tag can take ~30 s (NVD rate limit); later calls
+// are served from the backend cache.
+export const getOriginCves = (id: string) =>
+  api.get<OriginCveReport>(`/origins/${id}/cves`, { timeout: 60000 })

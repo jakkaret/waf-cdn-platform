@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getOrigin, deleteOrigin, restoreOrigin, updateOrigin } from '../api/origins'
+import { getOrigin, deleteOrigin, restoreOrigin, updateOrigin, getOriginCves } from '../api/origins'
 import { getDomains, deleteDomain, verifyDomain } from '../api/domains'
 import { getCaptchaConfig, updateCaptchaConfig } from '../api/captcha'
 import { getOtpConfig, updateOtpConfig } from '../api/otp'
@@ -52,7 +52,24 @@ import {
   Mail,
   Users,
   FileText,
+  Bug,
+  ExternalLink,
 } from 'lucide-react'
+
+const cveSeverityClass = (sev: string): string => {
+  switch (sev) {
+    case 'CRITICAL':
+      return 'bg-red-500/15 text-red-500 border-red-500/30'
+    case 'HIGH':
+      return 'bg-orange-500/15 text-orange-500 border-orange-500/30'
+    case 'MEDIUM':
+      return 'bg-yellow-500/15 text-yellow-600 border-yellow-500/30'
+    case 'LOW':
+      return 'bg-sky-500/15 text-sky-500 border-sky-500/30'
+    default:
+      return 'bg-[var(--bg-surface-2)] text-[var(--text-muted)] border-[var(--bg-border-subtle)]'
+  }
+}
 
 export const OriginDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -78,6 +95,15 @@ export const OriginDetail: React.FC = () => {
     queryFn: () => getOrigin(id!),
     enabled: !!id,
   })
+
+  const originHasTags = (data?.data?.tech_stack_tags || []).length > 0
+  const { data: cveData, isLoading: cveLoading, isError: cveError } = useQuery({
+    queryKey: ['origin-cves', id, data?.data?.tech_stack_tags],
+    queryFn: () => getOriginCves(id!),
+    enabled: !!id && originHasTags,
+    staleTime: 10 * 60 * 1000,
+  })
+  const originCves = cveData?.data?.cves || []
 
   const { data: domainsData, refetch: refetchDomains } = useQuery({
     queryKey: ['domains', id],
@@ -713,6 +739,85 @@ export const OriginDetail: React.FC = () => {
                 )}
               </div>
             )}
+
+            <div className="dash-card p-5 space-y-4 md:col-span-2">
+              <div className="flex items-center justify-between pb-3 border-b border-[var(--bg-border-subtle)]">
+                <h3 className="flex items-center gap-2 text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
+                  <Bug size={15} className="text-red-500" />
+                  Known CVEs
+                </h3>
+                <span className="text-[11px] text-[var(--text-muted)] font-mono">
+                  matched against tech stack tags
+                </span>
+              </div>
+              <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                CVEs from the NVD feed that match this origin's tech stack tags. Advisory only --
+                nothing is blocked until a virtual-patch proposal is reviewed and approved in ML
+                Anomaly Rules.
+              </p>
+              {!originHasTags ? (
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  No tech stack tags on this origin yet, so there is nothing to match. An admin of
+                  this origin can add tags such as nginx or wordpress.
+                </p>
+              ) : cveLoading ? (
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  Searching the NVD feed for {(origin.tech_stack_tags || []).join(', ')}... the first
+                  search can take up to 30 seconds.
+                </p>
+              ) : cveError ? (
+                <p className="text-[12px] text-red-500 font-mono m-0">
+                  Could not load CVEs. Reload the page to try again.
+                </p>
+              ) : originCves.length === 0 ? (
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  No CVEs modified in the last {cveData?.data?.window_days ?? 14} days match{' '}
+                  {(cveData?.data?.keywords_searched || []).join(', ')}.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {originCves.map((cve) => (
+                    <div
+                      key={cve.cve_id}
+                      className="flex flex-col gap-2 p-3 rounded bg-[var(--bg-surface-2)] border border-[var(--bg-border-subtle)]"
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`px-2 py-0.5 rounded border text-[11px] font-bold font-mono ${cveSeverityClass(cve.severity)}`}
+                        >
+                          {cve.severity}
+                        </span>
+                        <a
+                          href={`https://nvd.nist.gov/vuln/detail/${cve.cve_id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 text-[12px] font-bold font-mono text-[var(--text-primary)] hover:text-[var(--accent)]"
+                        >
+                          {cve.cve_id}
+                          <ExternalLink size={11} />
+                        </a>
+                        {cve.cvss_score !== null && (
+                          <span className="text-[11px] text-[var(--text-muted)] font-mono">
+                            CVSS {cve.cvss_score.toFixed(1)}
+                          </span>
+                        )}
+                        <span className="ml-auto text-[11px] text-[var(--text-muted)] font-mono">
+                          tag: {cve.matched_tag}
+                        </span>
+                      </div>
+                      <p className="text-[12px] text-[var(--text-secondary)] font-mono m-0 leading-relaxed">
+                        {cve.description}
+                      </p>
+                      {cve.published && (
+                        <span className="text-[11px] text-[var(--text-muted)] font-mono">
+                          published {cve.published.slice(0, 10)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

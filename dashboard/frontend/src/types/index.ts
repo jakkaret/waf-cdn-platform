@@ -294,3 +294,20 @@ export interface MLPendingRule {
   deployed_rule_id?: number
 }
 
+
+export interface OriginCve {
+  cve_id: string
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN'
+  cvss_score: number | null
+  matched_tag: string
+  description: string
+  published: string | null
+  last_modified: string | null
+}
+
+export interface OriginCveReport {
+  cves: OriginCve[]
+  keywords_searched: string[]
+  keywords_skipped: string[]
+  window_days: number
+}
