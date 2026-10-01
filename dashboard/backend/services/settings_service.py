@@ -9,7 +9,9 @@ from services.captcha_config import _client as _redis_client
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# WAF_DATA_DIR lets the test suite point this at a temp dir instead of the
+# tracked runtime files in data/.
+DATA_DIR = Path(os.getenv("WAF_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = DATA_DIR / "system_settings.json"
 
