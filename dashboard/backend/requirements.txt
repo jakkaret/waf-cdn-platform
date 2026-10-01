@@ -42,3 +42,12 @@ redis==5.0.1
 # ClickHouse Database Connector
 clickhouse-connect>=0.7.0
 maxminddb>=2.6.0  # services/geoip.py: local country lookup (DB-IP Lite / GeoLite2 .mmdb)
+
+# ML API (waf-ml.service, ml/ml_api.py) runs from this same venv. It crash-looped
+# after the venv was rebuilt without these (2026-09-27 to 2026-10-01).
+# scikit-learn is pinned to the version the .joblib models were trained with.
+scikit-learn==1.9.0
+joblib==1.6.0
+numpy==2.5.3
+pandas==3.0.6
+onnxruntime==1.30.0
