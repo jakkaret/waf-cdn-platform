@@ -25,9 +25,10 @@ class TenantRuleIn(BaseModel):
 
 
 @router.get("/options")
-async def get_options(current_user: dict = Depends(get_current_user)):
+async def get_options(origin: dict = Depends(verify_origin_access)):
     """Fixed choices the rule builder UI renders -- nothing here is free text
-    except the operator's value and the message."""
+    except the operator's value and the message. Gated like every other route
+    under /api/origins/{origin_id} even though the data is not per-origin."""
     return {
         "variables": VARIABLES,
         "operators": sorted(OPERATORS),
