@@ -18,6 +18,7 @@ remembered schema.
 """
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -33,6 +34,12 @@ NVD_MAX_WINDOW_DAYS = 120
 # spaced out and capped: 5 terms * 6.5s keeps one scan under ~35s.
 NVD_REQUEST_GAP_SECONDS = 6.5
 NVD_MAX_SEARCH_TERMS = 5
+DEFAULT_WINDOW_DAYS = 14
+# Per-keyword cache: the origin page reads matches on every open, and NVD's
+# data for a 14-day window barely moves within hours.
+KEYWORD_CACHE_TTL_SECONDS = 6 * 3600
+_keyword_cache: Dict[Tuple[str, int], Tuple[float, List[Dict[str, Any]]]] = {}
+_nvd_lock = asyncio.Lock()
 
 
 def _extract_cve_keywords(cve: Dict[str, Any]) -> Set[str]:
@@ -153,46 +160,60 @@ def select_search_terms(origins: List[Dict[str, Any]]) -> Tuple[List[str], List[
     return terms[:NVD_MAX_SEARCH_TERMS], terms[NVD_MAX_SEARCH_TERMS:]
 
 
-async def fetch_recent_cves(keywords: List[str], days: int = 7) -> List[Dict[str, Any]]:
+async def fetch_recent_cves(keywords: List[str], days: int = DEFAULT_WINDOW_DAYS) -> List[Dict[str, Any]]:
     """One NVD request per keyword (keywordSearch + lastMod window), results
     de-duplicated by CVE id. A single unfiltered request returned only the
     first 200 of thousands of recently-modified CVEs, so most real products
-    never appeared. lastModStartDate/lastModEndDate is mandatory for an
-    incremental query. Any failure (timeout, non-200, malformed JSON) skips
-    that keyword rather than raising -- the caller (the /cve-scan endpoint)
-    must never 500 because an external API had a bad moment."""
+    never appeared. Results are cached per (keyword, window) for
+    KEYWORD_CACHE_TTL_SECONDS, and requests are serialised under one lock so
+    concurrent page loads cannot exceed NVD's rate limit. Any failure
+    (timeout, non-200, malformed JSON) skips that keyword and is not cached --
+    callers must never 500 because an external API had a bad moment."""
     window_days = min(max(days, 1), NVD_MAX_WINDOW_DAYS)
+    found: Dict[str, Dict[str, Any]] = {}
+    async with _nvd_lock:
+        fetched_any = False
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            for keyword in keywords:
+                cached = _keyword_cache.get((keyword, window_days))
+                if cached and time.monotonic() - cached[0] < KEYWORD_CACHE_TTL_SECONDS:
+                    vulns = cached[1]
+                else:
+                    if fetched_any:
+                        await asyncio.sleep(NVD_REQUEST_GAP_SECONDS)
+                    fetched_any = True
+                    vulns = await _fetch_keyword(client, keyword, window_days)
+                    if vulns is None:
+                        continue
+                    _keyword_cache[(keyword, window_days)] = (time.monotonic(), vulns)
+                for vuln in vulns:
+                    cve_id = (vuln.get("cve") or {}).get("id")
+                    if cve_id:
+                        found.setdefault(cve_id, vuln)
+    return list(found.values())
+
+
+async def _fetch_keyword(client: httpx.AsyncClient, keyword: str, window_days: int) -> Optional[List[Dict[str, Any]]]:
+    """One NVD request; None on any failure. lastModStartDate/lastModEndDate
+    is mandatory for an incremental query."""
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=window_days)
-    window = {
+    params = {
         "lastModStartDate": start.strftime("%Y-%m-%dT%H:%M:%S.000"),
         "lastModEndDate": end.strftime("%Y-%m-%dT%H:%M:%S.000"),
         "resultsPerPage": 200,
+        "keywordSearch": keyword,
     }
-    found: Dict[str, Dict[str, Any]] = {}
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        for i, keyword in enumerate(keywords):
-            if i:
-                await asyncio.sleep(NVD_REQUEST_GAP_SECONDS)
-            try:
-                res = await client.get(
-                    NVD_BASE_URL, params={**window, "keywordSearch": keyword},
-                    headers={"User-Agent": "waf-project-cve-auto-patch/1.0"},
-                )
-                if res.status_code != 200:
-                    logger.warning(f"NVD API returned {res.status_code} for keyword {keyword!r}")
-                    continue
-                data = res.json()
-            except Exception as e:
-                logger.error(f"Failed to fetch CVE feed from NVD for {keyword!r}: {e}")
-                continue
-            vulns = data.get("vulnerabilities", []) or []
-            if data.get("totalResults", len(vulns)) > len(vulns):
-                logger.warning(
-                    f"NVD keyword {keyword!r}: {data['totalResults']} results, only first {len(vulns)} read"
-                )
-            for vuln in vulns:
-                cve_id = (vuln.get("cve") or {}).get("id")
-                if cve_id:
-                    found.setdefault(cve_id, vuln)
-    return list(found.values())
+    try:
+        res = await client.get(NVD_BASE_URL, params=params, headers={"User-Agent": "waf-project-cve-auto-patch/1.0"})
+        if res.status_code != 200:
+            logger.warning(f"NVD API returned {res.status_code} for keyword {keyword!r}")
+            return None
+        data = res.json()
+    except Exception as e:
+        logger.error(f"Failed to fetch CVE feed from NVD for {keyword!r}: {e}")
+        return None
+    vulns = data.get("vulnerabilities", []) or []
+    if data.get("totalResults", len(vulns)) > len(vulns):
+        logger.warning(f"NVD keyword {keyword!r}: {data['totalResults']} results, only first {len(vulns)} read")
+    return vulns
