@@ -286,3 +286,37 @@ def test_catalog_and_publish_are_platform_admin_only(client, accounts):
     assert first.status_code == 200 and first.json()["published"] is True
     second = client.post("/api/managed-rules/publish", headers=admin_h)
     assert second.status_code == 200 and second.json()["published"] is False
+
+
+# --- the real source in modsecurity/managed-rules -------------------------
+
+import re  # noqa: E402
+import urllib.parse  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+REPO_SOURCE = Path(__file__).resolve().parents[3] / "modsecurity" / "managed-rules"
+
+
+def _rule_regex(rule_text: str) -> "re.Pattern":
+    """The @rx operand as libmodsecurity reads it: only \\" is unescaped."""
+    operand = re.search(r'"@rx (.*?)(?<!\\)"', rule_text).group(1).replace('\\"', '"')
+    return re.compile(operand)
+
+
+def test_repo_managed_rules_load():
+    rules = mr.load_source(REPO_SOURCE)
+    assert {3000001, 3000002, 3000003, 3000004, 3000005, 3000006} <= set(rules)
+
+
+def test_path_sqli_rule_blocks_quote_then_sql_but_not_apostrophes_in_words():
+    rx = _rule_regex(mr.load_source(REPO_SOURCE)[3000006])
+
+    def hit(path):  # t:urlDecodeUni,t:lowercase
+        return bool(rx.search(urllib.parse.unquote(path).lower()))
+
+    for attack in ("/products/1'%20OR%201=1--", "/products/1' or '1'='1", "/item/5%22%20UNION%20SELECT%201",
+                   "/a/1';drop", "/a/1')%20or%20(1", "/a/x'--", "/a/1' order by 3"):
+        assert hit(attack), attack
+    for benign in ("/blog/don't-stop", "/authors/o'reilly", "/music/rock'n'roll", "/", "/api/items/42",
+                   "/search/shoes", "/products/1", "/docs/the-or-operator"):
+        assert not hit(benign), benign
