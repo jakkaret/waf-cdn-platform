@@ -57,6 +57,10 @@ os.environ["FRP_AUTH_TOKEN"] = "test-frp-token-for-pytest-only"
 os.environ["WAF_CONTAINER_NAME"] = "test-waf-container-does-not-exist"
 os.environ["GEMINI_API_KEY"] = ""
 os.environ.setdefault("ORIGINS_QUOTA_DEFAULT", "5")
+# Services keep sqlite/json state in dashboard/backend/data/, which is tracked in
+# git and is live data on Main. Tests get a throwaway directory instead.
+import tempfile  # noqa: E402
+os.environ["WAF_DATA_DIR"] = tempfile.mkdtemp(prefix="waf-test-data-")
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
