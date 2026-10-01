@@ -100,6 +100,15 @@ export const MLRules: React.FC = () => {
   const cveScanMutation = useMutation({
     mutationFn: () => mlRulesApi.runCveScan(),
     onSuccess: (res) => {
+      const searched: string[] = res.keywords_searched || []
+      const skipped: string[] = res.keywords_skipped || []
+      if (searched.length === 0) {
+        toast.error('ไม่มี origin ที่ตั้ง Tech Stack Tags ไว้ -- เพิ่ม tag ที่หน้า origin ก่อนสแกน')
+        return
+      }
+      if (skipped.length > 0) {
+        toast(`ค้นหาจาก tag: ${searched.join(', ')} (ข้าม ${skipped.join(', ')} เพราะจำกัดต่อรอบ -- กดสแกนใหม่หลังลบ tag อื่น)`)
+      }
       if (res.proposals_created > 0) {
         toast.success(
           `สแกน CVE เสร็จ: พบ ${res.matches_found} match, สร้าง proposal ใหม่ ${res.proposals_created} รายการ (ตรวจสอบ/อนุมัติก่อนถึงจะมีผล)`

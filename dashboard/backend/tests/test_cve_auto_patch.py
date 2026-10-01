@@ -2,7 +2,10 @@
 -- pure, no network, no Gemini -- same split that worked for
 build_incident_timeline. Built directly against a real NVD API 2.0 response
 shape (fetched live 2026-09-22), not a remembered schema."""
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
+
+import httpx
 
 import pytest
 from fastapi import FastAPI
@@ -11,7 +14,11 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from services.rate_limiter import limiter
-from services.cve_feed import match_cves_to_origins, _extract_cve_keywords, _severity_and_score
+import services.cve_feed as cve_feed_module
+from services.cve_feed import (
+    match_cves_to_origins, _extract_cve_keywords, _severity_and_score,
+    select_search_terms, fetch_recent_cves, NVD_MAX_SEARCH_TERMS,
+)
 from api import auth as auth_module
 from api import ml_rules as ml_rules_module
 import services.audit_log as audit_log_module
@@ -283,3 +290,76 @@ def test_scan_with_no_tagged_origins_creates_nothing_and_does_not_500(
     body = resp.json()
     assert body["matches_found"] == 0
     assert body["proposals_created"] == 0
+
+
+# --- per-tag NVD search -------------------------------------------------
+
+def test_search_terms_use_each_tags_first_word_deduplicated():
+    origins = [_origin("o1", ["nginx", "PHP 8.1"]), _origin("o2", ["php", "wordpress"])]
+    searched, skipped = select_search_terms(origins)
+    assert searched == ["nginx", "php", "wordpress"]
+    assert skipped == []
+
+
+def test_search_terms_over_the_cap_are_reported_as_skipped_not_dropped_silently():
+    tags = [f"prod{i}" for i in range(NVD_MAX_SEARCH_TERMS + 2)]
+    searched, skipped = select_search_terms([_origin("o1", tags)])
+    assert searched == tags[:NVD_MAX_SEARCH_TERMS]
+    assert skipped == tags[NVD_MAX_SEARCH_TERMS:]
+
+
+def _run_fetch(monkeypatch, handler, keywords):
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        cve_feed_module.httpx, "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+    )
+    monkeypatch.setattr(cve_feed_module.asyncio, "sleep", AsyncMock())
+    return asyncio.run(fetch_recent_cves(keywords, days=14))
+
+
+def test_fetch_searches_nvd_once_per_keyword_and_deduplicates_by_cve_id(monkeypatch):
+    seen = []
+
+    def handler(request):
+        kw = request.url.params["keywordSearch"]
+        seen.append(kw)
+        vulns = [_cve("CVE-2026-0001")] if kw == "nginx" else [_cve("CVE-2026-0001"), _cve("CVE-2026-0002")]
+        return httpx.Response(200, json={"totalResults": len(vulns), "vulnerabilities": vulns})
+
+    result = _run_fetch(monkeypatch, handler, ["nginx", "php"])
+    assert seen == ["nginx", "php"]
+    assert sorted(v["cve"]["id"] for v in result) == ["CVE-2026-0001", "CVE-2026-0002"]
+
+
+def test_fetch_skips_a_failing_keyword_and_keeps_the_rest(monkeypatch):
+    def handler(request):
+        if request.url.params["keywordSearch"] == "nginx":
+            return httpx.Response(503)
+        return httpx.Response(200, json={"totalResults": 1, "vulnerabilities": [_cve("CVE-2026-0009")]})
+
+    result = _run_fetch(monkeypatch, handler, ["nginx", "php"])
+    assert [v["cve"]["id"] for v in result] == ["CVE-2026-0009"]
+
+
+def test_fetch_with_no_keywords_makes_no_request(monkeypatch):
+    def handler(request):
+        raise AssertionError("no NVD request expected")
+
+    assert _run_fetch(monkeypatch, handler, []) == []
+
+
+def test_scan_searches_only_tag_keywords_and_reports_them(
+    client, register_user, auth_header, fake_rule_service, monkeypatch, fake_gemini_pattern,
+):
+    admin_h = _admin(client, register_user, auth_header)
+    fake_rule_service.db.origins_table.scan.return_value = {"Items": [_origin("o1", ["nginx", "php 8.1"])]}
+    fetch = AsyncMock(return_value=[])
+    monkeypatch.setattr(ml_rules_module, "fetch_recent_cves", fetch)
+
+    resp = client.post("/api/ml-rules/cve-scan", headers=admin_h)
+    assert resp.status_code == 200, resp.text
+    assert fetch.call_args.args[0] == ["nginx", "php"]
+    body = resp.json()
+    assert body["keywords_searched"] == ["nginx", "php"]
+    assert body["keywords_skipped"] == []
