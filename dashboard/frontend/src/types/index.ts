@@ -307,6 +307,7 @@ export interface OriginCve {
 
 export interface OriginCveReport {
   cves: OriginCve[]
+  total: number
   keywords_searched: string[]
   keywords_skipped: string[]
   window_days: number
