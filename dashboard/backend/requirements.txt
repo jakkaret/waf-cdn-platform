@@ -8,14 +8,14 @@ starlette==1.3.1
 uvicorn[standard]==0.24.0
 
 # HTTP Requests (สำหรับ Telegram API)
-requests==2.31.0
+requests==2.33.0
 httpx==0.27.0
 
 # Python ASGI Server
-python-multipart==0.0.6
+python-multipart==0.0.31
 
 # Additional utilities
-python-dotenv==1.0.0
+python-dotenv==1.2.2
 
 # AWS SDK for Python (ใช้ DynamoDB, S3, ฯลฯ)
 boto3==1.34.34
@@ -27,7 +27,7 @@ telethon==1.34.0
 # pulled `ecdsa`, which has CVE-2024-23342 (Minerva timing) with no upstream
 # fix. We only ever sign/verify HS256 (and optional RS via bola_guard); PyJWT
 # covers both. [crypto] pulls `cryptography` for the RS path.
-PyJWT[crypto]==2.10.1
+PyJWT[crypto]==2.15.0
 
 # Password Hashing
 argon2-cffi==25.1.0
