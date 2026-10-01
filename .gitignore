@@ -67,3 +67,7 @@ docs/site/.vitepress/cache/
 modsecurity/custom-rules/managed-*.conf
 modsecurity/custom-rules/tenant-*.conf
 dashboard/backend/data/managed_ruleset.json
+
+# Mode A site configs written at runtime by services/nginx_site_service.py;
+# they carry DECEPTION_INTERNAL_KEY.
+nginx/custom_sites/
