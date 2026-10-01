@@ -249,6 +249,11 @@ async def get_origin(origin: dict = Depends(verify_origin_access)):
     o = _attach_live_status([origin], online_names)[0]
     return o
 
+# A broad tag ("linux") matches hundreds of CVEs; the page shows the highest
+# CVSS scores and says how many there are in total.
+ORIGIN_CVES_LIMIT = 50
+
+
 @router.get("/{origin_id}/cves")
 async def get_origin_cves(origin: dict = Depends(verify_origin_access)):
     """CVEs from the NVD feed matching this origin's tech_stack_tags.
@@ -260,7 +265,8 @@ async def get_origin_cves(origin: dict = Depends(verify_origin_access)):
     matches.sort(key=lambda m: (m.get("cvss_score") is None, -(m.get("cvss_score") or 0)))
     fields = ("cve_id", "severity", "cvss_score", "matched_tag", "description", "published", "last_modified")
     return {
-        "cves": [{k: m.get(k) for k in fields} for m in matches],
+        "cves": [{k: m.get(k) for k in fields} for m in matches[:ORIGIN_CVES_LIMIT]],
+        "total": len(matches),
         "keywords_searched": searched,
         "keywords_skipped": skipped,
         "window_days": DEFAULT_WINDOW_DAYS,

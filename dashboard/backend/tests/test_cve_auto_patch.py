@@ -440,7 +440,22 @@ def test_origin_cves_lists_matches_highest_score_first_for_a_viewer(
     body = resp.json()
     assert [c["cve_id"] for c in body["cves"]] == ["CVE-2026-0002", "CVE-2026-0001"]
     assert body["keywords_searched"] == ["nginx"]
+    assert body["total"] == 2
     assert fetch.call_args.args[0] == ["nginx"]
+
+
+def test_origin_cves_returns_only_the_top_scores_but_reports_the_total(
+    origins_client, register_user, auth_header, monkeypatch,
+):
+    owner = register_user(email="cve-owner3@example.com", username="cve_owner3")
+    origin_id = _origin_with_tags(origins_client, auth_header, owner["access_token"], ["nginx"])
+    many = [_cve(f"CVE-2026-{i:04d}", score=float(i % 10)) for i in range(origins_module.ORIGIN_CVES_LIMIT + 7)]
+    monkeypatch.setattr(origins_module, "fetch_recent_cves", AsyncMock(return_value=many))
+
+    body = origins_client.get(f"/api/origins/{origin_id}/cves", headers=auth_header(owner["access_token"])).json()
+    assert body["total"] == origins_module.ORIGIN_CVES_LIMIT + 7
+    assert len(body["cves"]) == origins_module.ORIGIN_CVES_LIMIT
+    assert body["cves"][0]["cvss_score"] == 9.0
 
 
 def test_origin_cves_is_refused_to_a_user_without_access(
