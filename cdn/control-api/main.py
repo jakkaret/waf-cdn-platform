@@ -232,14 +232,17 @@ def get_bundle(request: Request) -> Response:
             bl_bytes = ("\n".join(all_ips) + "\n").encode("utf-8")
             bl_info = tarfile.TarInfo(name="global_blocklist.txt")
             bl_info.size = len(bl_bytes)
-            bl_info.mtime = int(time.time())
+            bl_info.mtime = 0
             tar.addfile(bl_info, io.BytesIO(bl_bytes))
 
             rule_bytes = _block_rule_content().encode("utf-8")
             rule_info = tarfile.TarInfo(name="custom-000000-global-blocklist.conf")
             rule_info.size = len(rule_bytes)
-            rule_info.mtime = int(time.time())
+            rule_info.mtime = 0
             tar.addfile(rule_info, io.BytesIO(rule_bytes))
 
-    gz = gzip.compress(tar_buf.getvalue())
+    # Byte-identical output for identical rules: edges reload nginx whenever
+    # the bundle's sha256 changes, so a timestamp here (gzip header, synthetic
+    # entries) made every edge reload every SYNC_INTERVAL_SEC.
+    gz = gzip.compress(tar_buf.getvalue(), mtime=0)
     return Response(content=gz, media_type="application/gzip")
