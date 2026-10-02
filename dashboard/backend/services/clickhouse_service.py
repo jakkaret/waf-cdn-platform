@@ -445,7 +445,7 @@ class ClickHouseService:
         status_filter: str = "ALL",
         severity_filter: str = "ALL",
         method_filter: str = "ALL",
-        domain_filter: list = None
+        origin_clause: str = ""
     ) -> dict:
         if not self.connected:
             return {"logs": [], "total": 0, "page": page, "limit": limit, "total_pages": 1}
@@ -457,26 +457,15 @@ class ClickHouseService:
         where_clauses = []
 
         # 1. Origin / Domain Scope Filter
-        if domain_filter:
-            domain_clauses = []
-            for d in domain_filter:
-                if not d or str(d).strip().upper() == "ALL":
-                    continue
-                d_clean = str(d).strip().lower()
-                if "juice" in d_clean or "3000" in d_clean:
-                    domain_clauses.append("(url LIKE '%juice%' OR url LIKE '%rest%' OR url LIKE '%socket.io%' OR url LIKE '%assets/public%' OR url LIKE '%main.js%' OR url LIKE '%polyfills.js%' OR url LIKE '%scripts.js%')")
-                elif "dvwa" in d_clean or "8080" in d_clean or ".php" in d_clean:
-                    domain_clauses.append("(url LIKE '%dvwa%' OR url LIKE '%.php%' OR url LIKE '%vulnerabilities%')")
-                elif "vampi" in d_clean or "5000" in d_clean:
-                    domain_clauses.append("(url LIKE '%vampi%' OR url LIKE '%/api/v1/%')")
-                elif "bwapp" in d_clean:
-                    domain_clauses.append("(url LIKE '%bwapp%' OR url LIKE '%bWAPP%')")
-                else:
-                    escaped_d = escape_like_value(d_clean)
-                    domain_clauses.append(f"(url LIKE '%{escaped_d}%' OR client_ip LIKE '%{escaped_d}%')")
-            if domain_clauses:
-                where_clauses.append(f"({' OR '.join(domain_clauses)})")
-        
+        # Tenant scope, built by the caller with
+        # tenant_service.build_tenant_origin_filter (matches the host column,
+        # same as every other endpoint). It used to guess the origin from URL
+        # keywords: a real domain never matched because url holds only the
+        # path, and any domain containing "juice" matched every tenant's
+        # Juice Shop traffic.
+        if origin_clause:
+            where_clauses.append(f"({origin_clause})")
+
         if search:
             escaped_search = escape_like_value(search)
             where_clauses.append(f"(client_ip ILIKE '%{escaped_search}%' OR url ILIKE '%{escaped_search}%' OR rule_id ILIKE '%{escaped_search}%' OR user_agent ILIKE '%{escaped_search}%' OR attack_type ILIKE '%{escaped_search}%')")
