@@ -4,13 +4,11 @@ import logging
 import os
 import time
 from datetime import datetime
-from services.dynamodb_service import DynamoDBService
 from services.clickhouse_service import ClickHouseService
 from services.telegram_listener import dispatch_telegram_alert
 
 logger = logging.getLogger(__name__)
 
-db = DynamoDBService()
 ch = ClickHouseService()
 log_buffer = {}
 
@@ -74,10 +72,26 @@ SEVERITY_NUM_MAP = {
     7: "DEBUG",
 }
 
-def save_hybrid_log(data: dict):
+# Entries ready to be stored, drained once per second by flush_old_logs().
+_ready: list = []
+
+
+def _store_batch(entries: list) -> None:
+    """Runs in ONE worker thread per drain (same reasoning as
+    api/cdn.py::_store_cdn_log_batch): ClickHouse inserts are synchronous,
+    and calling them on the event loop for every request starved the whole
+    API -- on 2026-10-02 a burst of blocked bot traffic left :8000 answering
+    nothing (1740 sockets in CLOSE-WAIT, the dashboard returned 502). One
+    bulk INSERT from one thread also keeps the shared ch.client
+    single-threaded. The DynamoDB waf_logs write is dropped for the reason
+    recorded there: that table is keyed (constant user_id, whole-second
+    timestamp) and kept at most one row per second."""
     if ch.connected:
-        ch.save_log("access_logs", data)
-    db.save_log(data)
+        ch.save_logs_bulk("access_logs", entries)
+
+
+def _is_alert(data: dict) -> bool:
+    return data.get("status") in [403, 429] or data.get("severity") in ["CRITICAL", "HIGH"]
 
 BASE_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "../../../")
@@ -291,13 +305,8 @@ def try_merge(key):
         if not merged.get("host"):
             merged["host"] = modsec.get("host") or access.get("host")
 
-        print("🔥 MERGED:", key, "Rule:", merged.get("rule_id"), "Sev:", merged.get("severity"))
-        save_hybrid_log(merged)
-
-        # Trigger Telegram Alert for blocked attack
-        if merged.get("status") in [403, 429] or merged.get("severity") in ["CRITICAL", "HIGH"]:
-            asyncio.create_task(dispatch_telegram_alert(merged))
-
+        logger.debug("MERGED: %s rule=%s sev=%s", key, merged.get("rule_id"), merged.get("severity"))
+        _ready.append(merged)
         del log_buffer[key]
 
 
@@ -314,14 +323,22 @@ async def flush_old_logs():
 
             if now - created > MERGE_TIMEOUT:
                 data = entry.get("modsec") or entry.get("access")
-
                 if data:
-                    print("⚠️ FALLBACK SAVE:", key)
-                    save_hybrid_log(data)
-                    if data.get("status") in [403, 429] or data.get("severity") in ["CRITICAL", "HIGH"]:
-                        asyncio.create_task(dispatch_telegram_alert(data))
-
+                    _ready.append(data)
                 del log_buffer[key]
+
+        if _ready:
+            batch = _ready[:]
+            _ready.clear()
+            try:
+                await asyncio.to_thread(_store_batch, batch)
+            except Exception as e:
+                logger.error("log batch store failed (%d entries): %s", len(batch), e)
+            # Alerts are dispatched from the loop, not the worker thread:
+            # create_task needs a running event loop.
+            for data in batch:
+                if _is_alert(data):
+                    asyncio.create_task(dispatch_telegram_alert(data))
 
         await asyncio.sleep(1)
 
