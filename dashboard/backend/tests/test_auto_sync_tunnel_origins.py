@@ -30,6 +30,8 @@ pokes _PROXY_OWNERS the same way the real webhook handler does, then exercise
 auto_sync_tunnel_origins the same way GET /api/tunnels/status does.
 """
 import asyncio
+
+import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import api.tunnels as tunnels_module
@@ -85,6 +87,13 @@ def _claim(proxy_name: str, user_id: str) -> None:
     ownership for `proxy_name` -- the real trigger that makes
     get_proxy_owner(proxy_name) return `user_id`."""
     tunnels_module._PROXY_OWNERS[proxy_name] = user_id
+
+
+@pytest.fixture(autouse=True)
+def _dns_not_pointed_at_us(monkeypatch):
+    """No real DNS lookups: by default a tunnel domain's DNS does not point
+    at the platform. Tests that need the opposite patch it themselves."""
+    monkeypatch.setattr(origin_service, "verify_domain_dns", lambda domain, token: False)
 
 
 def setup_function(_):
@@ -273,3 +282,49 @@ def test_proxy_owner_claimed_by_someone_else_than_the_existing_origin_record_is_
 
     assert created == []
     assert origin_service.get_origin("existing-1")["admin_user_id"] == "user-a"
+
+
+# ------------------------------------------- domain verification on create
+
+def _created_domain(name):
+    return next(d for d in origin_service.db.domains_table.scan()["Items"] if d["domain_name"] == name)
+
+
+def test_external_tunnel_domain_stays_unverified_until_dns_points_at_us():
+    """A tunnel token only proves nobody else in this system owns the domain.
+    Without DNS proof the domain must not become verified (no TLS cert, no
+    host mapping) -- otherwise anyone can pre-claim someone else's domain."""
+    proxy = _online_proxy("squat-tunnel", "victim.example.com")
+    _claim("squat-tunnel", "user-a")
+    with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
+        _run(origin_service.auto_sync_tunnel_origins("user-a"))
+
+    d = _created_domain("victim.example.com")
+    assert d["dns_verified"] is False
+    assert d["ssl_status"] == "none"
+
+
+def test_external_tunnel_domain_already_pointed_at_us_is_verified(monkeypatch):
+    seen = []
+    monkeypatch.setattr(origin_service, "verify_domain_dns", lambda domain, token: seen.append(domain) or True)
+    proxy = _online_proxy("owner-tunnel", "httpbin.example.com")
+    _claim("owner-tunnel", "user-a")
+    with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
+        _run(origin_service.auto_sync_tunnel_origins("user-a"))
+
+    assert seen == ["httpbin.example.com"]
+    d = _created_domain("httpbin.example.com")
+    assert d["dns_verified"] is True
+    assert d["ssl_status"] == "active"
+
+
+def test_own_zone_subdomain_tunnel_is_verified_without_a_dns_lookup(monkeypatch):
+    def no_lookup(domain, token):
+        raise AssertionError("own-zone subdomain must not need a DNS check")
+    monkeypatch.setattr(origin_service, "verify_domain_dns", no_lookup)
+    proxy = _online_proxy("own-tunnel", "shop.waf-it-kku.online")
+    _claim("own-tunnel", "user-a")
+    with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
+        _run(origin_service.auto_sync_tunnel_origins("user-a"))
+
+    assert _created_domain("shop.waf-it-kku.online")["dns_verified"] is True

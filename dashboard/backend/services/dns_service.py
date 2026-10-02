@@ -23,6 +23,34 @@ def resolve_txt(domain: str) -> list[str]:
     except Exception:
         return []
 
+
+# 2026-09-22 (self-service onboarding, overnight session): a subdomain of
+# our own already-DNS-controlled wildcard needs no CNAME/TXT dance at all --
+# *.waf-it-kku.online already resolves to the edge with zero setup
+# (confirmed live earlier this session). Reserved labels are the ones the
+# Caddyfile itself already aliases to the dashboard UI (block 1: waf-it-kku.
+# online, www., main., dash.) -- letting a user "claim" one of those as
+# their own origin's domain would collide with the real dashboard at that
+# hostname.
+OWN_WILDCARD_DOMAIN = os.getenv("WAF_OWN_WILDCARD_DOMAIN", "waf-it-kku.online").strip().lower()
+_RESERVED_OWN_SUBDOMAIN_LABELS = {"www", "main", "dash"}
+
+
+def is_claimable_own_wildcard_subdomain(domain_name: str) -> bool:
+    d = domain_name.strip().lower()
+    suffix = "." + OWN_WILDCARD_DOMAIN
+    if not d.endswith(suffix) or d == OWN_WILDCARD_DOMAIN:
+        return False
+    label = d[: -len(suffix)]
+    # Only a single-label subdomain auto-verifies -- a deeper one (e.g.
+    # api.myshop.waf-it-kku.online) still goes through the normal flow,
+    # since arbitrary nesting depth was never verified against the wildcard
+    # cert / Caddyfile blocks the way the single-level case was.
+    if not label or "." in label:
+        return False
+    return label not in _RESERVED_OWN_SUBDOMAIN_LABELS
+
+
 def verify_domain_dns(domain_name: str, verification_token: str) -> bool:
     """
     Checks if a domain's DNS is pointed to WAF Platform.
