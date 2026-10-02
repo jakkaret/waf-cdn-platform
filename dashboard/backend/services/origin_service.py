@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 import re
 import os
@@ -8,6 +9,7 @@ import logging
 from typing import List, Dict, Optional, Any, Set, Tuple
 from datetime import datetime
 from services.dynamodb_service import DynamoDBService
+from services.dns_service import is_claimable_own_wildcard_subdomain, verify_domain_dns
 from services.tenant_service import invalidate_tenant_cache
 from services.auth_service import AuthService
 
@@ -485,13 +487,22 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
             # Also ensure domain exists in waf_domains
             if "." in domain_val and not any(str(d.get("domain_name", "")).lower() == domain_val for d in all_domains_items):
                 domain_id = str(uuid.uuid4())
+                token = f"waf-tunnel-{uuid.uuid4().hex[:12]}"
+                # A tunnel token only proves the domain is not someone else's
+                # *in this system*, not that the caller owns it. Verify only a
+                # subdomain of our own zone, or a domain whose DNS already
+                # points at us; otherwise it stays pending and
+                # dns_verification_worker re-checks it every minute.
+                verified = is_claimable_own_wildcard_subdomain(domain_val) or await asyncio.to_thread(
+                    verify_domain_dns, domain_val, token
+                )
                 domain_data = {
                     "id": domain_id,
                     "origin_id": origin_id,
                     "domain_name": domain_val,
-                    "verification_token": f"waf-tunnel-{uuid.uuid4().hex[:12]}",
-                    "dns_verified": True,
-                    "ssl_status": "active",
+                    "verification_token": token,
+                    "dns_verified": verified,
+                    "ssl_status": "active" if verified else "none",
                     "created_at": now,
                     "updated_at": now,
                 }

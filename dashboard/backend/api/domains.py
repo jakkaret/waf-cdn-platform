@@ -10,7 +10,7 @@ from services.rbac import get_current_user, verify_origin_ownership, verify_orig
 from services import audit_log
 from services.dynamodb_service import DynamoDBService
 from services.captcha_config import sync_domain_config
-from services.dns_service import verify_domain_dns
+from services.dns_service import verify_domain_dns, is_claimable_own_wildcard_subdomain
 
 router = APIRouter(prefix="/api/domains", tags=["Domains"])
 db = DynamoDBService()
@@ -455,33 +455,6 @@ class DomainCreatePayload(BaseModel):
     def _domain_name_must_be_hostname(cls, v: str) -> str:
         return _validate_hostname(v)
 
-# 2026-09-22 (self-service onboarding, overnight session): a subdomain of
-# our own already-DNS-controlled wildcard needs no CNAME/TXT dance at all --
-# *.waf-it-kku.online already resolves to the edge with zero setup
-# (confirmed live earlier this session). Reserved labels are the ones the
-# Caddyfile itself already aliases to the dashboard UI (block 1: waf-it-kku.
-# online, www., main., dash.) -- letting a user "claim" one of those as
-# their own origin's domain would collide with the real dashboard at that
-# hostname.
-OWN_WILDCARD_DOMAIN = os.getenv("WAF_OWN_WILDCARD_DOMAIN", "waf-it-kku.online").strip().lower()
-_RESERVED_OWN_SUBDOMAIN_LABELS = {"www", "main", "dash"}
-
-
-def _is_claimable_own_wildcard_subdomain(domain_name: str) -> bool:
-    d = domain_name.strip().lower()
-    suffix = "." + OWN_WILDCARD_DOMAIN
-    if not d.endswith(suffix) or d == OWN_WILDCARD_DOMAIN:
-        return False
-    label = d[: -len(suffix)]
-    # Only a single-label subdomain auto-verifies -- a deeper one (e.g.
-    # api.myshop.waf-it-kku.online) still goes through the normal flow,
-    # since arbitrary nesting depth was never verified against the wildcard
-    # cert / Caddyfile blocks the way the single-level case was.
-    if not label or "." in label:
-        return False
-    return label not in _RESERVED_OWN_SUBDOMAIN_LABELS
-
-
 @origins_domains_router.post("/{origin_id}/domains")
 async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayload, current_user: dict = Depends(get_current_user)):
     verify_origin_edit_access(origin_id, current_user)
@@ -502,7 +475,7 @@ async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayloa
     verification_token = f"waf-token-{uuid.uuid4().hex[:16]}"
     now = datetime.now().isoformat() + "Z"
 
-    auto_verified = _is_claimable_own_wildcard_subdomain(domain_name)
+    auto_verified = is_claimable_own_wildcard_subdomain(domain_name)
 
     domain_data = {
         "id": domain_id,
