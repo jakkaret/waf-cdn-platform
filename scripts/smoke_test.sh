@@ -139,6 +139,10 @@ check_not gate "T4: control-api /docs not public" 200 "$(code "http://$MAIN_IP:8
 # The dashboard backend is reached through Caddy (https://$DASH_HOST); its own
 # port is firewalled to the edges and the docker network only.
 check_not gate "T4: backend :8000 not public"     200 "$(code "http://$MAIN_IP:8000/api/health")"
+# A protected site's Host sent straight to Main (skipping the edge) is refused
+# by Main's Caddy; only the dashboard is served there.
+direct_site="$("$CURL" -s -m "$TIMEOUT" -o /dev/null -w '%{http_code}' -H "Host: $SITE_HOST" "http://$MAIN_IP/" 2>/dev/null)"
+check gate "T7: Main refuses a site Host sent directly"  403 "$direct_site"
 
 echo "${c_dim}-- No secrets in the public JS bundle ---------------------${c_off}"
 bundle_path="$("$CURL" -sk -m "$TIMEOUT" "https://$DASH_HOST/" 2>/dev/null \
