@@ -159,7 +159,7 @@ def test_admin_can_view_all_logs_with_no_domain_filter(
     assert resp.status_code == 200
     assert get_logs_spy.call_count == 1
     _, kwargs = get_logs_spy.call_args
-    assert kwargs.get("domain_filter") is None, "admin with ALL scope must see every domain, not be filtered"
+    assert kwargs.get("origin_clause") == "", "admin with ALL scope must see every domain, not be filtered"
 
 
 # -------------------------------------------------- explain_log_by_id injection guard
@@ -257,3 +257,27 @@ def test_user_without_domains_cannot_request_an_arbitrary_origin(client: TestCli
     assert resp.status_code == 200
     assert resp.json()["logs"] == []
     assert get_logs_spy.call_count == 0
+
+
+def test_owned_origin_is_filtered_on_the_host_column_not_url_keywords(
+    client: TestClient, register_user, auth_header, monkeypatch,
+):
+    """2026-10-03: the Traffic Logs page showed nothing for a real tenant
+    domain (get_logs matched url LIKE '%domain%', but url is only the path)
+    and a domain containing "juice" matched every tenant's Juice Shop rows."""
+    owner = register_user(email="logs-host@example.com", username="logs_host")
+    headers = auth_header(owner["access_token"])
+    monkeypatch.setattr(logs_module, "get_user_origins_and_domains",
+                        lambda uid: (["o1"], [{"id": "o1"}], ["juiceshop.example.com"]))
+    spy = MagicMock(return_value={"logs": [], "total": 0, "page": 1, "limit": 20, "total_pages": 1})
+    monkeypatch.setattr(logs_module.ch, "connected", True)
+    monkeypatch.setattr(logs_module.ch, "get_logs", spy)
+
+    resp = client.get("/api/logs?origin=juiceshop.example.com", headers=headers)
+    assert resp.status_code == 200
+    clause = spy.call_args.kwargs["origin_clause"]
+    assert "host = 'juiceshop.example.com'" in clause
+    # URL-keyword guessing survives only for legacy rows with no host value.
+    legacy = clause.split("host = 'juiceshop.example.com'", 1)[1]
+    assert "%juice%" not in clause.split("host = ''", 1)[0]
+    assert "host = '' AND" in legacy

@@ -8,7 +8,7 @@ from services.rbac import require_viewer_or_above
 from services.pii_masker import pii_masker, zk_hash
 from services.explainability_service import explainability_service
 from services.fetch_logs import get_recent_logs
-from services.tenant_service import _normalize_origin_key, build_tenant_origin_filter, get_user_origins_and_domains, is_origin_owned
+from services.tenant_service import build_tenant_origin_filter, get_user_origins_and_domains
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 ch = ClickHouseService()
@@ -28,32 +28,12 @@ class MaskPreviewRequest(BaseModel):
     text: str = Field(..., max_length=8192, description="Unstructured text to preview PII masking")
 
 
-def _resolve_tenant_domains(current_user: dict, requested_origin: Optional[str]) -> Optional[List[str]]:
-    """Determine the allowed domain filter list for the user based on tenant isolation"""
-    user_id = current_user.get("user_id")
-    role = current_user.get("role", "viewer")
-    is_admin = (role == "admin")
-
-    origin_ids, active_origins, user_domains = get_user_origins_and_domains(user_id)
-
-    # 1. Specific origin requested
-    if requested_origin and str(requested_origin).strip().upper() not in ["ALL", ""]:
-        req_clean = str(requested_origin).strip()
-        # Exact ownership only, and no domains means nothing is owned (the
-        # old check was a two-way substring match and was skipped entirely
-        # for a user without domains). See tenant_service.is_origin_owned.
-        if not is_admin and not is_origin_owned(req_clean, user_domains):
-            return ["__FORBIDDEN_TENANT_DOMAIN__"]
-        return [_normalize_origin_key(req_clean)]
-
-    # 2. 'ALL' selected
-    if is_admin:
-        return None  # Admin can view all global logs
-
-    if not user_domains and not active_origins:
-        return ["__NO_TENANT_ORIGINS__"]
-
-    return user_domains if user_domains else ["__NO_TENANT_ORIGINS__"]
+def _tenant_clause(current_user: dict, requested_origin: Optional[str]) -> str:
+    """ClickHouse WHERE fragment for what this user may see; "1=0" means
+    nothing (no origins, or an origin they do not own)."""
+    is_admin = current_user.get("role", "viewer") == "admin"
+    _ids, _origins, user_domains = get_user_origins_and_domains(current_user.get("user_id"))
+    return build_tenant_origin_filter(requested_origin, user_domains, is_admin)
 
 
 @router.get("")
@@ -70,8 +50,8 @@ async def get_logs(
     current_user: dict = Depends(require_viewer_or_above)
 ):
     """Retrieve structured audit logs from ClickHouse with strict tenant isolation"""
-    domain_targets = _resolve_tenant_domains(current_user, origin)
-    if domain_targets and ("__NO_TENANT_ORIGINS__" in domain_targets or "__FORBIDDEN_TENANT_DOMAIN__" in domain_targets):
+    clause = _tenant_clause(current_user, origin)
+    if clause == "1=0":
         return {"logs": [], "total": 0, "page": page, "limit": limit, "total_pages": 1}
 
     if ch.connected:
@@ -82,7 +62,7 @@ async def get_logs(
             status_filter=status,
             severity_filter=severity,
             method_filter=method,
-            domain_filter=domain_targets
+            origin_clause=clause,
         )
 
     # ClickHouse itself is unavailable. services/fetch_logs.py's
@@ -124,12 +104,12 @@ async def fetch_recent_logs(
     current_user: dict = Depends(require_viewer_or_above)
 ):
     """Fetch recent logs for Dashboard table view scoped to tenant origin"""
-    domain_targets = _resolve_tenant_domains(current_user, origin)
-    if domain_targets and ("__NO_TENANT_ORIGINS__" in domain_targets or "__FORBIDDEN_TENANT_DOMAIN__" in domain_targets):
+    clause = _tenant_clause(current_user, origin)
+    if clause == "1=0":
         return {"logs": []}
 
     if ch.connected:
-        res = ch.get_logs(limit=limit, page=1, domain_filter=domain_targets)
+        res = ch.get_logs(limit=limit, page=1, origin_clause=clause)
         # Real cross-tenant leak fixed 2026-09-22, reported live and
         # reproduced with a fresh account: a properly-scoped-but-EMPTY
         # ClickHouse result (this tenant genuinely has no matching traffic
