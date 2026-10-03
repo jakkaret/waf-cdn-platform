@@ -16,7 +16,7 @@ services:
       - cdn-net
 
   edge-sg:
-    image: owasp/modsecurity-crs:nginx
+    image: owasp/modsecurity-crs@sha256:095ec501cf646c0ad13c5bd8b407a9080c58a303d2b0ee62d5342ef21df59b59  # CRS 3.3.10 -- pinned: the bare 'nginx' tag now resolves to CRS v4
     container_name: cdn-edge-sg
     user: root
     ports:
@@ -61,7 +61,7 @@ services:
       waf-net:
 
   edge-jp:
-    image: owasp/modsecurity-crs:nginx
+    image: owasp/modsecurity-crs@sha256:095ec501cf646c0ad13c5bd8b407a9080c58a303d2b0ee62d5342ef21df59b59  # CRS 3.3.10 -- pinned: the bare 'nginx' tag now resolves to CRS v4
     container_name: cdn-edge-jp
     user: root
     ports:
@@ -106,7 +106,7 @@ services:
       waf-net:
 
   edge-th:
-    image: owasp/modsecurity-crs:nginx
+    image: owasp/modsecurity-crs@sha256:095ec501cf646c0ad13c5bd8b407a9080c58a303d2b0ee62d5342ef21df59b59  # CRS 3.3.10 -- pinned: the bare 'nginx' tag now resolves to CRS v4
     container_name: cdn-edge-th
     user: root
     ports:
