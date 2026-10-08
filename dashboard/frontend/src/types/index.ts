@@ -56,6 +56,9 @@ export interface WafAlert {
   timestamp: string
   rule_id?: string | null
   severity?: string | null
+  /** Telegram dispatch outcome; not yet provided by backend. */
+  dispatch_status?: string | null
+  dispatched?: boolean | null
 }
 
 export interface CdnNode {

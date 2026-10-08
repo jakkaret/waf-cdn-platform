@@ -22,6 +22,7 @@ import {
   Sparkles,
   RefreshCw,
 } from 'lucide-react'
+import { CRS_VERSION } from '../lib/crsVersion'
 
 export const Tunnels: React.FC = () => {
   // Empty by default: a tunnel token is scoped to one domain and the backend
@@ -69,11 +70,10 @@ export const Tunnels: React.FC = () => {
   })
 
   const tunnels = data?.tunnels || []
-  // ?? not || -- active_count is a real, legitimate 0 when every tunnel is
-  // offline (backend only increments it per-online-tunnel; a falsy-0
-  // fallback to tunnels.length claimed every tunnel was active while the
-  // table below correctly showed them all offline).
-  const activeCount = data?.active_count ?? 0
+  // Derive the live count from the same rows the table renders so the
+  // summary cards and the table heading can never disagree (the backend's
+  // active_count previously read 0 while the table listed 5 tunnels).
+  const activeCount = data === undefined ? null : tunnels.filter((t: any) => t.is_online).length
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text)
@@ -101,7 +101,7 @@ export const Tunnels: React.FC = () => {
         subtitle="Secure outbound reverse tunneling for private origins without public IPs or port forwarding"
         badge={
           <Badge color="success" dot>
-            {activeCount} TUNNELS ACTIVE
+            {activeCount ?? '—'} TUNNELS ACTIVE
           </Badge>
         }
       />
@@ -136,7 +136,7 @@ export const Tunnels: React.FC = () => {
               Active Tunnels
             </span>
             <div className="text-[20px] font-bold text-[var(--text-primary)] font-mono mt-1">
-              {activeCount} Connected
+              {activeCount ?? '—'} Connected
             </div>
             <p className="text-[11.5px] text-[var(--text-secondary)] mt-0.5">Real-time persistent FRP links</p>
           </div>
@@ -151,7 +151,7 @@ export const Tunnels: React.FC = () => {
               WAF Protection
             </span>
             <div className="text-[16px] font-bold text-emerald-400 font-mono mt-1">
-              ModSec CRS 4.0 Active
+              ModSec CRS {CRS_VERSION} Active
             </div>
             <p className="text-[11.5px] text-[var(--text-secondary)] mt-0.5">Zero IP exposure to internet</p>
           </div>
@@ -310,7 +310,7 @@ export const Tunnels: React.FC = () => {
           <div className="flex items-center gap-2">
             <Activity size={18} className="text-indigo-400" />
             <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono uppercase tracking-wider m-0">
-              Live Connected Tunnel Proxies ({tunnels.length})
+              Live Connected Tunnel Proxies ({activeCount ?? '—'}{activeCount !== null && tunnels.length !== activeCount ? ` of ${tunnels.length}` : ''})
             </h3>
           </div>
           <div className="flex items-center gap-2">

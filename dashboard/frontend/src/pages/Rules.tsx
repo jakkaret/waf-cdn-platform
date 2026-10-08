@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { WafRule } from '../types'
 import toast from 'react-hot-toast'
+import { CRS_VERSION } from '../lib/crsVersion'
 
 const PAGE_SIZE = 10
 
@@ -336,7 +337,7 @@ export const Rules: React.FC = () => {
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-[26px] font-bold font-mono text-emerald-600 dark:text-emerald-400 leading-none">
-                CRS v3.3.5
+                CRS v{CRS_VERSION}
               </span>
               <span className="text-[11px] font-mono text-[var(--text-muted)]">Active baseline</span>
             </div>

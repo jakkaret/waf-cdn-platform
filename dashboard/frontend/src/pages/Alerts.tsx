@@ -33,6 +33,9 @@ import {
 } from 'lucide-react'
 import { WafAlert } from '../types'
 import toast from 'react-hot-toast'
+import { getDispatchLabel } from '../lib/alertDispatch'
+
+const ALERTS_FETCH_LIMIT = 200
 
 // Helper function to format timestamp to Thailand Timezone (Asia/Bangkok • UTC+7)
 const formatThaiDateTime = (rawDate?: string | number | Date | null): string => {
@@ -125,7 +128,7 @@ export const Alerts: React.FC = () => {
   // Fetch Alerts History
   const { data: rawAlerts = [], isLoading: isAlertsLoading, isFetching: isAlertsFetching, refetch: refetchAlerts } = useQuery({
     queryKey: ['alerts'],
-    queryFn: () => alertsApi.getAlerts(200),
+    queryFn: () => alertsApi.getAlerts(ALERTS_FETCH_LIMIT),
     refetchInterval: 8000,
   })
 
@@ -218,14 +221,16 @@ export const Alerts: React.FC = () => {
 
   // Summary Metrics
   const alertMetrics = useMemo(() => {
+    // /alerts/recent returns no total (needs a backend field); the array is
+    // only the fetched page, so a full page is shown as a lower bound ("200+").
     const total = rawAlerts.length
+    const totalIsLowerBound = rawAlerts.length >= ALERTS_FETCH_LIMIT
     const critical = rawAlerts.filter(
       (a) => String(a.severity).toUpperCase() === 'CRITICAL' || String(a.status).includes('403')
     ).length
-    const dispatched = rawAlerts.filter(
-      (a) => String(a.status).toUpperCase().includes('DISPATCH') || String(a.status).toUpperCase().includes('SENT') || a.status === '200'
-    ).length
-    return { total, critical, dispatched }
+    const tracked = rawAlerts.some((a) => getDispatchLabel(a).label !== 'Not tracked')
+    const dispatched = tracked ? rawAlerts.filter((a) => getDispatchLabel(a).state === 'sent').length : null
+    return { total, totalIsLowerBound, critical, dispatched }
   }, [rawAlerts])
 
   // Filtered Alerts calculation
@@ -254,7 +259,7 @@ export const Alerts: React.FC = () => {
       // 3. Status filter
       if (statusFilter !== 'ALL') {
         const st = (alert.status || '').toUpperCase()
-        if (statusFilter === 'DISPATCHED' && !st.includes('DISPATCH') && !st.includes('SENT') && !st.includes('200')) {
+        if (statusFilter === 'DISPATCHED' && getDispatchLabel(alert).state !== 'sent') {
           return false
         }
         if (statusFilter === 'BLOCKED' && !st.includes('403') && !st.includes('BLOCK')) {
@@ -491,7 +496,7 @@ export const Alerts: React.FC = () => {
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-[24px] font-bold font-mono text-[var(--text-primary)] leading-none">
-                {alertMetrics.total}
+                {alertMetrics.total}{alertMetrics.totalIsLowerBound ? '+' : ''}
               </span>
               <span className="text-[11px] font-mono text-[var(--text-muted)]">Events recorded</span>
             </div>
@@ -525,7 +530,7 @@ export const Alerts: React.FC = () => {
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-[24px] font-bold font-mono text-sky-600 dark:text-sky-400 leading-none">
-                {alertMetrics.dispatched}
+                {alertMetrics.dispatched ?? '—'}
               </span>
               <span className="text-[11px] font-mono text-[var(--text-muted)]">Push alerts sent</span>
             </div>
@@ -813,10 +818,24 @@ export const Alerts: React.FC = () => {
                           "DISPATCHED" here for the same empty status
                           contradicted that count. */}
                       <td className="border-r border-[var(--bg-border-subtle)]">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] font-mono font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
-                          <Send size={10} />
-                          <span>{alert.status || 'UNKNOWN'}</span>
-                        </span>
+                        {(() => {
+                          const d = getDispatchLabel(alert)
+                          const tone =
+                            d.state === 'sent'
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                              : d.state === 'failed'
+                                ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20'
+                                : 'bg-[var(--bg-surface-elevated)] text-[var(--text-muted)] border-[var(--bg-border)]'
+                          return (
+                            <span
+                              title={alert.status ? `WAF response: HTTP ${alert.status}` : undefined}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] font-mono font-semibold border ${tone}`}
+                            >
+                              <Send size={10} />
+                              <span>{d.label}</span>
+                            </span>
+                          )
+                        })()}
                       </td>
 
                       {/* Inspect Button */}

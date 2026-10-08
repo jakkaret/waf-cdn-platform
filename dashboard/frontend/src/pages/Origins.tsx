@@ -59,7 +59,7 @@ export const Origins: React.FC = () => {
     }
   }
 
-  const { data: quotaData } = useQuery({
+  const { data: quotaData, isLoading: isQuotaLoading } = useQuery({
     queryKey: ['origins-quota'],
     queryFn: () => api.get('/origins/quota').then((r) => r.data),
     refetchInterval: 30000,
@@ -104,9 +104,12 @@ export const Origins: React.FC = () => {
 
   const quotaUsed: number =
     quotaData?.origins?.used ?? origins.filter((o: Origin) => o.status !== 'archived').length
-  const quotaMax: number = quotaData?.origins?.max ?? 5
+  // No fabricated default max: until /origins/quota answers (or if it
+  // fails) the quota is unknown, so render a loading state instead of "0 / 5".
+  const quotaReady = quotaData?.origins?.max != null
+  const quotaMax: number = quotaData?.origins?.max ?? 0
   const quotaFull: boolean = quotaData?.origins?.at_limit ?? false
-  const quotaPct = Math.min(100, Math.round((quotaUsed / quotaMax) * 100))
+  const quotaPct = quotaReady && quotaMax > 0 ? Math.min(100, Math.round((quotaUsed / quotaMax) * 100)) : 0
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -115,7 +118,7 @@ export const Origins: React.FC = () => {
         subtitle="Upstream web server pools protected behind the CloudWAF reverse proxy"
         badge={
           <Badge color="blue" dot>
-            {origins.filter((o: Origin) => o.status !== 'archived').length} POOLS CONFIGURED
+            {isLoading ? '—' : origins.filter((o: Origin) => o.status !== 'archived').length} POOLS CONFIGURED
           </Badge>
         }
         action={
@@ -146,7 +149,9 @@ export const Origins: React.FC = () => {
                   : 'bg-emerald-500/15 text-emerald-400'
               }`}
             >
-              {quotaUsed} / {quotaMax} slots used ({quotaPct}%)
+              {quotaReady
+                ? `${quotaUsed} / ${quotaMax} slots used (${quotaPct}%)`
+                : isQuotaLoading ? 'Loading quota...' : 'Quota unavailable'}
             </span>
           </div>
           <p className="text-[12px] text-[var(--text-muted)] m-0">
