@@ -46,6 +46,19 @@ if str(_REPO_ROOT) not in sys.path:
 from ml.feature_engineering import FEATURE_COLUMNS  # noqa: E402
 
 
+class _AllowAll:
+    def is_allowed(self, *a, **k):
+        return True, 1, 0
+
+
+@pytest.fixture(autouse=True)
+def _no_suggestion_quota(monkeypatch):
+    """These tests are about the prediction/attribution payload, not the F-113
+    per-user quota; fakeredis cannot run the quota's Lua script (no lupa), and
+    the quota now fails closed, so stub it out here."""
+    monkeypatch.setattr(ml_module, "_suggest_limiter", _AllowAll())
+
+
 # Real live values observed for `?id=1' UNION SELECT 1,2,3--` per the T9
 # contract quoted in this task's brief.
 ATTRIBUTION = [
