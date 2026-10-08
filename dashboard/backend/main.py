@@ -378,7 +378,8 @@ async def serve_react_app(full_path: str):
     if full_path:
         dist_root = FRONTEND_DIST.resolve()
         target_file = (dist_root / full_path).resolve()
-        if target_file.is_file() and target_file.is_relative_to(dist_root):
+        # Containment first: never stat() a path outside the dist dir (F-124).
+        if target_file.is_relative_to(dist_root) and target_file.is_file():
             return FileResponse(str(target_file))
 
     index_file = FRONTEND_DIST / "index.html"
