@@ -21,6 +21,7 @@ import {
   Settings as SettingsIcon,
   FlaskConical,
 } from 'lucide-react'
+import { CRS_VERSION } from '../../lib/crsVersion'
 
 interface SidebarProps {
   mobileOpen?: boolean
@@ -134,7 +135,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
               </div>
               <div className="text-[10.5px] text-[var(--text-muted)] tracking-tight flex items-center gap-1 mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>ModSec CRS 3.3.10</span>
+                <span>ModSec CRS {CRS_VERSION}</span>
               </div>
             </div>
           </div>

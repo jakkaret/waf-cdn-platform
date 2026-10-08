@@ -83,7 +83,7 @@ export const NotificationCenter: React.FC = () => {
                   Security Alerts
                 </h3>
                 <span className="text-[11px] text-[var(--text-muted)]">
-                  {unreadCount} unread / {notifications.length} total events
+                  {unreadCount} unread · showing latest {notifications.length}
                 </span>
               </div>
             </div>

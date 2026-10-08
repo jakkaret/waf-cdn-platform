@@ -44,6 +44,7 @@ import {
   WifiOff,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { CRS_VERSION } from '../lib/crsVersion'
 
 // Full English country name for an ISO alpha-2 code, from the browser's own
 // data (always complete and current) rather than a list we maintain. The API's
@@ -151,7 +152,10 @@ export const Dashboard: React.FC = () => {
   // Alerts.tsx/Logs.tsx. Previously read as raw browser-local time here,
   // so the same event plotted up to 7 hours off from where it shows on
   // those other pages.
-  const chartData = logs
+  // logs arrive newest-first; reverse to oldest-first so time runs
+  // left->right, then keep the most recent 20 buckets.
+  const chartData = [...logs]
+    .reverse()
     .reduce((acc, log) => {
       const rawDt = String(log.datetime)
       const isoDt = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(rawDt)
@@ -272,7 +276,19 @@ export const Dashboard: React.FC = () => {
       {(() => {
         const unreadCount = notificationFeed?.unread_count ?? 0
         const pendingRuleCount = pendingMlRules?.length ?? 0
-        const offlineNodes = [thNode, mainNode].filter((n) => n && !n.online)
+        // Until /system/status answers, selectNode() reports every node as
+        // UNKNOWN/offline -- that is "not loaded yet", not an outage, so it
+        // must not raise a false alarm on first paint.
+        const statusLoaded = systemStatus !== undefined
+        const offlineNodes = statusLoaded ? [thNode, mainNode].filter((n) => n && !n.online) : []
+        if (!statusLoaded && notificationFeed === undefined) {
+          return (
+            <div className="mb-5 p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)] flex items-center gap-2.5 text-[12.5px] font-mono text-[var(--text-muted)]">
+              <RefreshCw size={14} className="animate-spin shrink-0" />
+              <span>Checking system status...</span>
+            </div>
+          )
+        }
         const hasAttentionItems = unreadCount > 0 || pendingRuleCount > 0 || offlineNodes.length > 0
 
         if (!hasAttentionItems) {
@@ -415,7 +431,7 @@ export const Dashboard: React.FC = () => {
                 </span>
               </div>
               <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11px]">
-                <span className="text-[var(--text-muted)] font-mono">ModSecurity v3 + CRS 3.3.10</span>
+                <span className="text-[var(--text-muted)] font-mono">ModSecurity v3 + CRS {CRS_VERSION}</span>
               </div>
             </div>
           </div>
@@ -794,11 +810,13 @@ export const Dashboard: React.FC = () => {
                 written to eliminate on the individual node cards below,
                 just missed on this summary badge. */}
             <Badge
-              color={thNode.online && mainNode.online ? 'success' : 'danger'}
+              color={systemStatus === undefined ? 'gray' : thNode.online && mainNode.online ? 'success' : 'danger'}
               dot
-              pulse={thNode.online && mainNode.online}
+              pulse={systemStatus !== undefined && thNode.online && mainNode.online}
             >
-              {thNode.online && mainNode.online ? 'ALL SYSTEMS OPERATIONAL' : 'DEGRADED — CHECK NODE STATUS'}
+              {systemStatus === undefined
+                ? 'CHECKING STATUS...'
+                : thNode.online && mainNode.online ? 'ALL SYSTEMS OPERATIONAL' : 'DEGRADED — CHECK NODE STATUS'}
             </Badge>
           </div>
 
@@ -829,7 +847,7 @@ export const Dashboard: React.FC = () => {
                 </div>
                 <div>
                   <span className="text-[var(--text-dim)] block text-[10px] uppercase">WAF Engine</span>
-                  <span className="font-bold text-emerald-400">CRS 3.3.10 Active</span>
+                  <span className="font-bold text-emerald-400">CRS {CRS_VERSION} Active</span>
                 </div>
               </div>
             </div>

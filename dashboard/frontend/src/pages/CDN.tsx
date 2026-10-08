@@ -89,6 +89,21 @@ export const CDN: React.FC = () => {
   // regardless of what was actually measured.
   const latencyList = Array.isArray(latencyData) ? latencyData : []
   const thEdgeLatency = latencyList.find((r: any) => r.client_region?.includes('Thailand'))
+  // One source for node health: /cdn/nodes says whether the POP answers a
+  // health check; /cdn/latency is the measured round-trip probe. They used to
+  // be rendered independently ("Healthy 375 ms" next to "Unreachable"). A node
+  // is only "healthy" when its health check passes AND, where a probe exists
+  // for it, the probe also reached it.
+  const nodeHealth = (node: CdnNode): 'healthy' | 'degraded' | 'offline' => {
+    const up = node.online === true || node.status === 'healthy' || node.status === 'online'
+    if (!up) return 'offline'
+    const probe = node.region === 'TH' ? thEdgeLatency : undefined
+    if (probe && probe.online === false) return 'degraded'
+    return 'healthy'
+  }
+  const thNodeEntry = safeNodes.find((n) => n.region === 'TH')
+  const thHealth = thNodeEntry ? nodeHealth(thNodeEntry) : thEdgeLatency?.online ? 'healthy' : 'offline'
+  const operationalPops = safeNodes.filter((n) => nodeHealth(n) === 'healthy').length
   const mainNodeLatencyMs = safeNodes.find((n) => n.region === 'MAIN')?.latency_ms ?? null
 
   // Calculations
@@ -125,8 +140,8 @@ export const CDN: React.FC = () => {
         title="CDN Edge Mesh & Cache Telemetry"
         subtitle="Global Anycast edge nodes, caching efficiency, and response latency"
         badge={
-          <Badge color="success" dot pulse>
-            {`${safeNodes.filter((n) => n.online === true || n.status === 'healthy' || n.status === 'online').length} POPS OPERATIONAL`}
+          <Badge color={isLoadingNodes ? 'gray' : 'success'} dot pulse={!isLoadingNodes}>
+            {isLoadingNodes ? 'CHECKING POPS...' : `${operationalPops} POPS OPERATIONAL`}
           </Badge>
         }
       />
@@ -156,10 +171,10 @@ export const CDN: React.FC = () => {
         />
         <StatCard
           label="Blocked at Edge"
-          value={totalBlocked.toLocaleString()}
+          value="—"
           color="red"
           icon={<Zap size={16} />}
-          sub="Threats Stopped Pre-Origin"
+          sub="Not reported by /cdn/stats yet"
         />
       </div>
 
@@ -186,7 +201,7 @@ export const CDN: React.FC = () => {
               </div>
             ) : (
               safeNodes.map((node) => {
-                const isOnline = node.online === true || node.status === 'healthy' || node.status === 'online'
+                const health = nodeHealth(node)
                 const port = node.port || 443
                 const latency = node.latency_ms ? `${node.latency_ms} ms Latency` : 'Anycast Direct'
 
@@ -207,8 +222,8 @@ export const CDN: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge color={isOnline ? 'success' : 'danger'} dot>
-                        {isOnline ? 'Healthy (Online)' : 'Offline'}
+                      <Badge color={health === 'healthy' ? 'success' : health === 'degraded' ? 'warning' : 'danger'} dot>
+                        {health === 'healthy' ? 'Healthy (Online)' : health === 'degraded' ? 'Degraded (probe failed)' : 'Offline'}
                       </Badge>
                     </div>
                   </div>
@@ -252,7 +267,6 @@ export const CDN: React.FC = () => {
                   />
                   <Bar dataKey="request_count" name="Total Ingest" fill={isDark ? '#38bdf8' : '#0284c7'} radius={[4, 4, 0, 0]} />
                   <Bar dataKey="cache_hit" name="Cache Hits" fill="#10b981" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="blocked_count" name="WAF Blocked" fill="#ef4444" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -358,8 +372,8 @@ export const CDN: React.FC = () => {
             <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
               <div className="flex justify-between items-center mb-1">
                 <span className="font-mono font-bold text-[12px] text-[var(--text-primary)]">Thailand Edge Node</span>
-                <Badge color={thEdgeLatency?.online ? 'success' : 'gray'}>
-                  {thEdgeLatency?.online ? `${thEdgeLatency.edge_ms} ms measured` : 'Unreachable'}
+                <Badge color={isLoadingLatency ? 'gray' : thEdgeLatency?.online && thHealth === 'healthy' ? 'success' : 'gray'}>
+                  {isLoadingLatency ? 'Checking...' : thEdgeLatency?.online && thHealth === 'healthy' ? `${thEdgeLatency.edge_ms} ms measured` : thHealth === 'offline' ? 'Offline' : 'Unreachable'}
                 </Badge>
               </div>
               <div className="flex justify-between text-[11px] font-mono text-[var(--text-muted)] mt-1.5">
