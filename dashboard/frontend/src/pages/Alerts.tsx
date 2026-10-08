@@ -196,7 +196,9 @@ export const Alerts: React.FC = () => {
   const handleDatePreset = (preset: 'all' | 'today' | '7d' | '30d') => {
     setDatePreset(preset)
     const now = new Date()
-    const formatDate = (d: Date) => d.toISOString().split('T')[0]
+    // Calendar date in Asia/Bangkok, the zone the table displays (F-030):
+    // toISOString() gave the UTC date, i.e. yesterday before 07:00 local.
+    const formatDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' })
 
     if (preset === 'all') {
       setDateFrom('')
@@ -273,14 +275,14 @@ export const Alerts: React.FC = () => {
         const alertDate = new Date(alert.timestamp)
         if (isNaN(alertDate.getTime())) return true
 
+        // Day bounds in Asia/Bangkok (UTC+7), matching the displayed
+        // timestamps regardless of the browser's own time zone (F-030).
         if (dateFrom) {
-          const from = new Date(dateFrom)
-          from.setHours(0, 0, 0, 0)
+          const from = new Date(`${dateFrom}T00:00:00.000+07:00`)
           if (alertDate < from) return false
         }
         if (dateTo) {
-          const to = new Date(dateTo)
-          to.setHours(23, 59, 59, 999)
+          const to = new Date(`${dateTo}T23:59:59.999+07:00`)
           if (alertDate > to) return false
         }
       }
@@ -1031,7 +1033,7 @@ export const Alerts: React.FC = () => {
                   </span>
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
                     <Send size={10} />
-                    <span>Telegram Bot Active</span>
+                    <span>{status?.connected ? 'Telegram Bot Active' : 'Telegram not connected'}</span>
                   </span>
                 </div>
               </div>
