@@ -11,6 +11,7 @@ from services.rbac import require_viewer_or_above, get_current_user
 from services.tenant_service import get_user_origins_and_domains, invalidate_tenant_cache
 from services.dynamodb_service import DynamoDBService
 from services.auth_service import AuthService
+from services.dns_service import is_platform_subdomain
 import services.origin_service as origin_service
 
 logger = logging.getLogger(__name__)
@@ -235,6 +236,8 @@ def _assert_domain_claimable(domain_clean: str, current_user: dict) -> None:
         )
     user_id = current_user.get("user_id")
     is_admin = current_user.get("role") == "admin"
+    owned_by_me = False
+    owned_by_other = False
     for d in db.domains_table.scan().get("Items", []):
         if str(d.get("domain_name", "")).lower() != domain_clean:
             continue
@@ -242,11 +245,30 @@ def _assert_domain_claimable(domain_clean: str, current_user: dict) -> None:
         if not origin_id:
             continue
         origin_rec = db.get_origin_by_id(origin_id)
-        if origin_rec and origin_rec.get("admin_user_id") != user_id and not is_admin:
-            raise HTTPException(
-                status_code=403,
-                detail="This domain is already registered by another account.",
-            )
+        if not origin_rec:
+            continue
+        if origin_rec.get("admin_user_id") == user_id:
+            owned_by_me = True
+        else:
+            owned_by_other = True
+    if owned_by_other and not owned_by_me and not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="This domain is already registered by another account.",
+        )
+    # F-129 (2026-10-08): a host at or under the platform's own wildcard apex
+    # (*.waf-it-kku.online) resolves to the edge with zero tenant DNS setup, and
+    # core routes an unknown Host straight to the tunnel router. An UNREGISTERED
+    # one would therefore let any signed-up user mint a tunnel token for it, bind
+    # a proxy through frps, and serve attacker content/phishing under the
+    # platform's own domain. These subdomains are operator-provisioned (the demo
+    # origins are admin-created); a normal tenant onboards their OWN domain. So a
+    # non-admin may only claim a platform subdomain it already owns.
+    if (not is_admin) and (not owned_by_me) and is_platform_subdomain(domain_clean):
+        raise HTTPException(
+            status_code=403,
+            detail="Subdomains of the platform domain are provisioned by the operator; register your own domain instead.",
+        )
 
 
 @router.post("/token")
@@ -472,16 +494,21 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
 
     elif op == "NewProxy":
         custom_domains = content.get("custom_domains") or ([content.get("domain")] if content.get("domain") else [])
+        requested = [str(c).strip().lower() for c in custom_domains if str(c).strip()]
+        subdomain = str(content.get("subdomain") or "").strip().lower()
         proxy_name = content.get("proxy_name", "")
-        target_domain = str(custom_domains[0] if custom_domains else proxy_name).strip().lower()
+        target_domain = requested[0] if requested else str(proxy_name).strip().lower()
 
         if not target_domain:
             return {"reject": False, "unchange": True}
 
-        # Check Reserved Domains
-        if target_domain in RESERVED_SUBDOMAINS:
-            logger.warning(f"FRP Webhook: Blocked attempt to bind reserved domain '{target_domain}'")
-            return {"reject": True, "reject_reason": f"Domain '{target_domain}' is reserved by CloudWAF Core", "unchange": True}
+        # Check Reserved Domains -- across EVERY requested host, not just the first.
+        # F-129 residual: the webhook used to read only custom_domains[0], so a
+        # proxy could carry a reserved/other host at index >=1 and slip it past.
+        for host in (requested or [target_domain]):
+            if host in RESERVED_SUBDOMAINS:
+                logger.warning(f"FRP Webhook: Blocked attempt to bind reserved domain '{host}'")
+                return {"reject": True, "reject_reason": f"Domain '{host}' is reserved by CloudWAF Core", "unchange": True}
 
         # Domain ownership: mirror the identity check from Login. FRP's
         # plugin protocol nests it under content["user"] for this op
@@ -520,6 +547,19 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
 
         if kind == "jwt":
             token_domain = str(payload.get("domain") or "").strip().lower()
+            # F-129 residual: a tunnel token authorizes EXACTLY one domain, so a
+            # proxy may bind only that host. Reject if it requests ANY other custom
+            # domain, or uses subdomain routing -- otherwise a token for one's own
+            # domain (e.g. myshop.com) could smuggle a second vhost
+            # (customDomains = ["myshop.com", "evil.waf-it-kku.online"]) past a
+            # check that only looked at custom_domains[0].
+            extra = [h for h in requested if h != token_domain]
+            if extra or subdomain:
+                logger.warning(
+                    f"FRP Webhook: Blocked proxy '{proxy_name}' -- token scoped to "
+                    f"'{token_domain}' but proxy requested {requested} subdomain='{subdomain}'"
+                )
+                return {"reject": True, "reject_reason": "Proxy requests a domain the token is not scoped to", "unchange": True}
             if token_domain == target_domain:
                 owner_id = payload.get("user_id") or payload.get("sub")
                 if owner_id:
