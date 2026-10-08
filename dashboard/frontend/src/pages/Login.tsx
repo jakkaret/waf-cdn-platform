@@ -142,12 +142,12 @@ export const Login: React.FC = () => {
                 <form onSubmit={handleSubmit} className="space-y-4 text-[13px]">
                   <div>
                     <label htmlFor="login-identifier" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
-                      Email or username
+                      Email
                     </label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
                       <input
-                        type="text"
+                        type="email"
                         required
                         id="login-identifier"
                         autoComplete="username"
