@@ -116,9 +116,10 @@ async def _check_node(region: str, meta: dict, client: httpx.AsyncClient) -> Dic
         online = False
         rtt_ms = 0
 
-    if not online and region == "MAIN":
-        online = True
-        rtt_ms = 2
+    # No fallback to "online" for MAIN: its loopback /healthz answers 200 in
+    # normal operation, so the old forced-online branch only ever fired during
+    # a real core outage -- and hid it from the dashboard and the public status
+    # page (F-046/F-106).
 
     if region == "MAIN":
         # health_url is a loopback http:// call -- there is no TLS hop to
