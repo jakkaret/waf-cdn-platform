@@ -151,6 +151,9 @@ def is_suspicious_pattern(pattern_str: str) -> bool:
     return False
 
 
+VALIDATION_WATCHDOG_SEC = 1.0
+
+
 def validate_regex_safety(pattern_str: str) -> Tuple[bool, str]:
     """
     Validates a regex pattern against known ReDoS vulnerabilities.
@@ -184,8 +187,17 @@ def validate_regex_safety(pattern_str: str) -> Tuple[bool, str]:
         "/'\"" * 8 + "xyz",
     ]
 
+    # The watchdog timeout covers process start-up and scheduling, not just the
+    # match: 30 ms was routinely exceeded by fork + CPU queueing on the busy
+    # 2-vCPU Main host, so legitimate patterns were rejected as "catastrophic
+    # backtracking" at random (F-134). Real catastrophic backtracking on these
+    # 25-char inputs runs for seconds, so a 1 s watchdog still kills it; the
+    # precise gate is internal_elapsed (pure match time measured inside the
+    # worker) below. Validation only runs when a rule is saved.
     for test_str in bench_strings:
-        res, timed_out, internal_elapsed = run_isolated_regex(pattern_str, test_str, timeout_sec=0.03, mode="test")
+        res, timed_out, internal_elapsed = run_isolated_regex(
+            pattern_str, test_str, timeout_sec=VALIDATION_WATCHDOG_SEC, mode="test"
+        )
 
         if timed_out:
             return False, "Rejected: Regex execution timed out on benchmark string (Catastrophic Backtracking detected)"
