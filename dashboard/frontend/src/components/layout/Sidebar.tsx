@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import { api } from '../../api/axios'
 import {
   LayoutDashboard,
   Network,
@@ -31,7 +32,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
   const navigate = useNavigate()
   const asideRef = useRef<HTMLDivElement>(null)
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // The HttpOnly access_token cookie (local + Google sessions) can only be
+    // cleared by the backend, so call it before dropping client state.
+    try {
+      await api.post('/auth/logout')
+    } catch {
+      // Network/401 failure must not trap the user in a signed-in UI.
+    }
     logout()
     navigate('/login')
   }
