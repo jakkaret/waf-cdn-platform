@@ -16,7 +16,7 @@ class _CountingLimiter:
     def __init__(self):
         self.counts = {}
 
-    def is_allowed(self, key, limit, window_seconds):
+    def is_allowed(self, key, limit, window_seconds, fail_open=True):
         n = self.counts.get(key, 0)
         if n >= limit:
             return False, n, window_seconds
@@ -56,3 +56,28 @@ def test_endpoint_rejects_before_calling_the_ml_service(monkeypatch):
     codes = [client.post("/api/ml/predict-and-suggest", json=body).status_code for _ in range(4)]
     assert codes[:3] == [503, 503, 503]
     assert codes[3] == 429
+
+
+def test_quota_fails_closed_when_redis_errors(monkeypatch):
+    from services.rate_limiter import RedisRateLimiter
+
+    def boom(*a, **k):
+        raise ConnectionError("redis down")
+
+    limiter = RedisRateLimiter()
+    monkeypatch.setattr(limiter, "script_runner", boom)
+    monkeypatch.setattr(ml, "_suggest_limiter", limiter)
+    with pytest.raises(HTTPException) as e:
+        ml._check_suggest_quota("u-d")
+    assert e.value.status_code == 429
+
+
+def test_other_limiter_callers_still_fail_open(monkeypatch):
+    from services.rate_limiter import RedisRateLimiter
+
+    def boom(*a, **k):
+        raise ConnectionError("redis down")
+
+    limiter = RedisRateLimiter()
+    monkeypatch.setattr(limiter, "script_runner", boom)
+    assert limiter.is_allowed("1.2.3.4", 10, 60)[0] is True
