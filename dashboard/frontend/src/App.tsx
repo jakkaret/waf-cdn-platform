@@ -66,6 +66,13 @@ const ProtectedRoute = ({
   return <AppLayout>{children}</AppLayout>
 }
 
+// F-103: an already signed-in user opening /login or /register is sent home.
+const PublicOnlyRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated } = useAuthStore()
+  if (isAuthenticated) return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
 export const App: React.FC = () => {
   const { theme } = useThemeStore()
 
@@ -86,8 +93,8 @@ export const App: React.FC = () => {
       <BrowserRouter>
         <Routes>
           {/* Public Routes */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+          <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
+          <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
           <Route path="/oauth-success" element={<OAuthSuccess />} />
           <Route path="/status" element={<StatusPage />} />
 
