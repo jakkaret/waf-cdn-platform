@@ -242,51 +242,15 @@ async def generate_mitigation_candidate_rule(
 
 @router.post("/sync")
 async def sync_rules_to_edges(request: Request, current_user: dict = Depends(require_admin)):
-    """
-    Trigger sync of WAF rules from this API to all CDN edge nodes.
-    Runs sync_waf_rules.py as a subprocess, passing the caller's JWT token.
-    Returns per-node sync results.
-    """
-    import subprocess
-    import sys
-    import json
-    from pathlib import Path
-
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.removeprefix("Bearer ").strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="Authorization token required")
-
-    script = Path(__file__).parent.parent.parent.parent / "scripts" / "sync_waf_rules.py"
-    if not script.exists():
-        raise HTTPException(status_code=500, detail=f"Sync script not found: {script}")
-
-    try:
-        result = subprocess.run(
-            [sys.executable, str(script), "--token", token],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        output_lines = result.stdout.strip().splitlines()
-
-        log_path = Path(__file__).parent.parent.parent.parent / "modsecurity" / "custom-rules" / "sync.log"
-        last_result = None
-        if log_path.exists():
-            lines = log_path.read_text().strip().splitlines()
-            if lines:
-                last_result = json.loads(lines[-1])
-
-        return {
-            "status": "success" if result.returncode == 0 else "partial_failure",
-            "exit_code": result.returncode,
-            "output": output_lines,
-            "node_results": last_result.get("results", []) if last_result else [],
-        }
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Sync script timed out (>60s)")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Sync failed: {exc}")
+    """Disabled (F-034). This ran scripts/sync_waf_rules.py, which wrote a
+    dashboard-sync.conf duplicating every custom rule id into the shared rules
+    dir; after one click every `nginx -t` failed on Main and, via the bundle,
+    on every edge. Edges already pull the validated rule bundle on their own
+    every few seconds, so there is nothing to trigger manually."""
+    raise HTTPException(
+        status_code=410,
+        detail="Manual edge sync is disabled: edges pull the rule bundle automatically every few seconds.",
+    )
 
 
 # ==========================================
