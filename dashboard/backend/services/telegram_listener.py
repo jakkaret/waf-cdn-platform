@@ -1,10 +1,12 @@
 import asyncio
+import html
 import logging
 import os
 import secrets
 import time
 import httpx
 from datetime import datetime
+from typing import Dict, Tuple
 from dotenv import load_dotenv
 from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
 from services.gemini_service import gemini_service
@@ -61,6 +63,49 @@ def _alert_recipients(users: list, origin: dict) -> list:
         allowed |= set(origin.get("editor_user_ids") or [])
         allowed |= set(origin.get("viewer_user_ids") or [])
     return [u for u in users if u.get("role") == "admin" or u.get("user_id") in allowed]
+
+
+# F-039: every blocked request produced its own Telegram push to every
+# recipient, so one scanner run meant hundreds of messages (and Telegram's own
+# rate limit dropping them). Alerts are still all stored; only repeat pushes
+# for the same (origin, client IP, rule) inside the window are suppressed.
+TELEGRAM_COOLDOWN_SECONDS = 300
+_last_push: Dict[Tuple[str, str, str], float] = {}
+
+
+def _telegram_cooldown_ok(key: Tuple[str, str, str], now: float) -> bool:
+    last = _last_push.get(key)
+    if last is not None and now - last < TELEGRAM_COOLDOWN_SECONDS:
+        return False
+    _last_push[key] = now
+    if len(_last_push) > 10000:  # bound memory: drop entries outside the window
+        for k, t in list(_last_push.items()):
+            if now - t >= TELEGRAM_COOLDOWN_SECONDS:
+                _last_push.pop(k, None)
+    return True
+
+
+def _format_alert_message(status_code, edge_node, ip, url, rule_id, severity,
+                          attack_type, ai_summary, time_local) -> str:
+    """Telegram parse_mode=HTML message. Every value is escaped: the URL is
+    attacker-controlled, and an unescaped `<script>` (a routine XSS probe)
+    made Telegram reject the message, so exactly those alerts were silently
+    dropped -- or a crafted `<a href>` could put a link into an admin's
+    alert (F-039)."""
+    e = lambda v: html.escape(str(v), quote=False)  # noqa: E731
+    return (
+        f"🚨 <b>WAF SECURITY ALERT ({e(status_code)})</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🌐 <b>Node:</b> <code>{e(edge_node)}</code>\n"
+        f"📍 <b>Client IP:</b> <code>{e(ip)}</code>\n"
+        f"🎯 <b>URL:</b> <code>{e(url[:500])}</code>\n"
+        f"🛡️ <b>Rule ID:</b> <code>{e(rule_id)}</code> ({e(severity)})\n"
+        f"⚠️ <b>Attack Type:</b> {e(attack_type)}\n\n"
+        f"🤖 <b>[บทวิเคราะห์โดย AI]:</b>\n"
+        f"<i>{e(ai_summary)}</i>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"⏰ <b>Time:</b> <code>{e(time_local)}</code>"
+    )
 
 
 def invalidate_user_cache():
@@ -178,20 +223,12 @@ async def dispatch_telegram_alert(data: dict):
             logger.info("No Telegram recipients allowed to see alert for origin %s", origin_id)
             return
 
-        # Format beautiful Telegram HTML Message with AI Explanation
-        msg = (
-            f"🚨 <b>WAF SECURITY ALERT ({status_code})</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"🌐 <b>Node:</b> <code>{edge_node}</code>\n"
-            f"📍 <b>Client IP:</b> <code>{ip}</code>\n"
-            f"🎯 <b>URL:</b> <code>{url}</code>\n"
-            f"🛡️ <b>Rule ID:</b> <code>{rule_id}</code> ({severity})\n"
-            f"⚠️ <b>Attack Type:</b> {attack_type}\n\n"
-            f"🤖 <b>[บทวิเคราะห์โดย AI]:</b>\n"
-            f"<i>{ai_summary}</i>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"⏰ <b>Time:</b> <code>{time_local}</code>"
-        )
+        if not _telegram_cooldown_ok((origin_id, ip, rule_id), time.time()):
+            logger.info("Telegram push suppressed (cooldown) for %s %s %s", origin_id, ip, rule_id)
+            return
+
+        msg = _format_alert_message(status_code, edge_node, ip, url, rule_id, severity,
+                                    attack_type, ai_summary, time_local)
 
         async with httpx.AsyncClient(timeout=6.0) as client:
             for user in users:
