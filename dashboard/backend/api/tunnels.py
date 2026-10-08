@@ -6,6 +6,7 @@ import logging
 from datetime import timedelta
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi.responses import PlainTextResponse
 from typing import List, Dict, Any, Optional, Tuple
 from services.rbac import require_viewer_or_above, get_current_user
 from services.tenant_service import get_user_origins_and_domains, invalidate_tenant_cache
@@ -70,7 +71,15 @@ if [[ -z "$TOKEN" || -z "$DOMAIN" ]]; then
   exit 1
 fi
 
-LEGACY_TOKEN="__CLOUDWAF_LEGACY_TOKEN__"
+# The frps connection secret is never embedded in this public script (F-023):
+# it is fetched with the caller's own domain-scoped tunnel token, so only a
+# holder of a valid, unexpired tunnel token can obtain it.
+API_BASE="${WAF_API_BASE:-https://waf-it-kku.online}"
+LEGACY_TOKEN="$(curl -fsSL -H "Authorization: Bearer $TOKEN" "$API_BASE/api/tunnels/agent-bootstrap")" || LEGACY_TOKEN=""
+if [[ -z "$LEGACY_TOKEN" ]]; then
+  echo "Could not fetch agent credentials: is the tunnel token valid and unexpired? Regenerate it from the dashboard." >&2
+  exit 1
+fi
 PROXY_NAME="$(echo "$DOMAIN" | tr '.' '-')"
 
 mkdir -p /etc/waf-agent
@@ -132,11 +141,28 @@ echo "==> waf-agent installed and started. Check status: systemctl status waf-ag
 
 
 def render_install_agent_script() -> str:
-    """Fills the __CLOUDWAF_LEGACY_TOKEN__ placeholder from the one canonical
-    LEGACY_STATIC_TOKEN (env-sourced, declared above) at request time, so the
-    real value exists in exactly one place in source rather than being
-    duplicated as a second hardcoded literal inside the script template."""
-    return INSTALL_AGENT_SCRIPT.replace("__CLOUDWAF_LEGACY_TOKEN__", LEGACY_STATIC_TOKEN)
+    """The public /install-agent.sh body. It must contain no secret: it used to
+    substitute the live frps connection token into this unauthenticated
+    response, handing it to anyone who fetched the URL (F-023). The script now
+    pulls that token from /api/tunnels/agent-bootstrap using the caller's own
+    tunnel token, so it is returned verbatim."""
+    return INSTALL_AGENT_SCRIPT
+
+
+@router.get("/agent-bootstrap", include_in_schema=False)
+async def agent_bootstrap(request: Request):
+    """Hand the frps connection secret only to a holder of a valid, unexpired
+    domain-scoped tunnel token (F-023). Tunnel tokens are minted solely for a
+    domain's owner (see _assert_domain_claimable), so this is the same trust
+    boundary the FRP gatekeeper already enforces per proxy."""
+    header = request.headers.get("authorization", "")
+    raw = header[7:].strip() if header.lower().startswith("bearer ") else ""
+    payload = auth_service.decode_token(raw) if raw else None
+    if not payload or payload.get("type") != "tunnel_token" or not payload.get("domain"):
+        raise HTTPException(status_code=401, detail="A valid tunnel token is required")
+    if not LEGACY_STATIC_TOKEN:
+        raise HTTPException(status_code=503, detail="Tunnel connection secret is not configured on the server")
+    return PlainTextResponse(LEGACY_STATIC_TOKEN)
 
 # Fix 2026-09-07: connections using the shared legacy token pass Login (which
 # reads content["privilege_key"] at the top level) but NewProxy events for
