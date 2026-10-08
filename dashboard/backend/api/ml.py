@@ -15,6 +15,29 @@ INTERNAL_RELAY_HEADER = "X-Internal-ML-Relay"
 INTERNAL_RELAY_VALUE = "nginx-shadow-v1"
 INTERNAL_RELAY_NETWORK = ipaddress.ip_network("172.16.0.0/12")
 
+# F-113: any viewer could call predict-and-suggest without limit, each call
+# writing a row into the admin approval queue and spending a Gemini
+# explanation call. Cap it per user (not per IP: behind Caddy every caller
+# shares one remote address).
+SUGGEST_LIMIT_PER_HOUR = 20
+_suggest_limiter = None
+
+
+def _check_suggest_quota(user_id: str) -> None:
+    global _suggest_limiter
+    if _suggest_limiter is None:
+        from services.rate_limiter import RedisRateLimiter
+        _suggest_limiter = RedisRateLimiter()
+    allowed, _, retry_after = _suggest_limiter.is_allowed(
+        f"ml-suggest:{user_id}", SUGGEST_LIMIT_PER_HOUR, 3600
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rule-suggestion limit reached ({SUGGEST_LIMIT_PER_HOUR}/hour). Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
 class PredictRequest(BaseModel):
     url: str
     method: str = "GET"
@@ -143,6 +166,7 @@ async def predict_anomaly(req: PredictRequest, current_user: dict = Depends(requ
 
 @router.post("/predict-and-suggest")
 async def predict_and_suggest(req: PredictRequest, current_user: dict = Depends(require_viewer_or_above)):
+    _check_suggest_quota(str(current_user.get("user_id") or current_user.get("sub") or "unknown"))
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
