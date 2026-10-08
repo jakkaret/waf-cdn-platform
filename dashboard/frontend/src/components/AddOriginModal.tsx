@@ -33,7 +33,7 @@ export const AddOriginModal: React.FC<AddOriginModalProps> = ({ open, onClose, o
       trimmedTarget !== 'localhost'
     ) {
       newErrors.ip =
-        'Enter a valid IPv4 address or Domain Hostname (e.g. 192.168.1.100 or tunnel.trycloudflare.com)'
+        'Enter a valid IPv4 address or Domain Hostname (e.g. 203.0.113.10 or origin.example.com)'
     }
 
     if (port < 1 || port > 65535) newErrors.port = 'Port must be between 1 and 65535'
@@ -87,7 +87,7 @@ export const AddOriginModal: React.FC<AddOriginModalProps> = ({ open, onClose, o
             value={ip}
             onChange={(e) => setIp(e.target.value)}
             className="w-full dash-input font-mono"
-            placeholder="e.g. 192.168.1.100 or tunnel.trycloudflare.com"
+            placeholder="e.g. 203.0.113.10 or origin.example.com"
           />
           {errors.ip && <p className="mt-1 text-[11px] font-mono text-red-500">{errors.ip}</p>}
         </div>
