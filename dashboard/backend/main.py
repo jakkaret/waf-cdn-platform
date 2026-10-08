@@ -100,6 +100,15 @@ def _dynamodb_table_status():
     return DynamoDBService().domains_table.table_status
 
 
+# Dedicated pool for the status probes. They are I/O-bound (socket connects,
+# one DescribeTable), so sizing them by CPU count is wrong: asyncio's default
+# executor is min(32, cpu+4) = 6 threads on the 2-vCPU Main host, so a few
+# concurrent /api/system/status calls (7 probes each) queued behind each other
+# AND starved every other endpoint that uses asyncio.to_thread (F-001 follow-up).
+from concurrent.futures import ThreadPoolExecutor
+_PROBE_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="status-probe")
+
+
 # System status (protected) -- see frontend/src/api/system.ts for the contract
 @app.get("/api/system/status")
 async def system_status(current_user: dict = Depends(require_viewer_or_above)):
@@ -117,8 +126,9 @@ async def system_status(current_user: dict = Depends(require_viewer_or_above)):
     }
     # Probe all ports concurrently, each in a worker thread, so the event
     # loop is never blocked and total time ~= one probe, not N.
+    loop = asyncio.get_running_loop()
     port_results = await asyncio.gather(
-        *(asyncio.to_thread(_port_open, port) for port, _ in SERVICES.values())
+        *(loop.run_in_executor(_PROBE_POOL, _port_open, port) for port, _ in SERVICES.values())
     )
     services = {
         name: {
@@ -132,7 +142,7 @@ async def system_status(current_user: dict = Depends(require_viewer_or_above)):
     db_status, db_detail = "offline", "unreachable"
     try:
         # Reading table_status makes a DescribeTable call -- the reachability probe.
-        await asyncio.to_thread(_dynamodb_table_status)
+        await loop.run_in_executor(_PROBE_POOL, _dynamodb_table_status)
         db_status, db_detail = "online", "DynamoDB reachable"
     except Exception as exc:
         db_detail = f"DynamoDB error: {exc}"[:200]
