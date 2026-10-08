@@ -10,6 +10,7 @@ export interface SystemSettings {
   telegram_notifications: boolean
   telegram_bot_token?: string
   telegram_bot_token_masked?: string
+  telegram_bot_token_set?: boolean
   telegram_chat_id?: string
   edge_sync_interval_seconds: number
 }

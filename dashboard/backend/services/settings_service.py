@@ -44,6 +44,28 @@ DEFAULT_SETTINGS = {
 }
 
 
+_SECRET_KEY_MARKERS = ("token", "password", "secret", "api_key", "apikey", "private_key")
+
+
+def mask_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """Client-safe copy of a settings dict: every secret-looking key is removed
+    and replaced by <key>_set (bool) and, for the Telegram token, a
+    <key>_masked hint (first/last 4 chars)."""
+    out: Dict[str, Any] = {}
+    for k, v in settings.items():
+        if k.endswith("_masked") or k.endswith("_set"):
+            continue
+        if any(m in k.lower() for m in _SECRET_KEY_MARKERS):
+            out[f"{k}_set"] = bool(v)
+            if k == "telegram_bot_token":
+                out["telegram_bot_token_masked"] = (
+                    f"{v[:4]}...{v[-4:]}" if isinstance(v, str) and len(v) > 8 else ""
+                )
+            continue
+        out[k] = v
+    return out
+
+
 OVERRIDE_FILE = Path(__file__).resolve().parent.parent.parent.parent / "modsecurity" / "custom-rules" / "00-modsecurity-override.conf"
 
 
@@ -112,14 +134,10 @@ class SettingsService:
             raw_data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
             # Filter only valid keys in DEFAULT_SETTINGS
             data = {k: raw_data.get(k, v) for k, v in DEFAULT_SETTINGS.items()}
-            # Mask secret tokens before returning to UI
-            masked = dict(data)
-            token = masked.get("telegram_bot_token", "")
-            if token and len(token) > 8:
-                masked["telegram_bot_token_masked"] = f"{token[:4]}...{token[-4:]}"
-            else:
-                masked["telegram_bot_token_masked"] = ""
-            return masked
+            # Raw values: internal callers (Telegram sender, ssl monitor,
+            # update_settings) need the real token. HTTP responses must go
+            # through mask_settings() -- never return this dict to a client.
+            return data
         except Exception as e:
             logger.error(f"Error reading settings: {e}")
             return DEFAULT_SETTINGS
