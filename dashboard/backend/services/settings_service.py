@@ -50,7 +50,7 @@ _SECRET_KEY_MARKERS = ("token", "password", "secret", "api_key", "apikey", "priv
 def mask_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     """Client-safe copy of a settings dict: every secret-looking key is removed
     and replaced by <key>_set (bool) and, for the Telegram token, a
-    <key>_masked hint (first/last 4 chars)."""
+    <key>_masked hint showing only the last 4 chars (F-123)."""
     out: Dict[str, Any] = {}
     for k, v in settings.items():
         if k.endswith("_masked") or k.endswith("_set"):
@@ -59,7 +59,7 @@ def mask_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
             out[f"{k}_set"] = bool(v)
             if k == "telegram_bot_token":
                 out["telegram_bot_token_masked"] = (
-                    f"{v[:4]}...{v[-4:]}" if isinstance(v, str) and len(v) > 8 else ""
+                    f"...{v[-4:]}" if isinstance(v, str) and len(v) > 8 else ""
                 )
             continue
         out[k] = v

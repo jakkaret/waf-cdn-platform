@@ -48,7 +48,8 @@ def test_viewer_get_settings_never_contains_raw_token(client, register_user, aut
     s = r.json()["settings"]
     assert "telegram_bot_token" not in s
     assert s["telegram_bot_token_set"] is True
-    assert s["telegram_bot_token_masked"] == f"{RAW[:4]}...{RAW[-4:]}"
+    assert s["telegram_bot_token_masked"] == f"...{RAW[-4:]}"
+    assert RAW[:4] not in s["telegram_bot_token_masked"]
     assert s["waf_mode"] == "blocking"
 
 
