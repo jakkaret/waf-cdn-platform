@@ -28,8 +28,10 @@ def _check_suggest_quota(user_id: str) -> None:
     if _suggest_limiter is None:
         from services.rate_limiter import RedisRateLimiter
         _suggest_limiter = RedisRateLimiter()
+    # Fail closed: if the quota cannot be checked (Redis down), refuse rather
+    # than reopen the flood this cap exists to stop.
     allowed, _, retry_after = _suggest_limiter.is_allowed(
-        f"ml-suggest:{user_id}", SUGGEST_LIMIT_PER_HOUR, 3600
+        f"ml-suggest:{user_id}", SUGGEST_LIMIT_PER_HOUR, 3600, fail_open=False
     )
     if not allowed:
         raise HTTPException(

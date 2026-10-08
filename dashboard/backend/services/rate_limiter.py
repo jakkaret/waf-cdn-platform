@@ -48,7 +48,7 @@ class RedisRateLimiter:
         """
         self.script_runner = self.redis_client.register_script(self.lua_script)
 
-    def is_allowed(self, ip: str, limit: int, window_seconds: int) -> tuple[bool, int, int]:
+    def is_allowed(self, ip: str, limit: int, window_seconds: int, fail_open: bool = True) -> tuple[bool, int, int]:
         """
         Check if client IP is allowed within rate limit window.
         Returns:
@@ -85,5 +85,9 @@ class RedisRateLimiter:
             
         except Exception as e:
             print(f"[Redis Rate Limiter] Error checking limit: {e}")
-            # Fail-open: allow request if Redis fails
-            return True, 0, 0
+            # Default fail-open (allow) keeps traffic flowing if Redis fails;
+            # callers guarding abuse-prone, non-critical actions pass
+            # fail_open=False to deny instead.
+            if fail_open:
+                return True, 0, 0
+            return False, 0, 60
