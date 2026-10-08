@@ -6,7 +6,7 @@ import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import toast from 'react-hot-toast'
-import { RefreshCw, Check, X, ShieldAlert, Sparkles } from 'lucide-react'
+import { RefreshCw, Check, X, ShieldAlert, Sparkles, RotateCcw } from 'lucide-react'
 
 export const ThresholdProposals: React.FC = () => {
   const { user } = useAuthStore()
@@ -20,11 +20,11 @@ export const ThresholdProposals: React.FC = () => {
   })
 
   const generateMutation = useMutation({
-    mutationFn: () => thresholdProposalsApi.generateProposals(),
+    mutationFn: () => thresholdProposalsApi.generateProposal(),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['threshold-proposals'] })
-      if (!data.proposals) {
-         toast('No safe proposal generated (metrics look fine)', { icon: 'ℹ️' })
+      if (!data.proposal) {
+         toast(data.message || 'No safe proposal generated (metrics look fine)', { icon: 'ℹ️' })
       } else {
          toast.success('Generated new tuning proposal')
       }
@@ -49,6 +49,15 @@ export const ThresholdProposals: React.FC = () => {
       toast.success('Proposal Rejected')
     },
     onError: (err: any) => toast.error(err?.response?.data?.detail || 'Rejection failed'),
+  })
+
+  const rollbackMutation = useMutation({
+    mutationFn: (id: string) => thresholdProposalsApi.rollbackProposal(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['threshold-proposals'] })
+      toast.success('Proposal rolled back. Previous threshold restored.')
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Rollback failed'),
   })
 
   const handleGenerate = () => {
@@ -86,26 +95,31 @@ export const ThresholdProposals: React.FC = () => {
                </div>
             ) : (
                proposals.map(p => (
-                 <div key={p.id} className="p-4 rounded-xl border border-[var(--bg-border)] bg-[var(--bg-surface)] flex justify-between items-center">
+                 <div key={p.proposal_id} className="p-4 rounded-xl border border-[var(--bg-border)] bg-[var(--bg-surface)] flex justify-between items-center">
                    <div>
                      <div className="flex items-center gap-2 mb-1">
-                       <span className="font-mono text-[11px] text-orange-500">{p.id}</span>
-                       <Badge color={p.status === 'PENDING' ? 'warning' : p.status === 'APPROVED' ? 'success' : 'danger'}>
+                       <span className="font-mono text-[11px] text-orange-500">{p.proposal_id}</span>
+                       <Badge color={p.status === 'pending' ? 'warning' : p.status === 'approved' ? 'success' : p.status === 'rolled_back' ? 'gray' : 'danger'}>
                          {p.status}
                        </Badge>
                      </div>
                      <p className="text-[13px] font-bold m-0">Threshold: {p.current_threshold} &rarr; <span className="text-emerald-500">{p.proposed_threshold}</span></p>
                      <p className="text-[12px] text-[var(--text-muted)] mt-1">{p.reason}</p>
                    </div>
-                   {p.status === 'PENDING' && isAdmin && (
+                   {p.status === 'pending' && isAdmin && (
                      <div className="flex gap-2">
-                       <Button color="ghost" onClick={() => rejectMutation.mutate(p.id)} isLoading={rejectMutation.isPending}>
+                       <Button color="ghost" onClick={() => rejectMutation.mutate(p.proposal_id)} isLoading={rejectMutation.isPending}>
                          <X size={14} /> Reject
                        </Button>
-                       <Button color="brand" onClick={() => approveMutation.mutate(p.id)} isLoading={approveMutation.isPending}>
+                       <Button color="brand" onClick={() => approveMutation.mutate(p.proposal_id)} isLoading={approveMutation.isPending}>
                          <Check size={14} /> Approve
                        </Button>
                      </div>
+                   )}
+                   {p.status === 'approved' && isAdmin && (
+                     <Button color="ghost" onClick={() => rollbackMutation.mutate(p.proposal_id)} isLoading={rollbackMutation.isPending}>
+                       <RotateCcw size={14} /> Rollback
+                     </Button>
                    )}
                  </div>
                ))
