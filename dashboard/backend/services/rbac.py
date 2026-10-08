@@ -35,6 +35,16 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Tunnel tokens (type=tunnel_token, ~365 days) are bearer credentials for
+    # the FRP gatekeeper only (api/tunnels.py decodes them directly). They must
+    # never act as a dashboard session. (F-021)
+    if payload.get("type") == "tunnel_token":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
