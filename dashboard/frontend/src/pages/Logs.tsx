@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { WafLog } from '../types'
 import toast from 'react-hot-toast'
+import { useDebouncedValue } from '../lib/useDebouncedValue'
 
 // Helper function to format timestamp to Thailand Timezone (Asia/Bangkok • UTC+7)
 export const formatThaiDateTime = (rawDate?: string | number | Date | null): string => {
@@ -71,6 +72,7 @@ export const Logs: React.FC = () => {
   const [page, setPage] = useState(1)
   const [pageInput, setPageInput] = useState('')
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebouncedValue(search)
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [methodFilter, setMethodFilter] = useState('ALL')
   const [severityFilter, setSeverityFilter] = useState('ALL')
@@ -92,12 +94,12 @@ export const Logs: React.FC = () => {
   })
 
   const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['logs-paginated', page, search, statusFilter, severityFilter, methodFilter, selectedOrigin],
+    queryKey: ['logs-paginated', page, debouncedSearch, statusFilter, severityFilter, methodFilter, selectedOrigin],
     queryFn: () =>
       logsApi.getLogsPaginated({
         page,
         limit,
-        search,
+        search: debouncedSearch,
         status_filter: statusFilter,
         severity_filter: severityFilter,
         method_filter: methodFilter,

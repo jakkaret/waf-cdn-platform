@@ -23,6 +23,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { CRS_VERSION } from '../lib/crsVersion'
+import { useDebouncedValue } from '../lib/useDebouncedValue'
 
 export const Tunnels: React.FC = () => {
   // Empty by default: a tunnel token is scoped to one domain and the backend
@@ -57,16 +58,22 @@ export const Tunnels: React.FC = () => {
   const hubStatus = combineTunnelHubStatus(data !== undefined && !frpErrored, cloudwaf)
   const cloudwafAgents = cloudwaf?.agents || []
 
+  // Each config-generator call mints a tunnel token and scans the domains
+  // table, so wait for typing to pause instead of calling per keystroke (F-104).
+  const debouncedDomain = useDebouncedValue(domain)
+  const debouncedPort = useDebouncedValue(localPort)
+  const debouncedIp = useDebouncedValue(localIp)
+
   // Fetch generated commands
   const { data: configData } = useQuery({
-    queryKey: ['tunnel-config', domain, localPort, localIp, activeTab],
+    queryKey: ['tunnel-config', debouncedDomain, debouncedPort, debouncedIp, activeTab],
     queryFn: () =>
       api
         .get('/tunnels/config-generator', {
-          params: { domain, port: localPort, local_ip: localIp, platform: activeTab },
+          params: { domain: debouncedDomain, port: debouncedPort, local_ip: debouncedIp, platform: activeTab },
         })
         .then((r) => r.data),
-    enabled: domain.trim().length > 0,
+    enabled: debouncedDomain.trim().length > 0,
   })
 
   const tunnels = data?.tunnels || []
