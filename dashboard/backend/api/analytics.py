@@ -165,7 +165,14 @@ async def get_analytics_summary(
         ] if country_rows else []
 
         # 8. AI Threat Summary
-        scope_title = f"Origin: {origin}" if (origin and origin.upper() != "ALL") else "Origin ทั้งหมดของคุณ"
+        if origin and origin.upper() != "ALL":
+            scope_title = f"Origin: {origin}"
+        elif role == "admin":
+            # Admin + ALL is unfiltered (tenant_service), i.e. the whole
+            # platform, not "your origins" (F-016).
+            scope_title = "ทราฟฟิกทั้งแพลตฟอร์ม (มุมมองผู้ดูแลระบบ)"
+        else:
+            scope_title = "Origin ทั้งหมดของคุณ"
         if blocked > 0:
             top_attack = list(attack_types.keys())[0] if attack_types else "Security Filter"
             top_ip = suspicious_ips[0]["ip"] if suspicious_ips else "Unknown"
