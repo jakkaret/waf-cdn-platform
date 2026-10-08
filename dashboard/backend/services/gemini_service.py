@@ -6,7 +6,6 @@ import httpx
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
-from services.geoip import country_code
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -47,13 +46,26 @@ class GeminiService:
         self._attribution_cache: Dict[str, Dict[str, Any]] = {}
         self._cache_ttl = 300  # 5 minutes cache for duplicate attack signatures
 
+    @staticmethod
+    def _attack_prompt_fields(data: Dict[str, Any]) -> Dict[str, str]:
+        """The ONLY request fields that reach the attack-explanation prompt.
+        The cached summary is shared by every alert with the same signature,
+        across clients and tenants, so the prompt must be a pure function of
+        the signature: no client IP, no IP-derived country, no query string
+        (F-121: one client's alert text named another client's IP)."""
+        path = str(data.get("url") or data.get("request_uri") or "/").split("?")[0][:200]
+        return {
+            "method": str(data.get("method") or "GET")[:10],
+            "path": path or "/",
+            "rule_id": str(data.get("rule_id") or "OWASP-CRS")[:60],
+            "attack_type": str(data.get("attack_type") or "WAF Security Block")[:80],
+            "status": str(data.get("status") or data.get("status_code") or "403")[:5],
+        }
+
     def _get_attack_signature_key(self, data: Dict[str, Any]) -> str:
-        """Create a compact signature key for deduplication"""
-        url = str(data.get("url") or data.get("request_uri") or "").split("?")[0]
-        method = str(data.get("method") or "GET")
-        rule_id = str(data.get("rule_id") or "0")
-        attack_type = str(data.get("attack_type") or "unknown")
-        return f"{method}:{url}:{rule_id}:{attack_type}"
+        """Cache key: exactly the fields the prompt is built from."""
+        f = self._attack_prompt_fields(data)
+        return f"{f['method']}:{f['path']}:{f['rule_id']}:{f['attack_type']}:{f['status']}"
 
     async def explain_attack(self, data: Dict[str, Any]) -> str:
         """
@@ -69,20 +81,16 @@ class GeminiService:
             if now - cached["timestamp"] < self._cache_ttl:
                 return cached["summary"]
 
-        ip = str(data.get("ip") or data.get("client_ip") or "Unknown")
-        url = str(data.get("url") or data.get("request_uri") or "/")
-        method = str(data.get("method") or "GET")
-        rule_id = str(data.get("rule_id") or "OWASP-CRS")
-        attack_type = str(data.get("attack_type") or "WAF Security Block")
-        status = str(data.get("status") or data.get("status_code") or "403")
-        country = str(data.get("country") or country_code(ip) or "")
+        f = self._attack_prompt_fields(data)
+        url, method, rule_id = f["path"], f["method"], f["rule_id"]
+        attack_type, status = f["attack_type"], f["status"]
 
         prompt = (
             "คุณคือ AI Security Analyst ประจำระบบ WAF จงวิเคราะห์และสรุปเหตุการณ์การโจมตีนี้ให้เข้าใจง่าย "
             "ใน 1-2 ประโยคสั้นๆ ภาษาไทย โดยบอกว่าผู้โจมตีพยายามทำอะไร (เช่น แอบดูไฟล์ลับ, ยิง SQLi, เจาะหลังบ้าน) "
-            "และระบบ WAF บล็อกไว้ได้อย่างไร (ห้ามเกริ่น ตอบสรุปเนื้อหาทันที):\n"
-            f"- Client IP: {ip} {f'({country})' if country else ''}\n"
-            f"- Target URL: {url}\n"
+            "และระบบ WAF บล็อกไว้ได้อย่างไร (ห้ามเกริ่น ตอบสรุปเนื้อหาทันที "
+            "และห้ามระบุ IP หรือข้อมูลระบุตัวผู้ใช้):\n"
+            f"- Target path: {url}\n"
             f"- Method: {method}\n"
             f"- Rule Triggered: {rule_id} ({attack_type})\n"
             f"- Action: {status} Blocked"
@@ -174,7 +182,10 @@ class GeminiService:
                                          attribution: Any) -> str:
         """Create a compact signature key for deduplication, mirroring
         _get_attack_signature_key's shape."""
-        url = self._truncate(str(request_context.get("url") or "").split("?")[0], 120)
+        # Same truncated URL (query included) that explain_attribution puts in
+        # the prompt, so a cached explanation can never describe another
+        # caller's query string (F-121).
+        url = self._truncate(request_context.get("url") or request_context.get("request_uri") or "/", 200)
         method = str(request_context.get("method") or "GET")
         top = self._top_contributors(attribution, limit=3)
         top_key = "|".join(
