@@ -6,7 +6,7 @@ import ipaddress
 import logging
 from pathlib import Path
 from typing import List, Dict, Optional
-from services.rule_manager import RuleManager
+from services.rule_manager import RuleManager, NginxConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,18 @@ class IPRuleService:
                 return str(ip_obj)
         except ValueError:
             raise ValueError(f"Invalid IP address or CIDR notation: '{ip_str}'")
+
+    def _reload_nginx(self) -> bool:
+        """Reload nginx; returns whether the change is live. An invalid config is
+        logged as an error instead of being silently skipped (F-037)."""
+        try:
+            self.rule_manager.reload_nginx()
+            return True
+        except NginxConfigError as e:
+            logger.error(f"IP rules saved but NOT applied: nginx -t failed: {e}")
+        except Exception as e:
+            logger.warning(f"Nginx reload notification skipped: {e}")
+        return False
 
     def _sync_files_from_db(self):
         """Re-generate global_blocklist.txt, global_whitelist.txt and the corresponding ModSec .conf files."""
@@ -170,16 +182,14 @@ class IPRuleService:
             conn.close()
 
         self._sync_files_from_db()
-        try:
-            self.rule_manager.reload_nginx()
-        except Exception as e:
-            logger.warning(f"Nginx reload notification skipped: {e}")
+        applied = self._reload_nginx()
 
         return {
             "status": "success",
             "ip": validated_ip,
             "rule_type": rule_type,
-            "expires_at": expires_at
+            "expires_at": expires_at,
+            "nginx_applied": applied,
         }
 
     def delete_rule(self, ip: str) -> bool:
@@ -194,10 +204,7 @@ class IPRuleService:
 
         if deleted:
             self._sync_files_from_db()
-            try:
-                self.rule_manager.reload_nginx()
-            except Exception as e:
-                logger.warning(f"Nginx reload notification skipped: {e}")
+            self._reload_nginx()
         return deleted
 
     def bulk_delete(self, ips: List[str]) -> int:
@@ -214,10 +221,7 @@ class IPRuleService:
 
         if deleted_count > 0:
             self._sync_files_from_db()
-            try:
-                self.rule_manager.reload_nginx()
-            except Exception as e:
-                logger.warning(f"Nginx reload notification skipped: {e}")
+            self._reload_nginx()
         return deleted_count
 
     def get_stats(self) -> Dict:

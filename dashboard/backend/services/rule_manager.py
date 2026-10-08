@@ -72,6 +72,13 @@ _ALLOWED_NGINX_COMMANDS = {
 
 CONTAINER_NAME = os.getenv("WAF_CONTAINER_NAME", "waf-nginx")
 
+
+class NginxConfigError(RuntimeError):
+    """`nginx -t` rejected the on-disk config. Reloading would be a silent
+    no-op (the master keeps the old config and `nginx -s reload` still exits 0)
+    and the next container start would fail, so callers must not treat the
+    change as applied (F-037)."""
+
 SEVERITY_MAP = {
     "CRITICAL": "CRITICAL",
     "HIGH": "ERROR",
@@ -134,6 +141,19 @@ class RuleManager:
             raise RuntimeError(f"Docker command failed: {err_msg}")
 
     def reload_nginx(self):
+        # Validate before every reload (F-037): `nginx -s reload` exits 0 even
+        # when the new config is invalid, so without this a broken rule file is
+        # reported as applied, silently ignored by the running nginx, and then
+        # stops nginx from starting at the next restart.
+        try:
+            self._run_docker_exec(("nginx", "-t"))
+        except RuntimeError as e:
+            msg = str(e)
+            if "[emerg]" in msg or "test failed" in msg:
+                logger.error(f"nginx -t failed, not reloading: {msg}")
+                raise NginxConfigError(msg) from e
+            logger.error(msg)
+            raise
         try:
             self._run_docker_exec(("nginx", "-s", "reload"))
             logger.info("Nginx reloaded successfully")

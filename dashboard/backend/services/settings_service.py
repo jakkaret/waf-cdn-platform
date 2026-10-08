@@ -4,7 +4,7 @@ import logging
 import httpx
 from pathlib import Path
 from typing import Dict, Any
-from services.rule_manager import RuleManager
+from services.rule_manager import RuleManager, NginxConfigError
 from services.captcha_config import _client as _redis_client
 
 logger = logging.getLogger(__name__)
@@ -151,22 +151,33 @@ class SettingsService:
                     continue
                 current[k] = v
 
-        # Write to JSON
         clean_save = {k: v for k, v in current.items() if not k.endswith("_masked")}
-        SETTINGS_FILE.write_text(json.dumps(clean_save, indent=2), encoding="utf-8")
 
-        # Sync ModSecurity configuration override if WAF mode changed
+        # Apply the ModSecurity override first: if nginx rejects it the call
+        # raises and nothing is persisted, instead of saving settings the live
+        # WAF is not actually running (F-037).
         self._apply_modsecurity_settings(clean_save)
+        SETTINGS_FILE.write_text(json.dumps(clean_save, indent=2), encoding="utf-8")
         self._sync_ml_policy(clean_save)
 
         return self.get_settings()
 
     def _apply_modsecurity_settings(self, settings: Dict[str, Any]):
         """Write modsecurity-override.conf to dynamically update SecRuleEngine and CRS thresholds."""
+        previous = OVERRIDE_FILE.read_text(encoding="utf-8") if OVERRIDE_FILE.exists() else None
         try:
             OVERRIDE_FILE.write_text(render_modsecurity_override(settings), encoding="utf-8")
             self.rule_manager.reload_nginx()
+        except NginxConfigError:
+            # nginx never loaded the rejected file; put the disk back in step
+            # with what is running, then tell the caller (F-037).
+            if previous is None:
+                OVERRIDE_FILE.unlink(missing_ok=True)
+            else:
+                OVERRIDE_FILE.write_text(previous, encoding="utf-8")
+            raise
         except Exception as e:
+            # nginx/docker not reachable from here (dev, tests): best effort.
             logger.warning(f"Failed to apply dynamic ModSecurity override: {e}")
 
     async def send_test_notification(self, channel: str = "telegram") -> Dict[str, Any]:
