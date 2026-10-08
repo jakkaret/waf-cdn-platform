@@ -253,15 +253,16 @@ from fastapi.responses import JSONResponse
 async def not_found_handler(request: Request, exc):
     return JSONResponse(
         status_code=404,
-        content={"error": "Resource not found", "path": str(request.url)}
+        content={"error": "Resource not found"}
     )
 
 @app.exception_handler(500)
 async def internal_error_handler(request: Request, exc):
+    # Log the detail server-side; never echo internal exception text to clients.
     print("Internal Error:", exc)
     return JSONResponse(
         status_code=500,
-        content={"error": str(exc)}
+        content={"error": "Internal server error"}
     )
 
 @app.get("/api/health")
