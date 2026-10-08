@@ -102,6 +102,12 @@ async def _check_node(region: str, meta: dict, client: httpx.AsyncClient) -> Dic
     rtt_ms = 0
     start_t = time.time()
 
+    # Run the TLS port probe concurrently with the health GET (non-MAIN only)
+    # so a node costs max(a, b) instead of a + b.
+    tls_task = None
+    if region != "MAIN":
+        tls_task = asyncio.ensure_future(_check_tls_port(meta["ip"], meta.get("port", 443)))
+
     try:
         res = await client.get(health_url)
         rtt_ms = max(1, int((time.time() - start_t) * 1000))
@@ -119,7 +125,7 @@ async def _check_node(region: str, meta: dict, client: httpx.AsyncClient) -> Dic
         # probe here at all, so "active"/"unreachable" would both be a lie.
         ssl_status = "not_applicable"
     else:
-        ssl_status = "port_open" if await _check_tls_port(meta["ip"], meta.get("port", 443)) else "unreachable"
+        ssl_status = "port_open" if await tls_task else "unreachable"
 
     return {
         "region": region,

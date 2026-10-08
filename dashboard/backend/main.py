@@ -86,17 +86,25 @@ if assets_dir.exists():
     app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
 
+def _port_open(port: int, host: str = "127.0.0.1") -> bool:
+    # Blocking connect; callers must run this off the event loop.
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        return sock.connect_ex((host, port)) == 0
+
+
+def _dynamodb_table_status():
+    # Sync boto3 DescribeTable -- callers must run this off the event loop.
+    from services.dynamodb_service import DynamoDBService
+    return DynamoDBService().domains_table.table_status
+
+
 # System status (protected) -- see frontend/src/api/system.ts for the contract
 @app.get("/api/system/status")
 async def system_status(current_user: dict = Depends(require_viewer_or_above)):
     import os
     import shutil
-    import socket
-
-    def _port_open(port: int, host: str = "127.0.0.1") -> bool:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(0.5)
-            return sock.connect_ex((host, port)) == 0
 
     # (port, description) for the services this control plane depends on.
     SERVICES = {
@@ -107,20 +115,24 @@ async def system_status(current_user: dict = Depends(require_viewer_or_above)):
         "frps": (7000, "FRP tunnel server"),
         "control_api": (8070, "WAF control API"),
     }
+    # Probe all ports concurrently, each in a worker thread, so the event
+    # loop is never blocked and total time ~= one probe, not N.
+    port_results = await asyncio.gather(
+        *(asyncio.to_thread(_port_open, port) for port, _ in SERVICES.values())
+    )
     services = {
         name: {
-            "status": "online" if _port_open(port) else "offline",
+            "status": "online" if is_open else "offline",
             "port": port,
             "desc": desc,
         }
-        for name, (port, desc) in SERVICES.items()
+        for (name, (port, desc)), is_open in zip(SERVICES.items(), port_results)
     }
 
     db_status, db_detail = "offline", "unreachable"
     try:
-        from services.dynamodb_service import DynamoDBService
         # Reading table_status makes a DescribeTable call -- the reachability probe.
-        _ = DynamoDBService().domains_table.table_status
+        await asyncio.to_thread(_dynamodb_table_status)
         db_status, db_detail = "online", "DynamoDB reachable"
     except Exception as exc:
         db_detail = f"DynamoDB error: {exc}"[:200]
