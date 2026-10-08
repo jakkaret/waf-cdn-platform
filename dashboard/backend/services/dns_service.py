@@ -36,6 +36,17 @@ OWN_WILDCARD_DOMAIN = os.getenv("WAF_OWN_WILDCARD_DOMAIN", "waf-it-kku.online").
 _RESERVED_OWN_SUBDOMAIN_LABELS = {"www", "main", "dash"}
 
 
+def is_platform_subdomain(domain_name: str) -> bool:
+    """True for the platform apex itself OR any host beneath it (single- or
+    multi-label). Every such host resolves to the edge with no tenant DNS setup
+    and core routes an unknown Host to the tunnel router, so claiming an
+    unregistered one must be restricted to the operator (see F-129). This is
+    broader than is_claimable_own_wildcard_subdomain, which only covers the
+    single-label auto-verify convenience."""
+    d = domain_name.strip().lower().rstrip(".")  # FQDN trailing dot must not evade the check
+    return d == OWN_WILDCARD_DOMAIN or d.endswith("." + OWN_WILDCARD_DOMAIN)
+
+
 def is_claimable_own_wildcard_subdomain(domain_name: str) -> bool:
     d = domain_name.strip().lower()
     suffix = "." + OWN_WILDCARD_DOMAIN

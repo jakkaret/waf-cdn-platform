@@ -10,7 +10,7 @@ from services.rbac import get_current_user, verify_origin_ownership, verify_orig
 from services import audit_log
 from services.dynamodb_service import DynamoDBService
 from services.captcha_config import sync_domain_config
-from services.dns_service import verify_domain_dns, is_claimable_own_wildcard_subdomain
+from services.dns_service import verify_domain_dns, is_claimable_own_wildcard_subdomain, is_platform_subdomain
 
 router = APIRouter(prefix="/api/domains", tags=["Domains"])
 db = DynamoDBService()
@@ -70,6 +70,24 @@ _HOSTNAME_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 _HOSTNAME_RE = re.compile(rf"^{_HOSTNAME_LABEL}(?:\.{_HOSTNAME_LABEL})+$")
 
 
+def _assert_platform_subdomain_allowed(domain_name: str, current_user: dict) -> None:
+    """F-129: a host at/under the platform apex (*.waf-it-kku.online) resolves to
+    the edge and core routes an unknown Host to the tunnel router, so registering
+    an unregistered one must be operator-only. Before this gate a non-admin could
+    create such a record (even dns_verified=False) and then — because
+    _assert_domain_claimable treated the self-created record as proof of ownership
+    — mint a tunnel token for it and bind a proxy, taking over a host under the
+    platform's own domain. Restrict platform-apex registration AND its auto-verify
+    to admins; tenants onboard their own external domains instead."""
+    if current_user.get("role") == "admin":
+        return
+    if is_platform_subdomain(domain_name):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Subdomains of the platform domain are provisioned by the operator; register your own domain instead.",
+        )
+
+
 def _validate_hostname(value: str) -> str:
     normalized = value.strip().lower()
     if len(normalized) > 253 or not _HOSTNAME_RE.match(normalized):
@@ -106,7 +124,9 @@ async def create_domain(payload: DomainCreate, current_user: dict = Depends(get_
     # Workspace, 2026-09-22: owner or editor -- adding a domain is a
     # routine, reversible operational change, not a destructive one)
     verify_origin_edit_access(payload.origin_id, current_user)
-    
+    # F-129: non-admins may not register a host under the platform apex
+    _assert_platform_subdomain_allowed(payload.domain_name, current_user)
+
     # 2. Check if domain already exists
     # Scans/queries domains table for this domain_name
     from boto3.dynamodb.conditions import Attr
@@ -460,6 +480,10 @@ async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayloa
     verify_origin_edit_access(origin_id, current_user)
 
     domain_name = payload.domain_name
+    # F-129: non-admins may not register (nor auto-verify) a host under the
+    # platform apex — this is the path whose is_claimable_own_wildcard_subdomain
+    # auto-verify made single-label platform subdomains claimable by any tenant.
+    _assert_platform_subdomain_allowed(domain_name, current_user)
 
     from boto3.dynamodb.conditions import Attr
     response = db.domains_table.scan(
