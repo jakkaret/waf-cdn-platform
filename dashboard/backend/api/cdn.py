@@ -28,7 +28,7 @@ _CDN_NODES_CACHE: Tuple[float, List[Dict[str, Any]]] = (0.0, [])
 CDN_CACHE_TTL = 5.0
 
 CDN_PURGE_API_URL = os.getenv("CDN_PURGE_API_URL", "http://localhost:8080")
-CDN_PURGE_TOKEN = os.getenv("CDN_PURGE_TOKEN", "cdn-secret-token")
+CDN_PURGE_TOKEN = os.getenv("CDN_PURGE_TOKEN", "")  # no guessable default: purge is refused when unset
 
 # Configured POPs (Thailand Edge POP + Asia Edge POP + Central Core)
 REGIONS_META = {
