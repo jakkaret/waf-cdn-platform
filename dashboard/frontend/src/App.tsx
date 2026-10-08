@@ -26,6 +26,7 @@ import Tunnels from './pages/Tunnels'
 import StatusPage from './pages/StatusPage'
 import Onboarding from './pages/Onboarding'
 import ConceptsIndex from './pages/concepts/ConceptsIndex'
+import NotFound from './pages/NotFound'
 import AiRuleComposer from './pages/concepts/AiRuleComposer'
 import TeamWorkspace from './pages/concepts/TeamWorkspace'
 import IncidentPostmortem from './pages/concepts/IncidentPostmortem'
@@ -349,6 +350,8 @@ export const App: React.FC = () => {
               </ProtectedRoute>
             }
           />
+          {/* F-029: unknown URLs used to render a blank screen */}
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
       <Toaster
