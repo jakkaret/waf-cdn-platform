@@ -63,11 +63,16 @@ export const OriginSelector: React.FC = () => {
   }
 
   const hasOrigins = allAvailableOrigins.length > 0
-  const triggerLabel = hasOrigins
-    ? selectedOrigin === 'ALL'
-      ? `All My Origins (${allAvailableOrigins.length})`
-      : selectedOriginLabel || 'Selected Origin'
-    : 'No Origins Added'
+  // F-016: for an admin, "ALL" is unfiltered platform-wide traffic (see the
+  // backend's tenant_service), so don't call it "my origins" or "none added".
+  const triggerLabel =
+    selectedOrigin === 'ALL' && isUserAdmin
+      ? 'All Platform Traffic (admin)'
+      : hasOrigins
+        ? selectedOrigin === 'ALL'
+          ? `All My Origins (${allAvailableOrigins.length})`
+          : selectedOriginLabel || 'Selected Origin'
+        : 'No Origins Added'
 
   return (
     <div className="relative font-mono" ref={dropdownRef}>
