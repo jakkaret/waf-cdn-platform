@@ -354,8 +354,9 @@ async def serve_react_app(full_path: str):
         raise HTTPException(status_code=404, detail="API route not found")
 
     if full_path:
-        target_file = FRONTEND_DIST / full_path
-        if target_file.is_file():
+        dist_root = FRONTEND_DIST.resolve()
+        target_file = (dist_root / full_path).resolve()
+        if target_file.is_file() and target_file.is_relative_to(dist_root):
             return FileResponse(str(target_file))
 
     index_file = FRONTEND_DIST / "index.html"
