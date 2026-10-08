@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
-from services.settings_service import SettingsService
+from services.settings_service import SettingsService, mask_settings
 from services.rbac import require_viewer_or_above, require_admin
 from services import audit_log
 
@@ -41,7 +41,7 @@ async def get_settings(
 ):
     try:
         settings = service.get_settings()
-        return {"settings": settings}
+        return {"settings": mask_settings(settings)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -76,7 +76,7 @@ async def update_settings(
                 details=changed,
             )
 
-        return {"status": "success", "settings": updated}
+        return {"status": "success", "settings": mask_settings(updated)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
