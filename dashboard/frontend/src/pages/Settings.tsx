@@ -550,8 +550,15 @@ export const Settings: React.FC = () => {
                     { key: 'waf_nginx', label: 'ModSecurity CRS (waf-nginx)' },
                     { key: 'redis', label: 'Redis Sliding Window (waf-redis)' },
                     { key: 'clickhouse', label: 'ClickHouse OLAP (waf-clickhouse)' },
+                    // F-105: the backend also probes these; they were hidden.
+                    { key: 'frps', label: 'FRP Tunnel Server (frps)' },
+                    { key: 'control_api', label: 'WAF Control API (control-api)' },
+                    { key: 'database', label: 'DynamoDB (tenants, rules, alerts)' },
                   ].map(({ key, label }) => {
-                    const svc = systemStatus?.services?.[key]
+                    const svc =
+                      key === 'database'
+                        ? systemStatus?.db && { status: systemStatus.db.status, port: undefined, desc: systemStatus.db.detail }
+                        : systemStatus?.services?.[key]
                     const online = svc?.status === 'online'
                     return (
                       <div
