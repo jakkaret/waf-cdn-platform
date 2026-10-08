@@ -67,11 +67,11 @@ def test_a_user_sees_only_alerts_matching_their_own_domain(client, register_user
     register_user(email="decoy1@example.com", username="decoy1")  # consumes the first-user-becomes-admin slot
     user_a = register_user(email="tenant-a@example.com", username="tenant_a")
     user_b = register_user(email="tenant-b@example.com", username="tenant_b")
-    _create_origin_with_domain(client, user_a["access_token"], auth_header, "origin-a", "tenant-a.waf-it-kku.online")
-    _create_origin_with_domain(client, user_b["access_token"], auth_header, "origin-b", "tenant-b.waf-it-kku.online")
+    _create_origin_with_domain(client, user_a["access_token"], auth_header, "origin-a", "tenant-a.example.com")
+    _create_origin_with_domain(client, user_b["access_token"], auth_header, "origin-b", "tenant-b.example.com")
 
-    _seed_alert("alert-a-1", "tenant-a.waf-it-kku.online")
-    _seed_alert("alert-b-1", "tenant-b.waf-it-kku.online")
+    _seed_alert("alert-a-1", "tenant-a.example.com")
+    _seed_alert("alert-b-1", "tenant-b.example.com")
 
     resp = client.get("/api/ai/notifications/feed", headers=auth_header(user_a["access_token"]))
     assert resp.status_code == 200, resp.text
@@ -86,11 +86,11 @@ def test_mark_all_read_never_touches_another_tenants_alerts(client, register_use
     register_user(email="decoy2@example.com", username="decoy2")  # consumes the first-user-becomes-admin slot
     user_a = register_user(email="tenant-a2@example.com", username="tenant_a2")
     user_b = register_user(email="tenant-b2@example.com", username="tenant_b2")
-    _create_origin_with_domain(client, user_a["access_token"], auth_header, "origin-a2", "tenant-a2.waf-it-kku.online")
-    _create_origin_with_domain(client, user_b["access_token"], auth_header, "origin-b2", "tenant-b2.waf-it-kku.online")
+    _create_origin_with_domain(client, user_a["access_token"], auth_header, "origin-a2", "tenant-a2.example.com")
+    _create_origin_with_domain(client, user_b["access_token"], auth_header, "origin-b2", "tenant-b2.example.com")
 
-    _seed_alert("alert-a2-1", "tenant-a2.waf-it-kku.online")
-    _seed_alert("alert-b2-1", "tenant-b2.waf-it-kku.online")
+    _seed_alert("alert-a2-1", "tenant-a2.example.com")
+    _seed_alert("alert-b2-1", "tenant-b2.example.com")
 
     resp = client.post("/api/ai/notifications/mark-read", json={}, headers=auth_header(user_a["access_token"]))
     assert resp.status_code == 200, resp.text
@@ -104,10 +104,10 @@ def test_a_user_cannot_mark_a_specific_alert_belonging_to_another_tenant(client,
     register_user(email="decoy3@example.com", username="decoy3")  # consumes the first-user-becomes-admin slot
     user_a = register_user(email="tenant-a3@example.com", username="tenant_a3")
     user_b = register_user(email="tenant-b3@example.com", username="tenant_b3")
-    _create_origin_with_domain(client, user_a["access_token"], auth_header, "origin-a3", "tenant-a3.waf-it-kku.online")
-    _create_origin_with_domain(client, user_b["access_token"], auth_header, "origin-b3", "tenant-b3.waf-it-kku.online")
+    _create_origin_with_domain(client, user_a["access_token"], auth_header, "origin-a3", "tenant-a3.example.com")
+    _create_origin_with_domain(client, user_b["access_token"], auth_header, "origin-b3", "tenant-b3.example.com")
 
-    _seed_alert("alert-b3-1", "tenant-b3.waf-it-kku.online")
+    _seed_alert("alert-b3-1", "tenant-b3.example.com")
 
     resp = client.post(
         "/api/ai/notifications/mark-read", json={"alert_id": "alert-b3-1"},
@@ -122,9 +122,9 @@ def test_a_user_cannot_mark_a_specific_alert_belonging_to_another_tenant(client,
 def test_admin_sees_and_can_mark_every_tenants_alerts(client, register_user, auth_header):
     admin = register_user(email="admin4@example.com", username="admin4")  # first user = admin
     user_b = register_user(email="tenant-b4@example.com", username="tenant_b4")
-    _create_origin_with_domain(client, user_b["access_token"], auth_header, "origin-b4", "tenant-b4.waf-it-kku.online")
+    _create_origin_with_domain(client, user_b["access_token"], auth_header, "origin-b4", "tenant-b4.example.com")
 
-    _seed_alert("alert-b4-1", "tenant-b4.waf-it-kku.online")
+    _seed_alert("alert-b4-1", "tenant-b4.example.com")
 
     resp = client.get("/api/ai/notifications/feed", headers=auth_header(admin["access_token"]))
     assert resp.status_code == 200, resp.text
@@ -142,7 +142,7 @@ def test_an_alert_with_no_captured_domain_is_hidden_from_non_admins(client, regi
     "belongs to everyone" by falling through an empty-string match."""
     register_user(email="decoy5@example.com", username="decoy5")  # consumes the first-user-becomes-admin slot
     user_a = register_user(email="tenant-a5@example.com", username="tenant_a5")
-    _create_origin_with_domain(client, user_a["access_token"], auth_header, "origin-a5", "tenant-a5.waf-it-kku.online")
+    _create_origin_with_domain(client, user_a["access_token"], auth_header, "origin-a5", "tenant-a5.example.com")
 
     _seed_alert("alert-no-domain", "")
 

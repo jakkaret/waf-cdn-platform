@@ -125,7 +125,7 @@ def test_an_editor_can_add_and_delete_a_domain(client, register_user, auth_heade
     client.post(f"/api/origins/{origin_id}/editors", json={"email": "ws-editor4@example.com"}, headers=owner_h)
 
     resp = client.post(
-        f"/api/origins/{origin_id}/domains", json={"domain_name": "editor-added.waf-it-kku.online"}, headers=editor_h,
+        f"/api/origins/{origin_id}/domains", json={"domain_name": "editor-added.example.com"}, headers=editor_h,
     )
     assert resp.status_code == 200, resp.text
     domain_id = resp.json()["domain"]["domain_id"]
@@ -140,7 +140,7 @@ def test_origin_update_and_domain_create_write_real_audit_events(client, registe
     origin_id = _create_origin(client, owner["access_token"], auth_header)
 
     client.put(f"/api/origins/{origin_id}", json={"label": "audited-rename"}, headers=owner_h)
-    client.post(f"/api/origins/{origin_id}/domains", json={"domain_name": "audited.waf-it-kku.online"}, headers=owner_h)
+    client.post(f"/api/origins/{origin_id}/domains", json={"domain_name": "audited.example.com"}, headers=owner_h)
 
     events = audit_log_module.get_audit_log(origin_id, db=audit_log_module.db)
     actions = [e["action"] for e in events]
