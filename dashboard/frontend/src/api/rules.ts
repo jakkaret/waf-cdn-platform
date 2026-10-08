@@ -22,10 +22,6 @@ export const rulesApi = {
     return res.data
   },
 
-  syncRules: async () => {
-    const res = await api.post('/rules/sync')
-    return res.data
-  },
 
   blastRadius: async (payload: { variable: string; operator: string; severity: string }): Promise<any> => {
     const res = await api.post('/rules/blast-radius', payload)

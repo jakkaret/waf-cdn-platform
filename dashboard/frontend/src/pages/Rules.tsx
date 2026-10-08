@@ -95,12 +95,6 @@ export const Rules: React.FC = () => {
     onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to delete rule'),
   })
 
-  const syncMutation = useMutation({
-    mutationFn: () => rulesApi.syncRules(),
-    onSuccess: (data: any) => toast.success(`Edge Sync Complete: ${data?.synced_nodes ?? 0} POP nodes synchronized`),
-    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Edge rule synchronization failed'),
-  })
-
   const handleBlastRadiusTest = async () => {
     try {
       setIsTestingBlastRadius(true)
@@ -287,14 +281,6 @@ export const Rules: React.FC = () => {
 
             {isAdmin && (
               <>
-                <Button
-                  variant="secondary"
-                  onClick={() => syncMutation.mutate()}
-                  isLoading={syncMutation.isPending}
-                  icon={<RefreshCw size={13} />}
-                >
-                  Sync to Edge Nodes
-                </Button>
                 <Button
                   variant="brand"
                   onClick={() => {
