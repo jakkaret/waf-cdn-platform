@@ -10,6 +10,7 @@ import { DnsInstructions } from '../types'
 import { onboardingApi } from '../api/onboarding'
 import { api } from '../api/axios'
 import { buildTunnelCommands } from '../lib/tunnelCommands'
+import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 import {
   Server,
@@ -40,6 +41,10 @@ const STEP_LABELS: Record<WizardStep, string> = {
 }
 
 export const Onboarding: React.FC = () => {
+  // Subdomains of the platform domain are operator-provisioned (F-129): the
+  // backend returns 403 for a non-admin, so only admins are offered that path.
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === 'admin'
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [step, setStep] = useState<WizardStep>(1)
@@ -53,7 +58,7 @@ export const Onboarding: React.FC = () => {
   const [port, setPort] = useState(3000)
 
   // Domain form
-  const [domainMode, setDomainMode] = useState<'subdomain' | 'custom'>('subdomain')
+  const [domainMode, setDomainMode] = useState<'subdomain' | 'custom'>('custom')
   const [subdomainLabel, setSubdomainLabel] = useState('')
   const [customDomain, setCustomDomain] = useState('')
   const [dnsInstructions, setDnsInstructions] = useState<DnsInstructions | null>(null)
@@ -249,13 +254,15 @@ export const Onboarding: React.FC = () => {
               2. ผูกโดเมน
             </h3>
             <p className="text-[12px] text-[var(--text-muted)] m-0">
-              เลือกได้ 2 แบบ -- ใช้ subdomain ของเรา (เสร็จทันที ไม่ต้องตั้ง DNS) หรือใช้โดเมนของคุณเอง (ต้องตั้ง DNS 2 record)
+              {isAdmin
+                ? 'เลือกได้ 2 แบบ -- ใช้ subdomain ของเรา (เสร็จทันที ไม่ต้องตั้ง DNS) หรือใช้โดเมนของคุณเอง (ต้องตั้ง DNS 2 record)'
+                : 'ผูกโดเมนของคุณเอง -- ตั้ง DNS 2 record (CNAME + TXT) แล้วกดตรวจสอบ'}
             </p>
           </div>
 
           {!domainName ? (
             <>
-              <div className="grid grid-cols-2 gap-3">
+              {isAdmin && <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
                   onClick={() => setDomainMode('subdomain')}
@@ -280,9 +287,9 @@ export const Onboarding: React.FC = () => {
                   <div className="font-mono font-bold text-[12.5px]">ใช้โดเมนของฉันเอง</div>
                   <div className="text-[10.5px] text-[var(--text-muted)] font-mono mt-0.5">ต้องตั้ง CNAME + TXT</div>
                 </button>
-              </div>
+              </div>}
 
-              {domainMode === 'subdomain' ? (
+              {isAdmin && domainMode === 'subdomain' ? (
                 <div className="space-y-2">
                   <label className="text-[11px] font-mono font-bold text-[var(--text-secondary)] uppercase tracking-wider">
                     เลือกชื่อ subdomain
