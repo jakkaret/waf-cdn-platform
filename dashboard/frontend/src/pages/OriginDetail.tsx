@@ -466,7 +466,7 @@ export const OriginDetail: React.FC = () => {
     setVerifyingDomainId(domainId)
     try {
       const res = await verifyDomain(id!, domainId)
-      if (res.data?.status === 'success') {
+      if (res.data?.status === 'verified') {
         toast.success('Domain DNS verified successfully!')
         refetchDomains()
       } else {

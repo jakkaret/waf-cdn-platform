@@ -10,7 +10,8 @@ export const createDomain = (originId: string, data: { domain_name: string }) =>
   )
 
 export const verifyDomain = (originId: string, domainId: string) =>
-  api.post<{ status: string; message: string }>(
+  // POST /api/origins/{id}/domains/{id}/verify answers status "verified" | "failed".
+  api.post<{ status: 'verified' | 'failed'; message: string }>(
     `/origins/${originId}/domains/${domainId}/verify`
   )
 
