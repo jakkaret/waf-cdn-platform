@@ -199,7 +199,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <ConceptsIndex />
               </ProtectedRoute>
             }
@@ -207,7 +207,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/ai-rules"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <AiRuleComposer />
               </ProtectedRoute>
             }
@@ -215,7 +215,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/team"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <TeamWorkspace />
               </ProtectedRoute>
             }
@@ -223,7 +223,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/postmortem"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <IncidentPostmortem />
               </ProtectedRoute>
             }
@@ -231,7 +231,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/ai-bots"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <AiBotControl />
               </ProtectedRoute>
             }
@@ -239,7 +239,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/cve-patch"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <CveAutoPatch />
               </ProtectedRoute>
             }
@@ -247,7 +247,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/supply-chain"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <SupplyChainMonitor />
               </ProtectedRoute>
             }
@@ -255,7 +255,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/api-guard"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <ApiSchemaGuard />
               </ProtectedRoute>
             }
@@ -263,7 +263,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/cost-shield"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <AttackCostShield />
               </ProtectedRoute>
             }
@@ -271,7 +271,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/agentic-traffic"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <AgenticTrafficGovernance />
               </ProtectedRoute>
             }
@@ -279,7 +279,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/ai-firewall"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <AiFirewallLlm />
               </ProtectedRoute>
             }
@@ -287,7 +287,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/deception"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <DeceptionLayer />
               </ProtectedRoute>
             }
@@ -295,7 +295,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/quantum-tls"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <QuantumSafeTls />
               </ProtectedRoute>
             }
@@ -303,7 +303,7 @@ export const App: React.FC = () => {
           <Route
             path="/concepts/risk-score"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <UnifiedRiskScore />
               </ProtectedRoute>
             }
