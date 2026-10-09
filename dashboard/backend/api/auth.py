@@ -10,6 +10,34 @@ from services.rate_limiter import limiter
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 auth_service = AuthService()
 
+import os as _os
+import secrets as _secrets
+
+CSRF_COOKIE_NAME = "csrf_token"
+SESSION_MAX_AGE = 3600
+
+
+def _cookie_secure() -> bool:
+    # HTTPS in production (behind Caddy) -> Secure by default. Tests run over
+    # http via TestClient and set SESSION_COOKIE_SECURE=false so the cookie is
+    # still sent back.
+    return _os.getenv("SESSION_COOKIE_SECURE", "true").lower() != "false"
+
+
+def _set_session_cookies(response, token: str) -> None:
+    """Session is an HttpOnly cookie (JS can't read it -> XSS can't steal it);
+    a companion non-HttpOnly csrf_token cookie backs double-submit CSRF."""
+    secure = _cookie_secure()
+    response.set_cookie("access_token", token, httponly=True, samesite="lax",
+                        secure=secure, max_age=SESSION_MAX_AGE, path="/")
+    response.set_cookie(CSRF_COOKIE_NAME, _secrets.token_urlsafe(32), httponly=False,
+                        samesite="lax", secure=secure, max_age=SESSION_MAX_AGE, path="/")
+
+
+def _clear_session_cookies(response) -> None:
+    for k in ("access_token", CSRF_COOKIE_NAME):
+        response.delete_cookie(k, path="/", samesite="lax", secure=_cookie_secure())
+
 
 # Schemas
 
@@ -73,13 +101,7 @@ async def register(request: Request, req: RegisterRequest, response: Response):
         "email": user["email"],
     })
 
-    response.set_cookie(
-        key="access_token",
-        value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=3600,
-    )
+    _set_session_cookies(response, token)
 
     return {
         "access_token": token,
@@ -105,13 +127,7 @@ async def login(request: Request, req: LoginRequest, response: Response):
         "email": user["email"],
     })
 
-    response.set_cookie(
-        key="access_token",
-        value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=3600,
-    )
+    _set_session_cookies(response, token)
 
     return {
         "access_token": token,
@@ -122,7 +138,7 @@ async def login(request: Request, req: LoginRequest, response: Response):
 
 @router.post("/logout")
 async def logout(response: Response):
-    response.delete_cookie("access_token")
+    _clear_session_cookies(response)
     return {"message": "Logged out"}
 
 
@@ -156,14 +172,7 @@ async def google_callback(code: str, response: Response):
         url="/oauth-success",
         status_code=302
     )
-    resp.set_cookie(
-        key="access_token",
-        value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=3600,
-        secure=os.getenv("FORCE_HTTPS", "false").lower() == "true",
-    )
+    _set_session_cookies(resp, token)
     return resp
 
 
@@ -184,13 +193,7 @@ async def telegram_login(req: TelegramLoginRequest, response: Response):
         "email": user.get("email", ""),
     })
 
-    response.set_cookie(
-        key="access_token",
-        value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=3600,
-    )
+    _set_session_cookies(response, token)
 
     return {
         "access_token": token,

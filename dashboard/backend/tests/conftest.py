@@ -53,6 +53,7 @@ os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 # instantly with "connection refused" instead of reaching real AWS.
 os.environ["DYNAMODB_ENDPOINT_URL"] = "http://127.0.0.1:1"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-pytest-only"
+os.environ["SESSION_COOKIE_SECURE"] = "false"  # TestClient uses http; let Set-Cookie come back
 os.environ["FRP_AUTH_TOKEN"] = "test-frp-token-for-pytest-only"
 os.environ["WAF_CONTAINER_NAME"] = "test-waf-container-does-not-exist"
 os.environ["GEMINI_API_KEY"] = ""
