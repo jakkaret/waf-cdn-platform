@@ -12,7 +12,9 @@ from typing import Any
 
 import numpy as np
 
-from ml.feature_engineering import FEATURE_COLUMNS, extract_features_from_request
+import json
+
+from ml.feature_engineering import EXTENDED_FEATURE_COLUMNS, FEATURE_COLUMNS, extract_features_from_request
 
 
 class OnnxWafInference:
@@ -25,6 +27,22 @@ class OnnxWafInference:
             providers=["CPUExecutionProvider"],
         )
         self._rf_input = self._rf.get_inputs()[0].name
+        self._feature_columns = self._resolve_feature_columns(models_dir)
+
+    def _resolve_feature_columns(self, models_dir: Path) -> list[str]:
+        """Match the feature contract to the ONNX input width (13 base or extended)."""
+        width = self._rf.get_inputs()[0].shape[-1]
+        columns = None
+        manifest_path = models_dir / "onnx_manifest.json"
+        if manifest_path.exists():
+            columns = json.loads(manifest_path.read_text(encoding="utf-8")).get("feature_columns")
+        if not columns:
+            columns = EXTENDED_FEATURE_COLUMNS if width == len(EXTENDED_FEATURE_COLUMNS) else FEATURE_COLUMNS
+        if isinstance(width, int) and width != len(columns):
+            raise ValueError(
+                f"ONNX model expects {width} features but feature contract has {len(columns)}"
+            )
+        return list(columns)
 
     @staticmethod
     def _first_output(session, values: list[Any], preferred: str) -> Any:
@@ -36,7 +54,7 @@ class OnnxWafInference:
     def predict(self, url: str = "", method: str = "GET", body: str = "") -> dict[str, Any]:
         features = extract_features_from_request(url=url, method=method, body=body)
         matrix = np.asarray(
-            [[float(features[column]) for column in FEATURE_COLUMNS]],
+            [[float(features[column]) for column in self._feature_columns]],
             dtype=np.float32,
         )
 

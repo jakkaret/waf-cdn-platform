@@ -13,6 +13,36 @@ AUTO_RULES_FILE = os.path.join(CUSTOM_RULES_DIR, "auto_generated_rules.conf")
 # Next available Rule ID counter
 START_RULE_ID = 1000500
 
+# Kept as-is in a literal pattern; every other byte is written as \xHH. Not "%": ModSecurity's
+# config parser reads it as the start of a macro (%{VAR}), and a pattern ending in "%" (a query cut
+# at 40 characters) made the whole rules file fail to load.
+_LITERAL_SAFE_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_/=&,:-")
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def regex_literal(text: str) -> str:
+    """PCRE pattern that matches `text` literally, built from safe characters and \\xHH escapes only.
+
+    The pattern comes from request data (attacker-controlled) and is placed inside the
+    double-quoted operator of a SecRule. re.escape() leaves `"` alone, so a payload with a
+    quote could close the operator and append its own actions (e.g. ctl:ruleEngine=Off).
+    Escaping every other UTF-8 byte as \\xHH leaves no quote, backslash-quote, whitespace
+    or control character in the output, and PCRE matches the same bytes as before.
+    """
+    return "".join(chr(b) if chr(b) in _LITERAL_SAFE_CHARS else f"\\x{b:02x}" for b in text.encode("utf-8"))
+
+
+def assert_secrule_safe(pattern: str) -> None:
+    """Raise ValueError if `pattern` could break out of a double-quoted SecRule operator."""
+    if _CONTROL_CHARS.search(pattern):
+        raise ValueError("SecRule pattern contains a control character")
+    for i, ch in enumerate(pattern):
+        if ch == '"' and (len(pattern[:i]) - len(pattern[:i].rstrip("\\"))) % 2 == 0:
+            raise ValueError("SecRule pattern contains an unescaped double quote")
+    if (len(pattern) - len(pattern.rstrip("\\"))) % 2 == 1:
+        raise ValueError("SecRule pattern ends with a backslash that would escape the closing quote")
+
+
 def generate_modsec_pattern(url: str, body: str = "") -> str:
     """
     Extract a safe, targeted Regex / String match pattern for ModSecurity SecRule.
@@ -52,18 +82,15 @@ def generate_modsec_pattern(url: str, body: str = "") -> str:
     if re.search(r"\$ne|\$gt|\$where|\$\{jndi:", decoded_str, re.I):
         return r"@rx (?i)(\$ne|\$gt|\$where|\$\{jndi:)"
 
-    # Fallback: Escaped specific query fragment
+    # Fallback: literal match of the first 40 characters (regex_literal keeps it SecRule-safe)
     if body:
-        safe_body = re.escape(body[:40])
-        return f"@rx {safe_body}"
+        return f"@rx {regex_literal(body[:40])}"
 
     parsed = urllib.parse.urlparse(url)
     if parsed.query:
-        safe_query = re.escape(parsed.query[:40])
-        return f"@rx {safe_query}"
+        return f"@rx {regex_literal(parsed.query[:40])}"
 
-    safe_uri = re.escape(parsed.path[:40])
-    return f"@rx {safe_uri}"
+    return f"@rx {regex_literal(parsed.path[:40])}"
 
 def generate_pending_rule(url: str, method: str = "GET", body: str = "", attack_type: str = "Anomaly") -> Dict[str, Any]:
     """
@@ -75,6 +102,7 @@ def generate_pending_rule(url: str, method: str = "GET", body: str = "", attack_
         safe_attack_type = "Anomaly"
 
     pattern = generate_modsec_pattern(url, body)
+    assert_secrule_safe(pattern)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     secrule_template = f"""SecRule REQUEST_URI|REQUEST_BODY "{pattern}" \\

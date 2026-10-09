@@ -51,6 +51,45 @@ def measure(fn: Callable[[], object], warmup: int, samples: int) -> dict[str, fl
     }
 
 
+def form_body(size: int) -> str:
+    """A benign-looking urlencoded form body of about `size` bytes (field names and prose values)."""
+    words = "customer+requested+delivery+before+noon+please+call+on+arrival"
+    fields, n = [], 0
+    while n < size:
+        field = f"field{len(fields)}={words}"
+        fields.append(field)
+        n += len(field) + 1
+    return "&".join(fields)[:size]
+
+
+def by_body_size(rf_model, args) -> dict:
+    """RF (features + predict_proba) and Gen3 ONNX per request, single thread, by POST body size.
+
+    RF feature extraction is superlinear in body size; Gen3 caps its units. Production RF only
+    scores the URL from the access log, so its body column is what logging bodies would cost.
+    """
+    from ml.feature_engineering import feature_columns_for_model
+
+    cols = feature_columns_for_model(rf_model)
+    try:
+        from ml.gen3_onnx import Gen3OnnxModel
+
+        gen3 = Gen3OnnxModel(str(args.gen3_onnx))
+    except Exception as exc:
+        gen3, gen3_error = None, f"{type(exc).__name__}: {exc}"
+    out = {}
+    for size in [int(s) for s in args.body_sizes.split(",") if s.strip()]:
+        body = form_body(size)
+        samples = max(3, min(args.samples, 30 if size >= 100_000 else args.samples))
+        row = {"rf_features_predict": measure(
+            lambda: rf_model.predict_proba(pd.DataFrame([extract_features_from_request(args.url, "POST", body)])[cols]),
+            1, samples)}
+        row["gen3_onnx"] = measure(lambda: gen3.score_request("POST", args.url, body), 1, samples) if gen3 \
+            else {"available": False, "reason": gen3_error}
+        out[str(size)] = row
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--samples", type=int, default=30)
@@ -59,6 +98,11 @@ def main() -> int:
     parser.add_argument("--method", default="GET")
     parser.add_argument("--body", default="")
     parser.add_argument("--models-dir", type=Path, default=REPO_ROOT / "ml" / "models")
+    parser.add_argument("--body-sizes", default="",
+                        help="comma-separated POST form body sizes in bytes (e.g. 0,1000,10000,100000): "
+                             "per-request time of RF (features + predict) and Gen3 (ONNX) at each size")
+    parser.add_argument("--gen3-onnx", type=Path,
+                        default=REPO_ROOT / "ml" / "models" / "gen3" / "gen3_f_noopenappsec.onnx")
     args = parser.parse_args()
 
     if args.samples < 1 or args.warmup < 0:
@@ -103,6 +147,9 @@ def main() -> int:
             sklearn_full_path, args.warmup, args.samples
         ),
     }
+
+    if args.body_sizes:
+        result["by_body_size"] = by_body_size(rf_model, args)
 
     try:
         from ml.onnx_inference import OnnxWafInference
