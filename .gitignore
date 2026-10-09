@@ -20,6 +20,12 @@ __pycache__/
 
 # ML Datasets (Auto-downloaded by ml/download_dataset.py)
 ml/dataset/*.csv
+# ML data and artifacts that must never reach this public repo: datasets
+# (including labelled production traffic), captured request telemetry, and
+# training-candidate archives (pickled models, audit samples).
+ml/dataset/
+ml/telemetry/
+ml/models/archive/
 
 # OS
 .DS_Store
