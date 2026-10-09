@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { logsApi } from '../api/logs'
+import React, { useState, useMemo } from 'react'
+import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
+import { logsApi, LogCursor, HistogramBucket } from '../api/logs'
 import { useOriginFilterStore } from '../store/originFilterStore'
 import { TopBar } from '../components/layout/TopBar'
 import { Drawer } from '../components/ui/Drawer'
@@ -69,8 +69,9 @@ export const formatThaiDateTime = (rawDate?: string | number | Date | null): str
 }
 
 export const Logs: React.FC = () => {
-  const [page, setPage] = useState(1)
-  const [pageInput, setPageInput] = useState('')
+  // Filter-first at scale: a time range narrows the search, and we never
+  // deep-page -- a cursor 'load more' walks newest->older in place (F: log UX).
+  const [rangePreset, setRangePreset] = useState<'15m'|'1h'|'24h'|'7d'|'all'>('24h')
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search)
   const [statusFilter, setStatusFilter] = useState('ALL')
@@ -83,7 +84,14 @@ export const Logs: React.FC = () => {
   const [isExplaining, setIsExplaining] = useState(false)
   const [maskedPayload, setMaskedPayload] = useState<string | null>(null)
   const [isMasking, setIsMasking] = useState(false)
-  const limit = 20
+  const range = useMemo(() => {
+    if (rangePreset === 'all') return { from: null as number | null, to: null as number | null }
+    const now = Math.floor(Date.now() / 1000)
+    const span = { '15m': 900, '1h': 3600, '24h': 86400, '7d': 604800 }[rangePreset]
+    return { from: now - span, to: null as number | null }
+  }, [rangePreset])
+  // histogram bucket chosen from the span so the bar chart stays readable
+  const bucketSeconds = rangePreset === '15m' ? 60 : rangePreset === '1h' ? 300 : rangePreset === '24h' ? 3600 : rangePreset === '7d' ? 86400 : 86400
 
   const { selectedOrigin, selectedOriginLabel, setSelectedOrigin } = useOriginFilterStore()
 
@@ -93,28 +101,37 @@ export const Logs: React.FC = () => {
     staleTime: 30000,
   })
 
-  const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['logs-paginated', page, debouncedSearch, statusFilter, severityFilter, methodFilter, selectedOrigin],
-    queryFn: () =>
-      logsApi.getLogsPaginated({
-        page,
-        limit,
-        search: debouncedSearch,
-        status_filter: statusFilter,
-        severity_filter: severityFilter,
-        method_filter: methodFilter,
-        origin: selectedOrigin,
-      }),
-    refetchInterval: 6000,
-  })
+  const commonFilters = {
+    search: debouncedSearch,
+    status_filter: statusFilter,
+    severity_filter: severityFilter,
+    method_filter: methodFilter,
+    origin: selectedOrigin,
+    from_ts: range.from,
+    to_ts: range.to,
+  }
 
-  const logs = data?.logs || []
-  const total = data?.total || 0
-  const totalPages = data?.total_pages || 1
+  const { data, isLoading, isFetching, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteQuery({
+      queryKey: ['logs-stream', debouncedSearch, statusFilter, severityFilter, methodFilter, selectedOrigin, range.from, range.to],
+      queryFn: ({ pageParam }) => logsApi.getLogStream({ ...commonFilters, limit: 50, cursor: pageParam as LogCursor | null }),
+      initialPageParam: null as LogCursor | null,
+      getNextPageParam: (lastPage) => (lastPage.has_more ? lastPage.next_cursor : undefined),
+      refetchInterval: 8000,
+    })
+
+  const logs = data?.pages.flatMap((pg) => pg.logs) ?? []
+  const total = logs.length
+
+  const { data: histogram = [] } = useQuery<HistogramBucket[]>({
+    queryKey: ['logs-histogram', debouncedSearch, statusFilter, severityFilter, methodFilter, selectedOrigin, range.from, range.to, bucketSeconds],
+    queryFn: () => logsApi.getHistogram({ ...commonFilters, bucket_seconds: bucketSeconds }),
+    refetchInterval: 15000,
+  })
+  const histoMax = histogram.reduce((m, b) => Math.max(m, b.total), 1)
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value)
-    setPage(1)
   }
 
   const handleExplainLog = async (logId: string) => {
@@ -149,14 +166,6 @@ export const Logs: React.FC = () => {
     setTimeout(() => setCopiedText(null), 2000)
   }
 
-  const handleJumpPage = (e: React.FormEvent) => {
-    e.preventDefault()
-    const target = parseInt(pageInput, 10)
-    if (!isNaN(target) && target >= 1 && target <= totalPages) {
-      setPage(target)
-      setPageInput('')
-    }
-  }
 
   const exportToCSV = () => {
     if (logs.length === 0) return
@@ -176,7 +185,7 @@ export const Logs: React.FC = () => {
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
     const a = document.createElement('a')
     a.href = window.URL.createObjectURL(blob)
-    a.download = `waf_traffic_logs_page${page}_${formatThaiDateTime(new Date()).slice(0, 10)}.csv`
+    a.download = `waf_traffic_logs_${formatThaiDateTime(new Date()).slice(0, 10)}.csv`
     a.click()
     toast.success('Downloaded log records CSV')
   }
@@ -199,8 +208,6 @@ export const Logs: React.FC = () => {
     return <Badge color="gray">NONE</Badge>
   }
 
-  const startRecord = (page - 1) * limit + 1
-  const endRecord = Math.min(page * limit, total)
 
   return (
     <div className="animate-fade-in pb-8">
@@ -261,6 +268,55 @@ export const Logs: React.FC = () => {
         </div>
       )}
 
+      {/* Time range + activity histogram (filter-first, click a bar to zoom) */}
+      <div className="dash-card p-4 mb-4 font-mono">
+        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            {(['15m','1h','24h','7d','all'] as const).map((r) => (
+              <button
+                key={r}
+                onClick={() => setRangePreset(r)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                  rangePreset === r
+                    ? 'border-orange-500 bg-orange-500/10 text-orange-500'
+                    : 'border-[var(--bg-border)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
+                }`}
+              >
+                {r === 'all' ? 'All' : `Last ${r}`}
+              </button>
+            ))}
+          </div>
+          <div className="text-[11px] text-[var(--text-muted)]">
+            {histogram.reduce((a: number, b: HistogramBucket) => a + b.total, 0).toLocaleString()} events in range
+            {' · '}
+            {histogram.reduce((a: number, b: HistogramBucket) => a + b.blocked, 0).toLocaleString()} blocked
+          </div>
+        </div>
+        <div className="flex items-end gap-[2px] h-16">
+          {histogram.length === 0 ? (
+            <div className="w-full text-center text-[11px] text-[var(--text-muted)] self-center">No activity in this range</div>
+          ) : (
+            histogram.map((b: HistogramBucket) => {
+              const h = Math.max(2, Math.round((b.total / histoMax) * 64))
+              const bh = b.total > 0 ? Math.round((b.blocked / b.total) * h) : 0
+              const d = new Date(b.bucket * 1000)
+              const label = `${d.toLocaleString('en-GB', { timeZone: 'Asia/Bangkok' })} — ${b.total} events, ${b.blocked} blocked`
+              return (
+                <div
+                  key={b.bucket}
+                  title={label}
+                  className="flex-1 min-w-[2px] flex flex-col justify-end cursor-pointer group"
+                  onClick={() => { setRangePreset('all'); }}
+                >
+                  <div className="w-full bg-red-500/80 rounded-t-sm" style={{ height: `${bh}px` }} />
+                  <div className="w-full bg-orange-400/50 group-hover:bg-orange-400 rounded-b-sm" style={{ height: `${h - bh}px` }} />
+                </div>
+              )
+            })
+          )}
+        </div>
+      </div>
+
       {/* Filter and Search Bar */}
       <div className="dash-card p-4 mb-4 font-mono">
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
@@ -282,7 +338,6 @@ export const Logs: React.FC = () => {
               value={statusFilter}
               onChange={(e) => {
                 setStatusFilter(e.target.value)
-                setPage(1)
               }}
               className="w-full px-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
             >
@@ -303,7 +358,6 @@ export const Logs: React.FC = () => {
               value={severityFilter}
               onChange={(e) => {
                 setSeverityFilter(e.target.value)
-                setPage(1)
               }}
               className="w-full px-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
             >
@@ -322,7 +376,6 @@ export const Logs: React.FC = () => {
               value={methodFilter}
               onChange={(e) => {
                 setMethodFilter(e.target.value)
-                setPage(1)
               }}
               className="w-full px-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
             >
@@ -417,49 +470,19 @@ export const Logs: React.FC = () => {
           </table>
         </div>
 
-        {/* Pagination Bar */}
+        {/* Load-more footer (keyset -- no deep paging) */}
         <div className="p-3.5 border-t border-[var(--bg-border)] flex flex-col sm:flex-row items-center justify-between gap-3 text-[12px] font-mono text-[var(--text-muted)]">
           <div>
-            Showing <strong className="text-[var(--text-primary)]">{total > 0 ? startRecord : 0}</strong>–
-            <strong className="text-[var(--text-primary)]">{endRecord}</strong> of{' '}
-            <strong className="text-orange-500">{total.toLocaleString()}</strong> events
+            Loaded <strong className="text-orange-500">{total.toLocaleString()}</strong> events
+            {hasNextPage ? ' (more available)' : ' (end of range)'}
           </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setPage(1)}
-              disabled={page <= 1}
-              className="p-1.5 rounded-lg border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
-            >
-              <ChevronsLeft size={14} />
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.max(p - 1, 1))}
-              disabled={page <= 1}
-              className="p-1.5 rounded-lg border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
-            >
-              <ChevronLeft size={14} />
-            </button>
-
-            <span className="px-2 font-bold text-[var(--text-primary)]">
-              Page {page} of {totalPages}
-            </span>
-
-            <button
-              onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-              disabled={page >= totalPages}
-              className="p-1.5 rounded-lg border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
-            >
-              <ChevronRight size={14} />
-            </button>
-            <button
-              onClick={() => setPage(totalPages)}
-              disabled={page >= totalPages}
-              className="p-1.5 rounded-lg border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
-            >
-              <ChevronsRight size={14} />
-            </button>
-          </div>
+          <button
+            onClick={() => fetchNextPage()}
+            disabled={!hasNextPage || isFetchingNextPage}
+            className="px-4 py-1.5 rounded-lg border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer text-[var(--text-primary)] font-semibold"
+          >
+            {isFetchingNextPage ? 'Loading…' : hasNextPage ? 'Load more' : 'No more'}
+          </button>
         </div>
       </div>
 
