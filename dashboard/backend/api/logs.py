@@ -97,6 +97,58 @@ async def get_logs(
     }
 
 
+@router.get("/stream")
+async def stream_logs(
+    limit: int = Query(50, ge=1, le=200),
+    search: str = Query("", max_length=256),
+    status: str = Query("ALL"),
+    severity: str = Query("ALL"),
+    method: str = Query("ALL"),
+    origin: Optional[str] = Query("ALL"),
+    from_ts: Optional[int] = Query(None, description="epoch seconds, inclusive lower bound"),
+    to_ts: Optional[int] = Query(None, description="epoch seconds, inclusive upper bound"),
+    cursor_ts: Optional[int] = Query(None, description="keyset cursor: epoch seconds of last row"),
+    cursor_id: Optional[str] = Query(None, description="keyset cursor: id of last row"),
+    include_health: bool = Query(False, description="include internal /healthz checks"),
+    current_user: dict = Depends(require_viewer_or_above),
+):
+    """Keyset-paginated log stream (filter-first, 'load more'). Replaces deep
+    offset paging: send the previous page's next_cursor to get the next slice."""
+    clause = _tenant_clause(current_user, origin)
+    if clause == "1=0" or not ch.connected:
+        return {"logs": [], "has_more": False, "next_cursor": None}
+    return ch.query_logs_keyset(
+        limit=limit, search=search, status_filter=status, severity_filter=severity,
+        method_filter=method, origin_clause=clause, from_ts=from_ts, to_ts=to_ts,
+        cursor_ts=cursor_ts, cursor_id=cursor_id, exclude_health=not include_health,
+    )
+
+
+@router.get("/histogram")
+async def logs_histogram(
+    bucket_seconds: int = Query(3600, ge=10, le=86400),
+    search: str = Query("", max_length=256),
+    status: str = Query("ALL"),
+    severity: str = Query("ALL"),
+    method: str = Query("ALL"),
+    origin: Optional[str] = Query("ALL"),
+    from_ts: Optional[int] = Query(None),
+    to_ts: Optional[int] = Query(None),
+    include_health: bool = Query(False),
+    current_user: dict = Depends(require_viewer_or_above),
+):
+    """Counts per time bucket for the filter bar chart (total + blocked)."""
+    clause = _tenant_clause(current_user, origin)
+    if clause == "1=0" or not ch.connected:
+        return {"buckets": [], "bucket_seconds": bucket_seconds}
+    buckets = ch.logs_histogram(
+        bucket_seconds=bucket_seconds, search=search, status_filter=status,
+        severity_filter=severity, method_filter=method, origin_clause=clause,
+        from_ts=from_ts, to_ts=to_ts, exclude_health=not include_health,
+    )
+    return {"buckets": buckets, "bucket_seconds": bucket_seconds}
+
+
 @router.get("/recent")
 async def fetch_recent_logs(
     limit: int = Query(100, ge=1, le=500),
