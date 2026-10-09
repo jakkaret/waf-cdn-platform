@@ -8,8 +8,13 @@ from typing import Dict, Any
 
 # ML API Endpoints
 BASE_ML_URL = os.environ.get("ML_API_URL", "http://127.0.0.1:5000").rstrip("/")
-PREDICT_URL = f"{BASE_ML_URL}/predict" if not BASE_ML_URL.endswith("/predict") else BASE_ML_URL
+PREDICT_URL = os.environ.get("ML_PREDICT_URL") or (
+    f"{BASE_ML_URL}/predict" if not BASE_ML_URL.endswith("/predict") else BASE_ML_URL)  # e.g. .../predict-gen3
 RULE_GEN_URL = f"{BASE_ML_URL}/generate-rule"
+# Same token as the backend (dashboard/backend/api/ml.py) when the ML service is remote.
+ML_HEADERS = {"Content-Type": "application/json"}
+if os.environ.get("ML_SERVICE_TOKEN"):
+    ML_HEADERS["X-WAF-ML-Token"] = os.environ["ML_SERVICE_TOKEN"]
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -25,7 +30,7 @@ def send_prediction_request(url: str, method: str = "GET", body: str = "") -> Di
     """Synchronous HTTP call to FastAPI ML Microservice with fast timeout."""
     try:
         data = json.dumps({"url": url, "method": method, "body": body}).encode("utf-8")
-        req = urllib.request.Request(PREDICT_URL, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        req = urllib.request.Request(PREDICT_URL, data=data, headers=ML_HEADERS, method="POST")
         with urllib.request.urlopen(req, timeout=1.5) as resp:
             if resp.status == 200:
                 return json.loads(resp.read().decode("utf-8"))
@@ -38,7 +43,7 @@ def send_rule_generation_request(url: str, method: str = "GET", body: str = "", 
     """Request auto-generation of ModSecurity SecRule."""
     try:
         data = json.dumps({"url": url, "method": method, "body": body, "attack_type": attack_type}).encode("utf-8")
-        req = urllib.request.Request(RULE_GEN_URL, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        req = urllib.request.Request(RULE_GEN_URL, data=data, headers=ML_HEADERS, method="POST")
         with urllib.request.urlopen(req, timeout=1.5) as resp:
             if resp.status == 200:
                 return json.loads(resp.read().decode("utf-8"))
@@ -107,7 +112,7 @@ async def tail_log_channel(channel_name: str, log_path: str):
                     loop = asyncio.get_event_loop()
                     result = await loop.run_in_executor(None, send_prediction_request, url, method, body)
 
-                    if result and result.get("is_anomaly"):
+                    if result and (result.get("is_anomaly") or result.get("is_attack")):  # /predict | /predict-gen3
                         prob = result.get("attack_probability", 0.0) * 100
                         print(f"🚨 [{channel_name} DETECTED] IP: {ip:<15} | Prob: {prob:5.1f}% | URL: {url}")
 

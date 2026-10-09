@@ -11,11 +11,11 @@ import joblib
 from skl2onnx import convert_sklearn
 from skl2onnx.common.data_types import FloatTensorType
 
-from ml.feature_engineering import FEATURE_COLUMNS
+from ml.feature_engineering import feature_columns_for_model
 
 
 def export_model(model, output_path: Path) -> dict[str, object]:
-    initial_types = [("features", FloatTensorType([None, len(FEATURE_COLUMNS)]))]
+    initial_types = [("features", FloatTensorType([None, len(feature_columns_for_model(model))]))]
     options = {id(model): {"zipmap": False}} if hasattr(model, "predict_proba") else None
     onnx_model = convert_sklearn(
         model,
@@ -45,7 +45,7 @@ def main() -> int:
     rf = joblib.load(args.models_dir / "random_forest_waf.joblib")
 
     manifest = {
-        "feature_columns": FEATURE_COLUMNS,
+        "feature_columns": feature_columns_for_model(rf),
         "random_forest": export_model(rf, args.models_dir / "random_forest_waf.onnx"),
         "isolation_forest": {
             "status": "async_only",

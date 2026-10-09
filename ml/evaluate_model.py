@@ -6,7 +6,7 @@ import pandas as pd
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from ml.feature_engineering import extract_features_from_request, FEATURE_COLUMNS
+from ml.feature_engineering import extract_features_from_request, FEATURE_COLUMNS, EXTENDED_FEATURE_COLUMNS
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 RF_PATH = os.path.join(MODELS_DIR, "random_forest_waf.joblib")
@@ -59,7 +59,8 @@ def evaluate_sample_requests():
             method=req.get("method", "GET"),
             body=req.get("body", "")
         )
-        df_feat = pd.DataFrame([feats])[FEATURE_COLUMNS]
+        feature_columns = EXTENDED_FEATURE_COLUMNS if getattr(rf_model, "n_features_in_", len(FEATURE_COLUMNS)) == len(EXTENDED_FEATURE_COLUMNS) else FEATURE_COLUMNS
+        df_feat = pd.DataFrame([feats])[feature_columns]
 
         rf_pred = rf_model.predict(df_feat)[0]
         prob = float(rf_model.predict_proba(df_feat)[0][1])

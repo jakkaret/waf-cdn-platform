@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import hashlib
 import joblib
 import pandas as pd
 import numpy as np
@@ -11,7 +12,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from ml.download_dataset import load_combined_dataset
-from ml.feature_engineering import extract_features_from_request, FEATURE_COLUMNS
+from ml.feature_engineering import extract_features_from_request, FEATURE_COLUMNS, EXTENDED_FEATURE_COLUMNS
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 RF_MODEL_PATH = os.path.join(MODELS_DIR, "random_forest_waf.joblib")
@@ -21,53 +22,111 @@ EVAL_RESULTS_PATH = os.path.join(MODELS_DIR, "eval_results.json")
 
 def load_and_preprocess_dataset():
     df = load_combined_dataset()
-    
+
+    # Enforce the roadmap's no-leakage rule before feature extraction and before
+    # the train/test split. The raw request tuple is the identity key; hashing
+    # it makes the check explicit, reproducible and independent of row order.
+    request_columns = ["URI", "GET-Query", "POST-Data", "Method"]
+    rows_before_deduplication = len(df)
+    canonical_rows = (
+        df[request_columns]
+        .fillna("")
+        .astype(str)
+        .agg("\x1f".join, axis=1)
+    )
+    request_hashes = canonical_rows.map(
+        lambda value: hashlib.sha256(value.encode("utf-8")).hexdigest()
+    )
+    labels = (
+        df["Class"].astype(str).str.strip().str.lower()
+        .map(lambda value: 1 if value in {"anomalous", "1"} else 0)
+    )
+
+    duplicate_mask = request_hashes.duplicated(keep=False)
+    if duplicate_mask.any():
+        conflicting = (
+            pd.DataFrame({"hash": request_hashes, "label": labels})
+            .groupby("hash")["label"]
+            .nunique()
+        )
+        if (conflicting > 1).any():
+            raise ValueError("Conflicting labels found for an identical request hash")
+        keep_mask = ~request_hashes.duplicated(keep="first")
+        print(
+            f"[+] SHA-256 deduplication removed "
+            f"{int((~keep_mask).sum())} duplicate rows before split"
+        )
+        df = df.loc[keep_mask].reset_index(drop=True)
+        labels = labels.loc[keep_mask].reset_index(drop=True)
+        request_hashes = request_hashes.loc[keep_mask].reset_index(drop=True)
+
+    if request_hashes.nunique() != len(request_hashes):
+        raise AssertionError("Request hashes are not unique before train/test split")
+
     features_list = []
-    labels = []
+    labels_from_features = []
 
     print("[*] Processing Multi-Dataset rows with URL Decoding and Advanced Feature Extraction...")
 
-    for idx, row in df.iterrows():
+    for _, row in df.iterrows():
         uri = str(row["URI"]) if pd.notna(row.get("URI")) else ""
         get_query = str(row["GET-Query"]) if pd.notna(row.get("GET-Query")) else ""
         post_data = str(row["POST-Data"]) if pd.notna(row.get("POST-Data")) else ""
         method = str(row["Method"]) if pd.notna(row.get("Method")) else "GET"
-
         full_url = f"{uri}?{get_query}" if get_query else uri
 
-        feat = extract_features_from_request(
-            url=full_url,
-            method=method,
-            body=post_data
+        features_list.append(
+            extract_features_from_request(
+                url=full_url,
+                method=method,
+                body=post_data,
+            )
         )
-        features_list.append(feat)
-
         class_str = str(row.get("Class", "")).strip().lower()
-        lbl = 1 if class_str == "anomalous" or class_str == "1" else 0
-        labels.append(lbl)
+        labels_from_features.append(1 if class_str in {"anomalous", "1"} else 0)
 
-    X_df = pd.DataFrame(features_list)[FEATURE_COLUMNS]
-    y_series = pd.Series(labels)
+    X_df = pd.DataFrame(features_list)[EXTENDED_FEATURE_COLUMNS]
+    y_series = pd.Series(labels_from_features)
+    if y_series.tolist() != labels.tolist():
+        raise AssertionError("Feature labels diverged from deduplicated source labels")
 
-    return X_df, y_series
+    return X_df, y_series, request_hashes.tolist(), {
+        "hash_algorithm": "sha256",
+        "rows_before_deduplication": rows_before_deduplication,
+        "rows_after_deduplication": len(X_df),
+        "duplicate_rows_removed": rows_before_deduplication - len(X_df),
+        "unique_hashes": int(request_hashes.nunique()),
+    }
 
 def train_and_evaluate():
     os.makedirs(MODELS_DIR, exist_ok=True)
 
     # 1. Extract features from multi-dataset
-    X, y = load_and_preprocess_dataset()
+    X, y, request_hashes, integrity = load_and_preprocess_dataset()
 
     print(f"[+] Total multi-dataset samples: {len(X)}")
     print(f"    - Benign (Normal, Label 0): {sum(y == 0)}")
     print(f"    - Malicious (Attack, Label 1): {sum(y == 1)}")
 
-    # 2. Perform Train / Test Split (75% Train, 25% Test)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.25, random_state=42, stratify=y
+    # 2. Perform Train / Test Split (75% Train, 25% Test) by row index so the
+    # hash sets can be checked directly for leakage.
+    row_indices = np.arange(len(X))
+    train_indices, test_indices = train_test_split(
+        row_indices, test_size=0.25, random_state=42, stratify=y
     )
+    train_hashes = {request_hashes[index] for index in train_indices}
+    test_hashes = {request_hashes[index] for index in test_indices}
+    overlap = train_hashes & test_hashes
+    if overlap:
+        raise AssertionError(f"SHA-256 leakage detected across split: {len(overlap)} hashes")
+    integrity["train_unique_hashes"] = len(train_hashes)
+    integrity["test_unique_hashes"] = len(test_hashes)
+    integrity["train_test_hash_overlap"] = len(overlap)
 
-    print(f"[*] Train set size: {len(X_train)} (Benign: {sum(y_train == 0)}, Attack: {sum(y_train == 1)})")
-    print(f"[*] Test set size:  {len(X_test)} (Benign: {sum(y_test == 0)}, Attack: {sum(y_test == 1)})")
+    X_train = X.iloc[train_indices].reset_index(drop=True)
+    X_test = X.iloc[test_indices].reset_index(drop=True)
+    y_train = y.iloc[train_indices].reset_index(drop=True)
+    y_test = y.iloc[test_indices].reset_index(drop=True)
 
     # 3. Train Supervised Classifier (Random Forest) for High Accuracy & Strong Generalization
     print("[*] Training Random Forest Classifier (n_estimators=200, max_depth=20, min_samples_leaf=3) ...")
@@ -119,7 +178,7 @@ def train_and_evaluate():
 
     # Feature Importance
     importances = rf_model.feature_importances_
-    feat_importance_dict = {col: round(float(imp), 4) for col, imp in zip(FEATURE_COLUMNS, importances)}
+    feat_importance_dict = {col: round(float(imp), 4) for col, imp in zip(EXTENDED_FEATURE_COLUMNS, importances)}
 
     print("\n" + "="*65)
     print(" 🚀 HIGH-ACCURACY MULTI-DATASET EVALUATION REPORT (25% TEST DATA)")
@@ -183,7 +242,8 @@ def train_and_evaluate():
             "attack_scores": attack_scores
         },
         "feature_importances": feat_importance_dict,
-        "feature_columns": FEATURE_COLUMNS
+        "feature_columns": EXTENDED_FEATURE_COLUMNS,
+        "data_integrity": integrity
     }
 
     with open(EVAL_RESULTS_PATH, "w", encoding="utf-8") as f:

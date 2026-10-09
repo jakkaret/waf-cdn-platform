@@ -1,0 +1,753 @@
+{
+  "model": "Gen3FModel: LightGBM on feature set F, trained on all data except ['OpenAppSec']",
+  "status": "NOT PROMOTED - promotion gate 3.1-G.0 passed 3/5 (see reference_experiment); demo / shadow use only",
+  "created": "20261002-153004",
+  "git_commit": "c1d3d58e0d0b369e68c83ab1c6cb26bd07f5c2f6",
+  "feature_set": "gen3-F-2026-09-29-canon2",
+  "feature_columns": [
+    "special_char_count",
+    "special_char_ratio",
+    "suspicious_path_marker_count",
+    "encoded_char_ratio",
+    "double_encoded_count",
+    "encoded_attack_token_count",
+    "delimiter_count",
+    "delimiter_ratio",
+    "comment_token_count",
+    "inline_function_count",
+    "json_operator_count",
+    "keyword_matches",
+    "html_tag_matches",
+    "path_traversal_depth",
+    "quote_unbalanced",
+    "has_sql_operator",
+    "has_ssrf_token",
+    "has_ssti_nosql",
+    "is_oversized_payload",
+    "is_clean_structure",
+    "has_excessive_params",
+    "method_is_post",
+    "is_static_asset",
+    "method_is_uncommon",
+    "has_duplicate_param_keys",
+    "has_control_char_encoding",
+    "non_printable_char_count",
+    "param_key_has_capital",
+    "param_value_punctuation_count",
+    "param_anomaly_score",
+    "v_sqli_libinjection",
+    "v_xss_libinjection",
+    "v_cmd_injection",
+    "v_path_traversal",
+    "v_sensitive_file",
+    "v_template_injection",
+    "v_nosql_operator",
+    "v_ssrf_target",
+    "v_code_exec",
+    "v_xml_entity",
+    "v_crlf_header",
+    "v_restricted_file",
+    "v_detector_units",
+    "v_max_keyword_hits",
+    "v_max_special_count",
+    "v_max_special_ratio",
+    "v_max_decode_layers",
+    "query_body_entropy"
+  ],
+  "threshold": 0.874914,
+  "benign_target_per_dataset": 0.99,
+  "threshold_per_dataset": {
+    "CSIC_2010_Cleaned": 0.874914,
+    "SRBH2020_Honeypot": 0.477434
+  },
+  "hyperparameters": {
+    "n_estimators": 400,
+    "max_depth": 10,
+    "num_leaves": 80,
+    "min_child_samples": 20,
+    "learning_rate": 0.05,
+    "reg_alpha": 0.2,
+    "reg_lambda": 0.3,
+    "colsample_bytree": 0.8,
+    "subsample": 0.85,
+    "random_state": 42,
+    "n_jobs": 6,
+    "verbose": -1,
+    "class_weight": {
+      "0": 1.0,
+      "1": 1.0
+    },
+    "from": "task3-1-real-augmented-candidate-20260927-205652"
+  },
+  "out_of_fold_at_threshold": {
+    "CSIC_2010_Cleaned": {
+      "benign_recall": 0.9901,
+      "benign_shapes": 2986.0,
+      "attack_recall": 0.5866,
+      "attack_shapes": 5684.0
+    },
+    "SRBH2020_Honeypot": {
+      "benign_recall": 0.998,
+      "benign_shapes": 31030.1,
+      "attack_recall": 0.9617,
+      "attack_shapes": 45784.0
+    }
+  },
+  "out_of_fold_gate_estimates": {
+    "G1_min_benign": 0.9901,
+    "G2_mean_known_attack": 0.7742
+  },
+  "out_of_fold_metrics": {
+    "all_datasets": {
+      "precision": 0.9981,
+      "recall": 0.9203,
+      "f1": 0.9576,
+      "tp": 47366.3367,
+      "fp": 92.5,
+      "fn": 4101.6633,
+      "tn": 33923.5833
+    },
+    "CSIC_2010_Cleaned": {
+      "precision": 0.9912,
+      "recall": 0.5866,
+      "f1": 0.737,
+      "tp": 3334.0034,
+      "fp": 29.5,
+      "fn": 2349.9966,
+      "tn": 2956.5
+    },
+    "SRBH2020_Honeypot": {
+      "precision": 0.9986,
+      "recall": 0.9617,
+      "f1": 0.9798,
+      "tp": 44032.3333,
+      "fp": 63.0,
+      "fn": 1751.6667,
+      "tn": 30967.0833
+    }
+  },
+  "scenarios": {
+    "normal_allowed": "37/37",
+    "attack_blocked": "23/26",
+    "misses": [
+      "BLOCK:WordPress admin probe",
+      "BLOCK:phpMyAdmin probe",
+      "BLOCK:Spring actuator probe"
+    ],
+    "metrics": {
+      "precision": 1.0,
+      "recall": 0.8846,
+      "f1": 0.9388,
+      "tp": 23.0,
+      "fp": 0.0,
+      "fn": 3.0,
+      "tn": 37.0
+    },
+    "results": [
+      {
+        "scenario": "Homepage root",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "Homepage HTML",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0105,
+        "correct": true
+      },
+      {
+        "scenario": "About page",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "About page HTML",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0105,
+        "correct": true
+      },
+      {
+        "scenario": "Contact page",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "Pricing page",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "Blog listing",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "Blog post",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "Documentation",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "FAQ page",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "Terms of service",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "Privacy policy",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "CSS stylesheet",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0105,
+        "correct": true
+      },
+      {
+        "scenario": "JavaScript file",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0105,
+        "correct": true
+      },
+      {
+        "scenario": "JS bundle",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0105,
+        "correct": true
+      },
+      {
+        "scenario": "PNG image",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0105,
+        "correct": true
+      },
+      {
+        "scenario": "JPEG image",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0105,
+        "correct": true
+      },
+      {
+        "scenario": "Favicon",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0105,
+        "correct": true
+      },
+      {
+        "scenario": "Web font",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0105,
+        "correct": true
+      },
+      {
+        "scenario": "Sitemap XML",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "Robots.txt",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "Health check",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": true
+      },
+      {
+        "scenario": "Product listing API",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.117,
+        "correct": true
+      },
+      {
+        "scenario": "User listing API",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.1072,
+        "correct": true
+      },
+      {
+        "scenario": "Order listing API",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.117,
+        "correct": true
+      },
+      {
+        "scenario": "Search query TH",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.1072,
+        "correct": true
+      },
+      {
+        "scenario": "Search query EN",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.1096,
+        "correct": true
+      },
+      {
+        "scenario": "Product filter",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.1072,
+        "correct": true
+      },
+      {
+        "scenario": "Profile update form",
+        "method": "POST",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0154,
+        "correct": true
+      },
+      {
+        "scenario": "Normal login form",
+        "method": "POST",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.1007,
+        "correct": true
+      },
+      {
+        "scenario": "Registration form",
+        "method": "POST",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0657,
+        "correct": true
+      },
+      {
+        "scenario": "Feedback form",
+        "method": "POST",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.1032,
+        "correct": true
+      },
+      {
+        "scenario": "Newsletter signup",
+        "method": "POST",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.0881,
+        "correct": true
+      },
+      {
+        "scenario": "Checkout form",
+        "method": "POST",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.1041,
+        "correct": true
+      },
+      {
+        "scenario": "JSON API message",
+        "method": "POST",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.1208,
+        "correct": true
+      },
+      {
+        "scenario": "Thai search query (\u0e01\u0e32\u0e23\u0e40\u0e23\u0e35\u0e22\u0e19)",
+        "method": "GET",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.2032,
+        "correct": true
+      },
+      {
+        "scenario": "Thai product review",
+        "method": "POST",
+        "expected": "ALLOW",
+        "predicted": "ALLOW",
+        "score": 0.1374,
+        "correct": true
+      },
+      {
+        "scenario": "SQLi Union-based",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "SQLi Boolean tautology",
+        "method": "POST",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "SQLi Drop table",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "SQLi Time-based blind",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "SQLi in POST body",
+        "method": "POST",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "XSS reflected script tag",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "XSS via img onerror",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "XSS via SVG onload",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "XSS via iframe",
+        "method": "POST",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "Path traversal /etc/passwd",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "Path traversal encoded",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "Path traversal double dot",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "RCE via semicolon",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "RCE via pipe",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "RCE in POST",
+        "method": "POST",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "Scanner probe .env",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "WordPress admin probe",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": false
+      },
+      {
+        "scenario": "phpMyAdmin probe",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": false
+      },
+      {
+        "scenario": "Git config probe",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "Spring actuator probe",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "ALLOW",
+        "score": 0.122,
+        "correct": false
+      },
+      {
+        "scenario": "Backup file probe",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 0.9987,
+        "correct": true
+      },
+      {
+        "scenario": "SSRF AWS metadata",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "SSRF localhost Redis",
+        "method": "POST",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "SSTI Jinja2",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "scenario": "NoSQL injection MongoDB",
+        "method": "POST",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 0.9999,
+        "correct": true
+      },
+      {
+        "scenario": "Log4Shell JNDI in param",
+        "method": "GET",
+        "expected": "BLOCK",
+        "predicted": "BLOCK",
+        "score": 0.9999,
+        "correct": true
+      }
+    ]
+  },
+  "latency_single_request": {
+    "p50_ms": 0.51,
+    "p95_ms": 0.82,
+    "n": 315
+  },
+  "reference_experiment": {
+    "report": "experiment-value-features-20260928-144424",
+    "config": "E_plus_query_body_entropy",
+    "gate_v2": "G1 98.69 PASS, G2 83.6 FAIL, G3 61.1 FAIL, G4 41.0 PASS, G5 PASS"
+  },
+  "data": {
+    "sources": [
+      "CSIC_2010_Cleaned",
+      "SRBH2020_Honeypot"
+    ],
+    "rows": 133977,
+    "excluded_datasets": [
+      "OpenAppSec"
+    ],
+    "integrity": {
+      "total_unique_samples": 297728,
+      "effective_distinct_shapes": 202923.0,
+      "unique_rows_by_source": {
+        "CSIC_2010_Cleaned": {
+          "benign": 9622,
+          "attack": 15472
+        },
+        "OpenAppSec_Legitimate": {
+          "benign": 97378,
+          "attack": 0
+        },
+        "OpenAppSec_Malicious": {
+          "benign": 0,
+          "attack": 66373
+        },
+        "SRBH2020_Honeypot": {
+          "benign": 39581,
+          "attack": 69302
+        }
+      }
+    },
+    "input_files": {
+      "dataset/csic_final.csv": {
+        "sha256": "65c74cd6e09b0e49771aa6f48d19cc5e1ba740f5ed927e16ecd952b797386195",
+        "bytes": 27376223
+      },
+      "dataset/external/openappsec_legitimate.jsonl": {
+        "sha256": "448d710683df9d0694246190fcd08080d0186f1b20dcfafd49b988d4caefb1d4",
+        "bytes": 942612710
+      },
+      "dataset/external/openappsec_malicious.jsonl": {
+        "sha256": "619abb70c8058e260c3a04648dd9cf7af356612fee8f6bedad617cd4d820b5ae",
+        "bytes": 16303567
+      },
+      "dataset/external/srbh2020_labelled.jsonl": {
+        "sha256": "b7189a779fa47a29e4b0244abd34b8d9c5aa4b397bb8497ec553f58d5c4f14dc",
+        "bytes": 63545866
+      }
+    }
+  },
+  "code_sha256": {
+    "gen3_model.py": "b68a9ec3f922da4ad35c11edf2ba6825b1d0d7bbd9cb1f2a4a124c648e2eba57",
+    "gen3_onnx.py": "b38c85a24bb63a0369bc96f0cc1f5b6f137db4840d959e5a713835e8aff1bda7",
+    "value_features.py": "ed87fd91aca6d6ddb8138f767773c638e45fcc90a96c6a81955fd3bff7fbbade",
+    "feature_engineering.py": "ae1b5dcc2c0029597c97d2fc438729adb3832dd9a181540b1f4d734e047506c4",
+    "hybrid_model.py": "7bca726760ab7901d31b3f0e70d4bd2aa988a52f9b98af5fd499b8183bb1434f",
+    "train_final_gen3.py": "ad81d2ee81032483cbbb6ac9642f90628e4c27760b240fabd653bf55e24473de",
+    "train_gen3_full_real_benchmark.py": "fffb34a96239f1c51ae8b67aff483812805c0b54fbaeac22747099123135b617"
+  },
+  "environment": {
+    "python": "3.12.3",
+    "lightgbm": "4.7.0"
+  },
+  "onnx": {
+    "format": "onnx",
+    "opset": 15,
+    "input": "features",
+    "output": "probabilities[:, 1]",
+    "thresholds_rounded_down": 9300,
+    "thresholds_ambiguous": 0,
+    "parity_rows": 50063,
+    "parity_max_abs_diff_real_rows": 3.672522506104059e-07,
+    "parity_max_abs_diff_boundary_rows": 3.516556259519632e-07,
+    "parity_tolerance": 1e-05,
+    "parity_passed": true,
+    "versions": {
+      "onnx": "1.23.0",
+      "onnxmltools": "1.16.0",
+      "onnxruntime": "1.30.0"
+    },
+    "exported": true,
+    "file": "gen3_f_model.onnx",
+    "sha256": "5785143d9cecb5af88b96f29ebaac47debb3c360280b8bb365bb348069d65f0b",
+    "bytes": 2157369,
+    "latency_single_request": {
+      "p50_ms": 0.3,
+      "p95_ms": 0.49,
+      "n": 315
+    }
+  }
+}
