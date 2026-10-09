@@ -9,7 +9,11 @@ on:
     branches: [main, develop, backend, Backend]
 
 env:
+  # control-api and the other CDN containers run python:3.11-slim.
   PYTHON_VERSION: "3.11"
+  # Backend and ML run from a host venv (Python 3.14 on Main); their pins
+  # (numpy 2.5.3, pandas 3.0.6) need Python >= 3.12, so 3.11 could not install them.
+  BACKEND_PYTHON_VERSION: "3.12"
   NODE_VERSION: "20"
 
 jobs:
@@ -116,7 +120,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: ${{ env.BACKEND_PYTHON_VERSION }}
           cache: pip
 
       - name: Install dependencies
@@ -207,7 +211,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: ${{ env.BACKEND_PYTHON_VERSION }}
           cache: pip
 
       - name: Install dependencies
