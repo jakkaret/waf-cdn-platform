@@ -437,6 +437,121 @@ class ClickHouseService:
                 "severities": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"]
             }
 
+    _UUID_RE = __import__("re").compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+    def _log_filter_clauses(self, search="", status_filter="ALL", severity_filter="ALL",
+                            method_filter="ALL", origin_clause="", from_ts=None, to_ts=None,
+                            exclude_health=True) -> list:
+        """Shared WHERE clauses for the logs list + histogram. Time bounds are
+        integer epoch seconds (no injection); search/method are escaped."""
+        w = []
+        if origin_clause:
+            w.append(f"({origin_clause})")
+        if from_ts is not None:
+            w.append(f"timestamp >= toDateTime({int(from_ts)})")
+        if to_ts is not None:
+            w.append(f"timestamp <= toDateTime({int(to_ts)})")
+        if exclude_health:
+            # internal container health checks (GET /healthz from the docker
+            # gateway) flood the security view; drop them by default.
+            w.append("url != '/healthz'")
+        if search:
+            e = escape_like_value(search)
+            w.append(f"(client_ip ILIKE '%{e}%' OR url ILIKE '%{e}%' OR rule_id ILIKE '%{e}%' OR user_agent ILIKE '%{e}%' OR attack_type ILIKE '%{e}%')")
+        if status_filter and status_filter != "ALL":
+            if status_filter == "BLOCKED":
+                w.append("(status_code = 403 OR status_code = 429)")
+            elif status_filter == "ALLOWED":
+                w.append("status_code >= 200 AND status_code < 300")
+            elif str(status_filter).isdigit():
+                w.append(f"status_code = {int(status_filter)}")
+        if method_filter and method_filter != "ALL":
+            w.append(f"method = '{escape_like_value(method_filter)}'")
+        if severity_filter and severity_filter != "ALL":
+            m = {"CRITICAL": "(status_code = 403 OR status_code = 429)",
+                 "HIGH": "status_code >= 500",
+                 "MEDIUM": "status_code >= 400 AND status_code != 403 AND status_code != 429",
+                 "LOW": "status_code >= 300 AND status_code < 400",
+                 "NONE": "status_code >= 200 AND status_code < 300"}
+            if severity_filter in m:
+                w.append(m[severity_filter])
+        return w
+
+    def query_logs_keyset(self, limit=50, search="", status_filter="ALL", severity_filter="ALL",
+                          method_filter="ALL", origin_clause="", from_ts=None, to_ts=None,
+                          cursor_ts=None, cursor_id=None, exclude_health=True) -> dict:
+        """Cursor (keyset) pagination on (timestamp, id) DESC: stays fast at any
+        depth, unlike OFFSET which re-reads every skipped row. Returns one page
+        plus next_cursor; no total COUNT (too expensive on a huge table)."""
+        if not self.connected:
+            return {"logs": [], "has_more": False, "next_cursor": None}
+        limit = max(1, min(int(limit), 200))
+        w = self._log_filter_clauses(search, status_filter, severity_filter, method_filter,
+                                     origin_clause, from_ts, to_ts, exclude_health)
+        if cursor_ts is not None and cursor_id and self._UUID_RE.match(str(cursor_id)):
+            cts = int(cursor_ts)
+            w.append(f"(toUnixTimestamp(timestamp) < {cts} OR (toUnixTimestamp(timestamp) = {cts} AND id < toUUID('{cursor_id}')))")
+        where_str = f"WHERE {' AND '.join(w)}" if w else ""
+        query = f"""
+            SELECT toString(id) as log_id,
+                   formatDateTime(timestamp, '%Y-%m-%d %H:%i:%S') as datetime,
+                   toUnixTimestamp(timestamp) as ts,
+                   client_ip as ip, method, url, status_code as status,
+                   user_agent, country, edge_node, attack_type, rule_id,
+                   CASE WHEN status_code = 403 THEN 'CRITICAL'
+                        WHEN status_code >= 500 THEN 'HIGH'
+                        WHEN status_code >= 400 THEN 'MEDIUM'
+                        WHEN status_code >= 300 THEN 'LOW'
+                        ELSE 'NONE' END as severity
+            FROM access_logs
+            {where_str}
+            ORDER BY timestamp DESC, id DESC
+            LIMIT {limit + 1}
+        """
+        cols = ['log_id','datetime','ts','ip','method','url','status','user_agent','country','edge_node','attack_type','rule_id','severity']
+        try:
+            res = self.client.query(query)
+            rows = [dict(zip(cols, r)) for r in res.result_rows]
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            for r in rows:
+                if not r.get('rule_id'):
+                    r['rule_id'] = 'WAF-CRS' if r.get('status') == 403 else None
+            nxt = None
+            if has_more and rows:
+                last = rows[-1]
+                nxt = {"ts": int(last["ts"]), "id": last["log_id"]}
+            return {"logs": rows, "has_more": has_more, "next_cursor": nxt}
+        except Exception as e:
+            print(f"⚠️ Error querying ClickHouse logs (keyset): {e}")
+            return {"logs": [], "has_more": False, "next_cursor": None}
+
+    def logs_histogram(self, bucket_seconds=3600, search="", status_filter="ALL",
+                       severity_filter="ALL", method_filter="ALL", origin_clause="",
+                       from_ts=None, to_ts=None, exclude_health=True) -> list:
+        """Count per time bucket (+ how many were blocked) for the filter bar
+        chart. Lets the user see the shape and click a spike to zoom."""
+        if not self.connected:
+            return []
+        bucket_seconds = max(10, min(int(bucket_seconds), 86400))
+        w = self._log_filter_clauses(search, status_filter, severity_filter, method_filter,
+                                     origin_clause, from_ts, to_ts, exclude_health)
+        where_str = f"WHERE {' AND '.join(w)}" if w else ""
+        query = f"""
+            SELECT toUnixTimestamp(toStartOfInterval(timestamp, INTERVAL {bucket_seconds} SECOND)) as bucket,
+                   count() as total,
+                   countIf(status_code = 403 OR status_code = 429) as blocked
+            FROM access_logs
+            {where_str}
+            GROUP BY bucket ORDER BY bucket
+        """
+        try:
+            res = self.client.query(query)
+            return [{"bucket": int(r[0]), "total": int(r[1]), "blocked": int(r[2])} for r in res.result_rows]
+        except Exception as e:
+            print(f"⚠️ Error querying ClickHouse histogram: {e}")
+            return []
+
     def get_logs(
         self,
         limit: int = 20,
