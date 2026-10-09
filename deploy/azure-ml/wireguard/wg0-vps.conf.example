@@ -1,0 +1,12 @@
+# /etc/wireguard/wg0.conf on the main WAF VPS. chmod 600.
+# The VPS dials out to the ML host, so the VPS needs no new inbound port.
+[Interface]
+Address = 10.77.0.1/24
+PrivateKey = <VPS_PRIVATE_KEY>
+
+# ML host (Azure VM)
+[Peer]
+PublicKey = <ML_HOST_PUBLIC_KEY>
+Endpoint = <ML_HOST_PUBLIC_IP>:51820
+AllowedIPs = 10.77.0.2/32
+PersistentKeepalive = 25

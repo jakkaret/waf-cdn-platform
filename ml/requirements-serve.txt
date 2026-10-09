@@ -1,14 +1,18 @@
 # ML API serving environment (ml/ml_api.py) for a separate ML host (deploy/azure-ml).
 # Python 3.12. No LightGBM: the Gen 3 model runs from its ONNX export (onnxruntime).
-# scikit-learn / pandas / joblib are for the explainable RandomForest /predict path
-# and must match requirements-train.txt, which produced the tracked .joblib models.
-fastapi==0.141.1
+# scikit-learn / pandas / joblib are for the explainable RandomForest /predict path.
+# Shared packages are pinned to the same versions as dashboard/backend/requirements.txt,
+# which already loads the tracked .joblib models in production (scikit-learn 1.9.0).
+# fastapi 0.142.1 + starlette 1.3.1: the patched pair from the backend (multipart DoS +
+# the 2026 PYSEC advisories); fastapi only pins starlette loosely, so pin it here too.
+fastapi==0.142.1
+starlette==1.3.1
 uvicorn==0.37.0
-numpy==2.5.2
-pandas==3.0.5
+numpy==2.5.3
+pandas==3.0.6
 scipy==1.18.0
 scikit-learn==1.9.0
-joblib==1.5.3
+joblib==1.6.0
 onnxruntime==1.30.0
 # SQLi/XSS detector used by the Gen 3 features (builds from source, needs gcc)
 libinjection-python==1.1.6

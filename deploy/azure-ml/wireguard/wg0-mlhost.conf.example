@@ -1,0 +1,11 @@
+# /etc/wireguard/wg0.conf on the ML host (Azure VM). chmod 600.
+# Keys: wg genkey | tee privatekey | wg pubkey > publickey   (never commit real keys)
+[Interface]
+Address = 10.77.0.2/24
+ListenPort = 51820
+PrivateKey = <ML_HOST_PRIVATE_KEY>
+
+# main WAF VPS
+[Peer]
+PublicKey = <VPS_PUBLIC_KEY>
+AllowedIPs = 10.77.0.1/32
