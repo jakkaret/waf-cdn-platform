@@ -23,7 +23,7 @@ async function register(page: Page, email: string, username: string, password: s
 
 async function login(page: Page, email: string, password: string) {
   await page.goto('/login')
-  await page.getByLabel(/email or username/i).fill(email)
+  await page.getByLabel('Email', { exact: true }).fill(email)
   await page.getByLabel('Password', { exact: true }).fill(password)
   await page.getByRole('button', { name: /sign in to console/i }).click()
 }
