@@ -1,5 +1,6 @@
 import ipaddress
 import logging
+import os
 import httpx
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from services.rbac import require_viewer_or_above
@@ -10,7 +11,29 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ml", tags=["ML Analyst"])
 
-ML_SERVICE_URL = "http://127.0.0.1:5000"
+
+def _env_float(name: str, default: float) -> float:
+    """A positive float from the environment; a missing or bad value keeps the default
+    (a typo in the env file must not stop the backend from starting)."""
+    try:
+        value = float(os.getenv(name, ""))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+# The ML service runs on this host by default, or on a separate ML host reached
+# over WireGuard (deploy/azure-ml/README.md): set ML_SERVICE_URL to its private
+# address and ML_SERVICE_TOKEN to the WAF_ML_API_TOKEN configured there. With
+# none of these set, behaviour is unchanged (local service, no token).
+ML_SERVICE_URL = os.getenv("ML_SERVICE_URL", "http://127.0.0.1:5000").rstrip("/")
+ML_SERVICE_TOKEN = os.getenv("ML_SERVICE_TOKEN", "")
+ML_TOKEN_HEADER = "X-WAF-ML-Token"
+# Budget of the Nginx shadow relay and the capture relay; both fail open beyond it.
+ML_FAST_TIMEOUT = _env_float("ML_FAST_TIMEOUT", 0.5)
+# Where lab telemetry capture is forwarded. Unset = the ML service; set but empty
+# = do not forward at all (keeps production request samples off a remote ML host).
+ML_CAPTURE_URL = os.getenv("ML_CAPTURE_URL", ML_SERVICE_URL).rstrip("/")
 INTERNAL_RELAY_HEADER = "X-Internal-ML-Relay"
 INTERNAL_RELAY_VALUE = "nginx-shadow-v1"
 INTERNAL_RELAY_NETWORK = ipaddress.ip_network("172.16.0.0/12")
@@ -44,6 +67,14 @@ class PredictRequest(BaseModel):
     url: str
     method: str = "GET"
     body: str = ""
+
+
+def _ml_headers(extra: dict | None = None) -> dict:
+    """Headers for every call to the ML service (the token only when configured)."""
+    headers = dict(extra or {})
+    if ML_SERVICE_TOKEN:
+        headers[ML_TOKEN_HEADER] = ML_SERVICE_TOKEN
+    return headers
 
 
 async def _attach_explanation(req: PredictRequest, result: dict) -> dict:
@@ -100,7 +131,8 @@ async def shadow_decision(request: Request):
             upstream = await client.post(
                 f"{ML_SERVICE_URL}/predict-fast",
                 json=payload,
-                timeout=0.5,
+                headers=_ml_headers(),
+                timeout=ML_FAST_TIMEOUT,
             )
         if upstream.status_code != 200:
             return Response(
@@ -129,21 +161,23 @@ async def capture_telemetry_relay(request: Request):
     """Docker-to-loopback relay for privacy-scoped lab telemetry."""
     if not _is_internal_relay_request(request):
         raise HTTPException(status_code=404, detail="Not found")
+    if not ML_CAPTURE_URL:
+        return Response(status_code=204)
     body = await request.body()
-    headers = {
+    headers = _ml_headers({
         "X-Original-Host": request.headers.get("X-Original-Host", ""),
         "X-Original-URI": request.headers.get("X-Original-URI", "/"),
         "X-Original-Method": request.headers.get("X-Original-Method", "GET"),
         "X-Original-Request-ID": request.headers.get("X-Original-Request-ID", ""),
         "Content-Type": request.headers.get("Content-Type", ""),
-    }
+    })
     try:
         async with httpx.AsyncClient() as client:
             await client.post(
-                f"{ML_SERVICE_URL}/capture",
+                f"{ML_CAPTURE_URL}/capture",
                 content=body,
                 headers=headers,
-                timeout=0.5,
+                timeout=ML_FAST_TIMEOUT,
             )
     except Exception as exc:
         logger.warning("ML capture relay failed open: %s", exc)
@@ -156,6 +190,7 @@ async def predict_anomaly(req: PredictRequest, current_user: dict = Depends(requ
             response = await client.post(
                 f"{ML_SERVICE_URL}/predict",
                 json=req.dict(),
+                headers=_ml_headers(),
                 timeout=10.0
             )
             response.raise_for_status()
@@ -174,6 +209,7 @@ async def predict_and_suggest(req: PredictRequest, current_user: dict = Depends(
             response = await client.post(
                 f"{ML_SERVICE_URL}/predict",
                 json=req.dict(),
+                headers=_ml_headers(),
                 timeout=10.0
             )
             response.raise_for_status()
@@ -191,6 +227,7 @@ async def predict_and_suggest(req: PredictRequest, current_user: dict = Depends(
                         "body": req.body,
                         "attack_type": "Anomaly Pattern"
                     },
+                    headers=_ml_headers(),
                     timeout=10.0
                 )
                 if rule_res.status_code == 200:
