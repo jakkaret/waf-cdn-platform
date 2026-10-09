@@ -23,12 +23,17 @@ def _secure() -> bool:
 
 class CSRFMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
-        if request.method not in SAFE_METHODS:
+        # Normalize: HTTP methods are case-sensitive, but a route only matches an
+        # uppercase verb, so treat the method uppercased to avoid a 'post' slipping
+        # the SAFE check while still reaching a POST handler via any differential.
+        if request.method.upper() not in SAFE_METHODS:
             has_bearer = request.headers.get("authorization", "").lower().startswith("bearer ")
             if request.cookies.get("access_token") and not has_bearer:
                 cookie_csrf = request.cookies.get("csrf_token")
                 header_csrf = request.headers.get("x-csrf-token")
-                if not cookie_csrf or not header_csrf or header_csrf != cookie_csrf:
+                # constant-time compare: never leak how much of the token matched
+                if (not cookie_csrf or not header_csrf
+                        or not secrets.compare_digest(str(header_csrf), str(cookie_csrf))):
                     return JSONResponse(status_code=403, content={"detail": "CSRF token missing or invalid"})
         response = await call_next(request)
         # Self-heal: a session from before this change has no csrf cookie yet;

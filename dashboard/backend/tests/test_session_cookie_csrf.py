@@ -92,3 +92,21 @@ def test_logout_clears_both_cookies(csrf_client):
     assert r.status_code == 200
     raw = r.headers.get("set-cookie", "")
     assert "access_token=" in raw and "csrf_token=" in raw  # both deleted (expired)
+
+
+def test_options_preflight_is_exempt(csrf_client):
+    _login(csrf_client)
+    # OPTIONS (CORS preflight) must never be blocked by CSRF
+    assert csrf_client.options("/api/echo").status_code in (200, 405)
+
+
+def test_empty_csrf_header_is_blocked(csrf_client):
+    _login(csrf_client)
+    r = csrf_client.post("/api/echo", headers={"X-CSRF-Token": ""})
+    assert r.status_code == 403
+
+
+def test_csrf_uses_constant_time_compare():
+    import inspect
+    import services.csrf as csrf
+    assert "compare_digest" in inspect.getsource(csrf.CSRFMiddleware.dispatch)
