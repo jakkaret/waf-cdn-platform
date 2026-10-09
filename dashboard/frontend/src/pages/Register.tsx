@@ -61,10 +61,9 @@ export const Register: React.FC = () => {
         password: formData.password,
         username: formData.username.trim(),
       })
-      const { access_token } = await authApi.login(formData.email.trim(), formData.password)
-      useAuthStore.setState({ token: access_token })
+      await authApi.login(formData.email.trim(), formData.password) // sets the HttpOnly session cookie
       const user = await authApi.getMe()
-      setAuth(access_token, user)
+      setAuth(user)
       toast.success('Account created successfully')
       navigate('/')
     } catch (err: any) {
@@ -73,7 +72,7 @@ export const Register: React.FC = () => {
       // -- otherwise a real bearer token sits in the persisted store while
       // isAuthenticated stays false, and axios keeps attaching it to
       // subsequent requests as a stale/orphaned credential.
-      useAuthStore.setState({ token: null })
+      useAuthStore.getState().logout()
       const detail = err.response?.data?.detail
       const message =
         typeof detail === 'string'

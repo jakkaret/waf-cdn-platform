@@ -23,7 +23,7 @@ export const OAuthSuccess: React.FC = () => {
       .then(res => {
         // สำหรับ cookie-based auth: token ใน store เป็น empty string
         // axios จะแนบ cookie อัตโนมัติทุก request
-        setAuth('', res.data)
+        setAuth(res.data)
         toast.success('Logged in with Google successfully!')
         navigate('/')
       })

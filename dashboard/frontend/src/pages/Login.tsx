@@ -32,10 +32,9 @@ export const Login: React.FC = () => {
 
     setLoading(true)
     try {
-      const { access_token } = await authApi.login(email.trim(), password)
-      useAuthStore.setState({ token: access_token })
+      await authApi.login(email.trim(), password) // sets the HttpOnly session cookie
       const user = await authApi.getMe()
-      setAuth(access_token, user)
+      setAuth(user)
       toast.success('Signed in successfully')
       navigate('/')
     } catch (err: any) {
@@ -47,7 +46,7 @@ export const Login: React.FC = () => {
           ? detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ')
           : 'Invalid email or password'
       toast.error(message)
-      useAuthStore.setState({ token: null })
+      useAuthStore.getState().logout()
     } finally {
       setLoading(false)
     }
