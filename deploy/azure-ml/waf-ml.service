@@ -1,0 +1,34 @@
+[Unit]
+Description=WAF ML API (ONNX) - separate ML host for the main WAF VPS
+Documentation=file:///opt/waf_project/deploy/azure-ml/README.md
+Wants=network-online.target
+After=network-online.target wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=wafml
+Group=wafml
+WorkingDirectory=/opt/waf_project/ml
+EnvironmentFile=/etc/waf-ml/waf-ml.env
+Environment=PYTHONPATH=/opt/waf_project
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/waf_project/.venv/bin/uvicorn ml_api:app --host ${WAF_ML_BIND} --port ${WAF_ML_PORT} --workers ${WAF_ML_WORKERS} --no-access-log
+Restart=on-failure
+RestartSec=3
+
+# Hardening: read-only code, write access to telemetry only, no privilege gain.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/opt/waf_project/ml/telemetry
+MemoryMax=900M
+
+[Install]
+WantedBy=multi-user.target
