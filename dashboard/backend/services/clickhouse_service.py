@@ -92,7 +92,14 @@ class ClickHouseService:
                 host=self.host,
                 port=self.port,
                 username=self.username,
-                password=self.password
+                password=self.password,
+                # One client is shared by every thread of a module (api/cdn.py
+                # runs one asyncio.to_thread batch per edge request, so two
+                # edges posting at once overlap). With a generated session id
+                # ClickHouse refuses the second query: "Attempt to execute
+                # concurrent queries within the same session". Nothing here
+                # relies on session state (no SET, no temporary tables).
+                autogenerate_session_id=False,
             )
             self.connected = True
             print("✅ Successfully connected to ClickHouse DB!")

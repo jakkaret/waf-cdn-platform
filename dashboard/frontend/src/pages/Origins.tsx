@@ -6,7 +6,8 @@ import { api } from '../api/axios'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
-import { AddOriginModal } from '../components/AddOriginModal'
+import { Modal } from '../components/ui/Modal'
+import { ConnectSiteFlow } from '../components/ConnectSiteFlow'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { toast } from 'react-hot-toast'
 import { originStatusBadge } from '../lib/tunnelStatus'
@@ -221,16 +222,16 @@ export const Origins: React.FC = () => {
           </h3>
           <p className="text-[12px] text-[var(--text-muted)] m-0 font-mono">
             {origins.length === 0
-              ? 'Click "Add Origin Server" to attach your backend hosts behind the WAF.'
+              ? 'เริ่มจากโดเมนของคุณ — ระบบหาเซิร์ฟเวอร์ให้และบอกสิ่งที่ต้องตั้งค่า'
               : 'No origins match the current search or status filter criteria.'}
           </p>
           {origins.length === 0 && (
             <button
               type="button"
-              onClick={() => navigate('/onboarding')}
+              onClick={() => setIsAddModalOpen(true)}
               className="mt-1 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-orange-700 hover:bg-orange-800 text-white text-[12px] font-mono font-semibold transition-colors cursor-pointer"
             >
-              เริ่มตั้งค่าด้วยตัวช่วย (Wizard)
+              เชื่อมเว็บแรกของคุณ
             </button>
           )}
         </div>
@@ -322,14 +323,18 @@ export const Origins: React.FC = () => {
         </div>
       )}
 
-      <AddOriginModal
-        open={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        onSuccess={() => {
-          setIsAddModalOpen(false)
-          refetch()
-        }}
-      />
+      {/* Domain first: the flow finds the server behind it and creates the
+          origin + domain in one call, then lands on its live setup status. */}
+      <Modal open={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="เชื่อมเว็บของคุณ">
+        <ConnectSiteFlow
+          onCancel={() => setIsAddModalOpen(false)}
+          onDone={(originId) => {
+            setIsAddModalOpen(false)
+            refetch()
+            navigate(`/origins/${originId}?tab=domains`)
+          }}
+        />
+      </Modal>
 
       <ConfirmDialog
         open={!!originToDelete}

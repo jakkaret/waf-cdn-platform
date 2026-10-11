@@ -50,14 +50,37 @@ def test_a_live_tunnel_domain_counts_as_configured_and_verified_without_a_domain
     assert status["next_step"] == "done"
 
 
-def test_a_domain_belonging_to_a_different_origin_does_not_count():
-    origins = [{"id": "o1"}, {"id": "o2"}]
-    domains = [{"origin_id": "o2", "domain_name": "other.example.com", "dns_verified": True}]
+def test_a_verified_older_origin_does_not_complete_a_new_one():
+    # The bug this replaces: status was account-wide, so one verified origin
+    # made every later origin read "done" and the wizard showed its success
+    # screen before the new origin had a domain.
+    origins = [{"id": "old", "created_at": "2026-10-01"}, {"id": "new", "created_at": "2026-10-09"}]
+    domains = [{"id": "d1", "origin_id": "old", "domain_name": "old.example.com", "dns_verified": True}]
     status = onboarding.compute_onboarding_status(origins=origins, domain_items=domains)
-    # o1 has none; o2 is verified -- overall still "done" since at least one
-    # origin is fully configured, but this proves cross-origin domains
-    # aren't attributed to the wrong origin's status.
-    assert status["next_step"] == "done"
+    assert status["next_step"] == "add_domain"
+    assert status["resume_origin_id"] == "new"
+    assert status["onboarding_complete"] is False
+
+
+def test_a_tunnel_on_another_origin_does_not_complete_a_new_one():
+    origins = [
+        {"id": "shared", "created_at": "2026-10-01", "tunnel_domains": ["x.example.com"]},
+        {"id": "new", "created_at": "2026-10-09"},
+    ]
+    status = onboarding.compute_onboarding_status(origins=origins, domain_items=[])
+    assert status["next_step"] == "add_domain"
+
+
+def test_the_newest_origin_with_an_unverified_domain_resumes_on_that_domain():
+    origins = [{"id": "old", "created_at": "2026-10-01"}, {"id": "new", "created_at": "2026-10-09"}]
+    domains = [
+        {"id": "d1", "origin_id": "old", "domain_name": "old.example.com", "dns_verified": True},
+        {"id": "d2", "origin_id": "new", "domain_name": "new.example.com", "dns_verified": False},
+    ]
+    status = onboarding.compute_onboarding_status(origins=origins, domain_items=domains)
+    assert status["next_step"] == "verify_domain"
+    assert status["resume_domain_id"] == "d2"
+    assert status["resume_domain_name"] == "new.example.com"
 
 
 def test_origin_count_reflects_the_real_number_of_origins():

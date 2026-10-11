@@ -1,8 +1,9 @@
-import React, { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import React, { useEffect, useState } from 'react'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getOrigin, deleteOrigin, restoreOrigin, updateOrigin, getOriginCves } from '../api/origins'
-import { getDomains, deleteDomain, verifyDomain } from '../api/domains'
+import { getDomains, deleteDomain } from '../api/domains'
+import { onboardingApi } from '../api/onboarding'
 import { getCaptchaConfig, updateCaptchaConfig } from '../api/captcha'
 import { getOtpConfig, updateOtpConfig } from '../api/otp'
 import { getOriginViewers, addOriginViewer, removeOriginViewer } from '../api/origin_viewers'
@@ -16,7 +17,9 @@ import { Button } from '../components/ui/Button'
 import { LoadingSpinner } from '../components/ui/LoadingSpinner'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState } from '../components/ui/EmptyState'
-import { DomainSetupWizard } from '../components/DomainSetupWizard'
+import { ConnectSiteFlow } from '../components/ConnectSiteFlow'
+import { DomainStatusCard } from '../components/DomainStatusCard'
+import { Modal } from '../components/ui/Modal'
 import { OriginWafRules } from '../components/OriginWafRules'
 import { ShieldActivity } from '../components/ShieldActivity'
 import {
@@ -77,7 +80,16 @@ export const OriginDetail: React.FC = () => {
   const currentUser = useAuthStore((s) => s.user)
   const [viewerEmailInput, setViewerEmailInput] = useState('')
   const [editorEmailInput, setEditorEmailInput] = useState('')
-  const [activeTab, setActiveTab] = useState<'overview' | 'domains' | 'waf' | 'ssl' | 'shield' | 'team' | 'postmortem'>('overview')
+  type OriginTab = 'overview' | 'domains' | 'waf' | 'shield' | 'team' | 'postmortem'
+  const [searchParams] = useSearchParams()
+  // ?tab=domains lands a just-connected site on its setup status. The old
+  // ?tab=ssl link target is now part of the Domains tab.
+  const requestedTab = searchParams.get('tab') === 'ssl' ? 'domains' : searchParams.get('tab')
+  const [activeTab, setActiveTab] = useState<OriginTab>(
+    (['overview', 'domains', 'waf', 'shield', 'team', 'postmortem'] as const).includes(requestedTab as OriginTab)
+      ? (requestedTab as OriginTab)
+      : 'overview'
+  )
   const [pmStart, setPmStart] = useState('')
   const [pmEnd, setPmEnd] = useState('')
   const [selectedPostmortemId, setSelectedPostmortemId] = useState<string | null>(null)
@@ -86,7 +98,6 @@ export const OriginDetail: React.FC = () => {
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false)
   const [isDomainWizardOpen, setIsDomainWizardOpen] = useState(false)
   const [domainToDelete, setDomainToDelete] = useState<string | null>(null)
-  const [verifyingDomainId, setVerifyingDomainId] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const impactCheck = useShieldImpactCheck(id || '')
 
@@ -110,6 +121,29 @@ export const OriginDetail: React.FC = () => {
     queryFn: () => getDomains(id!),
     enabled: !!id,
   })
+
+  // Per-domain DNS / connection / HTTPS, re-checked by the backend on each
+  // call (it throttles the real lookups). Poll fast while something is still
+  // being set up, slowly once everything is live.
+  const { data: progress, refetch: refetchProgress, isFetching: progressFetching } = useQuery({
+    queryKey: ['origin-progress', id],
+    queryFn: () => onboardingApi.progress(id!),
+    enabled: !!id && activeTab === 'domains',
+    refetchInterval: (q) => (q.state.data?.all_ready ? 60_000 : 10_000),
+  })
+
+  // The Domains tab lists what /progress returns: it is readable by viewers,
+  // unlike getDomains (edit-only), which left viewers on an empty state.
+  const tabDomains = progress?.domains ?? []
+
+  // The progress check is what activates an origin once its agent or route is
+  // up; reload the header (status badge, "Cancel Setup") when that happens.
+  const originStatus = data?.data?.status
+  useEffect(() => {
+    if (progress?.origin_status && originStatus && progress.origin_status !== originStatus) {
+      queryClient.invalidateQueries({ queryKey: ['origin', id] })
+    }
+  }, [progress?.origin_status, originStatus, id, queryClient])
 
   const { data: captchaData, isLoading: captchaLoading } = useQuery({
     queryKey: ['captcha-shield', id],
@@ -455,27 +489,11 @@ export const OriginDetail: React.FC = () => {
       await deleteDomain(id!, domainToDelete)
       toast.success('Domain deleted successfully')
       refetchDomains()
+      refetchProgress()
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Failed to delete domain')
     } finally {
       setDomainToDelete(null)
-    }
-  }
-
-  const handleVerifyDomain = async (domainId: string) => {
-    setVerifyingDomainId(domainId)
-    try {
-      const res = await verifyDomain(id!, domainId)
-      if (res.data?.status === 'verified') {
-        toast.success('Domain DNS verified successfully!')
-        refetchDomains()
-      } else {
-        toast.error(res.data?.message || 'DNS verification records not detected yet')
-      }
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'DNS verification failed')
-    } finally {
-      setVerifyingDomainId(null)
     }
   }
 
@@ -571,7 +589,6 @@ export const OriginDetail: React.FC = () => {
           { id: 'overview', label: 'Pool Overview', icon: <Server size={14} /> },
           { id: 'domains', label: 'Domains & DNS', icon: <Globe size={14} /> },
           { id: 'waf', label: 'WAF Policies', icon: <Shield size={14} /> },
-          { id: 'ssl', label: 'SSL Certificates', icon: <Lock size={14} /> },
           { id: 'shield', label: 'Bot & Login Shield', icon: <Bot size={14} /> },
           { id: 'team', label: 'Team & Audit Log', icon: <Users size={14} /> },
           { id: 'postmortem', label: 'Incident Postmortem', icon: <FileText size={14} /> },
@@ -828,99 +845,78 @@ export const OriginDetail: React.FC = () => {
 
         {activeTab === 'domains' && (
           <div className="space-y-4">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
               <div>
                 <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">
-                  Custom Domain Bindings
+                  Domains
                 </h2>
                 <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-                  Point your DNS CNAME / A records to CloudWAF edge proxy IP
+                  {progress
+                    ? `ชี้ CNAME ของโดเมนไปที่ ${progress.domains[0]?.dns.instructions.cname_record.value ?? 'edge ของเรา'} — DNS, การเชื่อมต่อ และ HTTPS ตรวจให้อัตโนมัติ`
+                    : 'DNS, การเชื่อมต่อ และ HTTPS ตรวจให้อัตโนมัติ'}
                 </p>
               </div>
-              <Button variant="brand" onClick={() => setIsDomainWizardOpen(true)} icon={<Plus size={14} />}>
-                Add Domain
-              </Button>
+              <div className="flex items-center gap-2 shrink-0">
+                {tabDomains.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={() => refetchProgress()} isLoading={progressFetching}>
+                    ตรวจเดี๋ยวนี้
+                  </Button>
+                )}
+                {isAdmin && tabDomains.length > 0 && (
+                  <Button variant="brand" size="sm" onClick={() => setIsDomainWizardOpen(true)} icon={<Plus size={14} />}>
+                    Add Domain
+                  </Button>
+                )}
+              </div>
             </div>
 
-            {domains.length === 0 ? (
+            {!progress ? (
+              <div className="dash-card p-8 flex justify-center">
+                <LoadingSpinner />
+              </div>
+            ) : tabDomains.length === 0 ? (
               <div className="dash-card p-12 text-center space-y-3 border-dashed">
                 <Globe size={36} className="mx-auto text-[var(--text-muted)] opacity-40" />
                 <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
-                  No Custom Domains Connected
+                  ยังไม่มีโดเมน
                 </h3>
                 <p className="text-[12px] text-[var(--text-muted)] m-0 font-mono">
-                  Attach a custom domain to route live visitors through CloudWAF.
+                  เพิ่มโดเมนเพื่อให้ผู้เข้าชมวิ่งผ่าน WAF ก่อนถึงเซิร์ฟเวอร์นี้
                 </p>
-                <Button variant="brand" onClick={() => setIsDomainWizardOpen(true)}>
-                  Add Custom Domain
-                </Button>
+                {isAdmin && (
+                  <Button variant="brand" onClick={() => setIsDomainWizardOpen(true)} icon={<Plus size={14} />}>
+                    Add Domain
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
-                {domains.map((domain: Domain) => (
-                  <div
-                    key={domain.domain_id}
-                    className="dash-card p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2.5">
-                        <h3 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">
-                          {domain.domain_name}
-                        </h3>
-                        <Badge
-                          color={
-                            domain.verification_status === 'verified'
-                              ? 'success'
-                              : domain.verification_status === 'pending'
-                              ? 'warning'
-                              : 'danger'
-                          }
-                          size="sm"
-                        >
-                          {domain.verification_status.toUpperCase()}
-                        </Badge>
-                      </div>
-                      <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0 mt-1">
-                        Bound to origin {origin.ip}:{origin.port} • Added{' '}
-                        {new Date(domain.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      {domain.verification_status !== 'verified' && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleVerifyDomain(domain.domain_id)}
-                          disabled={verifyingDomainId === domain.domain_id}
-                          isLoading={verifyingDomainId === domain.domain_id}
-                        >
-                          Verify DNS
-                        </Button>
-                      )}
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={() => setDomainToDelete(domain.domain_id)}
-                        icon={<Trash2 size={13} />}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
+                {tabDomains.map((item) => (
+                  <DomainStatusCard
+                    key={item.domain_id}
+                    item={item}
+                    mode={progress.connection_mode}
+                    originPort={progress.origin_port}
+                    egressIps={progress.origin_egress_ips}
+                    canEdit={isAdmin && progress.can_edit}
+                    canMintAgent={progress.can_mint_agent}
+                    onRemove={(domainId) => setDomainToDelete(domainId)}
+                  />
                 ))}
               </div>
             )}
 
-            <DomainSetupWizard
-              open={isDomainWizardOpen}
-              onClose={() => setIsDomainWizardOpen(false)}
-              onSuccess={() => {
-                setIsDomainWizardOpen(false)
-                refetchDomains()
-              }}
-              originId={id!}
-            />
+            <Modal open={isDomainWizardOpen} onClose={() => setIsDomainWizardOpen(false)} title="Add Domain">
+              <ConnectSiteFlow
+                existingOriginId={id!}
+                onCancel={() => setIsDomainWizardOpen(false)}
+                onDone={() => {
+                  setIsDomainWizardOpen(false)
+                  refetchDomains()
+                  refetchProgress()
+                }}
+              />
+            </Modal>
 
             <ConfirmDialog
               open={!!domainToDelete}
@@ -935,91 +931,6 @@ export const OriginDetail: React.FC = () => {
         )}
 
         {activeTab === 'waf' && id && <OriginWafRules originId={id} canEdit={isAdmin} />}
-
-        {activeTab === 'ssl' && (
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">
-                SSL / TLS Certificates
-              </h2>
-              <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-                Automated ACME provisioning via Let&apos;s Encrypt and ZeroSSL
-              </p>
-            </div>
-
-            {domains.length === 0 ? (
-              <div className="dash-card p-12 text-center space-y-2 border-dashed">
-                <Lock size={36} className="mx-auto text-[var(--text-muted)] opacity-40" />
-                <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
-                  No Domains to Secure
-                </h3>
-                <p className="text-[12px] text-[var(--text-muted)] m-0 font-mono">
-                  Connect and verify a custom domain first to enable SSL certificates.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {domains.map((domain: Domain) => {
-                  // Real status from services/ssl_cert_monitor.py's periodic
-                  // probe (was previously always the literal string
-                  // "ACTIVE", regardless of whether a certificate existed
-                  // at all -- see api/domains.py's format_domain()).
-                  const sslBadgeColor =
-                    domain.ssl_status === 'active'
-                      ? 'success'
-                      : domain.ssl_status === 'error'
-                      ? 'danger'
-                      : 'gray'
-                  const sslSubtitle =
-                    domain.ssl_status === 'active'
-                      ? `Issuer: ${domain.ssl_issuer || 'unknown'}${
-                          typeof domain.ssl_days_remaining === 'number'
-                            ? domain.ssl_days_remaining < 0
-                              ? ' • EXPIRED'
-                              : ` • expires in ${domain.ssl_days_remaining} day(s)`
-                            : ''
-                        }`
-                      : domain.ssl_status === 'error'
-                      ? 'Certificate check failed -- see Alerts for details'
-                      : 'Not checked yet -- the SSL monitor probes new domains on its next cycle'
-
-                  return (
-                    <div
-                      key={domain.domain_id}
-                      className="dash-card p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                            domain.ssl_status === 'active'
-                              ? 'bg-emerald-500/10 text-emerald-500'
-                              : domain.ssl_status === 'error'
-                              ? 'bg-red-500/10 text-red-500'
-                              : 'bg-[var(--bg-hover)] text-[var(--text-muted)]'
-                          }`}
-                        >
-                          <Lock size={18} />
-                        </div>
-                        <div>
-                          <p className="font-bold text-[14px] text-[var(--text-primary)] font-mono m-0">
-                            {domain.domain_name}
-                          </p>
-                          <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
-                            {sslSubtitle}
-                          </p>
-                        </div>
-                      </div>
-
-                      <Badge color={sslBadgeColor}>
-                        {(domain.ssl_status || 'pending').toUpperCase()}
-                      </Badge>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
 
         {activeTab === 'shield' && (
           <div className="space-y-4">

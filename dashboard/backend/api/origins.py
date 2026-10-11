@@ -280,6 +280,16 @@ async def update_origin(
     origin: dict = Depends(verify_origin_edit_access),
     current_user: dict = Depends(get_current_user),
 ):
+    is_direct = origin.get("connection_mode") == "direct"
+    if is_direct and payload.ip:
+        # Same rule /api/onboarding/connect applies: an edit must not turn a
+        # direct route into a hostname or an internal address (SSRF).
+        from services.nginx_site_service import direct_upstream_allowed
+        if not direct_upstream_allowed(payload.ip):
+            raise HTTPException(
+                status_code=400,
+                detail="A direct-mode origin needs a public IP address (not a hostname or one of the WAF's own hosts)",
+            )
     try:
         success = origin_service.update_origin(
             origin_id=origin_id,
@@ -288,6 +298,14 @@ async def update_origin(
             port=payload.port,
             tech_stack_tags=payload.tech_stack_tags,
         )
+        if success and is_direct and (payload.ip or payload.port is not None):
+            if payload.port in (80, 443):
+                # Re-derive the scheme for the standard ports; other ports keep
+                # the one the connect flow detected.
+                origin_service.db.update_origin(
+                    origin_id, {"origin_scheme": "https" if payload.port == 443 else "http"})
+            from api.domains import schedule_site_reconcile
+            schedule_site_reconcile()
         if success:
             changed = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
             audit_log.write_audit_event(
@@ -326,6 +344,9 @@ def _refresh_managed_hostmap() -> None:
     task = asyncio.create_task(_run())
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+    # A direct-mode origin's nginx route follows its status the same way.
+    from api.domains import schedule_site_reconcile
+    schedule_site_reconcile()
 
 
 @router.delete("/{origin_id}")
