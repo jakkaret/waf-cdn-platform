@@ -325,7 +325,12 @@ export const Origins: React.FC = () => {
 
       {/* Domain first: the flow finds the server behind it and creates the
           origin + domain in one call, then lands on its live setup status. */}
-      <Modal open={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="เชื่อมเว็บของคุณ">
+      <Modal
+        open={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        title="เชื่อมเว็บของคุณ"
+        description="ระบบจะตรวจ DNS และเซิร์ฟเวอร์ของโดเมนให้ก่อนเชื่อมต่อ"
+      >
         <ConnectSiteFlow
           onCancel={() => setIsAddModalOpen(false)}
           onDone={(originId) => {
