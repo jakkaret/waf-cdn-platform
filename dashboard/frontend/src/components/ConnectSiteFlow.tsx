@@ -1,7 +1,20 @@
 import React, { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
-import { Globe, Search, ArrowRight, Server, Terminal, ChevronDown, ChevronRight } from 'lucide-react'
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  Globe,
+  Info,
+  Pencil,
+  Search,
+  Server,
+  Terminal,
+  XCircle,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { Button } from './ui/Button'
 import { onboardingApi, ConnectionMode, InspectResult } from '../api/onboarding'
 import { createDomain } from '../api/domains'
@@ -24,15 +37,19 @@ interface ConnectSiteFlowProps {
 
 const HOSTNAME_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
 
-const TONE_CLASS: Record<InspectView['tone'], string> = {
-  success: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400',
-  warning: 'bg-amber-500/10 border-amber-500/25 text-amber-600 dark:text-amber-400',
-  info: 'bg-sky-500/10 border-sky-500/25 text-sky-600 dark:text-sky-400',
-  danger: 'bg-red-500/10 border-red-500/25 text-red-600 dark:text-red-400',
+const TONE: Record<InspectView['tone'], { className: string; icon: LucideIcon }> = {
+  success: { className: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-300', icon: CheckCircle2 },
+  warning: { className: 'bg-amber-500/10 border-amber-500/25 text-amber-700 dark:text-amber-300', icon: AlertTriangle },
+  info: { className: 'bg-sky-500/10 border-sky-500/25 text-sky-700 dark:text-sky-300', icon: Info },
+  danger: { className: 'bg-red-500/10 border-red-500/25 text-red-700 dark:text-red-300', icon: XCircle },
 }
 
-const inputClass = 'mt-1 w-full dash-input font-mono text-[13px]'
-const labelClass = 'block text-[11px] font-bold uppercase font-mono text-[var(--text-secondary)]'
+// Thai copy is set in the UI sans; monospace is kept for the values people
+// type or compare (domain, IP, port).
+const labelClass = 'block text-[12.5px] font-medium text-[var(--text-secondary)]'
+const hintClass = 'mt-1.5 mb-0 text-[12px] leading-relaxed text-[var(--text-muted)]'
+const fieldClass = 'w-full dash-input h-10 font-mono text-[13.5px] tabular-nums'
+const inputClass = `mt-1.5 ${fieldClass}`
 
 export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOriginId, onDone, onCancel }) => {
   const [domain, setDomain] = useState('')
@@ -103,41 +120,74 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
   const domainField = (
     <div>
       <label htmlFor="connect-domain" className={labelClass}>โดเมนของคุณ</label>
-      <input
-        id="connect-domain"
-        value={domain}
-        onChange={(e) => {
-          setDomain(e.target.value)
-          if (view) setView(null)
-          if (domainError) setDomainError('')
-        }}
-        placeholder="shop.example.com"
-        className={inputClass}
-        autoFocus
-        autoComplete="off"
-        spellCheck={false}
-      />
-      {domainError && <p className="mt-1 text-[11px] font-mono text-red-500 m-0">{domainError}</p>}
+      <div className="relative mt-1.5">
+        <Globe
+          size={16}
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
+        />
+        <input
+          id="connect-domain"
+          value={domain}
+          onChange={(e) => {
+            setDomain(e.target.value)
+            if (view) setView(null)
+            if (domainError) setDomainError('')
+          }}
+          placeholder="shop.example.com"
+          className={`${fieldClass} pl-9 ${domainError ? '!border-red-500' : ''}`}
+          aria-invalid={!!domainError}
+          aria-describedby={domainError ? 'connect-domain-error' : 'connect-domain-hint'}
+          autoFocus
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </div>
+      {domainError ? (
+        <p id="connect-domain-error" role="alert" className="mt-1.5 mb-0 flex items-center gap-1.5 text-[12px] text-red-600 dark:text-red-400">
+          <AlertCircle size={14} aria-hidden="true" className="shrink-0" />
+          {domainError}
+        </p>
+      ) : (
+        !view && (
+          <p id="connect-domain-hint" className={hintClass}>
+            วางลิงก์ของเว็บมาทั้งลิงก์ก็ได้ ระบบจะใช้เฉพาะชื่อโดเมน
+          </p>
+        )
+      )}
+    </div>
+  )
+
+  // Plain divider, no bleed: the flow also renders inline on Onboarding.
+  const footer = (submit: React.ReactNode) => (
+    <div className="pt-4 border-t border-[var(--bg-border-subtle)] flex justify-end gap-2.5">
+      {onCancel && (
+        <Button variant="ghost" size="lg" type="button" onClick={onCancel}>
+          ยกเลิก
+        </Button>
+      )}
+      {submit}
     </div>
   )
 
   if (existingOriginId) {
     return (
       <form
-        className="space-y-4 text-[12.5px]"
+        className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault()
           if (validDomain()) addDomainMutation.mutate()
         }}
       >
         {domainField}
-        <p className="text-[11.5px] text-[var(--text-muted)] font-mono m-0">
+        <p className="m-0 text-[12.5px] leading-relaxed text-[var(--text-muted)]">
           ใช้การเชื่อมต่อเดิมของ origin นี้ — หลังเพิ่มแล้วตั้ง DNS แค่ 1 record (CNAME)
         </p>
-        <div className="pt-2 border-t border-[var(--bg-border)] flex justify-end gap-2.5">
-          {onCancel && <Button variant="ghost" type="button" onClick={onCancel}>ยกเลิก</Button>}
-          <Button variant="brand" type="submit" isLoading={addDomainMutation.isPending}>เพิ่มโดเมน</Button>
-        </div>
+        {footer(
+          <Button variant="brand" size="lg" type="submit" isLoading={addDomainMutation.isPending}>
+            เพิ่มโดเมน
+          </Button>,
+        )}
       </form>
     )
   }
@@ -146,8 +196,53 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
   const canConnect =
     !!view && !blocked && port >= 1 && port <= 65535 && (mode === 'agent' || address.trim().length > 0)
 
+  const modeOption = (value: ConnectionMode, Icon: LucideIcon, title: string, detail: string, onPick: () => void) => {
+    const selected = mode === value
+    const recommended = view?.mode === value
+    return (
+      <label
+        className={`flex items-start gap-3 p-3.5 rounded-lg border cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-[var(--accent)] focus-within:ring-offset-1 focus-within:ring-offset-[var(--bg-surface)] ${
+          selected
+            ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
+            : 'border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] hover:bg-[var(--nav-hover)]'
+        }`}
+      >
+        <input
+          type="radio"
+          name="mode"
+          checked={selected}
+          onChange={onPick}
+          className="mt-[9px] h-4 w-4 shrink-0 accent-[var(--accent)] dark:[color-scheme:dark] cursor-pointer focus:outline-none"
+        />
+        <span
+          aria-hidden="true"
+          className={`grid h-8 w-8 shrink-0 place-items-center rounded-md border ${
+            selected
+              ? 'border-[var(--accent-border)] bg-[var(--bg-surface)] text-[var(--accent)]'
+              : 'border-[var(--bg-border)] bg-[var(--bg-primary)] text-[var(--text-muted)]'
+          }`}
+        >
+          <Icon size={16} />
+        </span>
+        <span className="min-w-0">
+          <span className="flex flex-wrap items-center gap-2 text-[13.5px] font-semibold text-[var(--text-primary)]">
+            {title}
+            {recommended && (
+              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-px text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                แนะนำ
+              </span>
+            )}
+          </span>
+          <span className="mt-0.5 block text-[12.5px] leading-relaxed text-[var(--text-muted)]">{detail}</span>
+        </span>
+      </label>
+    )
+  }
+
+  const tone = view ? TONE[view.tone] : null
+
   return (
-    <div className="space-y-4 text-[12.5px]">
+    <div className="space-y-5">
       <form
         className="space-y-3"
         onSubmit={(e) => {
@@ -157,13 +252,13 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
       >
         {domainField}
         {!view && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="brand" type="submit" isLoading={inspectMutation.isPending} icon={<Search size={14} />}>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
+            <Button variant="brand" size="lg" type="submit" isLoading={inspectMutation.isPending} icon={<Search size={15} />}>
               ตรวจสอบโดเมน
             </Button>
             <button
               type="button"
-              className="text-[11.5px] font-mono text-[var(--text-muted)] hover:text-orange-500 underline underline-offset-2 cursor-pointer"
+              className="text-[12.5px] text-[var(--text-secondary)] hover:text-[var(--accent)] underline decoration-[var(--bg-border-hover)] underline-offset-4 hover:decoration-current cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               onClick={() => {
                 if (validDomain()) applyView(describeInspect({ domain: cleanDomain, already_registered: false, reason: 'no_address' }))
               }}
@@ -174,65 +269,43 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
         )}
       </form>
 
-      {view && (
+      {view && tone && (
         <form
-          className="space-y-4"
+          className="space-y-5"
           onSubmit={(e) => {
             e.preventDefault()
             if (canConnect) connectMutation.mutate()
           }}
         >
-          <div className={`p-3 rounded-lg border font-mono text-[11.5px] ${TONE_CLASS[view.tone]}`}>
-            <Globe size={13} className="inline -mt-0.5 mr-1.5" />
-            {view.message}
+          <div role="status" className={`flex items-start gap-2.5 p-3.5 rounded-lg border text-[13px] leading-relaxed ${tone.className}`}>
+            <tone.icon size={17} aria-hidden="true" className="mt-px shrink-0" />
+            <span>{view.message}</span>
           </div>
 
           {!blocked && (
-            <fieldset className="space-y-2">
-              <legend className={labelClass}>วิธีเชื่อมต่อ</legend>
-              <label className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer ${mode === 'direct' ? 'border-orange-500 bg-orange-500/5' : 'border-[var(--bg-border)]'}`}>
-                <input
-                  type="radio"
-                  name="mode"
-                  checked={mode === 'direct'}
-                  onChange={() => {
-                    setMode('direct')
-                    // Detected values when there are some, else the common HTTPS default.
-                    setPort(view.mode === 'direct' ? view.port : 443)
-                    setScheme(view.mode === 'direct' ? view.scheme : 'https')
-                  }}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-mono font-bold text-[12.5px] flex items-center gap-1.5"><Server size={13} /> ต่อตรงไปที่เซิร์ฟเวอร์</span>
-                  <span className="block text-[11px] text-[var(--text-muted)] font-mono">เซิร์ฟเวอร์มี public IP — ไม่ต้องติดตั้งอะไร</span>
-                </span>
-              </label>
-              <label className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer ${mode === 'agent' ? 'border-orange-500 bg-orange-500/5' : 'border-[var(--bg-border)]'}`}>
-                <input
-                  type="radio"
-                  name="mode"
-                  checked={mode === 'agent'}
-                  onChange={() => {
-                    setMode('agent')
-                    setPort(3000)
-                  }}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-mono font-bold text-[12.5px] flex items-center gap-1.5"><Terminal size={13} /> ใช้ Agent</span>
-                  <span className="block text-[11px] text-[var(--text-muted)] font-mono">เครื่องอยู่หลัง NAT/firewall — ไม่ต้องเปิดพอร์ตขาเข้า</span>
-                </span>
-              </label>
+            <fieldset className="space-y-2 m-0 p-0 border-0">
+              <legend className={`${labelClass} mb-2`}>วิธีเชื่อมต่อ</legend>
+              {modeOption('direct', Server, 'ต่อตรงไปที่เซิร์ฟเวอร์', 'เซิร์ฟเวอร์มี public IP — ไม่ต้องติดตั้งอะไร', () => {
+                setMode('direct')
+                // Detected values when there are some, else the common HTTPS default.
+                setPort(view.mode === 'direct' ? view.port : 443)
+                setScheme(view.mode === 'direct' ? view.scheme : 'https')
+              })}
+              {modeOption('agent', Terminal, 'ใช้ Agent', 'เครื่องอยู่หลัง NAT/firewall — ไม่ต้องเปิดพอร์ตขาเข้า', () => {
+                setMode('agent')
+                setPort(3000)
+              })}
             </fieldset>
           )}
 
           {!blocked && mode === 'agent' && (
-            <div className="max-w-[180px]">
+            <div className="max-w-[200px]">
               <label htmlFor="connect-port" className={labelClass}>เว็บรันที่ port</label>
               <input
                 id="connect-port"
                 type="number"
+                min={1}
+                max={65535}
                 value={port}
                 onChange={(e) => setPort(parseInt(e.target.value, 10) || 0)}
                 className={inputClass}
@@ -241,50 +314,55 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
           )}
 
           {!blocked && mode === 'direct' && (
-            <div className="space-y-2">
-              {view.mode === 'direct' && !showAdvanced ? (
-                <button
-                  type="button"
-                  onClick={() => setShowAdvanced(true)}
-                  className="flex items-center gap-1 text-[11.5px] font-mono text-[var(--text-muted)] hover:text-orange-500 cursor-pointer"
-                >
-                  <ChevronRight size={13} /> {scheme}://{address}:{port} — แก้ไข
-                </button>
-              ) : (
-                <>
-                  {view.mode === 'direct' && (
-                    <button type="button" onClick={() => setShowAdvanced(false)} className="flex items-center gap-1 text-[11.5px] font-mono text-[var(--text-muted)] cursor-pointer">
-                      <ChevronDown size={13} /> ซ่อน
-                    </button>
-                  )}
-                  <div className="grid grid-cols-6 gap-2">
-                    <div className="col-span-2">
-                      <label htmlFor="connect-scheme" className={labelClass}>Protocol</label>
-                      <select id="connect-scheme" value={scheme} onChange={(e) => setScheme(e.target.value as 'http' | 'https')} className={inputClass}>
-                        <option value="https">https</option>
-                        <option value="http">http</option>
-                      </select>
-                    </div>
-                    <div className="col-span-3">
-                      <label htmlFor="connect-address" className={labelClass}>IP ของเซิร์ฟเวอร์</label>
-                      <input id="connect-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="203.0.113.10" className={inputClass} />
-                    </div>
-                    <div className="col-span-1">
-                      <label htmlFor="connect-direct-port" className={labelClass}>Port</label>
-                      <input id="connect-direct-port" type="number" value={port} onChange={(e) => setPort(parseInt(e.target.value, 10) || 0)} className={inputClass} />
-                    </div>
+            view.mode === 'direct' && !showAdvanced ? (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] px-3.5 py-2.5">
+                <div className="min-w-0">
+                  <span className="block text-[12px] text-[var(--text-muted)]">ส่ง traffic ไปที่</span>
+                  <span className="block truncate font-mono text-[13.5px] text-[var(--text-primary)]">
+                    {scheme}://{address}:{port}
+                  </span>
+                </div>
+                <Button variant="secondary" size="sm" type="button" onClick={() => setShowAdvanced(true)} icon={<Pencil size={13} />}>
+                  แก้ไข
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-[7rem_1fr_6rem]">
+                  <div>
+                    <label htmlFor="connect-scheme" className={labelClass}>Protocol</label>
+                    <select id="connect-scheme" value={scheme} onChange={(e) => setScheme(e.target.value as 'http' | 'https')} className={inputClass}>
+                      <option value="https">https</option>
+                      <option value="http">http</option>
+                    </select>
                   </div>
-                </>
-              )}
-            </div>
+                  <div className="col-span-2 row-start-2 sm:col-span-1 sm:row-start-auto">
+                    <label htmlFor="connect-address" className={labelClass}>IP ของเซิร์ฟเวอร์</label>
+                    <input id="connect-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="203.0.113.10" className={inputClass} />
+                  </div>
+                  <div>
+                    <label htmlFor="connect-direct-port" className={labelClass}>Port</label>
+                    <input id="connect-direct-port" type="number" min={1} max={65535} value={port} onChange={(e) => setPort(parseInt(e.target.value, 10) || 0)} className={inputClass} />
+                  </div>
+                </div>
+                {view.mode === 'direct' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvanced(false)}
+                    className="text-[12.5px] text-[var(--text-secondary)] hover:text-[var(--accent)] cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                  >
+                    ซ่อน
+                  </button>
+                )}
+              </div>
+            )
           )}
 
-          <div className="pt-2 border-t border-[var(--bg-border)] flex justify-end gap-2.5">
-            {onCancel && <Button variant="ghost" type="button" onClick={onCancel}>ยกเลิก</Button>}
-            <Button variant="brand" type="submit" disabled={!canConnect} isLoading={connectMutation.isPending}>
-              เชื่อมต่อ <ArrowRight size={14} />
-            </Button>
-          </div>
+          {footer(
+            <Button variant="brand" size="lg" type="submit" disabled={!canConnect} isLoading={connectMutation.isPending}>
+              เชื่อมต่อ <ArrowRight size={15} aria-hidden="true" />
+            </Button>,
+          )}
         </form>
       )}
     </div>
