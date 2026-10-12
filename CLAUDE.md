@@ -1,7 +1,11 @@
-# CLAUDE.md — waf_project (WAF + CDN)
+# CLAUDE.md — waf-cdn-platform (WAF + CDN)
 
-Repo: github.com/jakkaret/waf_project, branch `Backend` (local branch name: `backend`).
-Local checkout: `/Users/boss/project/waf_project`.
+Repo: github.com/jakkaret/waf-cdn-platform, branch `main`.
+Local checkout (Mac): `/Users/boss/project/waf-cdn-platform-main`. The older
+`/Users/boss/project/waf_project` (repo `waf_project`, branch `Backend`) and
+`/Users/boss/project/waf-cdn-platform` (unrelated history) are stale; don't work in them.
+On the main node the deployed tree is `/root/waf_project` (remote `origin` =
+`waf-cdn-platform`); it carries data-plane config and secrets that are not in git.
 
 ## Document scope
 
@@ -89,8 +93,10 @@ Do not re-flag issues already documented unless their status or impact has chang
   infra/deploy/config management (nginx, ModSecurity CRS rules, systemd services, docker
   compose).
 - **Edit flow:** local repo is source of truth. Make changes in
-  `/Users/boss/project/waf_project`, commit, then deploy/sync to the VPS via the existing
-  scripts (`scripts/sync_waf_rules.py`, `docker cp`, `scp`, etc.). Reserve direct SSH edits on
+  `/Users/boss/project/waf-cdn-platform-main`, commit, then deploy/sync to the VPS via the
+  existing scripts (`scripts/sync_waf_rules.py`, `docker cp`, `scp`, etc.). Never
+  `git pull`/`checkout`/`reset` in `/root/waf_project` on the main node: that would overwrite
+  data-plane config and secrets. Push to GitHub only from the Mac. Reserve direct SSH edits on
   a node for urgent hotfix/debug only (e.g. an active false-positive block, a broken prod
   service) — and when you do that, backport the change into the local repo afterward so a node
   never becomes its own untracked source of truth (this is exactly how Known Issue #1
@@ -119,7 +125,7 @@ Do not re-flag issues already documented unless their status or impact has chang
   flag them separately rather than sweeping them into an unrelated commit — this bit us once,
   see git log around 2026-08-26 for the reset+re-split). Conventional Commits prefix in English
   (`feat:`, `fix:`, `refactor:`, ...), details/body in Thai — matches existing repo convention.
-- **Push:** OK to `git push` to `origin/Backend` directly when explicitly asked to ship
+- **Push:** OK to `git push` to `origin/main` directly when explicitly asked to ship
   something — no need to stop and ask "should I push" every time once the user has said to do
   it.
 
