@@ -78,22 +78,21 @@ test.describe('Origins Management', () => {
     await expect(page.locator('body')).toContainText(/\d\s*\/\s*\d/)
   })
 
-  test('Add Origin → appears in list', async ({ page }) => {
+  test('Add Origin → connect by domain → lands on its setup status', async ({ page }) => {
+    const domain = `e2e-${Date.now()}.example.com`
     await page.goto('/origins')
 
-    // Click Add Origin
+    // Domain-first flow (ConnectSiteFlow): skip the DNS probe, use the agent.
     await page.getByRole('button', { name: /add origin/i }).click()
+    await page.getByLabel('โดเมนของคุณ').fill(domain)
+    await page.getByRole('button', { name: 'ข้ามการตรวจ ตั้งค่าเอง' }).click()
+    await page.getByLabel('เว็บรันที่ port').fill('8080')
+    await page.getByRole('button', { name: /เชื่อมต่อ/ }).click()
 
-    // Fill form (modal)
-    await page.getByPlaceholder(/label|name/i).first().fill('E2E Test Server')
-    await page.getByPlaceholder(/ip|address/i).fill('192.168.1.100')
-    await page.getByPlaceholder(/port/i).fill('8080')
-
-    // Submit
-    await page.getByRole('button', { name: /add|create|save/i }).last().click()
-
-    // Origin card should appear
-    await expect(page.locator('body')).toContainText('E2E Test Server', { timeout: 8_000 })
+    // The origin's Domains tab shows the domain with its CNAME instructions.
+    await expect(page).toHaveURL(/\/origins\/.+\?tab=domains/, { timeout: 8_000 })
+    await expect(page.locator('body')).toContainText(domain, { timeout: 8_000 })
+    await expect(page.locator('body')).toContainText(/CNAME/i)
   })
 })
 
