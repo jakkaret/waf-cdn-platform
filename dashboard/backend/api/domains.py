@@ -11,6 +11,7 @@ from services import audit_log
 from services.dynamodb_service import DynamoDBService
 from services.captcha_config import sync_domain_config
 from services.dns_service import verify_domain_dns, is_claimable_own_wildcard_subdomain, is_platform_subdomain
+from services import nginx_site_service
 
 router = APIRouter(prefix="/api/domains", tags=["Domains"])
 db = DynamoDBService()
@@ -21,6 +22,47 @@ db = DynamoDBService()
 # the done callback) is the standard workaround.
 # https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
 _background_tasks: set = set()
+
+
+def schedule_site_reconcile() -> None:
+    """Best-effort: bring direct-mode nginx routes in line with the database
+    now instead of at the site_route_worker's next tick. Never blocks or
+    fails the request that triggered it."""
+    async def _run():
+        try:
+            await asyncio.to_thread(nginx_site_service.reconcile_site_routes)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("site route reconcile after domain change failed: %s", exc)
+    task = asyncio.create_task(_run())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def after_domain_verified(origin_id: str, domain_name: str) -> None:
+    """Everything that has to follow a domain becoming verified, in one place.
+    The two verify endpoints and services/dns_verification_worker.py each did
+    a different subset (the worker did none of it, and the /api/origins/...
+    endpoint skipped the TLS allow-list refresh)."""
+    try:
+        await asyncio.to_thread(sync_domain_config, origin_id, domain_name)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("captcha config sync for %s failed: %s", domain_name, exc)
+    invalidate_ssl_allowed_snapshot()
+    _refresh_managed_hostmap()
+    schedule_site_reconcile()
+
+
+def _mark_verified(domain_id: str) -> None:
+    db.domains_table.update_item(
+        Key={"id": domain_id},
+        UpdateExpression="SET dns_verified = :verified, ssl_status = :ssl",
+        ExpressionAttributeValues={
+            ":verified": True,
+            ":ssl": "pending"
+        }
+    )
 
 
 def _refresh_managed_hostmap() -> None:
@@ -213,6 +255,7 @@ async def delete_domain(domain_id: str, current_user: dict = Depends(get_current
         db.domains_table.delete_item(Key={"id": domain_id})
         invalidate_ssl_allowed_snapshot()
         _refresh_managed_hostmap()
+        schedule_site_reconcile()
         audit_log.write_audit_event(
             scope_id=domain["origin_id"],
             actor_user_id=current_user.get("user_id"),
@@ -240,20 +283,13 @@ async def verify_domain_now(domain_id: str, current_user: dict = Depends(get_cur
     domain_name = domain.get("domain_name")
     token = domain.get("verification_token")
     
-    is_verified = verify_domain_dns(domain_name, token)
-    
+    # Up to three DNS lookups (dnspython's default lifetime is 5 s each): off
+    # the event loop, or every other request waits behind them.
+    is_verified = await asyncio.to_thread(verify_domain_dns, domain_name, token)
+
     if is_verified:
-        db.domains_table.update_item(
-            Key={"id": domain_id},
-            UpdateExpression="SET dns_verified = :verified, ssl_status = :ssl",
-            ExpressionAttributeValues={
-                ":verified": True,
-                ":ssl": "pending"
-            }
-        )
-        sync_domain_config(domain["origin_id"], domain_name)
-        invalidate_ssl_allowed_snapshot()
-        _refresh_managed_hostmap()
+        _mark_verified(domain_id)
+        await after_domain_verified(domain["origin_id"], domain_name)
         return {
             "status": "success",
             "dns_verified": True,
@@ -475,25 +511,70 @@ class DomainCreatePayload(BaseModel):
     def _domain_name_must_be_hostname(cls, v: str) -> str:
         return _validate_hostname(v)
 
-@origins_domains_router.post("/{origin_id}/domains")
-async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayload, current_user: dict = Depends(get_current_user)):
-    verify_origin_edit_access(origin_id, current_user)
+def dns_instructions_for(domain_name: str, verification_token: str) -> dict:
+    """The CNAME alone both routes traffic to the edge and proves control of
+    the name (services/dns_service.verify_domain_dns accepts it), so it is
+    the one record a customer has to add. The TXT record is the fallback for
+    names that cannot carry a CNAME (a zone apex) or sit behind another proxy."""
+    return {
+        "cname_record": {
+            "type": "CNAME",
+            "name": domain_name,
+            "value": os.getenv("WAF_CNAME_TARGET", "cdn.local")
+        },
+        "txt_record": {
+            "type": "TXT",
+            "name": f"_waf-challenge.{domain_name}",
+            "value": verification_token
+        },
+        "required": ["cname_record"],
+    }
 
-    domain_name = payload.domain_name
-    # F-129: non-admins may not register (nor auto-verify) a host under the
-    # platform apex — this is the path whose is_claimable_own_wildcard_subdomain
-    # auto-verify made single-label platform subdomains claimable by any tenant.
-    _assert_platform_subdomain_allowed(domain_name, current_user)
 
+def scan_domains(filter_expression) -> list:
+    """Every matching domain row. A filtered scan returns at most 1 MB per
+    page, so a match beyond page one is missed unless the scan follows
+    LastEvaluatedKey."""
+    items, kwargs = [], {"FilterExpression": filter_expression}
+    while True:
+        page = db.domains_table.scan(**kwargs)
+        items.extend(page.get("Items", []))
+        if not page.get("LastEvaluatedKey"):
+            return items
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def domain_registered(domain_name: str) -> bool:
     from boto3.dynamodb.conditions import Attr
-    response = db.domains_table.scan(
-        FilterExpression=Attr("domain_name").eq(domain_name)
-    )
-    if response.get("Items"):
+    return bool(scan_domains(Attr("domain_name").eq(domain_name)))
+
+
+def assert_domain_available(domain_name: str) -> None:
+    if domain_registered(domain_name):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Domain name {domain_name} is already registered."
         )
+
+
+@origins_domains_router.post("/{origin_id}/domains")
+async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayload, current_user: dict = Depends(get_current_user)):
+    verify_origin_edit_access(origin_id, current_user)
+    result = create_domain_record(origin_id, payload.domain_name, current_user)
+    if result.get("auto_verified"):
+        await after_domain_verified(origin_id, payload.domain_name)
+    return result
+
+
+def create_domain_record(origin_id: str, domain_name: str, current_user: dict) -> dict:
+    """Shared by POST /api/origins/{id}/domains and the connect flow
+    (api/onboarding.py). The caller has already checked edit access to the
+    origin and validated domain_name as a hostname."""
+    # F-129: non-admins may not register (nor auto-verify) a host under the
+    # platform apex — this is the path whose is_claimable_own_wildcard_subdomain
+    # auto-verify made single-label platform subdomains claimable by any tenant.
+    _assert_platform_subdomain_allowed(domain_name, current_user)
+    assert_domain_available(domain_name)
 
     domain_id = str(uuid.uuid4())
     verification_token = f"waf-token-{uuid.uuid4().hex[:16]}"
@@ -521,8 +602,9 @@ async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayloa
         )
 
     if auto_verified:
-        sync_domain_config(origin_id, domain_name)
-        invalidate_ssl_allowed_snapshot()
+        # The post-verify steps (config sync, TLS allow-list, hostmap, route)
+        # are after_domain_verified(), which every caller awaits for an
+        # auto-verified result -- one path for all of them.
         audit_log.write_audit_event(
             scope_id=origin_id,
             actor_user_id=current_user.get("user_id"),
@@ -537,18 +619,7 @@ async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayloa
             "auto_verified": True,
         }
 
-    dns_instructions = {
-        "cname_record": {
-            "type": "CNAME",
-            "name": domain_name,
-            "value": os.getenv("WAF_CNAME_TARGET", "cdn.local")
-        },
-        "txt_record": {
-            "type": "TXT",
-            "name": f"_waf-challenge.{domain_name}",
-            "value": verification_token
-        }
-    }
+    dns_instructions = dns_instructions_for(domain_name, verification_token)
 
     audit_log.write_audit_event(
         scope_id=origin_id,
@@ -576,19 +647,11 @@ async def verify_domain_now_under_origin(origin_id: str, domain_id: str, current
     domain_name = domain.get("domain_name")
     token = domain.get("verification_token")
     
-    is_verified = verify_domain_dns(domain_name, token)
-    
+    is_verified = await asyncio.to_thread(verify_domain_dns, domain_name, token)
+
     if is_verified:
-        db.domains_table.update_item(
-            Key={"id": domain_id},
-            UpdateExpression="SET dns_verified = :verified, ssl_status = :ssl",
-            ExpressionAttributeValues={
-                ":verified": True,
-                ":ssl": "pending"
-            }
-        )
-        sync_domain_config(domain["origin_id"], domain_name)
-        _refresh_managed_hostmap()
+        _mark_verified(domain_id)
+        await after_domain_verified(domain["origin_id"], domain_name)
         return {
             "status": "verified",
             "message": "Domain successfully verified!"
@@ -612,6 +675,7 @@ async def delete_domain_under_origin(origin_id: str, domain_id: str, current_use
         db.domains_table.delete_item(Key={"id": domain_id})
         invalidate_ssl_allowed_snapshot()
         _refresh_managed_hostmap()
+        schedule_site_reconcile()
         audit_log.write_audit_event(
             scope_id=origin_id,
             actor_user_id=current_user.get("user_id"),

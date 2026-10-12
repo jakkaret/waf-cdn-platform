@@ -338,6 +338,12 @@ async def startup_event():
     if not hasattr(app.state, "managed_ruleset_task"):
         from services.managed_ruleset import managed_ruleset_worker
         app.state.managed_ruleset_task = asyncio.create_task(managed_ruleset_worker())
+    # Direct-mode site routes (origin reached by IP, no tunnel): rebuilt from
+    # the database at start and every 2 minutes, so they survive a waf-nginx
+    # recreate. Touches only origins created with connection_mode="direct".
+    if not hasattr(app.state, "site_route_task"):
+        from services.nginx_site_service import site_route_worker
+        app.state.site_route_task = asyncio.create_task(site_route_worker())
 
 
 @app.on_event("shutdown")

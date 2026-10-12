@@ -481,6 +481,19 @@ def fake_infrastructure(monkeypatch, tmp_path):
     # singleton needs separate faking.
     monkeypatch.setattr(managed_rules_module, "_db", FakeDynamoDBService())
 
+    # Direct-mode site routes: verify/delete endpoints schedule
+    # reconcile_site_routes() in the background, which shells out to `docker
+    # exec`. No-op it here; tests of the reconcile itself call the function
+    # they imported directly and fake _docker.
+    from services import nginx_site_service as nginx_site_module
+    monkeypatch.setattr(nginx_site_module, "db", FakeDynamoDBService())
+    monkeypatch.setattr(nginx_site_module, "reconcile_site_routes", lambda: {})
+    monkeypatch.setattr(nginx_site_module, "_deployed_domains", set())
+    monkeypatch.setattr(nginx_site_module, "_failed_domains", {})
+    monkeypatch.setattr(nginx_site_module, "_pending_restores", {})
+    monkeypatch.setattr(nginx_site_module, "_reload_pending", False)
+    monkeypatch.setattr(nginx_site_module, "_unreloaded", set())
+
     # Deception layer: its audit logger lazily builds a real ClickHouseService
     # (production credentials) and DynamoDBService. Without this, every test
     # that hits /api/deception/respond wrote fake attack rows into the live

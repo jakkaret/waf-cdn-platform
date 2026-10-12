@@ -238,7 +238,10 @@ export interface SslCert {
 
 export interface DnsInstructions {
   cname_record: { type: 'CNAME'; name: string; value: string }
+  // Fallback only: the CNAME alone verifies the domain (api/domains.py's
+  // dns_instructions_for); TXT is for names that cannot hold a CNAME.
   txt_record: { type: 'TXT'; name: string; value: string }
+  required?: Array<'cname_record' | 'txt_record'>
 }
 
 export interface CaptchaShieldConfig {

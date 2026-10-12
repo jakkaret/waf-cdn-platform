@@ -174,12 +174,24 @@ def validate_ip(ip: str) -> bool:
     return bool(domain_pattern.match(ip_str))
 
 
-def create_origin(admin_user_id: str, label: str, ip: str, port: int) -> dict:
+CONNECTION_MODES = ("direct", "agent")
+ORIGIN_SCHEMES = ("http", "https")
+
+
+def create_origin(admin_user_id: str, label: str, ip: str, port: int,
+                  connection_mode: Optional[str] = None, origin_scheme: Optional[str] = None) -> dict:
+    """connection_mode / origin_scheme are set only by the connect flow
+    (api/onboarding.py). Leaving them out keeps the old record shape, so an
+    origin made through POST /api/origins behaves exactly as before."""
     if not validate_ip(ip):
         raise ValueError("Invalid IP address or domain format")
-    
+
     if not (1 <= port <= 65535):
         raise ValueError("Invalid port number")
+    if connection_mode is not None and connection_mode not in CONNECTION_MODES:
+        raise ValueError("Invalid connection mode")
+    if origin_scheme is not None and origin_scheme not in ORIGIN_SCHEMES:
+        raise ValueError("Invalid origin scheme")
         
     # Check quota limit
     existing_origins = [o for o in get_origins_for_user(admin_user_id) if o.get("status") != "archived"]
@@ -199,7 +211,11 @@ def create_origin(admin_user_id: str, label: str, ip: str, port: int) -> dict:
         "created_at": now,
         "updated_at": now
     }
-    
+    if connection_mode is not None:
+        origin_data["connection_mode"] = connection_mode
+    if origin_scheme is not None:
+        origin_data["origin_scheme"] = origin_scheme
+
     success = db.create_origin(origin_data)
     if not success:
         raise Exception("Failed to save origin to DynamoDB")
@@ -313,6 +329,15 @@ def delete_origin(origin_id: str) -> bool:
         invalidate_tenant_cache()
         _invalidate_origins_caches()
     return success
+
+
+def discard_new_origin(origin_id: str, admin_user_id: str) -> None:
+    """Hard-delete an origin that a multi-step flow created moments ago and
+    then could not finish (api/onboarding.py /connect). Not an archive: the
+    row never held anything the user saw."""
+    db.origins_table.delete_item(Key={"id": origin_id})
+    invalidate_tenant_cache(admin_user_id)
+    _invalidate_origins_caches()
 
 
 def restore_origin(origin_id: str) -> bool:
@@ -451,6 +476,23 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
                 continue
             if matched_origin.get("status") == "archived":
                 db.update_origin(matched_origin.get("id"), {"status": "active", "updated_at": datetime.now().isoformat() + "Z"})
+                need_cache_invalidation = True
+                owners_to_invalidate.add(true_owner_id)
+            elif matched_origin.get("connection_mode") == "agent" and (
+                matched_origin.get("status") == "pending" or not matched_origin.get("is_tunnel")
+            ):
+                # An origin made by the connect flow for an agent stores the
+                # domain as its address, which is what matched here. Its agent
+                # is now online: mark it as the tunnel origin instead of
+                # leaving it pending next to an auto-created duplicate.
+                update = {
+                    "status": "active",
+                    "is_tunnel": True,
+                    "tunnel_name": raw_name,
+                    "updated_at": datetime.now().isoformat() + "Z",
+                }
+                db.update_origin(matched_origin.get("id"), update)
+                matched_origin.update(update)
                 need_cache_invalidation = True
                 owners_to_invalidate.add(true_owner_id)
             continue
