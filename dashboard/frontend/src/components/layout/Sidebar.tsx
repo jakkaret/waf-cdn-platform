@@ -1,37 +1,79 @@
-import React, { useEffect, useRef } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { NavLink as RouterNavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import { api } from '../../api/axios'
-import {
-  LayoutDashboard,
-  Network,
-  ShieldAlert,
-  ListFilter,
-  Bell,
-  Globe,
-  Users,
-  LogOut,
-  Server,
-  Brain,
-  Sparkles,
-  Ban,
-  Gauge,
-  Shield,
-  X,
-  Settings as SettingsIcon,
-  FlaskConical,
-} from 'lucide-react'
+import { ChevronRight, LogOut, Search, X } from 'lucide-react'
 import { CRS_VERSION } from '../../lib/crsVersion'
+import { isOperator, platformRoleLabel } from '../../lib/permissions'
+import {
+  NAV_SECTIONS,
+  activeGroupId,
+  filterSections,
+  flattenLinks,
+  isPathActive,
+  visibleSections,
+  type NavGroup,
+  type NavLink,
+} from './navigation'
 
 interface SidebarProps {
   mobileOpen?: boolean
   onMobileClose?: () => void
 }
 
+// Which groups the user left open. A per-browser convenience only, so every
+// storage access is guarded: private windows and blocked storage throw.
+const EXPANDED_KEY = 'waf_nav_expanded'
+
+function loadExpanded(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(EXPANDED_KEY)
+    const parsed = raw ? JSON.parse(raw) : null
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveExpanded(value: Record<string, boolean>) {
+  try {
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify(value))
+  } catch {
+    // Storage unavailable; the sidebar still works for this page view.
+  }
+}
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+
+// Row styling follows BunkerWeb: roomy rows, a tinted fill on the current
+// page and a bar on the sidebar's right edge (-right-3 = the nav padding).
+const rowBase =
+  'relative flex w-full items-center gap-3 rounded-md px-3 h-9 text-[13.5px] transition-colors ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]'
+const rowIdle = 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--nav-hover)]'
+const rowActive =
+  'bg-[var(--nav-active)] text-[var(--text-primary)] font-medium ' +
+  'after:absolute after:-right-3 after:top-1 after:bottom-1 after:w-[3px] after:rounded-l after:bg-[var(--accent)]'
+
 export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileClose }) => {
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
-  const asideRef = useRef<HTMLDivElement>(null)
+  const { pathname } = useLocation()
+  const searchRef = useRef<HTMLInputElement>(null)
+  const [query, setQuery] = useState('')
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(loadExpanded)
+
+  const sections = useMemo(() => visibleSections(NAV_SECTIONS, isOperator(user)), [user])
+  const shown = useMemo(() => filterSections(sections, query), [sections, query])
+  const searching = query.trim().length > 0
+
+  // Open the group that holds the current page, e.g. after a deep link.
+  useEffect(() => {
+    const id = activeGroupId(sections, pathname)
+    if (id) setExpanded((prev) => (prev[id] ? prev : { ...prev, [id]: true }))
+  }, [sections, pathname])
+
+  useEffect(() => saveExpanded(expanded), [expanded])
 
   const handleLogout = async () => {
     // The HttpOnly access_token cookie (local + Google sessions) can only be
@@ -54,54 +96,115 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [mobileOpen, onMobileClose])
 
-  const sections = [
-    {
-      label: 'Monitoring & Core',
-      items: [
-        { label: 'Security Dashboard', path: '/', icon: <LayoutDashboard size={15} />, roles: ['admin', 'viewer'] },
-        { label: 'Traffic Logs', path: '/logs', icon: <ListFilter size={15} />, roles: ['admin', 'viewer'] },
-        { label: 'Origin Servers', path: '/origins', icon: <Server size={15} />, roles: ['admin', 'viewer'] },
-      ],
-    },
-    {
-      // Rules that act automatically on traffic -- configuring defenses.
-      label: 'Protection Rules',
-      items: [
-        { label: 'WAF Rules', path: '/rules', icon: <ShieldAlert size={15} />, roles: ['admin', 'viewer'] },
-        { label: 'API Security (BOLA)', path: '/bola', icon: <Network size={15} />, roles: ['admin', 'viewer'] },
-        { label: 'IP Access List', path: '/ip-rules', icon: <Ban size={15} />, roles: ['admin', 'viewer'] },
-        { label: 'Rate Limiting', path: '/rate-limits', icon: <Gauge size={15} />, roles: ['admin', 'viewer'] },
-        { label: 'ML Anomaly Rules', path: '/ml-rules', icon: <Sparkles size={15} />, roles: ['admin'] },
-      ],
-    },
-    {
-      // Things a human reviews and responds to -- monitoring, not configuring.
-      label: 'Detection & Response',
-      items: [
-        { label: 'AI Security Analyst', path: '/ml-analyst', icon: <Brain size={15} />, roles: ['admin', 'viewer'] },
-        { label: 'Tuning Proposals', path: '/threshold-proposals', icon: <LayoutDashboard size={15} />, roles: ['admin', 'viewer'] },
-        { label: 'Alert Center', path: '/alerts', icon: <Bell size={15} />, roles: ['admin', 'viewer'] },
-      ],
-    },
-    {
-      label: 'Edge & Delivery',
-      items: [
-        { label: 'CDN Edge Nodes', path: '/cdn', icon: <Globe size={15} />, roles: ['admin', 'viewer'] },
-        { label: 'Zero Trust Tunnels', path: '/tunnels', icon: <Shield size={15} />, roles: ['admin', 'viewer'] },
-      ],
-    },
-    {
-      label: 'Administration & System',
-      items: [
-        { label: 'Access Control', path: '/users', icon: <Users size={15} />, roles: ['admin'] },
-        { label: 'System Settings', path: '/settings', icon: <SettingsIcon size={15} />, roles: ['admin', 'viewer'] },
-        // Preview mockups only, not a live feature -- see ConceptBanner on
-        // every /concepts page. Admin-only: this is product-direction
-        // exploration, not something a viewer-scoped account needs.
-        { label: 'Concepts (preview)', path: '/concepts', icon: <FlaskConical size={15} />, roles: ['admin'] },
-      ],
-    },
-  ]
+  // Cmd+K / Ctrl+K jumps to the menu search from anywhere.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  const handleSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      const first = flattenLinks(shown)[0]
+      if (first) {
+        navigate(first.path)
+        setQuery('')
+        searchRef.current?.blur()
+        onMobileClose?.()
+      }
+    } else if (e.key === 'Escape') {
+      // Keep Escape from also closing the mobile drawer while clearing.
+      if (query) e.stopPropagation()
+      setQuery('')
+      if (!query) searchRef.current?.blur()
+    }
+  }
+
+  const toggleGroup = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }))
+
+  const renderLink = (link: NavLink, nested: boolean) => {
+    const Icon = link.icon
+    const active = isPathActive(link.path, pathname)
+    return (
+      <RouterNavLink
+        key={link.id}
+        to={link.path}
+        end={link.path === '/'}
+        onClick={() => {
+          setQuery('')
+          onMobileClose?.()
+        }}
+        className={() => `${rowBase} ${active ? rowActive : rowIdle} ${nested ? 'pl-[41px]' : ''}`}
+      >
+        {Icon && (
+          <Icon
+            size={17}
+            aria-hidden="true"
+            className={`shrink-0 ${active ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}
+          />
+        )}
+        <span className="truncate">{link.label}</span>
+        {link.badge && (
+          <span className="ml-auto rounded px-1.5 py-px text-[10.5px] font-medium text-[var(--text-muted)] border border-[var(--bg-border)]">
+            {link.badge}
+          </span>
+        )}
+      </RouterNavLink>
+    )
+  }
+
+  const renderGroup = (group: NavGroup) => {
+    const open = searching || !!expanded[group.id]
+    const holdsActive = group.children.some((c) => isPathActive(c.path, pathname))
+    const panelId = `nav-group-${group.id}`
+    const Icon = group.icon
+    return (
+      <div key={group.id}>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => toggleGroup(group.id)}
+          disabled={searching}
+          className={`${rowBase} ${holdsActive && !open ? 'text-[var(--text-primary)] font-medium hover:bg-[var(--nav-hover)]' : rowIdle}`}
+        >
+          <Icon
+            size={17}
+            aria-hidden="true"
+            className={`shrink-0 ${holdsActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}
+          />
+          <span className="truncate">{group.label}</span>
+          <ChevronRight
+            size={14}
+            aria-hidden="true"
+            className={`ml-auto shrink-0 text-[var(--text-muted)] transition-transform duration-150 motion-reduce:transition-none ${open ? 'rotate-90' : ''}`}
+          />
+        </button>
+        {/* grid-rows 0fr -> 1fr animates to the content's natural height;
+            visibility keeps collapsed links out of the tab order. The clip
+            box reaches the sidebar edge (-mr-3 pr-3) so the active-page bar
+            is not cut off. */}
+        <div
+          id={panelId}
+          className={`grid [transition:grid-template-rows_160ms_ease,visibility_160ms] motion-reduce:[transition:none] ${
+            open ? 'grid-rows-[1fr] visible' : 'grid-rows-[0fr] invisible'
+          }`}
+        >
+          <div className="overflow-hidden -mr-3 pr-3">
+            <div className="relative mt-0.5 space-y-0.5 before:absolute before:left-[20px] before:top-1 before:bottom-1 before:w-px before:bg-[var(--bg-border)]">
+              {group.children.map((child) => renderLink(child, true))}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <>
@@ -113,7 +216,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
         />
       )}
       <aside
-        ref={asideRef}
         role="navigation"
         aria-label="Main"
         className={`w-[240px] bg-[var(--bg-surface)] flex flex-col h-screen fixed left-0 top-0 border-r border-[var(--bg-border)] z-50 select-none transition-transform duration-200 ease-out md:translate-x-0 ${
@@ -149,51 +251,39 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
           </button>
         </div>
 
-        {/* Navigation Groups */}
-        <nav className="flex-1 overflow-y-auto py-4 px-2.5 space-y-5">
-          {sections.map((section) => {
-            const items = section.items.filter((item) => user && item.roles.includes(user.role))
-            if (!items.length) return null
-            return (
-              <div key={section.label}>
-                <p className="text-[10px] font-bold text-[var(--text-dim)] uppercase tracking-wider px-3 mb-1 font-mono">
-                  {section.label}
-                </p>
-                <div className="space-y-0.5">
-                  {items.map((item) => (
-                    <NavLink
-                      key={item.path}
-                      to={item.path}
-                      end={item.path === '/'}
-                      onClick={onMobileClose}
-                      className={({ isActive }) =>
-                        `group flex items-center gap-2.5 px-3 py-2 text-[12.5px] rounded-md transition-all duration-150 relative ${
-                          isActive
-                            ? 'bg-orange-500/10 text-orange-500 font-semibold dark:text-orange-400 border border-orange-500/20'
-                            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-                        }`
-                      }
-                    >
-                      {({ isActive }) => (
-                        <>
-                          <span
-                            className={`transition-colors ${
-                              isActive
-                                ? 'text-orange-500 dark:text-orange-400'
-                                : 'text-[var(--text-muted)] group-hover:text-[var(--text-primary)]'
-                            }`}
-                          >
-                            {item.icon}
-                          </span>
-                          <span className="font-mono">{item.label}</span>
-                        </>
-                      )}
-                    </NavLink>
-                  ))}
-                </div>
+        {/* Quick search */}
+        <div className="px-3 pt-3">
+          <label className="flex items-center gap-2 h-9 px-3 rounded-md border border-[var(--bg-border)] bg-[var(--bg-primary)] text-[var(--text-muted)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent-subtle)]">
+            <Search size={14} aria-hidden="true" className="shrink-0" />
+            <input
+              ref={searchRef}
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleSearchKey}
+              placeholder="Quick search..."
+              aria-label="Search the menu"
+              className="min-w-0 flex-1 bg-transparent text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none [&::-webkit-search-cancel-button]:hidden"
+            />
+            <kbd className="shrink-0 text-[10.5px] font-sans text-[var(--text-muted)]">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
+          </label>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto px-3 pt-3 pb-4">
+          {shown.length === 0 && (
+            <p className="px-2.5 py-2 text-[12.5px] text-[var(--text-muted)]">No page matches “{query.trim()}”.</p>
+          )}
+          {shown.map((section) => (
+            <div key={section.id} className={section.label ? 'mt-5 first:mt-0' : ''}>
+              {section.label && (
+                <p className="px-3 pb-1.5 text-[12px] font-medium text-[var(--text-muted)]">{section.label}</p>
+              )}
+              <div className="space-y-0.5">
+                {section.entries.map((entry) => (entry.kind === 'link' ? renderLink(entry, false) : renderGroup(entry)))}
               </div>
-            )
-          })}
+            </div>
+          ))}
         </nav>
 
         {/* Footer Profile & Logout */}
@@ -204,19 +294,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
                 {(user?.username || 'U')[0].toUpperCase()}
               </div>
               <div className="truncate">
-                <p className="text-[12px] font-medium text-[var(--text-primary)] truncate m-0 font-mono">
+                <p className="text-[12.5px] font-medium text-[var(--text-primary)] truncate m-0">
                   {user?.username || 'User'}
                 </p>
-                <span className="text-[10px] text-[var(--text-muted)] uppercase font-mono tracking-wider">
-                  {user?.role || 'Viewer'}
-                </span>
+                <span className="text-[11px] text-[var(--text-muted)]">{platformRoleLabel(user)}</span>
               </div>
             </div>
             <button
               type="button"
               onClick={handleLogout}
               className="p-1.5 rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
-              title="Sign Out"
+              title="Sign out"
+              aria-label="Sign out"
             >
               <LogOut size={14} />
             </button>
