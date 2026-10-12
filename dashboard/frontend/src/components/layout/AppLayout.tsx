@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Menu } from 'lucide-react'
 import { Sidebar } from './Sidebar'
+import { NAV_SECTIONS, breadcrumbFor } from './navigation'
 import { AICopilotWidget } from '../copilot/AICopilotWidget'
 
 export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const location = useLocation()
+  const crumbs = breadcrumbFor(NAV_SECTIONS, location.pathname)
 
   useEffect(() => {
     setMobileNavOpen(false)
@@ -28,6 +30,23 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
           <span className="text-[13px] font-bold font-mono text-[var(--text-primary)]">Firewall WAF</span>
         </div>
         <main className="flex-1 p-5 sm:p-7 min-w-0">
+          {crumbs.length > 0 && (
+            <nav aria-label="Breadcrumb" className="max-w-[1560px] mx-auto mb-3">
+              <ol className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-[var(--text-muted)]">
+                {crumbs.map((crumb, i) => (
+                  <li key={crumb} className="flex items-center gap-1.5">
+                    <span aria-hidden="true">/</span>
+                    <span
+                      aria-current={i === crumbs.length - 1 ? 'page' : undefined}
+                      className={i === crumbs.length - 1 ? 'text-[var(--text-primary)] font-medium' : ''}
+                    >
+                      {crumb}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </nav>
+          )}
           <div className="max-w-[1560px] mx-auto animate-fade-in">
             {children}
           </div>

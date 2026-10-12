@@ -34,6 +34,10 @@ html.dark {
   --accent-subtle: rgba(243, 128, 32, 0.12);
   --accent-border: rgba(243, 128, 32, 0.25);
 
+  /* Sidebar rows: hover and the selected page (BunkerWeb-style tinted fill). */
+  --nav-hover: #162235;
+  --nav-active: #1c2a42;
+
   --brand-blue: #38bdf8;
   --brand-cyan: #06b6d4;
   --brand-indigo: #6366f1;
@@ -71,6 +75,9 @@ html.light {
   --accent-hover: #c2410c;
   --accent-subtle: rgba(234, 88, 12, 0.08);
   --accent-border: rgba(234, 88, 12, 0.2);
+
+  --nav-hover: #f1f5f9;
+  --nav-active: #e3eaf1;
 
   --brand-blue: #0284c7;
   --brand-cyan: #0891b2;

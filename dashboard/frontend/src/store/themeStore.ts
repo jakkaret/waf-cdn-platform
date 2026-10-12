@@ -12,7 +12,8 @@ interface ThemeState {
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set) => ({
-      theme: 'dark',
+      // Light is the default look; a saved choice still wins on rehydrate.
+      theme: 'light',
       toggleTheme: () =>
         set((state) => {
           const next = state.theme === 'dark' ? 'light' : 'dark'
