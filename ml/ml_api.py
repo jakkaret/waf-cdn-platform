@@ -49,9 +49,10 @@ EVAL_RESULTS_PATH = os.path.join(MODELS_DIR, "eval_results.json")
 # so the open-appsec benchmark stays unseen data. The older F-canon2 is gen3_f_model.onnx.
 GEN3_ONNX_PATH = os.environ.get("WAF_GEN3_ONNX_PATH", os.path.join(MODELS_DIR, "gen3", "gen3_f_noopenappsec.onnx"))
 GEN3_MODEL_PATH = os.environ.get("WAF_GEN3_MODEL_PATH", os.path.join(MODELS_DIR, "gen3", "gen3_f_noopenappsec.joblib"))
-# Engine behind /predict-fast (the Nginx shadow hook): "rf" (13-feature RandomForest
-# ONNX, default) or "gen3" (Gen 3 model). Shadow only while ml_enforcement_enabled is off.
-FAST_ENGINE = os.environ.get("WAF_FAST_ENGINE", "rf").strip().lower()
+# Engine behind /predict-fast (the Nginx shadow hook): "gen3" (Gen 3 model, default
+# since 2026-10-13) or "rf" (13-feature RandomForest ONNX, retired). Shadow only while
+# ml_enforcement_enabled is off; without a Gen 3 model the hook answers "unavailable".
+FAST_ENGINE = os.environ.get("WAF_FAST_ENGINE", "gen3").strip().lower()
 # Shared secret for a remote ML host (deploy/azure-ml). Unset = no check, as on
 # the VPS where the API listens on 127.0.0.1 only.
 API_TOKEN = os.environ.get("WAF_ML_API_TOKEN", "")

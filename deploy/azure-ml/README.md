@@ -186,7 +186,7 @@ systemctl daemon-reload && systemctl restart waf-dashboard waf-log-analyzer
 | อัปเดตโค้ด | `sudo bash /opt/waf_project/deploy/azure-ml/install.sh` |
 | log | `journalctl -u waf-ml -f` |
 | เปลี่ยน token | แก้ `WAF_ML_API_TOKEN` ใน `/etc/waf-ml/waf-ml.env` และ `ML_SERVICE_TOKEN` บน VPS แล้ว restart ทั้ง 2 ฝั่ง |
-| ให้ shadow hook ใช้ Gen 3 | `WAF_FAST_ENGINE=gen3` แล้ว restart (ยังเป็น shadow จนกว่าจะผ่าน promotion gate 3.1-G.0) |
+| เอนจินของ shadow hook | ค่าเริ่มต้นเป็น Gen 3 (`WAF_FAST_ENGINE=gen3`) ตั้งแต่ 13 ต.ค. 2569 ใช้ RF เดิมได้ด้วย `WAF_FAST_ENGINE=rf` แล้ว restart (ยังเป็น shadow จนกว่าจะผ่าน promotion gate 3.1-G.0) |
 
 ## 12. Checklist ความปลอดภัย
 
