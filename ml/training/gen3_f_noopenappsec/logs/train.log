@@ -1,0 +1,92 @@
+[+] CSIC Dataset already exists at: /content/waf_project/ml/dataset/csic_final.csv
+[+] Loaded built dataset from cache dataset/.build_cache/b5fffd999131afeb41c02356.joblib
+[+] Loaded value features from cache dataset/.build_cache/value_af252cc6bd8bcc5835b680b8.joblib
+[*] excluded ['OpenAppSec']: 163751 rows dropped, 133977 kept
+[*] 133977 rows, 48 features (gen3-F-2026-09-29-canon2); params from task3-1-real-augmented-candidate-20260927-205652
+  OOF fold 1/5 done [12s]
+  OOF fold 2/5 done [24s]
+  OOF fold 3/5 done [37s]
+  OOF fold 4/5 done [50s]
+  OOF fold 5/5 done [63s]
+[*] Threshold 0.8749 (binding: CSIC_2010_Cleaned; per dataset {'CSIC_2010_Cleaned': 0.8749143913853211, 'SRBH2020_Honeypot': 0.4774339915547983})
+    OOF CSIC_2010_Cleaned    benign 0.9901 | attack 0.5866
+    OOF SRBH2020_Honeypot    benign 0.998 | attack 0.9617
+    G1-style min benign 0.9901 (gate 0.985) | G2-style mean attack 0.7742 (gate 0.85)
+[*] Out-of-fold Precision / Recall / F1 (attack = positive, group-weighted):
+    all_datasets         Precision  99.81% | Recall  92.03% | F1  95.76%
+    CSIC_2010_Cleaned    Precision  99.12% | Recall  58.66% | F1  73.70%
+    SRBH2020_Honeypot    Precision  99.86% | Recall  96.17% | F1  97.98%
+
+[*] Scenarios (threshold 0.8749)
+      #  expected predicted   score  ok  scenario
+      1  ALLOW    ALLOW      0.1220  ✓   Homepage root
+      2  ALLOW    ALLOW      0.0105  ✓   Homepage HTML
+      3  ALLOW    ALLOW      0.1220  ✓   About page
+      4  ALLOW    ALLOW      0.0105  ✓   About page HTML
+      5  ALLOW    ALLOW      0.1220  ✓   Contact page
+      6  ALLOW    ALLOW      0.1220  ✓   Pricing page
+      7  ALLOW    ALLOW      0.1220  ✓   Blog listing
+      8  ALLOW    ALLOW      0.1220  ✓   Blog post
+      9  ALLOW    ALLOW      0.1220  ✓   Documentation
+     10  ALLOW    ALLOW      0.1220  ✓   FAQ page
+     11  ALLOW    ALLOW      0.1220  ✓   Terms of service
+     12  ALLOW    ALLOW      0.1220  ✓   Privacy policy
+     13  ALLOW    ALLOW      0.0105  ✓   CSS stylesheet
+     14  ALLOW    ALLOW      0.0105  ✓   JavaScript file
+     15  ALLOW    ALLOW      0.0105  ✓   JS bundle
+     16  ALLOW    ALLOW      0.0105  ✓   PNG image
+     17  ALLOW    ALLOW      0.0105  ✓   JPEG image
+     18  ALLOW    ALLOW      0.0105  ✓   Favicon
+     19  ALLOW    ALLOW      0.0105  ✓   Web font
+     20  ALLOW    ALLOW      0.1220  ✓   Sitemap XML
+     21  ALLOW    ALLOW      0.1220  ✓   Robots.txt
+     22  ALLOW    ALLOW      0.1220  ✓   Health check
+     23  ALLOW    ALLOW      0.1170  ✓   Product listing API
+     24  ALLOW    ALLOW      0.1072  ✓   User listing API
+     25  ALLOW    ALLOW      0.1170  ✓   Order listing API
+     26  ALLOW    ALLOW      0.1072  ✓   Search query TH
+     27  ALLOW    ALLOW      0.1096  ✓   Search query EN
+     28  ALLOW    ALLOW      0.1072  ✓   Product filter
+     29  ALLOW    ALLOW      0.0154  ✓   Profile update form
+     30  ALLOW    ALLOW      0.1007  ✓   Normal login form
+     31  ALLOW    ALLOW      0.0657  ✓   Registration form
+     32  ALLOW    ALLOW      0.1032  ✓   Feedback form
+     33  ALLOW    ALLOW      0.0881  ✓   Newsletter signup
+     34  ALLOW    ALLOW      0.1041  ✓   Checkout form
+     35  ALLOW    ALLOW      0.1208  ✓   JSON API message
+     36  ALLOW    ALLOW      0.2032  ✓   Thai search query (การเรียน)
+     37  ALLOW    ALLOW      0.1374  ✓   Thai product review
+     38  BLOCK    BLOCK      1.0000  ✓   SQLi Union-based
+     39  BLOCK    BLOCK      1.0000  ✓   SQLi Boolean tautology
+     40  BLOCK    BLOCK      1.0000  ✓   SQLi Drop table
+     41  BLOCK    BLOCK      1.0000  ✓   SQLi Time-based blind
+     42  BLOCK    BLOCK      1.0000  ✓   SQLi in POST body
+     43  BLOCK    BLOCK      1.0000  ✓   XSS reflected script tag
+     44  BLOCK    BLOCK      1.0000  ✓   XSS via img onerror
+     45  BLOCK    BLOCK      1.0000  ✓   XSS via SVG onload
+     46  BLOCK    BLOCK      1.0000  ✓   XSS via iframe
+     47  BLOCK    BLOCK      1.0000  ✓   Path traversal /etc/passwd
+     48  BLOCK    BLOCK      1.0000  ✓   Path traversal encoded
+     49  BLOCK    BLOCK      1.0000  ✓   Path traversal double dot
+     50  BLOCK    BLOCK      1.0000  ✓   RCE via semicolon
+     51  BLOCK    BLOCK      1.0000  ✓   RCE via pipe
+     52  BLOCK    BLOCK      1.0000  ✓   RCE in POST
+     53  BLOCK    BLOCK      1.0000  ✓   Scanner probe .env
+     54  BLOCK    ALLOW      0.1220  ✗   WordPress admin probe
+     55  BLOCK    ALLOW      0.1220  ✗   phpMyAdmin probe
+     56  BLOCK    BLOCK      1.0000  ✓   Git config probe
+     57  BLOCK    ALLOW      0.1220  ✗   Spring actuator probe
+     58  BLOCK    BLOCK      0.9987  ✓   Backup file probe
+     59  BLOCK    BLOCK      1.0000  ✓   SSRF AWS metadata
+     60  BLOCK    BLOCK      1.0000  ✓   SSRF localhost Redis
+     61  BLOCK    BLOCK      1.0000  ✓   SSTI Jinja2
+     62  BLOCK    BLOCK      0.9999  ✓   NoSQL injection MongoDB
+     63  BLOCK    BLOCK      0.9999  ✓   Log4Shell JNDI in param
+    normal allowed 37/37 | attack blocked 23/26
+    Scenario Precision 100.00% | Recall  88.46% | F1  93.88%  (TP 23 FP 0 FN 3 TN 37)
+
+[*] Single-request latency p50 0.51 ms / p95 0.82 ms
+[*] ONNX parity max |diff| real 3.67e-07 / boundary 3.52e-07; p50 0.30 ms
+
+[✔] Saved /content/waf_project/ml/models/archive/gen3-final-f-noopenappsec-20261002-153004
+    serve it: copy gen3_f_model.onnx (or .joblib) to ml/models/gen3/ (ml_api.py /predict-gen3 prefers ONNX)

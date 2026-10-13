@@ -79,6 +79,7 @@ mkdir -p ml/models/gen3 && cp ml/models/archive/gen3-final-f-<เวลา>/gen3
   - ถ้ามีแค่ `.joblib` จากรอบเก่า แปลงได้ด้วย `ml/export_gen3_onnx.py`
 - ไฟล์โมเดลไม่ขึ้น git (`.gitignore`) ให้ commit `model_card.json` แทน
   - ยกเว้นรุ่นที่เลือกใช้: `ml/models/gen3/gen3_f_noopenappsec.onnx` (F-noopenappsec, เทรนจาก CSIC + SR-BH เท่านั้น, card: `ml/models/gen3/gen3_f_noopenappsec_model_card.json`) อยู่ใน repo และเป็นค่าเริ่มต้นของ `ml_api.py`
+  - ข้อมูลเทรน, log ของรอบเทรนจริง และสคริปต์เทรนซ้ำของรุ่นนี้อยู่ที่ [`ml/training/gen3_f_noopenappsec/`](training/gen3_f_noopenappsec/README.md) (ใช้แค่ public data ไม่ต้องดาวน์โหลด open-appsec)
   - รุ่นก่อน `gen3_f_model.onnx` (F-canon2 เทรนรวม OpenAppSec) ไม่ได้อยู่ใน repo นี้ ถ้าต้องการใช้ ให้วางไฟล์เองแล้วชี้ด้วย `WAF_GEN3_ONNX_PATH`
   - รุ่นใหม่จาก Colab ชื่อ `gen3_f_model.onnx` ให้คัดลอกมาเป็น `ml/models/gen3/gen3_f_noopenappsec.onnx`
   - ต้องใช้กับโค้ด extraction `canon2` ขึ้นไป (commit `a3b11de` ขึ้นไป) โค้ดเก่าจะปฏิเสธไฟล์นี้
