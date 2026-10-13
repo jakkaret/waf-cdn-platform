@@ -16,8 +16,11 @@ export const TopBar: React.FC<TopBarProps> = ({ title, subtitle, badge, action }
   const [isAiModalOpen, setIsAiModalOpen] = useState(false)
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-[var(--bg-border-subtle)]">
-      <div>
+    // Side by side only from xl: below that the action row (origin scope,
+    // AI summary, page actions) is wide enough to squeeze the title into a
+    // column a word or two wide.
+    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6 pb-4 border-b border-[var(--bg-border-subtle)]">
+      <div className="min-w-0">
         <div className="flex items-center gap-2.5 flex-wrap">
           <img src="/firewall.png" alt="Firewall" className="w-7 h-7 object-contain drop-shadow-md rounded-md" />
           <h1 className="text-[20px] font-bold text-[var(--text-primary)] tracking-tight m-0 font-mono">

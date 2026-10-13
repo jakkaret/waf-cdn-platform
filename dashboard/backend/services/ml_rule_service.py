@@ -7,6 +7,35 @@ from services.rule_manager import RuleManager
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
 
+# Newest request examples kept on a pending rule (record_hit).
+MAX_EXAMPLES = 5
+
+
+def _default_generator(created_by: str) -> str:
+    """Generator of a rule stored before the field existed (or written without it)."""
+    return "cve" if created_by == "cve-auto" else "rf-regex"
+
+
+def _example(rule_data: Dict[str, Any], seen_at: str) -> Dict[str, Any]:
+    return {
+        "url": str(rule_data.get("source_url", ""))[:200],
+        "method": rule_data.get("source_method", "GET"),
+        "seen_at": seen_at,
+    }
+
+
+def with_defaults(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Fill the 2026-10-13 fields on rows written before they existed, so the API shape is stable."""
+    item = dict(item)
+    item.setdefault("generator", _default_generator(item.get("created_by", "")))
+    item.setdefault("detector", "")
+    item.setdefault("dedup_key", "")
+    item["hit_count"] = int(item.get("hit_count") or 1)
+    item.setdefault("examples", [])
+    item.setdefault("last_seen_at", item.get("created_at", ""))
+    return item
+
+
 class MLRuleService:
     def __init__(self):
         self.db = DynamoDBService()
@@ -48,10 +77,53 @@ class MLRuleService:
             # and the endpoints stay admin-only (see api/ml_rules.py).
             "origin_id": rule_data.get("origin_id", ""),
             "origin_label": rule_data.get("origin_label", ""),
+            # 2026-10-13: which generator wrote the rule ("rf-regex" = the
+            # RandomForest path's fixed regex / 40-char literal, "gen3-detector"
+            # = a Gen 3 value detector, "cve" = CVE Auto-Patch) and the key
+            # repeats merge on. hit_count / examples / last_seen_at grow when
+            # the same proposal comes back (record_hit) instead of the queue
+            # getting one near-identical row per flagged request.
+            "generator": rule_data.get("generator") or _default_generator(created_by),
+            "detector": rule_data.get("detector", ""),
+            "dedup_key": rule_data.get("dedup_key", ""),
+            "hit_count": 1,
+            "examples": [_example(rule_data, timestamp)],
+            "last_seen_at": timestamp,
         }
-        
+
         self.table.put_item(Item=item)
         return item
+
+    def find_pending_by_dedup_key(self, dedup_key: str) -> Optional[Dict[str, Any]]:
+        """The pending rule a new proposal with this key should merge into, if any."""
+        if not dedup_key:
+            return None
+        for item in self.list_rules("pending"):
+            if item.get("dedup_key") == dedup_key:
+                return item
+        return None
+
+    def record_hit(self, rule: Dict[str, Any], rule_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Add one more request behind an existing pending rule (count, last seen, newest examples)."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        examples = [_example(rule_data, timestamp)] + list(rule.get("examples") or [])
+        examples = examples[:MAX_EXAMPLES]
+        hit_count = int(rule.get("hit_count") or 1) + 1
+        self.table.update_item(
+            Key={"rule_id": rule["rule_id"], "created_at": rule["created_at"]},
+            UpdateExpression="SET hit_count = :n, examples = :ex, last_seen_at = :t",
+            ExpressionAttributeValues={":n": hit_count, ":ex": examples, ":t": timestamp},
+        )
+        return {**rule, "hit_count": hit_count, "examples": examples, "last_seen_at": timestamp}
+
+    def save_backtest(self, rule: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+        """Keep the latest backtest on the rule so the queue shows it without re-running."""
+        self.table.update_item(
+            Key={"rule_id": rule["rule_id"], "created_at": rule["created_at"]},
+            UpdateExpression="SET backtest = :b",
+            ExpressionAttributeValues={":b": result},
+        )
+        return {**rule, "backtest": result}
 
     def list_rules(self, status: str = None) -> List[Dict[str, Any]]:
         """List rules, optionally filtered by status."""
@@ -68,7 +140,7 @@ class MLRuleService:
             
             # Sort by created_at descending
             items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-            return items
+            return [with_defaults(i) for i in items]
         except Exception as e:
             print(f"Error fetching rules: {e}")
             return []
@@ -83,7 +155,7 @@ class MLRuleService:
             )
             items = response.get("Items", [])
             if items:
-                return items[0]
+                return with_defaults(items[0])
             return None
         except Exception as e:
             print(f"Error getting rule detail: {e}")
@@ -165,6 +237,48 @@ class MLRuleService:
         
         rule["status"] = "rejected"
         return rule
+
+    def reject_legacy_pending(self, rejected_by: str, reason: str) -> Dict[str, int]:
+        """Reject every pending rule written by the retired RandomForest path ("rf-regex").
+
+        2026-10-13: proposals come from Gen 3 only, and the RF rules left in the queue
+        (~268 near-identical literals) only ever matched the request they came from.
+        Gen3-detector and CVE rules are left alone. Pages through the status index, and
+        each update is conditional on the rule still being pending, so a rule an admin
+        approved meanwhile is skipped rather than overwritten.
+        """
+        pending, kwargs = [], {"IndexName": "status-index", "KeyConditionExpression": Key("status").eq("pending")}
+        while True:
+            response = self.table.query(**kwargs)
+            pending.extend(response.get("Items", []))
+            if not response.get("LastEvaluatedKey"):
+                break
+            kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rejected = skipped = 0
+        for item in pending:
+            if with_defaults(item)["generator"] != "rf-regex":
+                continue
+            try:
+                self.table.update_item(
+                    Key={"rule_id": item["rule_id"], "created_at": item["created_at"]},
+                    UpdateExpression="SET #s = :status, reviewed_by = :reviewer, reviewed_at = :time, reject_reason = :reason",
+                    ConditionExpression="#s = :pending",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={
+                        ":status": "rejected",
+                        ":pending": "pending",
+                        ":reviewer": rejected_by,
+                        ":time": timestamp,
+                        ":reason": reason,
+                    },
+                )
+                rejected += 1
+            except Exception as e:  # ConditionalCheckFailed: reviewed meanwhile
+                print(f"Skipping legacy rule {item.get('rule_id')}: {e}")
+                skipped += 1
+        return {"rejected": rejected, "skipped": skipped}
 
     def delete_rule(self, rule_id: str) -> bool:
         rule = self.get_rule_detail(rule_id)
