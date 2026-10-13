@@ -23,6 +23,8 @@ ml/dataset/*.csv
 # ML data and artifacts that must never reach this public repo: datasets
 # (including labelled production traffic), captured request telemetry, and
 # training-candidate archives (pickled models, audit samples).
+# Exception: ml/training/<model>/data/ keeps the PUBLIC datasets (CSIC 2010,
+# SR-BH 2020) a served model was trained on, gzipped, so it can be rebuilt.
 ml/dataset/
 ml/telemetry/
 ml/models/archive/

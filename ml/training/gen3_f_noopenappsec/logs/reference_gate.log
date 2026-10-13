@@ -1,0 +1,14 @@
+== E_plus_query_body_entropy: FAILED (3 holdout folds)
+  [FAIL] G1_benign_every_dataset                                      0.9835  target >= 0.985  | CSIC_2010_Cleaned=0.9835, OpenAppSec=0.9994, SRBH2020_Honeypot=0.9976
+  [FAIL] G2_known_attack_mean                                          0.837  target >= 0.85  | CSIC_2010_Cleaned=0.5679, OpenAppSec=0.9805, SRBH2020_Honeypot=0.9627
+  [FAIL] G3_unseen_attack_mean                                        0.6392  target >= 0.7  | CSIC_2010_Cleaned=0.4262, OpenAppSec=0.785, SRBH2020_Honeypot=0.7063
+  [PASS] G4_no_dataset_below                                          0.4262  target >= 0.4  | unseen:CSIC_2010_Cleaned=0.4262
+  [PASS] G5_sanity                  {'scenario_normal_min': 37, 'scenario_attack_mean': 23.0, 'stress_detect_mean': 0.6216}  target normal 37/37, attack >= 23/26, stress >= 0.6  | stress_control_fp_mean=0.0011
+     from: {'holdout_folds': '/content/drive/MyDrive/waf_ml/results/20260929-124509/experiment-value-features-20260929-123839/value_feature_report.json', 'leave_one_dataset_out': '/content/drive/MyDrive/waf_ml/results/20260929-124509/experiment-value-features-20260929-123839/value_feature_report.json'}
+== F_noenc: FAILED (3 holdout folds)
+  [FAIL] G1_benign_every_dataset                                      0.9838  target >= 0.985  | CSIC_2010_Cleaned=0.9838, OpenAppSec=0.999, SRBH2020_Honeypot=0.997
+  [FAIL] G2_known_attack_mean                                         0.8305  target >= 0.85  | CSIC_2010_Cleaned=0.5525, OpenAppSec=0.9789, SRBH2020_Honeypot=0.9602
+  [FAIL] G3_unseen_attack_mean                                        0.6752  target >= 0.7  | CSIC_2010_Cleaned=0.4301, OpenAppSec=0.8213, SRBH2020_Honeypot=0.7742
+  [PASS] G4_no_dataset_below                                          0.4301  target >= 0.4  | unseen:CSIC_2010_Cleaned=0.4301
+  [PASS] G5_sanity                  {'scenario_normal_min': 37, 'scenario_attack_mean': 23.0, 'stress_detect_mean': 0.6156}  target normal 37/37, attack >= 23/26, stress >= 0.6  | stress_control_fp_mean=0.0013
+     from: {'holdout_folds': '/content/drive/MyDrive/waf_ml/results/20260929-124509/experiment-value-features-20260929-123839/value_feature_report.json', 'leave_one_dataset_out': '/content/drive/MyDrive/waf_ml/results/20260929-124509/experiment-value-features-20260929-123839/value_feature_report.json'}

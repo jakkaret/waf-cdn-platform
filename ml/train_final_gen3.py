@@ -48,12 +48,25 @@ from ml.gen3_model import FEATURE_SETS, Gen3FModel, feature_set_version  # noqa:
 from ml.promotion_gate import GATE, dataset_of  # noqa: E402
 from ml.test_comprehensive import TESTS  # noqa: E402
 from ml.train_gen3_full_real_benchmark import (  # noqa: E402
-    ARCHIVE_DIR, CSIC_PATH, EXTERNAL_SOURCES, NGINX_BENIGN_PATH, TELEMETRY_DIR, VPS_AUDIT_PATH, _sha256_file,
-    build_full_real_dataset, group_folds, weighted_recalls,
+    ARCHIVE_DIR, CSIC_PATH, EXTERNAL_SOURCES, LGBM_PARAMS, NGINX_BENIGN_PATH, TELEMETRY_DIR, VPS_AUDIT_PATH,
+    _sha256_file, build_full_real_dataset, group_folds, weighted_recalls,
 )
 
 ML_DIR = os.path.dirname(os.path.abspath(__file__))
 REFERENCE_EXPERIMENT = "experiment-value-features-20260928-144424"  # gate v2 run that selected F
+
+
+def hyperparameters_from(path):
+    """(params, source) from a JSON file's "hyperparameters", as latest_hyperparameters() returns them.
+
+    A model card names the candidate its parameters came from ("from"); that name is kept as
+    the source so a reproduced card matches the original.
+    """
+    with open(path, encoding="utf-8") as f:
+        hp = dict(json.load(f)["hyperparameters"])
+    source = hp.pop("from", os.path.basename(path))
+    hp["class_weight"] = {int(k): v for k, v in hp["class_weight"].items()}
+    return LGBM_PARAMS | hp, source
 
 
 def benign_threshold(p_benign, w_benign, target):
@@ -146,6 +159,10 @@ def main():
     ap.add_argument("--exclude-dataset", action="append", default=[], metavar="NAME",
                     help="drop a dataset (name as in promotion_gate.dataset_of, e.g. OpenAppSec) before training; "
                          "for a model that is then evaluated on that dataset's public benchmark (repeatable)")
+    ap.add_argument("--params-from", metavar="JSON",
+                    help="take the LightGBM hyperparameters from this file's 'hyperparameters' (a model card works) "
+                         "instead of the newest archived candidate; reproduces a published model on a clone "
+                         "without ml/models/archive/")
     args = ap.parse_args()
     cols, version = FEATURE_SETS[args.feature_set], feature_set_version(args.feature_set)
 
@@ -153,9 +170,13 @@ def main():
     V = value_feature_frame(meta)
     if args.exclude_dataset:
         present = sorted(set(meta["Source"].map(dataset_of)))
-        unknown = sorted(set(args.exclude_dataset) - set(present))
+        known = set(present) | {dataset_of(s) for s in EXTERNAL_SOURCES} | {"VPS"}
+        unknown = sorted(set(args.exclude_dataset) - known)
         if unknown:
-            raise SystemExit(f"--exclude-dataset {unknown}: not in the built data {present}")
+            raise SystemExit(f"--exclude-dataset {unknown}: not a dataset name ({sorted(known)})")
+        # A known dataset that was never downloaded is already excluded: nothing to drop.
+        for name in sorted(set(args.exclude_dataset) - set(present)):
+            print(f"[*] --exclude-dataset {name}: not in the built data, nothing to drop")
         keep = ~meta["Source"].map(dataset_of).isin(args.exclude_dataset).to_numpy()
         X, y, V = X[keep].reset_index(drop=True), y[keep].reset_index(drop=True), V[keep].reset_index(drop=True)
         meta = meta[keep].reset_index(drop=True)
@@ -163,7 +184,7 @@ def main():
     F = pd.concat([X.reset_index(drop=True).astype(np.float32), V], axis=1)[cols].to_numpy(dtype=np.float32)
     yv, w = y.to_numpy(), meta["Weight"].to_numpy()
     datasets = meta["Source"].map(dataset_of).to_numpy()
-    params, params_from = latest_hyperparameters()
+    params, params_from = hyperparameters_from(args.params_from) if args.params_from else latest_hyperparameters()
     print(f"[*] {len(yv)} rows, {len(cols)} features ({version}); params from {params_from}")
 
     # 1. out-of-fold scores over all data

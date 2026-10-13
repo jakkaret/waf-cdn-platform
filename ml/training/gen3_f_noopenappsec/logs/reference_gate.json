@@ -1,0 +1,138 @@
+{
+  "E_plus_query_body_entropy": {
+    "criteria": {
+      "G1_benign_every_dataset": {
+        "value": 0.9835,
+        "target": ">= 0.985",
+        "passed": false,
+        "detail": {
+          "CSIC_2010_Cleaned": 0.9835,
+          "OpenAppSec": 0.9994,
+          "SRBH2020_Honeypot": 0.9976
+        }
+      },
+      "G2_known_attack_mean": {
+        "value": 0.837,
+        "target": ">= 0.85",
+        "passed": false,
+        "detail": {
+          "CSIC_2010_Cleaned": 0.5679,
+          "OpenAppSec": 0.9805,
+          "SRBH2020_Honeypot": 0.9627
+        }
+      },
+      "G3_unseen_attack_mean": {
+        "value": 0.6392,
+        "target": ">= 0.7",
+        "passed": false,
+        "detail": {
+          "CSIC_2010_Cleaned": 0.4262,
+          "OpenAppSec": 0.785,
+          "SRBH2020_Honeypot": 0.7063
+        }
+      },
+      "G4_no_dataset_below": {
+        "value": 0.4262,
+        "target": ">= 0.4",
+        "passed": true,
+        "detail": {
+          "unseen:CSIC_2010_Cleaned": 0.4262
+        }
+      },
+      "G5_sanity": {
+        "value": {
+          "scenario_normal_min": 37,
+          "scenario_attack_mean": 23.0,
+          "stress_detect_mean": 0.6216
+        },
+        "target": "normal 37/37, attack >= 23/26, stress >= 0.6",
+        "passed": true,
+        "detail": {
+          "stress_control_fp_mean": 0.0011
+        }
+      }
+    },
+    "complete": true,
+    "passed": false,
+    "holdout_folds": 3,
+    "sources": [
+      "CSIC_2010_Cleaned",
+      "OpenAppSec_Legitimate",
+      "OpenAppSec_Malicious",
+      "SRBH2020_Honeypot"
+    ],
+    "feature_extraction": "gen3-F-2026-09-29-canon2",
+    "from_reports": {
+      "holdout_folds": "/content/drive/MyDrive/waf_ml/results/20260929-124509/experiment-value-features-20260929-123839/value_feature_report.json",
+      "leave_one_dataset_out": "/content/drive/MyDrive/waf_ml/results/20260929-124509/experiment-value-features-20260929-123839/value_feature_report.json"
+    }
+  },
+  "F_noenc": {
+    "criteria": {
+      "G1_benign_every_dataset": {
+        "value": 0.9838,
+        "target": ">= 0.985",
+        "passed": false,
+        "detail": {
+          "CSIC_2010_Cleaned": 0.9838,
+          "OpenAppSec": 0.999,
+          "SRBH2020_Honeypot": 0.997
+        }
+      },
+      "G2_known_attack_mean": {
+        "value": 0.8305,
+        "target": ">= 0.85",
+        "passed": false,
+        "detail": {
+          "CSIC_2010_Cleaned": 0.5525,
+          "OpenAppSec": 0.9789,
+          "SRBH2020_Honeypot": 0.9602
+        }
+      },
+      "G3_unseen_attack_mean": {
+        "value": 0.6752,
+        "target": ">= 0.7",
+        "passed": false,
+        "detail": {
+          "CSIC_2010_Cleaned": 0.4301,
+          "OpenAppSec": 0.8213,
+          "SRBH2020_Honeypot": 0.7742
+        }
+      },
+      "G4_no_dataset_below": {
+        "value": 0.4301,
+        "target": ">= 0.4",
+        "passed": true,
+        "detail": {
+          "unseen:CSIC_2010_Cleaned": 0.4301
+        }
+      },
+      "G5_sanity": {
+        "value": {
+          "scenario_normal_min": 37,
+          "scenario_attack_mean": 23.0,
+          "stress_detect_mean": 0.6156
+        },
+        "target": "normal 37/37, attack >= 23/26, stress >= 0.6",
+        "passed": true,
+        "detail": {
+          "stress_control_fp_mean": 0.0013
+        }
+      }
+    },
+    "complete": true,
+    "passed": false,
+    "holdout_folds": 3,
+    "sources": [
+      "CSIC_2010_Cleaned",
+      "OpenAppSec_Legitimate",
+      "OpenAppSec_Malicious",
+      "SRBH2020_Honeypot"
+    ],
+    "feature_extraction": "gen3-F-2026-09-29-canon2",
+    "from_reports": {
+      "holdout_folds": "/content/drive/MyDrive/waf_ml/results/20260929-124509/experiment-value-features-20260929-123839/value_feature_report.json",
+      "leave_one_dataset_out": "/content/drive/MyDrive/waf_ml/results/20260929-124509/experiment-value-features-20260929-123839/value_feature_report.json"
+    }
+  }
+}
