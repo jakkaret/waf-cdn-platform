@@ -1,10 +1,11 @@
 import re
+import httpx
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from services.ml_rule_service import MLRuleService
 from services.rbac import require_admin
-from services import audit_log
+from services import audit_log, rule_backtest
 from services.cve_feed import DEFAULT_WINDOW_DAYS, fetch_recent_cves, match_cves_to_origins, select_search_terms
 from services.gemini_service import gemini_service
 from services.rule_manager import escape_secrule_string
@@ -76,6 +77,29 @@ async def approve_ml_rule(rule_id: str, current_user: dict = Depends(require_adm
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+LEGACY_REJECT_REASON = "กฎแบบเก่าจาก RandomForest: ระบบเปลี่ยนมาใช้ Gen 3 แล้ว"
+
+
+@router.post("/reject-legacy")
+async def reject_legacy_ml_rules(current_user: dict = Depends(require_admin)):
+    """Reject every pending "rf-regex" rule in one call (the queue's ~268 RF leftovers)."""
+    try:
+        result = rule_service.reject_legacy_pending(
+            rejected_by=current_user.get("username", "admin"), reason=LEGACY_REJECT_REASON
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    audit_log.write_audit_event(
+        scope_id=AUDIT_SCOPE_GLOBAL,
+        actor_user_id=current_user.get("user_id"),
+        actor_username=current_user.get("username", ""),
+        action="rule.reject",
+        summary=f"ปฏิเสธกฎแบบเก่า (RandomForest) ทั้งหมด {result['rejected']} กฎ",
+        details=result | {"reason": LEGACY_REJECT_REASON},
+    )
+    return result
+
+
 @router.post("/{rule_id}/reject")
 async def reject_ml_rule(rule_id: str, req: RuleRejectRequest, current_user: dict = Depends(require_admin)):
     try:
@@ -97,6 +121,39 @@ async def reject_ml_rule(rule_id: str, req: RuleRejectRequest, current_user: dic
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{rule_id}/backtest")
+async def backtest_ml_rule(rule_id: str, days: int = rule_backtest.DEFAULT_DAYS, current_user: dict = Depends(require_admin)):
+    """How many requests the WAF let through in the last `days` this rule would
+    also have matched (services/rule_backtest.py). Read-only: nothing is
+    deployed, and the result is stored on the rule for the review queue."""
+    rule = rule_service.get_rule_detail(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    from api.ml import ML_SERVICE_URL, _ml_headers
+    try:
+        result = await rule_backtest.run_backtest(rule, _get_ch(), ML_SERVICE_URL, _ml_headers(), days)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:  # no traffic store to test against
+        raise HTTPException(status_code=503, detail=str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=503, detail=f"ML Service unavailable: {e}")
+    rule_service.save_backtest(rule, result)
+    return {"rule_id": rule_id, "backtest": result}
+
+
+_ch = None
+
+
+def _get_ch():
+    """ClickHouse client, built on first backtest (constructing it connects and runs DDL)."""
+    global _ch
+    if _ch is None:
+        from services.clickhouse_service import ClickHouseService
+        _ch = ClickHouseService()
+    return _ch
+
 
 @router.delete("/{rule_id}")
 async def delete_ml_rule(rule_id: str, current_user: dict = Depends(require_admin)):

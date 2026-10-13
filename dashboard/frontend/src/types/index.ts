@@ -298,6 +298,29 @@ export interface MLPendingRule {
   reviewed_at?: string
   reject_reason?: string
   deployed_rule_id?: number
+  // 2026-10-13: Gen3-rules, queue de-duplication and backtest
+  // (dashboard/backend/services/ml_rule_service.py, rule_backtest.py)
+  created_by?: string
+  generator?: MLRuleGenerator
+  detector?: string
+  dedup_key?: string
+  hit_count?: number
+  examples?: { url: string; method: string; seen_at: string }[]
+  last_seen_at?: string
+  backtest?: MLRuleBacktest
+  cve_id?: string
+  origin_label?: string
+}
+
+export type MLRuleGenerator = 'gen3-detector' | 'rf-regex' | 'cve'
+
+export interface MLRuleBacktest {
+  window_days: number
+  scanned: number
+  matched: number
+  example_paths: string[]
+  sample_limit: number
+  ran_at: string
 }
 
 

@@ -1,5 +1,5 @@
 import { api } from './axios'
-import { MLPendingRule } from '../types'
+import { MLPendingRule, MLRuleBacktest } from '../types'
 
 export const mlRulesApi = {
   listRules: async (status?: string) => {
@@ -20,6 +20,20 @@ export const mlRulesApi = {
 
   rejectRule: async (id: string, reason?: string) => {
     const res = await api.post(`/ml-rules/${id}/reject`, { reason })
+    return res.data
+  },
+
+  // Read-only: how much recent allowed traffic the rule would also match.
+  backtestRule: async (id: string, days?: number) => {
+    const res = await api.post<{ rule_id: string; backtest: MLRuleBacktest }>(`/ml-rules/${id}/backtest`, undefined, {
+      params: days ? { days } : undefined,
+    })
+    return res.data.backtest
+  },
+
+  // Rejects every pending rule from the retired RandomForest path in one call.
+  rejectLegacy: async () => {
+    const res = await api.post<{ rejected: number; skipped: number }>('/ml-rules/reject-legacy')
     return res.data
   },
 

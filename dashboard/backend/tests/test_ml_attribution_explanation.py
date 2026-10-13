@@ -1,6 +1,7 @@
 """
 Scenario: T10 - turn the model's per-feature attribution (T9) into a Thai
-explanation, surfaced by both /api/ml/predict and /api/ml/predict-and-suggest.
+explanation, surfaced by /api/ml/predict. (/api/ml/predict-and-suggest dropped it
+on 2026-10-13 together with the RandomForest: it answers with Gen 3 only.)
 
 Ruling R2 (task-10-brief.md): the explanation is generated in the dashboard
 backend by extending GeminiService with a new method (explain_attribution)
@@ -442,18 +443,19 @@ def test_predict_includes_explanation_when_attribution_present(
     assert body["attribution"] == ATTRIBUTION  # existing field untouched
 
 
-def test_predict_and_suggest_returns_prediction_and_suggested_rule_keys(
+def test_predict_and_suggest_answers_with_gen3_and_never_calls_gemini(
     client: TestClient, register_user, auth_header, monkeypatch
 ):
-    """`predict-and-suggest` must still return {"prediction": ..., "suggested_rule": ...}."""
-    _patch_httpx(
+    """`predict-and-suggest` is Gen 3 only since 2026-10-13: no RF `prediction`,
+    no Gemini explanation (it described the RF attribution)."""
+    calls = _patch_httpx(
         monkeypatch,
-        gemini_response=_gemini_ok_response("อธิบายผลการวิเคราะห์"),
+        gemini_raise=AssertionError("must not be called"),
         ml_response=_FakeResponse(200, json_data={
-            "is_anomaly": False,  # avoids MLRuleService/DynamoDB entirely; out of this task's scope
-            "score": 0.2,
-            "attribution": ATTRIBUTION,
-            "attribution_baseline": 0.5001,
+            "is_attack": False,  # avoids MLRuleService/DynamoDB entirely
+            "attack_probability": 0.2,
+            "threshold": 0.8749,
+            "detectors": [],
         }),
     )
 
@@ -466,10 +468,11 @@ def test_predict_and_suggest_returns_prediction_and_suggested_rule_keys(
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert set(body.keys()) == {"prediction", "suggested_rule"}
+    assert "prediction" not in body
+    assert body["gen3"]["is_attack"] is False
     assert body["suggested_rule"] is None
-    assert body["prediction"]["explanation"] == "อธิบายผลการวิเคราะห์"
-    assert body["prediction"]["is_anomaly"] is False
+    assert body["suggestion"]["reason"] == "gen3_not_attack"
+    assert calls["gemini"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -515,41 +518,6 @@ def test_predict_survives_explain_attribution_raising(
     assert body["attribution_baseline"] == 0.5001
 
 
-def test_predict_and_suggest_survives_explain_attribution_raising(
-    client: TestClient, register_user, auth_header, monkeypatch
-):
-    """Same guarantee for predict-and-suggest: the response keeps its
-    {"prediction": ..., "suggested_rule": ...} shape, and "prediction" keeps
-    its original fields, just without "explanation"."""
-
-    async def _boom(*_args, **_kwargs):
-        raise RuntimeError("explain_attribution blew up")
-
-    monkeypatch.setattr(ml_module.gemini_service, "explain_attribution", _boom)
-    _patch_httpx(
-        monkeypatch,
-        ml_response=_FakeResponse(200, json_data={
-            "is_anomaly": False,  # avoids MLRuleService/DynamoDB entirely; out of this task's scope
-            "score": 0.2,
-            "attribution": ATTRIBUTION,
-        }),
-    )
-
-    user = register_user(email="ml-user5@example.com", username="ml_user5")
-    resp = client.post(
-        "/api/ml/predict-and-suggest",
-        json={"url": "/vuln?id=1", "method": "GET", "body": ""},
-        headers=auth_header(user["access_token"]),
-    )
-
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert set(body.keys()) == {"prediction", "suggested_rule"}
-    assert "explanation" not in body["prediction"]
-    assert body["prediction"]["is_anomaly"] is False
-    assert body["prediction"]["attribution"] == ATTRIBUTION
-
-
 # ---------------------------------------------------------------------------
 # No execution sink
 # ---------------------------------------------------------------------------
@@ -584,9 +552,12 @@ def test_explanation_never_reaches_an_execution_sink_or_rule_generation():
         assert sink not in ml_src, f"forbidden sink {sink!r} found in api/ml.py"
         assert sink not in gemini_src, f"forbidden sink {sink!r} found in services/gemini_service.py"
 
-    # The rule-generation block (from the /generate-rule call through the
-    # create_pending_rule() call) never mentions "explanation".
-    start = ml_src.index('f"{ML_SERVICE_URL}/generate-rule"')
-    end = ml_src.index("return {", start)
-    rule_generation_block = ml_src[start:end]
-    assert "explanation" not in rule_generation_block
+    # The rule-generation code never mentions "explanation". Since 2026-10-13
+    # predict-and-suggest is Gen 3 only and attaches no explanation at all:
+    # neither it nor the helpers that ask the ML service for proposals may
+    # reference one, so model text cannot reach a rule.
+    import inspect
+    for fn in (ml_module._gen3_verdict, ml_module._proposed_rules, ml_module.predict_and_suggest):
+        assert "explanation" not in inspect.getsource(fn)
+        assert "_attach_explanation" not in inspect.getsource(fn)
+    assert "create_pending_rule" in inspect.getsource(ml_module.predict_and_suggest)

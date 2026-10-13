@@ -242,9 +242,17 @@ def predict_gen3(req: PredictionRequest):
     if gen3_model is None:
         raise HTTPException(503, detail=f"Gen 3 model is not available: {gen3_error}")
     try:
-        return gen3_model.predict(method=req.method, url=req.url, body=req.body) | {"mode": "shadow"}
+        result = gen3_model.predict(method=req.method, url=req.url, body=req.body) | {"mode": "shadow"}
     except Exception as exc:
         raise HTTPException(500, detail=f"Gen 3 scoring failed: {type(exc).__name__}")
+    # The detectors behind the score, for display (dashboard AI Analyst). Optional:
+    # the score stands without them, so a failure here only drops the key.
+    try:
+        from ml.rule_proposal import describe_detectors
+        result["detectors"] = describe_detectors(req.method, req.url, req.body)
+    except Exception as exc:
+        print(f"[!] Gen 3 detectors unavailable: {type(exc).__name__}: {exc}")
+    return result
 
 
 @app.post("/capture", include_in_schema=False)
@@ -314,6 +322,51 @@ def generate_waf_rule(req: RuleGenerateRequest):
             attack_type=req.attack_type
         )
     except ValueError as exc:  # pattern unsafe to place in a SecRule: never propose it
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+def _rule_proposal():
+    """ml.rule_proposal, imported on first use: it needs libinjection, and a host
+    without it must still serve /predict (the endpoints below answer 503 instead)."""
+    try:
+        from ml import rule_proposal
+    except ImportError as exc:
+        raise HTTPException(503, detail=f"Gen3 rule proposal is not available: {exc}")
+    return rule_proposal
+
+
+@app.post("/generate-rule-gen3")
+def generate_gen3_rules(req: PredictionRequest):
+    """Gen3-rules: one general SecRule per Gen 3 value detector that fired on the request.
+
+    Does not score the request; the caller decides whether it is an attack (/predict-gen3).
+    An empty `rules` list means no detector fired: nothing to turn into a rule.
+    """
+    proposal = _rule_proposal()
+    rules = proposal.propose_gen3_rules(req.method, req.url, req.body)
+    return {"generator": proposal.GENERATOR, "detectors": [r["detector"] for r in rules], "rules": rules}
+
+
+class BacktestRequestItem(BaseModel):
+    method: str = "GET"
+    url: str = "/"
+    body: str = ""
+
+
+class BacktestRequest(BaseModel):
+    rule: dict
+    requests: list[BacktestRequestItem]
+
+
+@app.post("/backtest-rule")
+def backtest_proposed_rule(req: BacktestRequest):
+    """How many of the given (logged, already allowed) requests a proposed rule would match."""
+    proposal = _rule_proposal()
+    if len(req.requests) > proposal.BACKTEST_MAX_REQUESTS:
+        raise HTTPException(413, detail=f"at most {proposal.BACKTEST_MAX_REQUESTS} requests per backtest")
+    try:
+        return proposal.backtest_rule(req.rule, [r.model_dump() for r in req.requests])
+    except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
 # Serve Dashboard static files

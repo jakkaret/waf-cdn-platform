@@ -201,46 +201,82 @@ async def predict_anomaly(req: PredictRequest, current_user: dict = Depends(requ
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=e.response.status_code, detail=f"ML Service error: {e.response.text}")
 
+async def _gen3_verdict(client, req: PredictRequest) -> dict:
+    """Gen 3 score for the request (`detectors` = what fired, for display).
+
+    The RandomForest is no longer used here (2026-10-13): without a Gen 3 model
+    on the ML host the analyst has nothing to show, so this answers 503 rather
+    than falling back to the RF score.
+    """
+    res = await client.post(f"{ML_SERVICE_URL}/predict-gen3", json=req.dict(), headers=_ml_headers(), timeout=10.0)
+    if res.status_code != 200:
+        raise HTTPException(status_code=503, detail=f"Gen 3 model unavailable on the ML service ({res.status_code})")
+    data = res.json()
+    if not isinstance(data, dict) or "is_attack" not in data:
+        raise HTTPException(status_code=503, detail="Gen 3 model unavailable on the ML service")
+    return data
+
+
+async def _proposed_rules(client, req: PredictRequest, gen3: dict) -> tuple[list, str]:
+    """(rule data list, reason) for one analysed request: Gen3-rules only.
+
+    The Gen 3 model decides whether the request is an attack, and every value
+    detector that fired becomes one general rule (merged across requests on
+    dedup_key). Measured on the open-appsec set (ml/security_test/
+    BENCHMARK_PLAN_OPENAPPSEC.md 14.4) Gen 3 separates far better than the
+    RandomForest (ROC-AUC 0.965 vs 0.874), whose rules were a literal of the
+    request that matched nothing else. Proposals are never applied on their
+    own: an admin approves each one, so using the shadow-only Gen 3 model here
+    does not let it enforce anything.
+    """
+    if not gen3.get("is_attack"):
+        return [], "gen3_not_attack"
+    body = {"url": req.url, "method": req.method, "body": req.body}
+    res = await client.post(f"{ML_SERVICE_URL}/generate-rule-gen3", json=body, headers=_ml_headers(), timeout=10.0)
+    if res.status_code != 200:
+        logger.warning("generate-rule-gen3 answered %s", res.status_code)
+        return [], "generator_error"
+    rules = res.json().get("rules") or []
+    return rules, "" if rules else "gen3_no_detector"
+
+
 @router.post("/predict-and-suggest")
 async def predict_and_suggest(req: PredictRequest, current_user: dict = Depends(require_viewer_or_above)):
+    """Score a request with Gen 3 and queue rule proposals for admin review.
+
+    Response: `gen3` (score, threshold, detectors), `suggested_rule` (first
+    proposal, or None), `suggested_rules` and `suggestion` = {engine, created,
+    merged, reason}. `reason` says why nothing was proposed: gen3_not_attack,
+    gen3_no_detector (flagged on structural features only), generator_error.
+    No Gemini call: Gemini described the RandomForest attribution, which is no longer used here.
+    """
     _check_suggest_quota(str(current_user.get("user_id") or current_user.get("sub") or "unknown"))
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{ML_SERVICE_URL}/predict",
-                json=req.dict(),
-                headers=_ml_headers(),
-                timeout=10.0
-            )
-            response.raise_for_status()
-            result = response.json()
-            result = await _attach_explanation(req, result)
+            # Proposals come from the ML service's own answers only.
+            gen3 = await _gen3_verdict(client, req)
+            rules, reason = await _proposed_rules(client, req, gen3)
 
-            # If anomaly detected, generate a pending rule
-            pending_rule = None
-            if result.get("is_anomaly"):
-                rule_res = await client.post(
-                    f"{ML_SERVICE_URL}/generate-rule",
-                    json={
-                        "url": req.url,
-                        "method": req.method,
-                        "body": req.body,
-                        "attack_type": "Anomaly Pattern"
-                    },
-                    headers=_ml_headers(),
-                    timeout=10.0
-                )
-                if rule_res.status_code == 200:
-                    rule_data = rule_res.json()
-                    from services.ml_rule_service import MLRuleService
-                    rule_service = MLRuleService()
-                    pending_rule = rule_service.create_pending_rule(rule_data, created_by="ml-auto")
-            
+            suggested, created, merged = [], 0, 0
+            if rules:
+                from services.ml_rule_service import MLRuleService
+                rule_service = MLRuleService()
+                for rule_data in rules:
+                    existing = rule_service.find_pending_by_dedup_key(rule_data.get("dedup_key", ""))
+                    if existing:
+                        suggested.append(rule_service.record_hit(existing, rule_data))
+                        merged += 1
+                    else:
+                        suggested.append(rule_service.create_pending_rule(rule_data, created_by="ml-auto"))
+                        created += 1
+
             return {
-                "prediction": result,
-                "suggested_rule": pending_rule
+                "gen3": gen3,
+                "suggested_rule": suggested[0] if suggested else None,
+                "suggested_rules": suggested,
+                "suggestion": {"engine": "gen3", "created": created, "merged": merged, "reason": reason},
             }
-            
+
     except httpx.RequestError as e:
         raise HTTPException(status_code=503, detail=f"ML Service unavailable: {str(e)}")
     except httpx.HTTPStatusError as e:

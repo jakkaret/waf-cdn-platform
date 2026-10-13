@@ -122,7 +122,11 @@ def generate_pending_rule(url: str, method: str = "GET", body: str = "", attack_
         "secrule_template": secrule_template,
         "source_url": url[:100],
         "source_method": method,
-        "timestamp": timestamp
+        "timestamp": timestamp,
+        # Which generator wrote the rule, and the key the dashboard queue merges repeats on:
+        # the same pattern proposed again adds a hit to the pending rule instead of a new row.
+        "generator": "rf-regex",
+        "dedup_key": f"rf-regex:{pattern}",
     }
 
 if __name__ == "__main__":

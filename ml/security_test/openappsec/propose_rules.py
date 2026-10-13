@@ -34,7 +34,6 @@ import os
 import sys
 import time
 from collections import defaultdict
-from urllib.parse import urlsplit
 
 import duckdb
 import numpy as np
@@ -43,52 +42,17 @@ import pandas as pd
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, REPO)
 
-from ml.auto_rule_generator import assert_secrule_safe, generate_pending_rule  # noqa: E402
-from ml.canonical import canonical_request  # noqa: E402
-from ml.feature_engineering import (  # noqa: E402
-    RESTRICTED_FILE_PATTERN, extract_features_from_request, feature_columns_for_model,
-)
-from ml.hybrid_model import request_units  # noqa: E402
+from ml.auto_rule_generator import generate_pending_rule  # noqa: E402
+from ml.feature_engineering import extract_features_from_request, feature_columns_for_model  # noqa: E402
+# The Gen3-rules generator is shared with the ML API (/generate-rule-gen3); re-exported for the tests.
+from ml.rule_proposal import GEN3_OPERATORS, detectors_fired, gen3_rule_text  # noqa: E402,F401
 from ml.security_test.openappsec.score_offline import RF_BODY_CAP  # noqa: E402
 from ml.security_test.openappsec.split import GEN, half_of  # noqa: E402
-from ml.value_features import DETECTORS, normalize_unit, unit_hits  # noqa: E402
 
 RF_PATH = os.path.join(REPO, "ml", "models", "random_forest_waf.joblib")
 GEN3_PATH = os.path.join(REPO, "ml", "models", "gen3", "gen3_f_noopenappsec.onnx")
 RF_THRESHOLD = 0.5
 RF_FIRST_ID, GEN3_FIRST_ID = 1000500, 1100000
-
-GEN3_VARIABLES = "ARGS|ARGS_NAMES|REQUEST_FILENAME"
-# Mirrors ml/value_features.normalize_unit: URL decoding (ModSecurity already decoded ARGS once),
-# HTML entities, \xHH / \uXXXX escapes, lowercase, null bytes dropped.
-GEN3_TRANSFORMS = "t:none,t:urlDecodeUni,t:htmlEntityDecode,t:jsDecode,t:lowercase,t:removeNulls"
-GEN3_OPERATORS = {
-    "v_sqli_libinjection": "@detectSQLi",
-    "v_xss_libinjection": "@detectXSS",
-    **{name: f"@rx {pattern.pattern}" for name, pattern in DETECTORS.items()},
-    "v_restricted_file": f"@rx {RESTRICTED_FILE_PATTERN.pattern}",
-}
-
-
-def gen3_rule_text(rule_id, detector):
-    operator = GEN3_OPERATORS[detector]
-    assert_secrule_safe(operator)
-    return (f'SecRule {GEN3_VARIABLES} "{operator}" \\\n'
-            f'    "id:{rule_id},phase:2,deny,status:403,log,severity:CRITICAL,\\\n'
-            f'    {GEN3_TRANSFORMS},\\\n'
-            f"    msg:'ML proposed rule (Gen3-rules): {detector}'\"")
-
-
-def detectors_fired(method, url, body):
-    """Detector names that fired on any unit of the request, as Gen3 computes its value features."""
-    parts = urlsplit(url)
-    path, query, body = canonical_request(parts.path or "/", parts.query, body)
-    texts = [normalize_unit(str(path).lower())[0]]
-    texts += [normalize_unit(u)[0] for u in request_units(method, path, query, body)]
-    fired = set()
-    for text in texts:
-        fired.update(name for name, hit in unit_hits(text).items() if hit)
-    return fired
 
 
 def load_gen_half(requests_db, view):
