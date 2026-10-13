@@ -6,11 +6,12 @@ import urllib.request
 import urllib.parse
 from typing import Dict, Any
 
-# ML API Endpoints
+# ML API Endpoints. Gen 3 only since 2026-10-13 (the RandomForest is retired, as in
+# dashboard/backend/api/ml.py): /predict-gen3 decides, /generate-rule-gen3 names the
+# detector rules. ML_PREDICT_URL still overrides the scoring endpoint.
 BASE_ML_URL = os.environ.get("ML_API_URL", "http://127.0.0.1:5000").rstrip("/")
-PREDICT_URL = os.environ.get("ML_PREDICT_URL") or (
-    f"{BASE_ML_URL}/predict" if not BASE_ML_URL.endswith("/predict") else BASE_ML_URL)  # e.g. .../predict-gen3
-RULE_GEN_URL = f"{BASE_ML_URL}/generate-rule"
+PREDICT_URL = os.environ.get("ML_PREDICT_URL") or f"{BASE_ML_URL}/predict-gen3"
+RULE_GEN_URL = f"{BASE_ML_URL}/generate-rule-gen3"
 # Same token as the backend (dashboard/backend/api/ml.py) when the ML service is remote.
 ML_HEADERS = {"Content-Type": "application/json"}
 if os.environ.get("ML_SERVICE_TOKEN"):
@@ -39,10 +40,10 @@ def send_prediction_request(url: str, method: str = "GET", body: str = "") -> Di
         pass
     return None
 
-def send_rule_generation_request(url: str, method: str = "GET", body: str = "", attack_type: str = "Anomaly") -> Dict[str, Any]:
-    """Request auto-generation of ModSecurity SecRule."""
+def send_rule_generation_request(url: str, method: str = "GET", body: str = "") -> Dict[str, Any]:
+    """Gen3-rules for a flagged request: {"detectors": [...], "rules": [...]} (printed, not queued)."""
     try:
-        data = json.dumps({"url": url, "method": method, "body": body, "attack_type": attack_type}).encode("utf-8")
+        data = json.dumps({"url": url, "method": method, "body": body}).encode("utf-8")
         req = urllib.request.Request(RULE_GEN_URL, data=data, headers=ML_HEADERS, method="POST")
         with urllib.request.urlopen(req, timeout=1.5) as resp:
             if resp.status == 200:
@@ -112,14 +113,15 @@ async def tail_log_channel(channel_name: str, log_path: str):
                     loop = asyncio.get_event_loop()
                     result = await loop.run_in_executor(None, send_prediction_request, url, method, body)
 
-                    if result and (result.get("is_anomaly") or result.get("is_attack")):  # /predict | /predict-gen3
+                    if result and (result.get("is_attack") or result.get("is_anomaly")):  # /predict-gen3 (| old /predict)
                         prob = result.get("attack_probability", 0.0) * 100
                         print(f"🚨 [{channel_name} DETECTED] IP: {ip:<15} | Prob: {prob:5.1f}% | URL: {url}")
 
-                        # Trigger Auto Rule Suggestion
-                        rule_res = await loop.run_in_executor(None, send_rule_generation_request, url, method, body, "Threat Payload")
-                        if rule_res and rule_res.get("pattern"):
-                            print(f"✨ [{channel_name} RULE SUGGESTED] Pattern: {rule_res.get('pattern')} -> Pending Approval")
+                        # Which Gen3-rules this request would propose. Printed only: the
+                        # admin queue is fed by the dashboard (predict-and-suggest).
+                        rule_res = await loop.run_in_executor(None, send_rule_generation_request, url, method, body)
+                        for rule in (rule_res or {}).get("rules", []):
+                            print(f"✨ [{channel_name} RULE CANDIDATE] {rule.get('attack_type')}: {rule.get('pattern')}")
                     elif result:
                         print(f"✅ [{channel_name} PASS] IP: {ip:<15} | URL: {url}")
 
