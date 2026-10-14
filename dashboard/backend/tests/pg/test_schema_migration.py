@@ -57,7 +57,7 @@ def _err(conn, sql, params=None) -> str:
 
 
 def test_migrate_applies_init_once_then_is_up_to_date(db):
-    assert db["applied"] == ["0001_init"]
+    assert db["applied"] == ["0001_init", "0002_seed_rate_limit_rules"]
     assert migrate_mod.migrate(_dsn_for(db["name"])) == []
 
 
@@ -126,6 +126,17 @@ def test_constraints_and_relations(db):
         c, "INSERT INTO pending_rules(dedup_key) VALUES('k1')")
 
 
+def test_default_rate_limit_rules_are_seeded(db):
+    rows = db["conn"].execute(
+        "SELECT id, method, limit_count, window_seconds, burst, action, enabled "
+        "FROM rate_limit_rules ORDER BY id").fetchall()
+    assert rows == [
+        ("rule_auth_protect", "POST", 10, 60, 2, "429", True),
+        ("rule_edge_flood", "ALL", 50, 1, 10, "429", True),
+        ("rule_global_api", "ALL", 120, 60, 20, "429", True),
+    ]
+
+
 def test_audit_logs_are_append_only(db):
     c = db["conn"]
     c.execute("INSERT INTO audit_logs(event_id,scope_id,action,summary) "
@@ -159,7 +170,8 @@ def test_dry_run_reports_pending_without_applying(tmp_path):
     with psycopg.connect(ADMIN_DSN, autocommit=True) as admin:
         admin.execute(f'CREATE DATABASE "{name}"')
     try:
-        assert migrate_mod.migrate(_dsn_for(name), dry_run=True) == ["0001_init"]
+        assert migrate_mod.migrate(_dsn_for(name), dry_run=True) == [
+            "0001_init", "0002_seed_rate_limit_rules"]
         with psycopg.connect(_dsn_for(name)) as conn:
             assert conn.execute("SELECT to_regclass('waf.users')").fetchone()[0] is None
     finally:
