@@ -91,6 +91,26 @@ _redis_module.StrictRedis = _SharedFakeRedis
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+# ---------------------------------------------------------------------------
+# 1c. PostgreSQL mode (DATA_BACKEND=postgres): services.dynamodb_service then
+#     exports PgStore, and the suite runs against a throwaway database made
+#     from db/migrations (tests/pg_harness.py). Method groups already moved
+#     to PostgreSQL run real SQL; the rest still use the in-memory tables
+#     below until their migration phase. The default (dynamodb) mode is
+#     unchanged.
+# ---------------------------------------------------------------------------
+PG_MODE = os.environ.get("DATA_BACKEND", "").strip().lower() == "postgres"
+from tests import pg_harness  # noqa: E402
+
+if PG_MODE:
+    if not pg_harness.enabled():
+        pytest.exit("DATA_BACKEND=postgres needs TEST_DATABASE_URL (a disposable server)", returncode=4)
+    pg_harness.ensure_database()
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "pg: needs a real PostgreSQL (TEST_DATABASE_URL)")
+
 from boto3.dynamodb.conditions import And, Or, Equals  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -386,6 +406,8 @@ def fake_infrastructure(monkeypatch, tmp_path):
     """Patch every external-store singleton at its service boundary (Ruling R3)."""
     _SharedFakeRedis().flushall()
     _STORE.clear()
+    if PG_MODE:
+        pg_harness.reset()
 
     # DynamoDB: patch the class itself so any fresh construction (e.g. the
     # local import inside services.rbac.verify_origin_ownership) also lands

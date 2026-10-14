@@ -40,8 +40,10 @@ class MLRuleService:
     def __init__(self):
         self.db = DynamoDBService()
         self.rule_manager = RuleManager()
-        # Ensure the table is accessible
-        self._table = self.db.dynamodb.Table("waf_pending_rules")
+        from services.dynamodb_service import data_backend
+        # postgres: no boto3 table handle (no I/O at import; api/ml_rules.py
+        # builds this at module level). The SQL lands in migration Phase 4.
+        self._table = None if data_backend() == "postgres" else self.db.dynamodb.Table("waf_pending_rules")
 
     def create_pending_rule(self, rule_data: Dict[str, Any], created_by: str = "ml-auto") -> Dict[str, Any]:
         """Save a new pending rule to DynamoDB."""

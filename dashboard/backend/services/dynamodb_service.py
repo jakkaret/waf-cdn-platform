@@ -662,3 +662,17 @@ class DynamoDBService:
 
 class DuplicateDomain(ValueError):
     """A domain with this name is already registered."""
+
+
+# The DynamoDB-backed implementation, also the base of PgStore while method
+# groups move to PostgreSQL (migration plan Phases 2-7).
+_DynamoBackedStore = DynamoDBService
+
+
+def data_backend() -> str:
+    """'postgres' or 'dynamodb' (default), from env DATA_BACKEND."""
+    return "postgres" if os.getenv("DATA_BACKEND", "dynamodb").strip().lower() == "postgres" else "dynamodb"
+
+
+if data_backend() == "postgres":
+    from services.pg_store import PgStore as DynamoDBService  # noqa: E402,F811
