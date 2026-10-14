@@ -143,13 +143,14 @@ async def system_status(current_user: dict = Depends(require_viewer_or_above)):
         for (name, (port, desc)), is_open in zip(SERVICES.items(), port_results)
     }
 
+    from services.dynamodb_service import data_backend
+    db_name = "PostgreSQL" if data_backend() == "postgres" else "DynamoDB"
     db_status, db_detail = "offline", "unreachable"
     try:
-        # Reading table_status makes a DescribeTable call -- the reachability probe.
         await loop.run_in_executor(_PROBE_POOL, _db_ping)
-        db_status, db_detail = "online", "DynamoDB reachable"
+        db_status, db_detail = "online", f"{db_name} reachable"
     except Exception as exc:
-        db_detail = f"DynamoDB error: {exc}"[:200]
+        db_detail = f"{db_name} error: {exc}"[:200]
 
     cdn_nodes = []
     try:
@@ -283,11 +284,29 @@ async def health_check():
     # already a free in-memory flag (checked once at ClickHouseService
     # construction), so this now costs no network round-trip at all instead
     # of paying that tax on every poll from monitoring/uptime tooling.
-    return {"status": "ok", "clickhouse": "connected" if ch.connected else "disconnected"}
+    #
+    # The one exception is the PostgreSQL control-plane store (local, so a
+    # SELECT 1 is ~1ms): a deploy check must see "db": "down" when the app
+    # is up but cannot reach its database. Bounded to 1s off the loop.
+    result = {"status": "ok", "clickhouse": "connected" if ch.connected else "disconnected"}
+    from services.dynamodb_service import data_backend
+    if data_backend() == "postgres":
+        from db import pool as pg_pool
+        result["db"] = "ok" if await asyncio.to_thread(pg_pool.ping, 1.0) else "down"
+    return result
 
 # Startup & Shutdown
 @app.on_event("startup")
 async def startup_event():
+    from services.dynamodb_service import data_backend
+    if data_backend() == "postgres":
+        from db import pool as pg_pool
+        try:
+            await asyncio.to_thread(pg_pool.open_pool, 10.0)
+        except Exception as exc:
+            # Keep serving: /api/health reports "db": "down" and requests
+            # retry through the pool, instead of the process crash-looping.
+            print(f"PostgreSQL pool warm-up failed: {exc}")
     print("=" * 50)
     print("WAF Dashboard API Starting...")
     print("=" * 50)
@@ -349,6 +368,10 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     print("WAF Dashboard API Shutting down...")
+    from services.dynamodb_service import data_backend
+    if data_backend() == "postgres":
+        from db import pool as pg_pool
+        pg_pool.close_pool()
 
 # Registered ahead of the SPA catch-all below -- Starlette matches routes in
 # registration order, so without these two, requests for /robots.txt and

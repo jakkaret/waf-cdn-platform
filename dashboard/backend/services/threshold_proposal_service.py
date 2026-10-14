@@ -202,9 +202,11 @@ class ThresholdProposalStore:
     """
 
     def __init__(self):
-        from services.dynamodb_service import DynamoDBService
+        from services.dynamodb_service import DynamoDBService, data_backend
         self.db = DynamoDBService()
-        self._table = self.db.dynamodb.Table("waf_threshold_proposals")
+        # postgres: no boto3 table handle (built at import time in
+        # api/threshold_proposals.py). The SQL lands in migration Phase 4.
+        self._table = None if data_backend() == "postgres" else self.db.dynamodb.Table("waf_threshold_proposals")
 
     def create(self, proposal: Dict[str, Any], created_by: str = "ml-auto") -> Dict[str, Any]:
         item = dict(proposal)

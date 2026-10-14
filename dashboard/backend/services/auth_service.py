@@ -48,6 +48,13 @@ ph = PasswordHasher(
 
 class AuthService:
     def __init__(self):
+        from services.dynamodb_service import data_backend
+        self.backend = data_backend()
+        if self.backend == "postgres":
+            # No boto3 resource and no I/O: scripts and tests build this at
+            # module level. Accounts live in waf.users (migration Phase 3).
+            self.users_table = None
+            return
         self.region = os.getenv("AWS_REGION", "ap-southeast-1")
         endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
         self.dynamodb = boto3.resource(
