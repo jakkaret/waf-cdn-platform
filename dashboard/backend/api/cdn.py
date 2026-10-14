@@ -11,9 +11,8 @@ import json as _json
 import pathlib as _pathlib
 
 from services.rbac import require_viewer_or_above, require_admin
-from services.dynamodb_service import DynamoDBService
 from services.clickhouse_service import ClickHouseService
-from services.cdn_log_forward import normalize_cdn_access
+from services.log_normalize import normalize_cdn_access
 from services.telegram_listener import dispatch_telegram_alert
 from services.pii_masker import pii_masker
 from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter
@@ -21,7 +20,6 @@ from services.tenant_service import get_user_origins_and_domains, build_tenant_o
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/cdn", tags=["cdn"])
 
-_db = DynamoDBService()
 ch = ClickHouseService()
 
 _CDN_NODES_CACHE: Tuple[float, List[Dict[str, Any]]] = (0.0, [])

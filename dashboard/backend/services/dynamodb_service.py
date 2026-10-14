@@ -2,10 +2,10 @@ import boto3
 import os
 import time
 import uuid
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 from decimal import Decimal
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.config import Config
 
 from dotenv import load_dotenv, find_dotenv
@@ -35,7 +35,6 @@ class DynamoDBService:
         # the key means what it says. Rows whose Host could not be resolved
         # to a registered domain live in the UNATTRIBUTED partition.
         self.alerts_table_name = "waf_alerts_v2"
-        self.logs_table_name = "waf_logs"
         self.rules_table_name = "waf_rules"
         self.users_table_name = "waf_users"
         endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
@@ -53,10 +52,6 @@ class DynamoDBService:
 
         # Initialize tables
         self.alerts_table = self.dynamodb.Table(self.alerts_table_name)
-        # Pre-migration table, left intact as the rollback target. Nothing
-        # reads or writes it any more.
-        self.alerts_legacy_table = self.dynamodb.Table("waf_alerts")
-        self.logs_table = self.dynamodb.Table(self.logs_table_name)
         # Misnomer, kept because the physical table name cannot be changed
         # in place. "waf_rules" holds BOLA policies (services/bola_guard.py
         # is its only reader/writer, and it is empty in production), NOT
@@ -85,52 +80,6 @@ class DynamoDBService:
             return [self.convert_floats(i) for i in obj]
         else:
             return obj
-    # LOGS
-    def save_log(self, event):
-        try:
-            event = self.convert_floats(event)
-
-            #เติม primary key ถ้าไม่มี
-            event["user_id"] = event.get("user_id", "default-user")
-            event["log_id"] = event.get("log_id", str(uuid.uuid4()))
-
-            event["timestamp"] = event.get("timestamp", int(time.time()))
-            event["alert"] = event.get("alert", False)
-            self.logs_table.put_item(Item=event)
-            # (success is silent; failures are logged in the except below)
-
-        except Exception as e:
-            print("Failed to save log:", e)
-
-    def get_logs(self, limit: int = 10) -> List[Dict]:
-        try:
-            response = self.logs_table.scan(Limit=limit)
-            return response.get("Items", [])
-        except Exception as e:
-            print("Failed to fetch logs:", e)
-            return []
-
-    def get_cdn_logs(self, limit: int = 500, region: str = "ALL") -> List[Dict]:
-        """
-        [Q2 FIX] ดึง CDN logs โดย filter source='cdn' ที่ DynamoDB level
-        แทนการดึง 2000 rows มา filter ใน Python application memory
-        """
-        try:
-            filter_expr = Attr("source").eq("cdn")
-            if region and region.upper() != "ALL":
-                filter_expr = filter_expr & Attr("region").eq(region.upper())
-
-            response = self.logs_table.scan(
-                FilterExpression=filter_expr,
-                Limit=limit,
-            )
-            items = response.get("Items", [])
-            items.sort(key=lambda x: int(x.get("timestamp", 0)), reverse=True)
-            return items
-        except Exception as e:
-            print("Failed to fetch CDN logs:", e)
-            return []
-
     # ALERTS
     def save_alert(
         self,
@@ -256,52 +205,6 @@ class DynamoDBService:
             print("Failed to fetch all alerts:", e)
             return _alerts_cache[:max_items] if _alerts_cache else []
 
-
-    def get_unalerted_403_logs(self):
-        try:
-            response = self.logs_table.scan(
-                FilterExpression=Attr("status").eq(403) & Attr("alert").eq(False)
-            )
-            return response.get("Items", [])
-        except Exception as e:
-            print("Failed to fetch 403 logs:", e)
-            return []
-
-    def mark_log_alerted(self, user_id, timestamp):
-        try:
-            self.logs_table.update_item(
-                Key={
-                    "user_id": user_id,
-                    "timestamp": timestamp
-                },
-                UpdateExpression="SET alert = :val",
-                ExpressionAttributeValues={
-                    ":val": True
-                }
-            )
-            print("Marked as alerted:", timestamp)
-        except Exception as e:
-            print("Failed to update alert flag:", e)
-
-
-    # TEST CONNECTION
-    # def test_connection(self) -> bool:
-    #     try:
-    #         self.alerts_table.put_item(
-    #             Item={
-    #                 "user_id": "test-user",
-    #                 "alert_id": str(int(time.time())),
-    #                 "ip": "127.0.0.1",
-    #                 "url": "/healthcheck",
-    #                 "status": "200",
-    #                 "timestamp": datetime.now().isoformat() + "Z",  # ใช้ ISO format
-    #             }
-    #         )
-    #         print("✅ DynamoDB connection OK")
-    #         return True
-    #     except Exception as e:
-    #         print("❌ DynamoDB connection failed:", e)
-    #         return False
 
     # ORIGINS
     def create_origin(self, origin_data: Dict) -> bool:
@@ -497,15 +400,265 @@ class DynamoDBService:
             print("Failed to restore origin:", e)
             return False
 
-# ตัวอย่างการใช้งาน / Quick test (python3 -m services.dynamodb_service)
-if __name__ == "__main__":
-    db = DynamoDBService()
+    # ------------------------------------------------------------------
+    # Named data-access methods (migration Phase 1). Every read/write of a
+    # table outside this class goes through one of these, so the PostgreSQL
+    # store can implement the same interface method by method.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _scan_all(table, **kwargs) -> List[Dict]:
+        """Every matching row: scan() returns at most 1 MB per page."""
+        items: List[Dict] = []
+        while True:
+            page = table.scan(**kwargs)
+            items.extend(page.get("Items", []))
+            last_key = page.get("LastEvaluatedKey")
+            if not last_key:
+                return items
+            kwargs["ExclusiveStartKey"] = last_key
 
-    # [Q8 FIX] เดิมเรียก db.get_alerts() ซึ่งไม่มีใน class → crash
-    # แก้เป็น get_logs() และ get_unalerted_403_logs() ที่มีอยู่จริง
-    print("=== Recent Logs ===")
-    print(db.get_logs(limit=5))
+    @staticmethod
+    def _query_all(table, **kwargs) -> List[Dict]:
+        items: List[Dict] = []
+        while True:
+            page = table.query(**kwargs)
+            items.extend(page.get("Items", []))
+            last_key = page.get("LastEvaluatedKey")
+            if not last_key:
+                return items
+            kwargs["ExclusiveStartKey"] = last_key
 
-    print("=== Unalerted 403 Logs ===")
-    print(db.get_unalerted_403_logs())
+    @staticmethod
+    def _set_expression(fields: Dict[str, Any]):
+        names, values, clauses = {}, {}, []
+        for i, (k, v) in enumerate(fields.items()):
+            names[f"#f{i}"] = k
+            values[f":v{i}"] = v
+            clauses.append(f"#f{i} = :v{i}")
+        return "SET " + ", ".join(clauses), names, values
 
+    def ping(self) -> bool:
+        """Reachability probe for /api/system/status (raises on failure)."""
+        return bool(self.domains_table.table_status)
+
+    # ---- domains --------------------------------------------------------
+    def get_domain(self, domain_id: str) -> Optional[Dict]:
+        return self.domains_table.get_item(Key={"id": domain_id}).get("Item")
+
+    def get_domain_by_name(self, domain_name: str) -> Optional[Dict]:
+        items = self._scan_all(self.domains_table, FilterExpression=Attr("domain_name").eq(domain_name))
+        return items[0] if items else None
+
+    def list_domains(self, origin_id: Optional[str] = None,
+                     dns_verified: Optional[bool] = None) -> List[Dict]:
+        if origin_id is not None:
+            items = self._query_all(
+                self.domains_table, IndexName="origin_id-index",
+                KeyConditionExpression=Key("origin_id").eq(str(origin_id)))
+        elif dns_verified is not None:
+            items = self._scan_all(self.domains_table, FilterExpression=Attr("dns_verified").eq(dns_verified))
+        else:
+            items = self._scan_all(self.domains_table)
+        if dns_verified is not None:
+            items = [d for d in items if bool(d.get("dns_verified", False)) == dns_verified]
+        return items
+
+    def create_domain(self, item: Dict) -> Dict:
+        """Insert a domain row; DuplicateDomain if the name is taken."""
+        if self.get_domain_by_name(item["domain_name"]):
+            raise DuplicateDomain(f"Domain name {item['domain_name']} is already registered.")
+        self.domains_table.put_item(Item=item)
+        return item
+
+    def update_domain(self, domain_id: str, fields: Dict[str, Any]) -> None:
+        expr, names, values = self._set_expression(fields)
+        self.domains_table.update_item(Key={"id": domain_id}, UpdateExpression=expr,
+                                       ExpressionAttributeNames=names,
+                                       ExpressionAttributeValues=values)
+
+    def delete_domain(self, domain_id: str) -> None:
+        self.domains_table.delete_item(Key={"id": domain_id})
+
+    def delete_domains_for_origin(self, origin_id: str) -> int:
+        rows = self._scan_all(self.domains_table, FilterExpression=Attr("origin_id").eq(origin_id))
+        for row in rows:
+            self.domains_table.delete_item(Key={"id": row["id"]})
+        return len(rows)
+
+    # ---- origins ----------------------------------------------------------
+    def list_origins(self) -> List[Dict]:
+        return self._scan_all(self.origins_table)
+
+    def hard_delete_origin(self, origin_id: str) -> None:
+        self.origins_table.delete_item(Key={"id": origin_id})
+
+    # ---- hostnames ----------------------------------------------------------
+    def verified_hostnames_active(self) -> List[tuple]:
+        """[(hostname, origin_id)] for DNS-verified BYO domains and tunnel
+        domains of origins that are not archived/deleted. Not de-duplicated:
+        a host claimed by two origins appears twice (callers decide)."""
+        origins = self.list_origins()
+        active = {str(o.get("id")) for o in origins if o.get("status") not in ("archived", "deleted")}
+        pairs: List[tuple] = []
+        for d in self.list_domains():
+            oid = str(d.get("origin_id") or "")
+            if d.get("dns_verified") and d.get("domain_name") and oid in active:
+                pairs.append((str(d["domain_name"]), oid))
+        for o in origins:
+            if str(o.get("id")) not in active:
+                continue
+            for host in o.get("tunnel_domains") or []:
+                if host:
+                    pairs.append((str(host), str(o.get("id"))))
+        return pairs
+
+    def hostname_owner_map(self) -> Dict[str, str]:
+        """host -> owning admin_user_id for every BYO and tunnel hostname,
+        verified or not and whatever the origin status (threat-intel
+        attribution semantics)."""
+        mapping: Dict[str, str] = {}
+        owner_by_origin_id = {}
+        for o in self.list_origins():
+            origin_id, owner = o.get("id"), o.get("admin_user_id")
+            if origin_id and owner:
+                owner_by_origin_id[origin_id] = owner
+            if owner:
+                for d in (o.get("tunnel_domains") or []):
+                    if d:
+                        mapping[str(d).strip().lower()] = owner
+        for d in self.list_domains():
+            name, owner = d.get("domain_name"), owner_by_origin_id.get(d.get("origin_id"))
+            if name and owner:
+                mapping[str(name).strip().lower()] = owner
+        return mapping
+
+    # ---- alerts -------------------------------------------------------------
+    def put_alert(self, item: Dict) -> None:
+        self.alerts_table.put_item(Item=item)
+
+    def mark_alert_read(self, origin_id: str, alert_id: str) -> None:
+        self.alerts_table.update_item(
+            Key={"origin_id": origin_id, "alert_id": alert_id},
+            UpdateExpression="SET #r = :val",
+            ExpressionAttributeNames={"#r": "read"},
+            ExpressionAttributeValues={":val": True},
+        )
+        invalidate_alerts_cache()
+
+    def mark_alerts_read(self, alerts: List[Dict]) -> int:
+        """Mark the given alert rows read (each needs origin_id + alert_id).
+        BatchWriteItem has no update, so full rows are rewritten."""
+        n = 0
+        with self.alerts_table.batch_writer() as batch:
+            for a in alerts:
+                if not a.get("origin_id") or not a.get("alert_id"):
+                    continue
+                batch.put_item(Item={**a, "read": True})
+                n += 1
+        invalidate_alerts_cache()
+        return n
+
+    # ---- postmortems ------------------------------------------------------
+    def save_postmortem(self, item: Dict) -> None:
+        self.postmortems_table.put_item(Item=item)
+
+    def list_postmortems(self, origin_ids: List[str], limit: Optional[int] = None) -> List[Dict]:
+        wanted = {str(o) for o in origin_ids}
+        items = [i for i in self._scan_all(self.postmortems_table) if i.get("origin_id") in wanted]
+        items.sort(key=lambda i: i.get("created_at", ""), reverse=True)
+        return items[:limit] if limit else items
+
+    def get_postmortem(self, postmortem_id: str) -> Optional[Dict]:
+        return self.postmortems_table.get_item(Key={"id": postmortem_id}).get("Item")
+
+    # ---- ssl certificates -------------------------------------------------
+    def get_ssl_cert(self, hostname: str) -> Optional[Dict]:
+        return self.ssl_certs_table.get_item(Key={"id": hostname}).get("Item")
+
+    def upsert_ssl_cert(self, hostname: str, record: Dict) -> None:
+        """Insert or update the probe result for one hostname (keyed by the
+        hostname itself under "id"). Every field goes through a name
+        placeholder: "status" is a DynamoDB reserved word."""
+        existing = self.get_ssl_cert(hostname)
+        if existing is None:
+            self.ssl_certs_table.put_item(Item={**record, "id": hostname})
+            return
+        fields = {k: v for k, v in record.items() if k != "domain"}
+        if not fields:
+            return
+        expr, names, values = self._set_expression(fields)
+        self.ssl_certs_table.update_item(Key={"id": hostname}, UpdateExpression=expr,
+                                         ExpressionAttributeNames=names,
+                                         ExpressionAttributeValues=values)
+
+    def set_ssl_last_alerted(self, hostname: str, ts: str) -> None:
+        self.upsert_ssl_cert(hostname, {"last_alerted_at": ts})
+
+    # ---- public status history -------------------------------------------
+    def record_status_sample(self, component_id: str, date_bucket: str, name: str,
+                             healthy: bool, expires_at: int) -> None:
+        self.status_history_table.update_item(
+            Key={"component_id": component_id, "date_bucket": date_bucket},
+            UpdateExpression="SET #exp = :exp, #name = :name ADD #sc :one, #hc :healthy",
+            ExpressionAttributeNames={"#exp": "expires_at", "#name": "name",
+                                      "#sc": "sample_count", "#hc": "healthy_count"},
+            ExpressionAttributeValues={":exp": expires_at, ":name": name, ":one": 1,
+                                       ":healthy": 1 if healthy else 0},
+        )
+
+    def get_status_history(self, component_ids: List[str],
+                           since: Optional[str] = None) -> Dict[str, List[Dict]]:
+        """{component_id: [{date_bucket, sample_count, healthy_count, ...}]}
+        with date_bucket >= since ('YYYY-MM-DD') when given."""
+        result: Dict[str, List[Dict]] = {}
+        for cid in component_ids:
+            items = self._query_all(self.status_history_table,
+                                    KeyConditionExpression=Key("component_id").eq(cid))
+            if since:
+                items = [i for i in items if str(i.get("date_bucket", "")) >= since]
+            result[cid] = items
+        return result
+
+    # ---- threat intel -------------------------------------------------------
+    def record_threat_hit(self, rule_id: str, bucket: str, attack_type: str,
+                          tenant_hash: str, expires_at: int, updated_at: str) -> None:
+        """Atomically +1 the (rule_id, hour bucket) counter and add the
+        tenant hash to its contributor set."""
+        self.threat_patterns_table.update_item(
+            Key={"pattern_key": f"{rule_id}#{bucket}"},
+            UpdateExpression=("SET #rid = :rid, #at = :at, #tb = :tb, #exp = :exp, #ua = :ua "
+                              "ADD #hc :one, #th :hashes"),
+            ExpressionAttributeNames={"#rid": "rule_id", "#at": "attack_type", "#tb": "time_bucket",
+                                      "#exp": "expires_at", "#ua": "updated_at",
+                                      "#hc": "hit_count", "#th": "tenant_hashes"},
+            ExpressionAttributeValues={":rid": rule_id, ":at": attack_type, ":tb": bucket,
+                                       ":exp": expires_at, ":ua": updated_at, ":one": 1,
+                                       ":hashes": {tenant_hash}},
+        )
+
+    def list_threat_patterns(self) -> List[Dict]:
+        """Rows with rule_id, attack_type, time_bucket ('YYYYMMDDHH'),
+        hit_count and tenant_hashes (a set)."""
+        return self._scan_all(self.threat_patterns_table)
+
+    # ---- audit log ----------------------------------------------------------
+    def put_audit_event(self, item: Dict) -> None:
+        self.audit_log_table.put_item(Item=item)
+
+    def query_audit_events(self, scope_id: str) -> List[Dict]:
+        return self._query_all(self.audit_log_table,
+                               KeyConditionExpression=Key("scope_id").eq(scope_id))
+
+    # ---- BOLA policies (physical table waf_rules) -------------------------
+    def list_bola_policies(self) -> List[Dict]:
+        return self._scan_all(self.rules_table, FilterExpression=Attr("type").eq("bola_policy"))
+
+    def put_bola_policy(self, item: Dict) -> None:
+        self.rules_table.put_item(Item={**item, "type": "bola_policy"})
+
+    def delete_bola_policy(self, policy_id: str) -> None:
+        self.rules_table.delete_item(Key={"id": policy_id})
+
+
+class DuplicateDomain(ValueError):
+    """A domain with this name is already registered."""

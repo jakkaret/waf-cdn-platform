@@ -65,7 +65,7 @@ class _FakeSettingsService:
 @pytest.fixture
 def store():
     s = ThresholdProposalStore.__new__(ThresholdProposalStore)
-    s.table = _FakeTable()
+    s._table = _FakeTable()
     return s
 
 

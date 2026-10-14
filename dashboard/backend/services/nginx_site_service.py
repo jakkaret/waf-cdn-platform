@@ -280,8 +280,8 @@ def remove_site_route(domain_name: str) -> bool:
 def sync_all_verified_sites() -> int:
     """Scan all verified domains in DynamoDB and deploy their configs."""
     try:
-        domains = db.domains_table.scan().get("Items", [])
-        origins_list = db.origins_table.scan().get("Items", [])
+        domains = db.list_domains()
+        origins_list = db.list_origins()
         origins_by_id = {o["id"]: o for o in origins_list}
 
         deployed_count = 0
@@ -342,17 +342,6 @@ def deployed_direct_domains() -> set:
 
 def failed_direct_domains() -> Dict[str, str]:
     return dict(_failed_domains)
-
-
-def _scan_all(table) -> list:
-    items, kwargs = [], {}
-    while True:
-        page = table.scan(**kwargs)
-        items.extend(page.get("Items", []))
-        last = page.get("LastEvaluatedKey")
-        if not last:
-            return items
-        kwargs["ExclusiveStartKey"] = last
 
 
 def direct_upstream_allowed(address: str) -> bool:
@@ -504,8 +493,8 @@ def reconcile_site_routes() -> Dict[str, Any]:
     with _reconcile_lock:
         for domain, previous in list(_pending_restores.items()):
             _restore(domain, previous)
-        domains = _scan_all(db.domains_table)
-        origins = _scan_all(db.origins_table)
+        domains = db.list_domains()
+        origins = db.list_origins()
         desired = desired_direct_sites(domains, origins)
 
         current = _container_site_files()

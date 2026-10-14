@@ -143,7 +143,7 @@ def test_clickhouse_row_for_private_client_is_blank_not_TH(reader):
 
 
 def test_cdn_normalizer_no_longer_derives_country_from_the_edge_region(reader):
-    from services.cdn_log_forward import normalize_cdn_access
+    from services.log_normalize import normalize_cdn_access
 
     from_us = normalize_cdn_access({"remote_addr": "8.8.8.8", "status": "200"}, "th")
     from_th = normalize_cdn_access({"remote_addr": "1.1.1.1", "status": "200"}, "th")

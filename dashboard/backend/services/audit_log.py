@@ -45,7 +45,7 @@ def write_audit_event(
     expires_at = int((now + dt.timedelta(days=RETENTION_DAYS)).timestamp())
 
     try:
-        _db.audit_log_table.put_item(Item={
+        _db.put_audit_event({
             "scope_id": scope_id,
             "event_id": event_id,
             "timestamp": now.isoformat(),
@@ -70,13 +70,9 @@ def get_audit_log(
     """Newest first. event_id's zero-padded-epoch-ms prefix makes
     lexicographic order the same as chronological order, so a plain
     query + reverse is enough -- no separate sort needed."""
-    from boto3.dynamodb.conditions import Key
-
     _db = db if db is not None else globals()["db"]
     try:
-        items = _db.audit_log_table.query(
-            KeyConditionExpression=Key("scope_id").eq(scope_id)
-        ).get("Items", [])
+        items = _db.query_audit_events(scope_id)
     except Exception as e:
         print(f"[audit_log] query failed for scope={scope_id}: {e}")
         return []

@@ -15,7 +15,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from services.clickhouse_service import ClickHouseService
-from services.dynamodb_service import DynamoDBService
 from services.payload_normalizer import payload_normalizer
 from services.pii_masker import pii_masker
 
@@ -284,13 +283,8 @@ TEMPLATES_CATALOG: Dict[str, Dict[str, Any]] = {
 class DeceptionService:
     """Core deception engine responsible for classification, templating, and fail-safe logging."""
 
-    def __init__(
-        self,
-        ch_service: Optional[ClickHouseService] = None,
-        db_service: Optional[DynamoDBService] = None,
-    ):
+    def __init__(self, ch_service: Optional[ClickHouseService] = None):
         self._ch = ch_service
-        self._db = db_service
 
     @property
     def ch(self) -> ClickHouseService:
@@ -301,16 +295,6 @@ class DeceptionService:
     @ch.setter
     def ch(self, val: Any):
         self._ch = val
-
-    @property
-    def db(self) -> DynamoDBService:
-        if self._db is None:
-            self._db = DynamoDBService()
-        return self._db
-
-    @db.setter
-    def db(self, val: Any):
-        self._db = val
 
     def classify_attack(
         self,
@@ -522,9 +506,6 @@ class DeceptionService:
             with _CH_WRITE_LOCK:
                 self._save_to_clickhouse(event, sanitized_url, sanitized_ua, clean_ip)
 
-            # 3. DynamoDB Sink (Dashboard & Real-Time Alerts)
-            self._save_to_dynamodb(event, sanitized_url, sanitized_ua, clean_ip)
-
             return True
 
         except Exception as exc:
@@ -608,45 +589,6 @@ class DeceptionService:
 
         except Exception as ch_err:
             logger.warning("ClickHouse deception log write error (non-blocking): %s", ch_err)
-
-    def _save_to_dynamodb(
-        self,
-        event: DeceptionLogEvent,
-        sanitized_url: str,
-        sanitized_ua: str,
-        clean_ip: str,
-    ):
-        """Dispatches event to DynamoDB waf_logs table."""
-        if not self.db:
-            return
-
-        try:
-            dynamo_entry = {
-                "user_id": "default-user",
-                "log_id": str(uuid.uuid4()),
-                "request_id": event.request_id,
-                "timestamp": event.timestamp,
-                "datetime": event.datetime,
-                "ip": clean_ip,
-                "method": event.method,
-                "url": sanitized_url,
-                "status": event.response_status,
-                "action": event.action,
-                "attack_category": event.attack_category,
-                "attack_type": f"Deception: {event.attack_category}",
-                "template_id": event.template_id,
-                "rule_id": event.rule_id or "DECEPTION-ENGINE",
-                "execution_result": event.execution_result,
-                "alert": event.alert,
-                "severity": event.severity,
-                "edge_node": event.edge_node or "edge-th",
-                "body_bytes_sent": event.body_bytes_sent,
-                "latency_ms": event.latency_ms,
-                "source": event.source,
-            }
-            self.db.save_log(dynamo_entry)
-        except Exception as db_err:
-            logger.warning("DynamoDB deception log write error (non-blocking): %s", db_err)
 
 
 # ClickHouseService.client is one shared object that is not documented as

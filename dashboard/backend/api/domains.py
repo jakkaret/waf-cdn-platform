@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from services.rbac import get_current_user, verify_origin_ownership, verify_origin_edit_access
 from services import audit_log
-from services.dynamodb_service import DynamoDBService
+from services.dynamodb_service import DynamoDBService, DuplicateDomain
 from services.captcha_config import sync_domain_config
 from services.dns_service import verify_domain_dns, is_claimable_own_wildcard_subdomain, is_platform_subdomain
 from services import nginx_site_service
@@ -55,14 +55,7 @@ async def after_domain_verified(origin_id: str, domain_name: str) -> None:
 
 
 def _mark_verified(domain_id: str) -> None:
-    db.domains_table.update_item(
-        Key={"id": domain_id},
-        UpdateExpression="SET dns_verified = :verified, ssl_status = :ssl",
-        ExpressionAttributeValues={
-            ":verified": True,
-            ":ssl": "pending"
-        }
-    )
+    db.update_domain(domain_id, {"dns_verified": True, "ssl_status": "pending"})
 
 
 def _refresh_managed_hostmap() -> None:
@@ -170,17 +163,8 @@ async def create_domain(payload: DomainCreate, current_user: dict = Depends(get_
     _assert_platform_subdomain_allowed(payload.domain_name, current_user)
 
     # 2. Check if domain already exists
-    # Scans/queries domains table for this domain_name
-    from boto3.dynamodb.conditions import Attr
-    response = db.domains_table.scan(
-        FilterExpression=Attr("domain_name").eq(payload.domain_name)
-    )
-    if response.get("Items"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Domain name {payload.domain_name} is already registered."
-        )
-        
+    assert_domain_available(payload.domain_name)
+
     # 3. Create domain record
     domain_id = str(uuid.uuid4())
     # Generate verification token
@@ -198,14 +182,7 @@ async def create_domain(payload: DomainCreate, current_user: dict = Depends(get_
         "updated_at": now
     }
     
-    try:
-        db.domains_table.put_item(Item=domain_data)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to save domain: {e}"
-        )
-        
+    _save_new_domain(domain_data)
     return domain_data
 
 @router.get("/origin/{origin_id}", response_model=List[DomainResponse])
@@ -215,35 +192,17 @@ async def list_domains_by_origin(origin_id: str, current_user: dict = Depends(ge
     verify_origin_edit_access(origin_id, current_user)
 
     try:
-        # Query domains table using GSI
-        response = db.domains_table.query(
-            IndexName="origin_id-index",
-            KeyConditionExpression=boto3_key_query(origin_id)
-        )
-        return response.get("Items", [])
+        return db.list_domains(origin_id=origin_id)
     except Exception as e:
-        # Fallback to scan filter if index is not ready yet
-        from boto3.dynamodb.conditions import Attr
-        try:
-            response = db.domains_table.scan(
-                FilterExpression=Attr("origin_id").eq(origin_id)
-            )
-            return response.get("Items", [])
-        except Exception as scan_err:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to query domains: {scan_err}"
-            )
-
-def boto3_key_query(origin_id: str):
-    import boto3
-    return boto3.dynamodb.conditions.Key("origin_id").eq(origin_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to query domains: {e}"
+        )
 
 @router.delete("/{domain_id}")
 async def delete_domain(domain_id: str, current_user: dict = Depends(get_current_user)):
     # 1. Fetch domain
-    res = db.domains_table.get_item(Key={"id": domain_id})
-    domain = res.get("Item")
+    domain = db.get_domain(domain_id)
     if not domain:
         raise HTTPException(status_code=404, detail="Domain not found")
         
@@ -252,7 +211,7 @@ async def delete_domain(domain_id: str, current_user: dict = Depends(get_current
 
     # 3. Delete domain
     try:
-        db.domains_table.delete_item(Key={"id": domain_id})
+        db.delete_domain(domain_id)
         invalidate_ssl_allowed_snapshot()
         _refresh_managed_hostmap()
         schedule_site_reconcile()
@@ -271,8 +230,7 @@ async def delete_domain(domain_id: str, current_user: dict = Depends(get_current
 @router.post("/{domain_id}/verify")
 async def verify_domain_now(domain_id: str, current_user: dict = Depends(get_current_user)):
     # 1. Fetch domain
-    res = db.domains_table.get_item(Key={"id": domain_id})
-    domain = res.get("Item")
+    domain = db.get_domain(domain_id)
     if not domain:
         raise HTTPException(status_code=404, detail="Domain not found")
         
@@ -322,40 +280,18 @@ def _load_ssl_allowed_from_db() -> set:
        cloudwaf-tunneled subdomain could never get a cert issued even once
        the Caddy wiring for this endpoint was fixed.
     """
-    allowed = set()
-
     # 2026-09-23: archiving an origin is a soft delete on the origin row
     # only -- nothing cascades to its domains, which have no status field
-    # of their own. Without this filter an archived origin's domains stayed
-    # in the allow-list forever, so a resource the owner had removed could
-    # still obtain and renew TLS certificates indefinitely. Ownership and
-    # tenant scoping already exclude archived origins
-    # (tenant_service.get_user_origins_and_domains); this is the same rule
-    # applied to cert issuance.
-    origin_items = db.origins_table.scan().get("Items", [])
-    inactive_origin_ids = {
-        str(o.get("id"))
-        for o in origin_items
-        if o.get("status") in ("archived", "deleted")
+    # of their own. Without the origin-status filter an archived origin's
+    # domains stayed in the allow-list forever, so a resource the owner had
+    # removed could still obtain and renew TLS certificates indefinitely.
+    # verified_hostnames_active() applies that filter and leaves out
+    # unverified BYO domains.
+    return {
+        str(host).strip().lower()
+        for host, _origin_id in db.verified_hostnames_active()
+        if host
     }
-
-    domain_items = db.domains_table.scan().get("Items", [])
-    allowed |= {
-        str(i.get("domain_name", "")).strip().lower()
-        for i in domain_items
-        if i.get("dns_verified", False)
-        and i.get("domain_name")
-        and str(i.get("origin_id")) not in inactive_origin_ids
-    }
-
-    for o in origin_items:
-        if o.get("status") in ("archived", "deleted"):
-            continue
-        for d in (o.get("tunnel_domains") or []):
-            if d:
-                allowed.add(str(d).strip().lower())
-
-    return allowed
 
 
 async def _load_ssl_allowed_from_frp() -> set:
@@ -446,7 +382,7 @@ def format_domain(domain_data: dict) -> dict:
             # waf_ssl_certs' real key schema is HASH="id" -- see
             # services/ssl_cert_monitor.py's _persist_cert_record for why
             # it's keyed by the domain string itself under "id".
-            cert = db.ssl_certs_table.get_item(Key={"id": domain_name}).get("Item")
+            cert = db.get_ssl_cert(domain_name)
         except Exception:
             cert = None
 
@@ -486,20 +422,7 @@ async def list_domains_under_origin(origin_id: str, current_user: dict = Depends
     # Owner or editor (Team Workspace, 2026-09-22)
     verify_origin_edit_access(origin_id, current_user)
 
-    try:
-        from boto3.dynamodb.conditions import Key
-        response = db.domains_table.query(
-            IndexName="origin_id-index",
-            KeyConditionExpression=Key("origin_id").eq(origin_id)
-        )
-        items = response.get("Items", [])
-    except Exception:
-        from boto3.dynamodb.conditions import Attr
-        response = db.domains_table.scan(
-            FilterExpression=Attr("origin_id").eq(origin_id)
-        )
-        items = response.get("Items", [])
-        
+    items = db.list_domains(origin_id=origin_id)
     formatted = [format_domain(item) for item in items]
     return {"domains": formatted}
 
@@ -531,22 +454,22 @@ def dns_instructions_for(domain_name: str, verification_token: str) -> dict:
     }
 
 
-def scan_domains(filter_expression) -> list:
-    """Every matching domain row. A filtered scan returns at most 1 MB per
-    page, so a match beyond page one is missed unless the scan follows
-    LastEvaluatedKey."""
-    items, kwargs = [], {"FilterExpression": filter_expression}
-    while True:
-        page = db.domains_table.scan(**kwargs)
-        items.extend(page.get("Items", []))
-        if not page.get("LastEvaluatedKey"):
-            return items
-        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
-
-
 def domain_registered(domain_name: str) -> bool:
-    from boto3.dynamodb.conditions import Attr
-    return bool(scan_domains(Attr("domain_name").eq(domain_name)))
+    return db.get_domain_by_name(domain_name) is not None
+
+
+def _save_new_domain(domain_data: dict) -> None:
+    """Insert a domain row. A name registered meanwhile is a 400, like the
+    pre-check; anything else is a 500."""
+    try:
+        db.create_domain(domain_data)
+    except DuplicateDomain as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save domain: {e}"
+        )
 
 
 def assert_domain_available(domain_name: str) -> None:
@@ -593,13 +516,7 @@ def create_domain_record(origin_id: str, domain_name: str, current_user: dict) -
         "updated_at": now
     }
 
-    try:
-        db.domains_table.put_item(Item=domain_data)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to save domain: {e}"
-        )
+    _save_new_domain(domain_data)
 
     if auto_verified:
         # The post-verify steps (config sync, TLS allow-list, hostmap, route)
@@ -639,8 +556,7 @@ def create_domain_record(origin_id: str, domain_name: str, current_user: dict) -
 async def verify_domain_now_under_origin(origin_id: str, domain_id: str, current_user: dict = Depends(get_current_user)):
     verify_origin_edit_access(origin_id, current_user)
     
-    res = db.domains_table.get_item(Key={"id": domain_id})
-    domain = res.get("Item")
+    domain = db.get_domain(domain_id)
     if not domain or domain.get("origin_id") != origin_id:
         raise HTTPException(status_code=404, detail="Domain not found")
         
@@ -666,13 +582,12 @@ async def verify_domain_now_under_origin(origin_id: str, domain_id: str, current
 async def delete_domain_under_origin(origin_id: str, domain_id: str, current_user: dict = Depends(get_current_user)):
     verify_origin_edit_access(origin_id, current_user)
 
-    res = db.domains_table.get_item(Key={"id": domain_id})
-    domain = res.get("Item")
+    domain = db.get_domain(domain_id)
     if not domain or domain.get("origin_id") != origin_id:
         raise HTTPException(status_code=404, detail="Domain not found")
 
     try:
-        db.domains_table.delete_item(Key={"id": domain_id})
+        db.delete_domain(domain_id)
         invalidate_ssl_allowed_snapshot()
         _refresh_managed_hostmap()
         schedule_site_reconcile()

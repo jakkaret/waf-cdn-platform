@@ -41,7 +41,7 @@ FRP_ADMIN_PASS = os.getenv("FRP_ADMIN_PASS", "admin1234")
 _LIVE_PROXIES_CACHE: Optional[Tuple[float, List[Dict]]] = None
 LIVE_STATUS_CACHE_TTL = 60.0
 
-# origins_table.scan() measured at ~240-255ms against the real table
+# A full origins scan measured at ~240-255ms against the real table
 # (DynamoDB is cross-region from where this backend runs). Before this fix,
 # a single GET /api/origins request scanned this table TWICE -- once inside
 # auto_sync_tunnel_origins (global dedup check: "does some tunnel's origin
@@ -80,7 +80,7 @@ def _scan_all_origins() -> List[Dict]:
         if now - cached_time < ORIGINS_SCAN_CACHE_TTL:
             return cached_items
     try:
-        items = db.origins_table.scan().get("Items", [])
+        items = db.list_origins()
     except Exception:
         if _ORIGINS_SCAN_CACHE is not None:
             return _ORIGINS_SCAN_CACHE[1]
@@ -335,7 +335,7 @@ def discard_new_origin(origin_id: str, admin_user_id: str) -> None:
     """Hard-delete an origin that a multi-step flow created moments ago and
     then could not finish (api/onboarding.py /connect). Not an archive: the
     row never held anything the user saw."""
-    db.origins_table.delete_item(Key={"id": origin_id})
+    db.hard_delete_origin(origin_id)
     invalidate_tenant_cache(admin_user_id)
     _invalidate_origins_caches()
 
@@ -385,13 +385,13 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
         return []
 
     try:
-        all_domains_items = db.domains_table.scan().get("Items", [])
+        all_domains_items = db.list_domains()
     except Exception:
         all_domains_items = []
     try:
         # 2026-09-20 perf fix: shares the same short-TTL cache as
         # get_origins_visible_to_user, collapsing what used to be two
-        # separate origins_table.scan() calls within the same
+        # separate full origins scans within the same
         # GET /api/origins request (this function runs first, so its scan
         # populates the cache the other call then reuses for free).
         all_origins_global = _scan_all_origins()
@@ -549,7 +549,7 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
                     "updated_at": now,
                 }
                 try:
-                    db.domains_table.put_item(Item=domain_data)
+                    db.create_domain(domain_data)
                     all_domains_items.append(domain_data)
                     logger.info(f"Auto-created Domain {domain_val} (ID: {domain_id}) for origin {origin_id}")
                 except Exception as ex:

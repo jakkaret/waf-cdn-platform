@@ -6,7 +6,7 @@ from services.dynamodb_service import DynamoDBService
 # second thing to get wrong (this endpoint's own hand-rolled filter is
 # exactly what went wrong before).
 from api.ai_summary import _visible_alerts_for_user
-from services.rbac import get_current_user
+from services.rbac import get_current_user, auth_service
 from services.telegram_listener import invalidate_user_cache
 import os, secrets, time, httpx, asyncio, logging
 
@@ -204,11 +204,7 @@ async def _check_telegram_for_code(target_code: str):
 async def _save_chat_id_to_user(user_id: str, chat_id: str):
     #อัพเดต telegram_chat_id ใน waf_users 
     try:
-        db.waf_users.update_item(
-            Key={"user_id": user_id},
-            UpdateExpression="SET telegram_chat_id = :c",
-            ExpressionAttributeValues={":c": chat_id},
-        )
+        auth_service.set_telegram_chat_id(user_id, chat_id)
         print(f"Updated user {user_id} with chat_id {chat_id}")
     except Exception as e:
         print("Failed to save chat_id:", e)

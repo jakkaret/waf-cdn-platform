@@ -228,11 +228,7 @@ def test_connect_poll_still_waiting_when_telegram_has_not_seen_the_code_yet(
 def test_disconnect_clears_chat_id_and_invalidates_cache(client: TestClient, register_user, auth_header, monkeypatch):
     user = register_user(email="alerts-disconnect@example.com", username="alerts_disconnect")
     user_id = user["user"]["user_id"]
-    alerts_module.db.waf_users.update_item(
-        Key={"user_id": user_id},
-        UpdateExpression="SET telegram_chat_id = :c",
-        ExpressionAttributeValues={":c": "111222333"},
-    )
+    alerts_module.auth_service.set_telegram_chat_id(user_id, "111222333")
     invalidate_spy = MagicMock()
     monkeypatch.setattr(alerts_module, "invalidate_user_cache", invalidate_spy)
 

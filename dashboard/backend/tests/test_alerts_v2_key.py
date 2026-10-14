@@ -104,8 +104,6 @@ def test_mark_read_uses_the_new_composite_key(db, monkeypatch):
         )
     )
 
-    key = db.alerts_table.update_item.call_args.kwargs["Key"]
-    # user_id is no longer part of the schema; using it raises
-    # ValidationException, which this handler would surface as a 500.
-    assert key == {"origin_id": "o-mine", "alert_id": "a-1"}
-    assert "user_id" not in key
+    # The key is (origin_id, alert_id); user_id is no longer part of it --
+    # using it raised ValidationException, surfaced as a 500.
+    assert db.mark_alert_read.call_args.args == ("o-mine", "a-1")

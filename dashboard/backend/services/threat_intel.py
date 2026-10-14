@@ -96,43 +96,11 @@ def record_pattern_hit(
     _db = db if db is not None else globals()["db"]
     now = now or _now_utc()
     bucket = _hour_bucket(now)
-    pattern_key = f"{rule_id}#{bucket}"
     expires_at = int((now + dt.timedelta(hours=PATTERN_RETENTION_HOURS)).timestamp())
     tenant_hash = _tenant_hash(user_id)
 
-    _db.threat_patterns_table.update_item(
-        Key={"pattern_key": pattern_key},
-        # 2026-09-21: every field name goes through an
-        # ExpressionAttributeNames placeholder, not written literally --
-        # caught live in services/ssl_cert_monitor.py's own persist function
-        # that "status" (unrelated field there, but the same UpdateExpression
-        # shape) is a DynamoDB reserved word and a bare `field = :v` clause
-        # is rejected by real AWS for any reserved name. None of these
-        # fields are currently reserved, but aliasing all of them removes
-        # the need to know DynamoDB's reserved-word list at all.
-        UpdateExpression=(
-            "SET #rid = :rid, #at = :at, #tb = :tb, #exp = :exp, #ua = :ua "
-            "ADD #hc :one, #th :hashes"
-        ),
-        ExpressionAttributeNames={
-            "#rid": "rule_id",
-            "#at": "attack_type",
-            "#tb": "time_bucket",
-            "#exp": "expires_at",
-            "#ua": "updated_at",
-            "#hc": "hit_count",
-            "#th": "tenant_hashes",
-        },
-        ExpressionAttributeValues={
-            ":rid": rule_id,
-            ":at": attack_type,
-            ":tb": bucket,
-            ":exp": expires_at,
-            ":ua": now.isoformat(),
-            ":one": 1,
-            ":hashes": {tenant_hash},
-        },
-    )
+    _db.record_threat_hit(rule_id, bucket, attack_type, tenant_hash,
+                          expires_at, now.isoformat())
 
 
 def get_trending_patterns(
@@ -154,7 +122,7 @@ def get_trending_patterns(
     now = now or _now_utc()
     cutoff = now - dt.timedelta(hours=window_hours)
 
-    rows = _db.threat_patterns_table.scan().get("Items", [])
+    rows = _db.list_threat_patterns()
     by_rule: Dict[str, dict] = {}
     for row in rows:
         bucket = row.get("time_bucket")
@@ -195,27 +163,7 @@ def get_trending_patterns(
 
 
 def _build_domain_owner_map(db) -> Dict[str, str]:
-    mapping: Dict[str, str] = {}
-    origin_items = db.origins_table.scan().get("Items", [])
-    owner_by_origin_id = {}
-    for o in origin_items:
-        origin_id = o.get("id")
-        owner = o.get("admin_user_id")
-        if origin_id and owner:
-            owner_by_origin_id[origin_id] = owner
-        if owner:
-            for d in (o.get("tunnel_domains") or []):
-                if d:
-                    mapping[str(d).strip().lower()] = owner
-
-    domain_items = db.domains_table.scan().get("Items", [])
-    for d in domain_items:
-        name = d.get("domain_name")
-        owner = owner_by_origin_id.get(d.get("origin_id"))
-        if name and owner:
-            mapping[str(name).strip().lower()] = owner
-
-    return mapping
+    return db.hostname_owner_map()
 
 
 def _domain_owner_map(now: Optional[float] = None) -> Dict[str, str]:

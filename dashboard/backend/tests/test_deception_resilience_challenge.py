@@ -418,49 +418,17 @@ class TestFailureResilienceChallenge:
         resp = client.get("/api/deception/respond", headers=valid_headers)
         assert resp.status_code == 200
 
-    def test_dynamodb_provisioned_throughput_exceeded(
-        self, client: TestClient, valid_headers: Dict[str, str], monkeypatch
-    ):
-        """DynamoDB 400 ThroughputExceeded throttle must not crash honeypot."""
-        class ThrottledDB:
-            def save_log(self, *args, **kwargs):
-                raise RuntimeError("DynamoDB ProvisionedThroughputExceededException: Rate exceeded")
-
-        monkeypatch.setattr(deception_service, "db", ThrottledDB())
-
-        resp = client.get("/api/deception/respond", headers=valid_headers)
-        assert resp.status_code == 200
-        assert resp.status_code != 500
-
-    def test_dynamodb_network_partition_and_timeout(
-        self, client: TestClient, valid_headers: Dict[str, str], monkeypatch
-    ):
-        """DynamoDB connection timeout / network partition must not fail response."""
-        class UnreachableDB:
-            def save_log(self, *args, **kwargs):
-                raise ConnectionError("EndpointConnectionError: Could not connect to the endpoint URL")
-
-        monkeypatch.setattr(deception_service, "db", UnreachableDB())
-
-        resp = client.get("/api/deception/respond", headers=valid_headers)
-        assert resp.status_code == 200
-        assert resp.status_code != 500
-
     def test_simultaneous_dual_database_outage(
         self, client: TestClient, valid_headers: Dict[str, str], monkeypatch
     ):
-        """Simultaneous failure of both ClickHouse and DynamoDB must still yield HTTP 200."""
+        """A failing log store (ClickHouse, the only sink since the DynamoDB
+        waf_logs writer was removed) must still yield HTTP 200."""
         class FatalCH:
             connected = True
             def save_log(self, *args, **kwargs):
                 raise BrokenPipeError("[Errno 32] Broken pipe in ClickHouse cluster")
 
-        class FatalDB:
-            def save_log(self, *args, **kwargs):
-                raise OSError("[Errno 101] Network is unreachable for DynamoDB endpoint")
-
         monkeypatch.setattr(deception_service, "ch", FatalCH())
-        monkeypatch.setattr(deception_service, "db", FatalDB())
 
         resp = client.get("/api/deception/respond", headers=valid_headers)
         assert resp.status_code == 200

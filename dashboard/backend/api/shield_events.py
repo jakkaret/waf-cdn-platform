@@ -32,9 +32,8 @@ class ShieldPreviewRequest(BaseModel):
 
 
 def _verified_hosts(origin_id: str) -> List[str]:
-    from boto3.dynamodb.conditions import Attr
-    items = origin_service.db.domains_table.scan(FilterExpression=Attr("origin_id").eq(origin_id)).get("Items", [])
-    return [str(i["domain_name"]).strip().lower() for i in items if i.get("domain_name") and i.get("dns_verified")]
+    items = origin_service.db.list_domains(origin_id=origin_id, dns_verified=True)
+    return [str(i["domain_name"]).strip().lower() for i in items if i.get("domain_name")]
 
 
 @router.post("/preview")

@@ -273,19 +273,12 @@ def verified_hosts_by_origin(db) -> Tuple[List[dict], Dict[str, List[str]]]:
     purpose -- otherwise anyone could add someone else's hostname and have
     their rules applied to that site's traffic. A host claimed by two
     origins is dropped from both and logged."""
-    origins = [o for o in _scan(db.origins_table) if o.get("status") not in ("archived", "deleted")]
-    active_ids = {str(o.get("id")) for o in origins}
+    origins = [o for o in db.list_origins() if o.get("status") not in ("archived", "deleted")]
     claims: Dict[str, set] = {}
-    for d in _scan(db.domains_table):
-        oid = str(d.get("origin_id") or "")
-        host = str(d.get("domain_name") or "").strip().lower().rstrip(".")
-        if d.get("dns_verified") and oid in active_ids and host:
-            claims.setdefault(host, set()).add(oid)
-    for o in origins:
-        for host in o.get("tunnel_domains") or []:
-            host = str(host).strip().lower().rstrip(".")
-            if host:
-                claims.setdefault(host, set()).add(str(o.get("id")))
+    for host, oid in db.verified_hostnames_active():
+        host = str(host or "").strip().lower().rstrip(".")
+        if host and oid:
+            claims.setdefault(host, set()).add(str(oid))
     by_origin: Dict[str, List[str]] = {}
     for host, owners in claims.items():
         if len(owners) != 1:
@@ -293,16 +286,6 @@ def verified_hosts_by_origin(db) -> Tuple[List[dict], Dict[str, List[str]]]:
             continue
         by_origin.setdefault(next(iter(owners)), []).append(host)
     return origins, by_origin
-
-
-def _scan(table) -> List[dict]:
-    items, kwargs = [], {}
-    while True:
-        resp = table.scan(**kwargs)
-        items.extend(resp.get("Items", []))
-        if not resp.get("LastEvaluatedKey"):
-            return items
-        kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
 
 
 # ------------------------------------------------------------------ apply

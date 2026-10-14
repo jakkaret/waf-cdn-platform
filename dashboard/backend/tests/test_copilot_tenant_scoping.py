@@ -108,7 +108,7 @@ def test_account_with_an_origin_gets_a_query_scoped_to_their_own_domain(
     # Same reasoning as test_ai_summary_tenant_scoping.py: domains_module's
     # router isn't mounted here, write the domain directly into the shared
     # fake store get_user_origins_and_domains reads from.
-    tenant_service_module.db.domains_table.put_item(Item={
+    tenant_service_module.db.create_domain({
         "id": "domain-copilot-1", "origin_id": origin_id, "domain_name": "mycopilotapp.example.com", "dns_verified": True,
     })
 

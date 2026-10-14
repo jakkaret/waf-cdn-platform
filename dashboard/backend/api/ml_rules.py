@@ -180,7 +180,7 @@ async def run_cve_scan(
     window_days = days or CVE_SCAN_DEFAULT_WINDOW_DAYS
 
     try:
-        all_origins = rule_service.db.origins_table.scan().get("Items", [])
+        all_origins = rule_service.db.list_origins()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load origins: {e}")
 
@@ -195,7 +195,7 @@ async def run_cve_scan(
     # Dedup against the FULL queue (any status) -- a CVE that was already
     # proposed and rejected should not come back on the next scan either.
     try:
-        existing_items = rule_service.table.scan().get("Items", [])
+        existing_items = rule_service.list_rules()
     except Exception:
         existing_items = []
     already_proposed_cve_ids = {i.get("cve_id") for i in existing_items if i.get("cve_id")}

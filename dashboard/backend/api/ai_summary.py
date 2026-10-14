@@ -338,12 +338,7 @@ async def mark_notifications_read(
             for a in targets:
                 if not a.get("origin_id") or not a.get("alert_id"):
                     continue
-                db.alerts_table.update_item(
-                    Key={"origin_id": a["origin_id"], "alert_id": a["alert_id"]},
-                    UpdateExpression="SET #r = :val",
-                    ExpressionAttributeNames={"#r": "read"},
-                    ExpressionAttributeValues={":val": True}
-                )
+                db.mark_alert_read(a["origin_id"], a["alert_id"])
         else:
             # "Mark all" can touch thousands of real rows (confirmed live:
             # this project's own backlog was 1000+) -- one UpdateItem call
@@ -355,13 +350,7 @@ async def mark_notifications_read(
             # get_all_alerts()) is rewritten with read=True rather than
             # patched in place.
             targets = [a for a in visible_alerts if not a.get("read", False)]
-            with db.alerts_table.batch_writer() as batch:
-                for a in targets:
-                    if not a.get("origin_id") or not a.get("alert_id"):
-                        continue
-                    updated_item = dict(a)
-                    updated_item["read"] = True
-                    batch.put_item(Item=updated_item)
+            db.mark_alerts_read(targets)
         invalidate_alerts_cache()
         return {"success": True, "message": "Marked as read"}
     except Exception as e:
@@ -521,7 +510,7 @@ async def create_postmortem(
         "ai_narrative_degraded": narrative_result.get("degraded", False),
     }
     try:
-        db.postmortems_table.put_item(Item=item)
+        db.save_postmortem(item)
     except Exception as e:
         logger.error(f"Failed to persist postmortem: {e}")
         raise HTTPException(status_code=500, detail="Failed to save postmortem report")
@@ -533,29 +522,13 @@ async def create_postmortem(
 async def list_postmortems(
     origin: dict = Depends(verify_origin_access),  # Admins and Viewers may read
 ):
-    """No range key on waf_postmortems (HASH=id only) -- scan + filter +
-    Python-side sort, the same shape services/audit_log.py's get_audit_log
-    already uses, rather than adding a GSI for this."""
+    """This origin's reports, newest first."""
     origin_id = origin.get("id")
     try:
-        # Paginated: scan() returns at most 1MB per call, so the unpaginated
-        # version silently stopped listing once the table crossed that --
-        # an origin's older reports would just disappear from the list with
-        # no error. Still a scan rather than a GSI, per the note above.
-        items = []
-        scan_kwargs = {}
-        while True:
-            resp = db.postmortems_table.scan(**scan_kwargs)
-            items.extend(resp.get("Items", []))
-            last_key = resp.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            scan_kwargs["ExclusiveStartKey"] = last_key
+        matching = db.list_postmortems([origin_id])
     except Exception as e:
         logger.error(f"Failed to list postmortems: {e}")
         return {"postmortems": []}
-    matching = [i for i in items if i.get("origin_id") == origin_id]
-    matching.sort(key=lambda i: i.get("created_at", ""), reverse=True)
     # Full audit_events/hourly_buckets are not needed for a list view.
     summaries = [
         {
@@ -580,7 +553,7 @@ async def get_postmortem(
     origin: dict = Depends(verify_origin_access),
 ):
     try:
-        item = db.postmortems_table.get_item(Key={"id": postmortem_id}).get("Item")
+        item = db.get_postmortem(postmortem_id)
     except Exception as e:
         logger.error(f"Failed to fetch postmortem {postmortem_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to load postmortem report")

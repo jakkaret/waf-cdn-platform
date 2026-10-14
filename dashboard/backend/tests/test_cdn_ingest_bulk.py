@@ -78,7 +78,7 @@ def _entries(n, status="200"):
 def test_batch_is_stored_in_one_call_per_store(monkeypatch):
     ch, db = _RecordingClickHouse(), _RecordingDynamo()
     monkeypatch.setattr(cdn_module, "ch", ch)
-    monkeypatch.setattr(cdn_module, "_db", db)
+    monkeypatch.setattr(cdn_module, "_db", db, raising=False)  # api/cdn.py no longer has a DynamoDB handle
 
     stored, flagged = cdn_module._store_cdn_log_batch(_entries(120), "th")
 
@@ -107,7 +107,7 @@ def test_host_survives_into_the_stored_rows(monkeypatch):
             return len(entries)
 
     monkeypatch.setattr(cdn_module, "ch", _CapturingClickHouse())
-    monkeypatch.setattr(cdn_module, "_db", _RecordingDynamo())
+    monkeypatch.setattr(cdn_module, "_db", _RecordingDynamo(), raising=False)  # api/cdn.py no longer has a DynamoDB handle
 
     cdn_module._store_cdn_log_batch(_entries(3), "th")
 
@@ -117,7 +117,7 @@ def test_host_survives_into_the_stored_rows(monkeypatch):
 def test_unparseable_entry_does_not_lose_the_rest_of_the_batch(monkeypatch):
     ch, db = _RecordingClickHouse(), _RecordingDynamo()
     monkeypatch.setattr(cdn_module, "ch", ch)
-    monkeypatch.setattr(cdn_module, "_db", db)
+    monkeypatch.setattr(cdn_module, "_db", db, raising=False)  # api/cdn.py no longer has a DynamoDB handle
 
     def _explode(entry, region):
         if entry.get("request_id") == "req-1":
@@ -136,7 +136,7 @@ def test_unparseable_entry_does_not_lose_the_rest_of_the_batch(monkeypatch):
 def test_empty_batch_touches_neither_store(monkeypatch):
     ch, db = _RecordingClickHouse(), _RecordingDynamo()
     monkeypatch.setattr(cdn_module, "ch", ch)
-    monkeypatch.setattr(cdn_module, "_db", db)
+    monkeypatch.setattr(cdn_module, "_db", db, raising=False)  # api/cdn.py no longer has a DynamoDB handle
 
     assert cdn_module._store_cdn_log_batch([], "th") == (0, [])
     assert ch.bulk_calls == []
@@ -148,7 +148,7 @@ def test_empty_batch_touches_neither_store(monkeypatch):
 
 def test_blocked_entry_is_flagged_for_dispatch(monkeypatch):
     monkeypatch.setattr(cdn_module, "ch", _RecordingClickHouse())
-    monkeypatch.setattr(cdn_module, "_db", _RecordingDynamo())
+    monkeypatch.setattr(cdn_module, "_db", _RecordingDynamo(), raising=False)  # api/cdn.py no longer has a DynamoDB handle
 
     _stored, flagged = cdn_module._store_cdn_log_batch(_entries(1, status="403"), "th")
 
@@ -158,7 +158,7 @@ def test_blocked_entry_is_flagged_for_dispatch(monkeypatch):
 
 def test_rate_limited_entry_is_flagged_too(monkeypatch):
     monkeypatch.setattr(cdn_module, "ch", _RecordingClickHouse())
-    monkeypatch.setattr(cdn_module, "_db", _RecordingDynamo())
+    monkeypatch.setattr(cdn_module, "_db", _RecordingDynamo(), raising=False)  # api/cdn.py no longer has a DynamoDB handle
 
     _stored, flagged = cdn_module._store_cdn_log_batch(_entries(1, status="429"), "th")
 
@@ -167,7 +167,7 @@ def test_rate_limited_entry_is_flagged_too(monkeypatch):
 
 def test_ok_entries_are_never_flagged(monkeypatch):
     monkeypatch.setattr(cdn_module, "ch", _RecordingClickHouse())
-    monkeypatch.setattr(cdn_module, "_db", _RecordingDynamo())
+    monkeypatch.setattr(cdn_module, "_db", _RecordingDynamo(), raising=False)  # api/cdn.py no longer has a DynamoDB handle
 
     _stored, flagged = cdn_module._store_cdn_log_batch(_entries(50, status="200"), "th")
 
@@ -182,7 +182,7 @@ def test_ingest_endpoint_dispatches_one_alert_per_flagged_entry(monkeypatch):
     # test would fail loudly if dispatch were ever moved back into that
     # synchronous function.
     monkeypatch.setattr(cdn_module, "ch", _RecordingClickHouse())
-    monkeypatch.setattr(cdn_module, "_db", _RecordingDynamo())
+    monkeypatch.setattr(cdn_module, "_db", _RecordingDynamo(), raising=False)  # api/cdn.py no longer has a DynamoDB handle
 
     dispatched = []
 

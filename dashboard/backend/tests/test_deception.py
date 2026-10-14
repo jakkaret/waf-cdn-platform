@@ -76,31 +76,6 @@ class MockClickHouseService:
         return True
 
 
-class MockDynamoDBTable:
-    def __init__(self, should_fail: bool = False):
-        self.should_fail = should_fail
-        self.items = []
-
-    def put_item(self, Item: dict):
-        if self.should_fail:
-            raise RuntimeError("Simulated DynamoDB ProvisionedThroughputExceededException")
-        self.items.append(dict(Item))
-        return {}
-
-
-class MockDynamoDBService:
-    def __init__(self, should_fail: bool = False):
-        self.logs_table = MockDynamoDBTable(should_fail=should_fail)
-
-    def convert_floats(self, obj):
-        return obj
-
-    def save_log(self, event: dict):
-        if self.logs_table.should_fail:
-            raise RuntimeError("DynamoDB Client Error")
-        self.logs_table.put_item(event)
-
-
 # ---------------------------------------------------------------------------
 # Pytest Fixtures
 # ---------------------------------------------------------------------------
@@ -389,8 +364,7 @@ class TestDeceptionLoggingResilience:
 
     def test_logging_populates_all_r6_fields(self):
         mock_ch = MockClickHouseService()
-        mock_db = MockDynamoDBService()
-        svc = DeceptionService(ch_service=mock_ch, db_service=mock_db)
+        svc = DeceptionService(ch_service=mock_ch)
 
         event = DeceptionLogEvent(
             request_id="req-test-uuid-99",
@@ -413,23 +387,24 @@ class TestDeceptionLoggingResilience:
         ok = svc.log_deception_event(event)
         assert ok is True
 
-        # Verify DynamoDB recorded R6 mandatory attributes
-        assert len(mock_db.logs_table.items) == 1
-        item = mock_db.logs_table.items[0]
-        assert item["request_id"] == "req-test-uuid-99"
-        assert item["rule_id"] == "custom-100005"
-        assert item["attack_category"] == "Path Traversal (LFI)"
-        assert item["template_id"] == "path_traversal"
-        assert item["status"] == 200
-        assert item["execution_result"] == "deceived"
-        assert item["action"] == "DECEIVE"
-
-        # Verify ClickHouse recorded logs
-        assert len(mock_ch.saved_logs) >= 1
+        # ClickHouse is the only sink (the DynamoDB waf_logs copy was
+        # removed): the R6 attributes land in access_logs and
+        # security_audit_logs.
+        by_table = {s["table"]: s["data"] for s in mock_ch.saved_logs}
+        access = by_table["access_logs"]
+        assert access["request_id"] == "req-test-uuid-99"
+        assert access["rule_id"] == "custom-100005"
+        assert access["status"] == 200
+        assert access["attack_type"] == "Deception: Path Traversal (LFI)"
+        audit = by_table["security_audit_logs"]
+        assert audit["request_id"] == "req-test-uuid-99"
+        assert audit["action"] == "DECEIVE"
+        assert "path_traversal" in audit["message"]
+        assert "Path Traversal (LFI)" in audit["message"]
 
     def test_logging_sanitizes_pii_and_passwords(self):
-        mock_db = MockDynamoDBService()
-        svc = DeceptionService(ch_service=None, db_service=mock_db)
+        mock_ch = MockClickHouseService()
+        svc = DeceptionService(ch_service=mock_ch)
 
         event = DeceptionLogEvent(
             request_id="req-pii-01",
@@ -450,7 +425,7 @@ class TestDeceptionLoggingResilience:
         )
 
         svc.log_deception_event(event)
-        logged_url = mock_db.logs_table.items[0]["url"]
+        logged_url = next(s["data"]["url"] for s in mock_ch.saved_logs if s["table"] == "access_logs")
         assert "UltraSecretPassword123!" not in logged_url
         assert "password=" in logged_url  # Masked password parameter remains
 
@@ -469,29 +444,12 @@ class TestDeceptionLoggingResilience:
         assert "root:x:0:0:root" in resp.text
         assert resp.status_code != 500
 
-    def test_fail_safe_dynamodb_outage_never_fails_response(
-        self, deception_client: TestClient, valid_auth_headers, monkeypatch
-    ):
-        """Simulates DynamoDB throttling/crash; verifies endpoint still returns 200 OK."""
-        failing_db = MockDynamoDBService(should_fail=True)
-        monkeypatch.setattr(deception_service, "db", failing_db)
-
-        headers = dict(valid_auth_headers)
-        headers["X-Original-URI"] = "/login?id=1' UNION SELECT 1,2--"
-        resp = deception_client.get("/api/deception/respond", headers=headers)
-
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "success"
-        assert resp.status_code != 500
-
     def test_fail_safe_dual_database_simultaneous_crash(
         self, deception_client: TestClient, valid_auth_headers, monkeypatch
     ):
         """Simulates BOTH ClickHouse and DynamoDB failing simultaneously."""
         failing_ch = MockClickHouseService(should_fail=True)
-        failing_db = MockDynamoDBService(should_fail=True)
         monkeypatch.setattr(deception_service, "ch", failing_ch)
-        monkeypatch.setattr(deception_service, "db", failing_db)
 
         headers = dict(valid_auth_headers)
         headers["X-Original-URI"] = "/../../etc/passwd"

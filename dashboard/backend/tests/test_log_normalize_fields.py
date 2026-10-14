@@ -10,14 +10,14 @@ deployed (only Thailand exists), and 68.4% carry request_time_ms=0 even though
 nginx's own $request_time field is populated in every request. Root cause is that
 normalize_access() (the Main-node-reads-its-own-nginx-log ingestion path) never
 extracts request_time, and never sets edge_node at all -- unlike
-cdn_log_forward.py's normalize_cdn_access() (the Edge-pushes-to-Main path), which
+the old CDN log forwarder's normalize_cdn_access() (the Edge-pushes-to-Main path), which
 does both correctly. Both paths ultimately call clickhouse_service.py's save_log(),
 whose defaults ("sg", 0.0) were written to look plausible rather than to signal
 "this wasn't set."
 
 This test locks in two fixes:
 1. normalize_access() must extract request_time_ms from nginx's request_time field
-   (mirroring cdn_log_forward.py's request_time -> latency_ms computation).
+   (mirroring the old CDN log forwarder's request_time -> latency_ms computation).
 2. normalize_access() must set edge_node explicitly (Main is presently the only
    node that reads its own log this way, so "edge-th" is correct today -- this
    will need revisiting if a second such node is ever added, not silently

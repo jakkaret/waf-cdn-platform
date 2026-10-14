@@ -268,8 +268,13 @@ class _FakeTable:
         return {}
 
 
-class _FakeDB:
-    def __init__(self):
+from tests.conftest import FakeDynamoDBService  # noqa: E402
+
+
+class _FakeDB(FakeDynamoDBService):
+    """The real store methods (get_ssl_cert/upsert_ssl_cert) over one fake table."""
+
+    def __init__(self):  # noqa: super() intentionally not called
         self.ssl_certs_table = _FakeTable()
 
 

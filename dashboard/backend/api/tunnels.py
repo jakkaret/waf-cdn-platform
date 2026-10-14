@@ -264,7 +264,7 @@ def _assert_domain_claimable(domain_clean: str, current_user: dict) -> None:
     is_admin = current_user.get("role") == "admin"
     owned_by_me = False
     owned_by_other = False
-    for d in db.domains_table.scan().get("Items", []):
+    for d in db.list_domains():
         if str(d.get("domain_name", "")).lower() != domain_clean:
             continue
         origin_id = d.get("origin_id")
@@ -638,11 +638,11 @@ async def get_tunnels_status(
     await origin_service.auto_sync_tunnel_origins(user_id, user_role)
     _, active_origins, user_domains = get_user_origins_and_domains(user_id)
 
-    all_origins = db.origins_table.scan().get("Items", []) if view_all else active_origins
+    all_origins = db.list_origins() if view_all else active_origins
     all_users_map = {}
     if is_admin:
         try:
-            users_list = db.waf_users.scan().get("Items", [])
+            users_list = auth_service.list_users()
             all_users_map = {u.get("user_id"): u.get("username", "Unknown") for u in users_list}
         except Exception:
             pass
@@ -784,7 +784,7 @@ async def deregister_tunnel(target_identifier: str, current_user: dict = Depends
     global _TUNNELS_CACHE
     _TUNNELS_CACHE.clear()
 
-    all_origins = db.origins_table.scan().get("Items", [])
+    all_origins = db.list_origins()
     matched_origin = None
 
     for o in all_origins:

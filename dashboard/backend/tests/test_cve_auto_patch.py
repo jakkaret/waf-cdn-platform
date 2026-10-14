@@ -150,8 +150,8 @@ def _patch_audit_log_db(monkeypatch, fake_infrastructure):
 @pytest.fixture()
 def fake_rule_service(monkeypatch):
     fake = MagicMock()
-    fake.db.origins_table.scan.return_value = {"Items": []}
-    fake.table.scan.return_value = {"Items": []}
+    fake.db.list_origins.return_value = []
+    fake.list_rules.return_value = []
     fake.create_pending_rule.side_effect = lambda rule_data, created_by: {
         **rule_data, "rule_id": f"generated-{rule_data['cve_id']}",
         "status": "pending", "created_by": created_by,
@@ -186,9 +186,7 @@ def test_admin_can_run_a_scan_and_it_creates_a_proposal_for_a_matching_origin(
     client, register_user, auth_header, fake_rule_service, fake_cve_fetch, fake_gemini_pattern,
 ):
     admin_h = _admin(client, register_user, auth_header)
-    fake_rule_service.db.origins_table.scan.return_value = {
-        "Items": [_origin("origin-1", tags=["nginx"])],
-    }
+    fake_rule_service.db.list_origins.return_value = [_origin("origin-1", tags=["nginx"])]
     fake_cve_fetch([_cve(cve_id="CVE-2026-9001", vendor="nginx", product="nginx")])
     fake_gemini_pattern(r"/nginx-exploit-path")
 
@@ -221,9 +219,7 @@ def test_scan_respects_the_hard_cap_on_proposals_per_scan(
     client, register_user, auth_header, fake_rule_service, fake_cve_fetch, fake_gemini_pattern,
 ):
     admin_h = _admin(client, register_user, auth_header)
-    fake_rule_service.db.origins_table.scan.return_value = {
-        "Items": [_origin("origin-1", tags=["nginx"])],
-    }
+    fake_rule_service.db.list_origins.return_value = [_origin("origin-1", tags=["nginx"])]
     ten_cves = [_cve(cve_id=f"CVE-2026-{i}", vendor="nginx", product="nginx") for i in range(10)]
     fake_cve_fetch(ten_cves)
     fake_gemini_pattern(r"/some-path")
@@ -240,12 +236,8 @@ def test_scan_skips_a_cve_that_already_has_a_proposal_in_the_queue(
     client, register_user, auth_header, fake_rule_service, fake_cve_fetch, fake_gemini_pattern,
 ):
     admin_h = _admin(client, register_user, auth_header)
-    fake_rule_service.db.origins_table.scan.return_value = {
-        "Items": [_origin("origin-1", tags=["nginx"])],
-    }
-    fake_rule_service.table.scan.return_value = {
-        "Items": [{"rule_id": "existing-1", "cve_id": "CVE-2026-9001", "status": "pending"}],
-    }
+    fake_rule_service.db.list_origins.return_value = [_origin("origin-1", tags=["nginx"])]
+    fake_rule_service.list_rules.return_value = [{"rule_id": "existing-1", "cve_id": "CVE-2026-9001", "status": "pending"}]
     fake_cve_fetch([_cve(cve_id="CVE-2026-9001", vendor="nginx", product="nginx")])
     fake_gemini_pattern(r"/some-path")
 
@@ -263,9 +255,7 @@ def test_scan_never_writes_a_proposal_whose_gemini_pattern_fails_to_compile(
     """The core safety hazard: an LLM-drafted regex that doesn't even
     compile must never reach the approval queue."""
     admin_h = _admin(client, register_user, auth_header)
-    fake_rule_service.db.origins_table.scan.return_value = {
-        "Items": [_origin("origin-1", tags=["nginx"])],
-    }
+    fake_rule_service.db.list_origins.return_value = [_origin("origin-1", tags=["nginx"])]
     fake_cve_fetch([_cve(cve_id="CVE-2026-9001", vendor="nginx", product="nginx")])
     fake_gemini_pattern(r"(unclosed[paren")  # invalid regex
 
@@ -281,7 +271,7 @@ def test_scan_with_no_tagged_origins_creates_nothing_and_does_not_500(
     client, register_user, auth_header, fake_rule_service, fake_cve_fetch, fake_gemini_pattern,
 ):
     admin_h = _admin(client, register_user, auth_header)
-    fake_rule_service.db.origins_table.scan.return_value = {"Items": []}
+    fake_rule_service.db.list_origins.return_value = []
     fake_cve_fetch([_cve(vendor="nginx", product="nginx")])
     fake_gemini_pattern(r"/some-path")
 
@@ -362,7 +352,7 @@ def test_scan_searches_only_tag_keywords_and_reports_them(
     client, register_user, auth_header, fake_rule_service, monkeypatch, fake_gemini_pattern,
 ):
     admin_h = _admin(client, register_user, auth_header)
-    fake_rule_service.db.origins_table.scan.return_value = {"Items": [_origin("o1", ["nginx", "php 8.1"])]}
+    fake_rule_service.db.list_origins.return_value = [_origin("o1", ["nginx", "php 8.1"])]
     fetch = AsyncMock(return_value=[])
     monkeypatch.setattr(ml_rules_module, "fetch_recent_cves", fetch)
 

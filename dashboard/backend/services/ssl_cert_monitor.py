@@ -136,35 +136,7 @@ def _persist_cert_record(db, record: dict) -> None:
     # string as `id` instead of trying to resolve a domains_table.id for
     # every domain -- confirmed live 2026-09-21 (describe_table) rather than
     # assumed.
-    record_id = record["domain"]
-    existing = db.ssl_certs_table.get_item(Key={"id": record_id}).get("Item")
-    if existing is None:
-        db.ssl_certs_table.put_item(Item={**record, "id": record_id})
-        return
-    # 2026-09-21: caught live -- "status" is a DynamoDB reserved keyword,
-    # so a bare `status = :v` UpdateExpression fails against the real table
-    # (the fake used in tests doesn't validate reserved words, so no test
-    # caught this; only surfaced once a second scan cycle hit the
-    # update_item path against real AWS). Every field now goes through an
-    # ExpressionAttributeNames placeholder rather than relying on knowing
-    # which field names happen to collide.
-    names = {}
-    values = {}
-    set_clauses = []
-    for i, (k, v) in enumerate(record.items()):
-        if k == "domain":
-            continue
-        name_token = f"#f{i}"
-        val_token = f":v{i}"
-        names[name_token] = k
-        values[val_token] = v
-        set_clauses.append(f"{name_token} = {val_token}")
-    db.ssl_certs_table.update_item(
-        Key={"id": record_id},
-        UpdateExpression="SET " + ", ".join(set_clauses),
-        ExpressionAttributeNames=names,
-        ExpressionAttributeValues=values,
-    )
+    db.upsert_ssl_cert(record["domain"], record)
 
 
 async def check_domain_certificate(
@@ -184,7 +156,7 @@ async def check_domain_certificate(
     send_alert = send_alert or _send_expiry_telegram_alert
 
     result = await probe(domain)
-    existing = db.ssl_certs_table.get_item(Key={"id": domain}).get("Item") or {}
+    existing = db.get_ssl_cert(domain) or {}
     last_alerted_at = None
     if existing.get("last_alerted_at"):
         last_alerted_at = dt.datetime.fromisoformat(existing["last_alerted_at"])

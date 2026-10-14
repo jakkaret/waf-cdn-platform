@@ -15,9 +15,7 @@ _reported_invalid: set = set()
 
 
 def _scan_unverified(db) -> list:
-    from boto3.dynamodb.conditions import Attr
-    response = db.domains_table.scan(FilterExpression=Attr("dns_verified").eq(False))
-    return response.get("Items", [])
+    return db.list_domains(dns_verified=False)
 
 
 def _valid_hostname(name: str) -> bool:
