@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
 from api import ai_summary as ai_summary_module
+from tests.helpers.seed import seed_domain
 
 
 def _fake_generate_summary(monkeypatch, capture: dict):
@@ -94,7 +95,7 @@ def test_account_with_an_origin_gets_a_query_scoped_to_their_own_domain(
     # record directly into the same fake store ai_summary_module.db shares
     # with everything else, same as reading it back via
     # get_user_origins_and_domains's own db.domains_table.scan() would see.
-    ai_summary_module.db.domains_table.put_item(Item={
+    seed_domain(ai_summary_module.db, {
         "id": "domain-1", "origin_id": origin_id, "domain_name": "myapp.example.com", "dns_verified": True,
     })
 

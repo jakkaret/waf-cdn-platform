@@ -57,7 +57,9 @@ def _err(conn, sql, params=None) -> str:
 
 
 def test_migrate_applies_init_once_then_is_up_to_date(db):
-    assert db["applied"] == ["0001_init", "0002_seed_rate_limit_rules"]
+    expected = [p.stem for p in migrate_mod.migration_files()]
+    assert expected[:3] == ["0001_init", "0002_seed_rate_limit_rules", "0003_origin_owner_delete_archives"]
+    assert db["applied"] == expected
     assert migrate_mod.migrate(_dsn_for(db["name"])) == []
 
 
@@ -137,6 +139,21 @@ def test_default_rate_limit_rules_are_seeded(db):
     ]
 
 
+def test_deleting_an_origin_owner_needs_the_origins_archived_first(db):
+    c = db["conn"]
+    uid = c.execute("INSERT INTO users(email,username,password_hash) "
+                    "VALUES('owner-del@x.com','od','$argon2id$x') RETURNING user_id").fetchone()[0]
+    oid = c.execute("INSERT INTO origins(admin_user_id,label,ip,port,status) "
+                    "VALUES(%s,'live','10.0.0.9',80,'active') RETURNING id", (uid,)).fetchone()[0]
+    # A live origin may not lose its owner.
+    assert "origins_owner_unless_archived" in _err(c, "DELETE FROM users WHERE user_id=%s", (uid,))
+    c.execute("UPDATE origins SET status='archived', archived_at=now() WHERE id=%s", (oid,))
+    c.execute("DELETE FROM users WHERE user_id=%s", (uid,))
+    assert c.execute("SELECT admin_user_id, status FROM origins WHERE id=%s", (oid,)).fetchone() == (None, "archived")
+    assert "origins_owner_unless_archived" in _err(
+        c, "UPDATE origins SET status='active' WHERE id=%s", (oid,))
+
+
 def test_audit_logs_are_append_only(db):
     c = db["conn"]
     c.execute("INSERT INTO audit_logs(event_id,scope_id,action,summary) "
@@ -171,7 +188,7 @@ def test_dry_run_reports_pending_without_applying(tmp_path):
         admin.execute(f'CREATE DATABASE "{name}"')
     try:
         assert migrate_mod.migrate(_dsn_for(name), dry_run=True) == [
-            "0001_init", "0002_seed_rate_limit_rules"]
+            p.stem for p in migrate_mod.migration_files()]
         with psycopg.connect(_dsn_for(name)) as conn:
             assert conn.execute("SELECT to_regclass('waf.users')").fetchone()[0] is None
     finally:

@@ -52,8 +52,10 @@ class AuthService:
         self.backend = data_backend()
         if self.backend == "postgres":
             # No boto3 resource and no I/O: scripts and tests build this at
-            # module level. Accounts live in waf.users (migration Phase 3).
+            # module level. Accounts live in waf.users / waf.user_identities.
+            from services.pg_store import PgUserRepository
             self.users_table = None
+            self._pg = PgUserRepository()
             return
         self.region = os.getenv("AWS_REGION", "ap-southeast-1")
         endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
@@ -89,6 +91,12 @@ class AuthService:
             return None
 
     def get_user_by_id(self, user_id: str) -> Optional[Dict]:
+        if self.backend == "postgres":
+            try:
+                return self._pg.get_by_id(user_id)
+            except Exception as e:
+                logger.error("get_user_by_id error: %s", e)
+                return None
         try:
             resp = self.users_table.get_item(Key={"user_id": user_id})
             return resp.get("Item")
@@ -97,6 +105,12 @@ class AuthService:
             return None
 
     def get_user_by_email(self, email: str) -> Optional[Dict]:
+        if self.backend == "postgres":
+            try:
+                return self._pg.get_by_email(email)
+            except Exception as e:
+                logger.error("get_user_by_email error: %s", e)
+                return None
         try:
             # [Q1 FIX] ลองใช้ GSI query ก่อน (ประสิทธิภาพดีกว่า)
             try:
@@ -122,6 +136,12 @@ class AuthService:
             return None
 
     def get_user_by_provider(self, provider: str, provider_id: str) -> Optional[Dict]:
+        if self.backend == "postgres":
+            try:
+                return self._pg.get_by_provider(provider, provider_id)
+            except Exception as e:
+                logger.error("get_user_by_provider error: %s", e)
+                return None
         try:
             # [Q1 FIX] ลองใช้ GSI query ก่อน
             try:
@@ -155,6 +175,15 @@ class AuthService:
         provider_id: Optional[str] = None,
         avatar_url: Optional[str] = None,
     ) -> Dict:
+        if self.backend == "postgres":
+            if auth_provider == "local" and not password:
+                raise ValueError("Password is required")
+            return self._pg.create(
+                email=email, username=username,
+                password_hash=self.hash_password(password) if password else None,
+                role=role, auth_provider=auth_provider, provider_id=provider_id,
+                avatar_url=avatar_url,
+            )
         user_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat() + "Z"
 
@@ -182,6 +211,12 @@ class AuthService:
         return item
 
     def update_last_login(self, user_id: str):
+        if self.backend == "postgres":
+            try:
+                self._pg.touch_login(user_id)
+            except Exception as e:
+                logger.error("update_last_login error: %s", e)
+            return
         try:
             self.users_table.update_item(
                 Key={"user_id": user_id},
@@ -192,6 +227,12 @@ class AuthService:
             print("update_last_login error:", e)
 
     def list_users(self):
+        if self.backend == "postgres":
+            try:
+                return self._pg.list()
+            except Exception as e:
+                logger.error("list_users error: %s", e)
+                return []
         try:
             resp = self.users_table.scan()
             return resp.get("Items", [])
@@ -199,8 +240,19 @@ class AuthService:
             print("list_users error:", e)
             return []
 
+    def count_users(self) -> int:
+        if self.backend == "postgres":
+            return self._pg.count()
+        return len(self.list_users())
+
     def list_telegram_recipients(self):
         """Users who connected a Telegram chat for alert delivery."""
+        if self.backend == "postgres":
+            try:
+                return self._pg.list_telegram_recipients()
+            except Exception as e:
+                logger.error("list_telegram_recipients error: %s", e)
+                return []
         try:
             resp = self.users_table.scan(FilterExpression=Attr("telegram_chat_id").exists())
             return resp.get("Items", [])
@@ -210,6 +262,9 @@ class AuthService:
 
     def set_telegram_chat_id(self, user_id: str, chat_id: Optional[str]) -> None:
         """Connect ('123') or disconnect (None/'') the user's alert chat."""
+        if self.backend == "postgres":
+            self._pg.set_field(user_id, "telegram_chat_id", str(chat_id) if chat_id else None)
+            return
         if chat_id:
             self.users_table.update_item(
                 Key={"user_id": user_id},
@@ -226,6 +281,10 @@ class AuthService:
         allowed = {"admin", "viewer"}
         if role not in allowed:
             raise ValueError("Invalid role")
+        if self.backend == "postgres":
+            if not self._pg.set_field(user_id, "role", role):
+                raise ValueError("User not found")
+            return
         self.users_table.update_item(
             Key={"user_id": user_id},
             UpdateExpression="SET #r = :r",
@@ -233,14 +292,22 @@ class AuthService:
             ExpressionAttributeValues={":r": role},
         )
 
-    def delete_user(self, user_id: str):
+    def delete_user(self, user_id: str) -> int:
+        """Delete the account. In PostgreSQL the origins it still owns are
+        archived in the same transaction; returns how many were archived."""
+        if self.backend == "postgres":
+            return self._pg.delete(user_id)
         self.users_table.delete_item(Key={"user_id": user_id})
+        return 0
 
     def set_threat_intel_opt_in(self, user_id: str, enabled: bool) -> None:
         """services/threat_intel.py reads this field fresh (never cached) on
         every write and read, so opting out here takes effect on the very
         next attack -- see that module's docstring for why that direction
         matters more than opt-in lag would."""
+        if self.backend == "postgres":
+            self._pg.set_field(user_id, "share_threat_intel", bool(enabled))
+            return
         self.users_table.update_item(
             Key={"user_id": user_id},
             UpdateExpression="SET share_threat_intel = :v",
@@ -314,7 +381,10 @@ class AuthService:
 
         if user:
             self.update_last_login(user["user_id"])
-            if not user.get("avatar_url") and avatar:
+            if not user.get("avatar_url") and avatar and self.backend == "postgres":
+                self._pg.set_field(user["user_id"], "avatar_url", avatar)
+                user["avatar_url"] = avatar
+            elif not user.get("avatar_url") and avatar:
                 self.users_table.update_item(
                     Key={"user_id": user["user_id"]},
                     UpdateExpression="SET avatar_url = :a",

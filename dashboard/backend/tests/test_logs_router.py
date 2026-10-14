@@ -29,6 +29,7 @@ import services.tenant_service as tenant_service_module
 from api import auth as auth_module
 from api import origins as origins_module
 from api import logs as logs_module
+from tests.helpers.seed import seed_domain
 
 
 @pytest.fixture()
@@ -104,7 +105,7 @@ def test_requesting_an_origin_you_do_not_own_returns_empty_not_another_tenants_l
     )
     assert origin_resp.status_code == 200
     origin_id = origin_resp.json()["id"]
-    tenant_service_module.db.domains_table.put_item(Item={
+    seed_domain(tenant_service_module.db, {
         "id": "domain-logs-1", "origin_id": origin_id, "domain_name": "mylogsapp.example.com",
     })
 
@@ -231,7 +232,7 @@ def test_parent_domain_of_owned_domain_returns_empty(client: TestClient, registe
     origin_id = client.post(
         "/api/origins", json={"label": "ParentApp", "ip": "203.0.113.31", "port": 8080}, headers=headers,
     ).json()["id"]
-    tenant_service_module.db.domains_table.put_item(Item={
+    seed_domain(tenant_service_module.db, {
         "id": "domain-parent-1", "origin_id": origin_id, "domain_name": "mylogsapp.example.com",
     })
 

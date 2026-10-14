@@ -17,6 +17,7 @@ from api import managed_rules as managed_rules_module
 from api import origins as origins_module
 from api import rules as rules_module
 from services.rate_limiter import limiter
+from tests.helpers.seed import seed_domain, seed_origin, uid
 
 RULE_1 = 'SecRule REQUEST_URI "@contains /evil" "id:3000001,phase:1,deny,status:403,log,severity:CRITICAL,msg:\'evil path\',tag:\'managed-ruleset\'"'
 RULE_2 = 'SecRule ARGS "@contains jndi:" "id:3000002,phase:2,deny,status:403,log,severity:CRITICAL,msg:\'log4shell\',tag:\'managed-ruleset\'"'
@@ -152,21 +153,22 @@ def test_effective_version_auto_always_tracks_latest(source_dir, catalog_path):
 
 
 def test_verified_hosts_by_origin_excludes_unverified_domains(db):
-    db.origins_table.put_item(Item={"id": "o1", "status": "active"})
-    db.domains_table.put_item(Item={"id": "d1", "origin_id": "o1", "domain_name": "unverified.example.com", "dns_verified": False})
-    db.domains_table.put_item(Item={"id": "d2", "origin_id": "o1", "domain_name": "verified.example.com", "dns_verified": True})
+    seed_origin(db, {"id": "o1", "status": "active"})
+    seed_domain(db, {"id": "d1", "origin_id": "o1", "domain_name": "unverified.example.com", "dns_verified": False})
+    seed_domain(db, {"id": "d2", "origin_id": "o1", "domain_name": "verified.example.com", "dns_verified": True})
     origins, by_origin = mr.verified_hosts_by_origin(db)
-    assert by_origin.get("o1") == ["verified.example.com"]
+    assert by_origin.get(uid("o1")) == ["verified.example.com"]
 
 
 def test_verified_hosts_by_origin_drops_a_host_claimed_by_two_origins(db):
-    db.origins_table.put_item(Item={"id": "o1", "status": "active"})
-    db.origins_table.put_item(Item={"id": "o2", "status": "active"})
-    db.domains_table.put_item(Item={"id": "d1", "origin_id": "o1", "domain_name": "shared.example.com", "dns_verified": True})
-    db.domains_table.put_item(Item={"id": "d2", "origin_id": "o2", "domain_name": "shared.example.com", "dns_verified": True})
+    # A BYO domain name is unique, so the two claims come from one origin's
+    # verified domain and another origin's tunnel host.
+    seed_origin(db, {"id": "o1", "status": "active"})
+    seed_origin(db, {"id": "o2", "status": "active", "tunnel_domains": ["shared.example.com"]})
+    seed_domain(db, {"id": "d1", "origin_id": "o1", "domain_name": "shared.example.com", "dns_verified": True})
     _origins, by_origin = mr.verified_hosts_by_origin(db)
-    assert "shared.example.com" not in by_origin.get("o1", [])
-    assert "shared.example.com" not in by_origin.get("o2", [])
+    assert "shared.example.com" not in by_origin.get(uid("o1"), [])
+    assert "shared.example.com" not in by_origin.get(uid("o2"), [])
 
 
 def test_status_for_origin_shape(source_dir, catalog_path):

@@ -24,6 +24,7 @@ import asyncio
 import pytest
 
 import api.domains as domains_module
+from tests.helpers.seed import seed_domain, seed_origin
 
 
 def _run(coro):
@@ -62,14 +63,8 @@ def test_unregistered_domain_is_still_rejected(monkeypatch):
 
 def test_dns_verified_domain_is_allowed(monkeypatch):
     """The original "bring your own domain" path -- must keep working."""
-    monkeypatch.setattr(
-        domains_module.db.domains_table, "scan",
-        lambda **kw: {"Items": [{"domain_name": "myapp.example.com", "dns_verified": True,
-                                 "origin_id": "o1"}]},
-    )
-    # Every domain row belongs to an origin (a foreign key in PostgreSQL).
-    monkeypatch.setattr(domains_module.db.origins_table, "scan",
-                        lambda **kw: {"Items": [{"id": "o1", "status": "active"}]})
+    seed_origin(domains_module.db, {"id": "o1", "status": "active"})
+    seed_domain(domains_module.db, {"origin_id": "o1", "domain_name": "myapp.example.com", "dns_verified": True})
 
     async def _no_proxies():
         return []
@@ -85,11 +80,7 @@ def test_cloudwaf_tunnel_domain_is_allowed(monkeypatch):
     """New: a domain claimed via api/tunnel.py's issue_agent_token (stored
     in origins_table.tunnel_domains) must be allowed -- this table was
     never checked at all before this fix."""
-    monkeypatch.setattr(domains_module.db.domains_table, "scan", lambda **kw: {"Items": []})
-    monkeypatch.setattr(
-        domains_module.db.origins_table, "scan",
-        lambda **kw: {"Items": [{"id": "o1", "tunnel_domains": ["cloudwaf-app.waf-it-kku.online"]}]},
-    )
+    seed_origin(domains_module.db, {"id": "o1", "tunnel_domains": ["cloudwaf-app.waf-it-kku.online"]})
 
     async def _no_proxies():
         return []
@@ -148,13 +139,8 @@ def test_a_transient_frp_dashboard_failure_does_not_reject_everything(monkeypatc
     """get_live_proxies() failing (FRP dashboard unreachable) must degrade
     to "no FRP-sourced domains this cycle", not crash the whole allowed-set
     refresh and lock out every domain including DB-verified ones."""
-    monkeypatch.setattr(
-        domains_module.db.domains_table, "scan",
-        lambda **kw: {"Items": [{"domain_name": "myapp.example.com", "dns_verified": True,
-                                 "origin_id": "o1"}]},
-    )
-    monkeypatch.setattr(domains_module.db.origins_table, "scan",
-                        lambda **kw: {"Items": [{"id": "o1", "status": "active"}]})
+    seed_origin(domains_module.db, {"id": "o1", "status": "active"})
+    seed_domain(domains_module.db, {"origin_id": "o1", "domain_name": "myapp.example.com", "dns_verified": True})
 
     async def _broken_proxies():
         raise Exception("FRP dashboard unreachable")

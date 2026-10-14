@@ -246,18 +246,10 @@ def get_origins_visible_to_user(user_id: str) -> list:
     owned = get_origins_for_user(user_id)
     owned_ids = {o.get("id") for o in owned}
     try:
-        all_origins = _scan_all_origins()
+        shared = db.get_origins_shared_with(user_id)
     except Exception:
         return owned
-    shared = [
-        o for o in all_origins
-        if o.get("id") not in owned_ids
-        and (
-            user_id in (o.get("viewer_user_ids") or set())
-            or user_id in (o.get("editor_user_ids") or set())
-        )
-    ]
-    return owned + shared
+    return owned + [o for o in shared if o.get("id") not in owned_ids]
 
 
 def list_origin_viewers(origin_id: str) -> list:

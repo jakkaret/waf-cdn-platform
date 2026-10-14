@@ -22,6 +22,7 @@ from api import rate_limits as rate_limits_module
 from api import rules as rules_module
 from api import threshold_proposals as proposals_module
 from services.rate_limiter import limiter
+from tests.helpers.seed import seed_domain
 
 
 @pytest.fixture()
@@ -41,7 +42,7 @@ def accounts(client: TestClient, register_user, auth_header):
     admin_h = auth_header(admin["access_token"])
     viewer_h = auth_header(viewer["access_token"])
     origin_id = client.post("/api/origins", json={"label": "Mine", "ip": "203.0.113.40", "port": 80}, headers=viewer_h).json()["id"]
-    tenant_service_module.db.domains_table.put_item(Item={"id": "ac-dom-1", "origin_id": origin_id, "domain_name": "mine.example.com", "dns_verified": True})
+    seed_domain(tenant_service_module.db, {"id": "ac-dom-1", "origin_id": origin_id, "domain_name": "mine.example.com", "dns_verified": True})
     tenant_service_module.invalidate_tenant_cache()
     return admin_h, viewer_h
 

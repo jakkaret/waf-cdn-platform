@@ -154,6 +154,60 @@ jobs:
           path: dashboard/backend/coverage.xml
           retention-days: 14
 
+  # ── Job 4a: Backend tests on PostgreSQL (DATA_BACKEND=postgres) ────────
+  # Production runs on PostgreSQL since 2026-10-15. The ML-rules tests below
+  # still use the DynamoDB-era table handle and move in migration Phase 4;
+  # they keep running in the job above. This list goes away in Phase 4.
+  test-backend-pg:
+    name: "Test: Backend on PostgreSQL (pytest)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard/backend
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATA_BACKEND: postgres
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.BACKEND_PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest httpx pytest-asyncio fakeredis
+
+      - name: Run pytest (PostgreSQL mode)
+        run: >-
+          pytest tests/ -q --tb=short
+          --deselect tests/test_ml_rule_suggest_gen3.py::test_new_rule_stores_generator_and_first_hit
+          --deselect tests/test_ml_rule_suggest_gen3.py::test_repeat_merges_into_the_pending_rule
+          --deselect tests/test_ml_rule_suggest_gen3.py::test_reviewed_rule_is_not_a_merge_target
+          --deselect tests/test_ml_rule_suggest_gen3.py::test_rows_written_before_the_new_fields_get_defaults
+          --deselect tests/test_ml_rule_suggest_gen3.py::test_gen3_attack_queues_detector_rules_then_merges_the_repeat
+          --deselect tests/test_ml_rule_suggest_gen3.py::test_admin_backtest_stores_the_result
+          --deselect tests/test_ml_rule_suggest_gen3.py::test_reject_legacy_rejects_only_pending_rf_rules_across_pages
+          --deselect tests/test_ml_rule_suggest_gen3.py::test_reject_legacy_skips_a_rule_reviewed_meanwhile
+          --deselect tests/test_ml_rule_suggest_gen3.py::test_reject_legacy_endpoint_is_admin_only
+          --deselect tests/test_pending_rule_origin.py::test_cve_proposal_records_the_matched_origin
+          --deselect tests/test_pending_rule_origin.py::test_anomaly_proposal_without_origin_context_stores_empty_not_a_guess
+          --deselect tests/test_pending_rule_origin.py::test_origin_attribution_is_persisted_not_just_returned
+
   # ── Job 4b: control-api Tests (CAPTCHA / OTP shield) ───────────────────
   test-control-api:
     name: "Test: control-api (pytest)"

@@ -9,20 +9,15 @@ from api import tunnels
 
 @pytest.fixture
 def no_domains(monkeypatch):
-    """domains_table.scan() -> empty (nothing registered yet)."""
-    class _T:
-        def scan(self, *a, **k):
-            return {"Items": []}
-    monkeypatch.setattr(tunnels.db, "domains_table", _T())
+    """Nothing registered yet."""
+    monkeypatch.setattr(tunnels.db, "list_domains", lambda *a, **k: [])
     monkeypatch.setattr(tunnels.db, "get_origin_by_id", lambda *_a, **_k: None)
 
 
 def _registered_to(monkeypatch, owner_user_id):
     """One domain record whose origin belongs to owner_user_id."""
-    class _T:
-        def scan(self, *a, **k):
-            return {"Items": [{"domain_name": "shop.waf-it-kku.online", "origin_id": "o1"}]}
-    monkeypatch.setattr(tunnels.db, "domains_table", _T())
+    monkeypatch.setattr(tunnels.db, "list_domains",
+                        lambda *a, **k: [{"domain_name": "shop.waf-it-kku.online", "origin_id": "o1"}])
     monkeypatch.setattr(tunnels.db, "get_origin_by_id",
                         lambda *_a, **_k: {"admin_user_id": owner_user_id})
 

@@ -15,6 +15,7 @@ from api import origins as origins_module
 from api import shield_events as shield_events_api
 from services import shield_events as se
 from services.rate_limiter import limiter
+from tests.helpers.seed import seed_domain
 
 
 class FakeList:
@@ -222,8 +223,8 @@ def test_preview_endpoint_is_for_origin_admins(client, accounts, monkeypatch):
     monkeypatch.setattr(shield_events_api, "preview_for_paths",
                         lambda _ch, hosts, paths, excl, hours: captured.update(hosts=hosts) or {"total": 0})
     import services.origin_service as origin_service_module
-    origin_service_module.db.domains_table.put_item(Item={"id": "d-ok", "origin_id": origin_id, "domain_name": "Shop.Example.com", "dns_verified": True})
-    origin_service_module.db.domains_table.put_item(Item={"id": "d-no", "origin_id": origin_id, "domain_name": "pending.example.com", "dns_verified": False})
+    seed_domain(origin_service_module.db, {"id": "d-ok", "origin_id": origin_id, "domain_name": "Shop.Example.com", "dns_verified": True})
+    seed_domain(origin_service_module.db, {"id": "d-no", "origin_id": origin_id, "domain_name": "pending.example.com", "dns_verified": False})
     body = {"login_paths": ["/login*"]}
     url = f"/api/origins/{origin_id}/shield-events/preview"
     assert client.post(url, json=body, headers=admin_h).status_code == 200

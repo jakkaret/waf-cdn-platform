@@ -1,4 +1,4 @@
-"""db/pool.py, db/types.py and db/errors.py against a real PostgreSQL.
+"""db/pool.py, db/values.py and db/errors.py against a real PostgreSQL.
 Needs TEST_DATABASE_URL (tests/pg_harness.py makes a throwaway database)."""
 import uuid
 
@@ -95,7 +95,7 @@ def test_app_role_cannot_rewrite_audit_history():
 
 
 def test_as_uuid():
-    from db.types import as_uuid
+    from db.values import as_uuid
     u = uuid.uuid4()
     assert as_uuid("not-a-uuid") is None
     assert as_uuid(None) is None
@@ -106,7 +106,7 @@ def test_as_uuid():
 
 def test_time_formats_keep_each_tables_shape():
     from datetime import datetime, timezone
-    from db import types
+    from db import values as types
     t = datetime(2026, 10, 15, 3, 4, 5, 123456, tzinfo=timezone.utc)
     assert types.iso_z_us(t) == "2026-10-15T03:04:05.123456Z"
     assert types.iso_z_s(t) == "2026-10-15T03:04:05Z"

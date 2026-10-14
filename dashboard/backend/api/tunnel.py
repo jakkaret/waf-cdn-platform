@@ -24,7 +24,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from services.dynamodb_service import DynamoDBService
+from services.dynamodb_service import DomainAlreadyClaimed, DynamoDBService
 from services.rbac import get_current_user, require_admin, verify_origin_ownership
 
 router = APIRouter(prefix="/api/tunnel", tags=["Private Tunnel"])
@@ -82,11 +82,15 @@ async def issue_agent_token(
 
     secret = secrets.token_hex(32)
     token = f"{TOKEN_PREFIX}_{req.origin_id}_{secret}"
-    ok = db.update_origin(req.origin_id, {
-        "tunnel_token_hash": _hash_secret(secret),
-        "tunnel_domains": domains,
-        "tunnel_token_issued_at": int(time.time()),
-    })
+    try:
+        ok = db.update_origin(req.origin_id, {
+            "tunnel_token_hash": _hash_secret(secret),
+            "tunnel_domains": domains,
+            "tunnel_token_issued_at": int(time.time()),
+        })
+    except DomainAlreadyClaimed as exc:
+        # One hostname, one tunnel owner (UNIQUE in PostgreSQL).
+        raise HTTPException(status_code=409, detail=str(exc))
     if not ok:
         raise HTTPException(status_code=500, detail="Could not store the credential")
 
@@ -119,7 +123,8 @@ async def verify_agent(req: VerifyAgentRequest):
     if not origin or origin.get("status") == "archived":
         raise denied
 
-    stored = origin.get("tunnel_token_hash")
+    credential = db.get_agent_credential(origin_id) or {}
+    stored = credential.get("token_hash")
     if not stored or not hmac.compare_digest(str(stored), _hash_secret(secret)):
         raise denied
 

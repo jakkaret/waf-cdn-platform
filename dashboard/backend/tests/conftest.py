@@ -54,6 +54,11 @@ os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 os.environ["DYNAMODB_ENDPOINT_URL"] = "http://127.0.0.1:1"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-pytest-only"
 os.environ["SESSION_COOKIE_SECURE"] = "false"  # TestClient uses http; let Set-Cookie come back
+# Production seeds its first admin (scripts/seed_admin.py) and never lets
+# self-registration grant admin. The suite keeps the old bootstrap rule (the
+# first registered user is admin) that its fixtures are written around;
+# tests/test_register_role.py covers the production default.
+os.environ["WAF_FIRST_USER_ADMIN"] = "true"
 os.environ["FRP_AUTH_TOKEN"] = "test-frp-token-for-pytest-only"
 os.environ["WAF_CONTAINER_NAME"] = "test-waf-container-does-not-exist"
 os.environ["GEMINI_API_KEY"] = ""
