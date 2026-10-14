@@ -271,11 +271,18 @@ class _FakeTable:
 from tests.conftest import FakeDynamoDBService  # noqa: E402
 
 
-class _FakeDB(FakeDynamoDBService):
+class _FakeTableDB(FakeDynamoDBService):
     """The real store methods (get_ssl_cert/upsert_ssl_cert) over one fake table."""
 
     def __init__(self):  # noqa: super() intentionally not called
         self.ssl_certs_table = _FakeTable()
+
+
+def _FakeDB():
+    """DynamoDB mode: one isolated fake table. PostgreSQL mode: the real
+    store (conftest empties the database before every test)."""
+    from services.dynamodb_service import DynamoDBService, data_backend
+    return DynamoDBService() if data_backend() == "postgres" else _FakeTableDB()
 
 
 def test_check_domain_certificate_persists_a_healthy_result_without_alerting():
@@ -300,7 +307,7 @@ def test_check_domain_certificate_persists_a_healthy_result_without_alerting():
     assert record["status"] == "ok"
     assert record["days_remaining"] == 54
     assert alerts_sent == []
-    assert db.ssl_certs_table.rows["safe.example.com"]["days_remaining"] == 54
+    assert db.get_ssl_cert("safe.example.com")["days_remaining"] == 54
 
 
 def test_check_domain_certificate_alerts_once_when_crossing_the_threshold():
@@ -321,15 +328,16 @@ def test_check_domain_certificate_alerts_once_when_crossing_the_threshold():
     assert record["days_remaining"] == 4
     assert len(alerts_sent) == 1
     assert alerts_sent[0][0] == "expiring.example.com"
-    assert "last_alerted_at" in db.ssl_certs_table.rows["expiring.example.com"]
+    assert "last_alerted_at" in db.get_ssl_cert("expiring.example.com")
 
 
 def test_check_domain_certificate_does_not_alert_twice_inside_the_cooldown():
     db = _FakeDB()
-    db.ssl_certs_table.rows["expiring.example.com"] = {
-        "domain": "expiring.example.com",
+    db.upsert_ssl_cert("expiring.example.com", {
+        "status": "error",
+        "checked_at": "2026-11-01T06:00:00+00:00",
         "last_alerted_at": "2026-11-01T06:00:00+00:00",
-    }
+    })
     alerts_sent = []
 
     async def fake_probe(domain):
@@ -362,4 +370,4 @@ def test_check_domain_certificate_persists_a_probe_error_without_crashing():
 
     assert record["status"] == "error"
     assert record["days_remaining"] is None
-    assert db.ssl_certs_table.rows["unreachable.example.com"]["status"] == "error"
+    assert db.get_ssl_cert("unreachable.example.com")["status"] == "error"

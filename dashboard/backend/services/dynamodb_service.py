@@ -492,6 +492,22 @@ class DynamoDBService:
     def hard_delete_origin(self, origin_id: str) -> None:
         self.origins_table.delete_item(Key={"id": origin_id})
 
+    def get_origins_shared_with(self, user_id: str) -> List[Dict]:
+        """Origins where the user holds a viewer or editor grant."""
+        return [
+            o for o in self.list_origins()
+            if user_id in (o.get("viewer_user_ids") or set())
+            or user_id in (o.get("editor_user_ids") or set())
+        ]
+
+    def get_agent_credential(self, origin_id: str) -> Optional[Dict]:
+        """{token_hash, issued_at} of the origin's tunnel agent, or None."""
+        origin = self.get_origin_by_id(origin_id)
+        if not origin or not origin.get("tunnel_token_hash"):
+            return None
+        return {"token_hash": origin["tunnel_token_hash"],
+                "issued_at": origin.get("tunnel_token_issued_at")}
+
     # ---- hostnames ----------------------------------------------------------
     def verified_hostnames_active(self) -> List[tuple]:
         """[(hostname, origin_id)] for DNS-verified BYO domains and tunnel
@@ -662,6 +678,10 @@ class DynamoDBService:
 
 class DuplicateDomain(ValueError):
     """A domain with this name is already registered."""
+
+
+class DomainAlreadyClaimed(ValueError):
+    """A tunnel hostname is already claimed by another origin."""
 
 
 # The DynamoDB-backed implementation, also the base of PgStore while method

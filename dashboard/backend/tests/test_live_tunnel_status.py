@@ -31,6 +31,17 @@ import pytest
 
 import api.origins as origins_module
 import services.origin_service as origin_service
+from tests.helpers.seed import ensure_user, uid
+
+USER_A = uid("user-a")
+USER_B = uid("user-b")
+
+
+@pytest.fixture(autouse=True)
+def _known_users(fake_infrastructure):
+    ensure_user(USER_A)
+    ensure_user(USER_B)
+
 
 
 def _run(coro):
@@ -162,7 +173,7 @@ def test_auto_create_reads_port_from_metadatas_when_localport_is_absent():
     autouse fixture's already-patched origin_service.db (a fresh
     FakeDynamoDBService per test), same as every other test in this file."""
     import api.tunnels as tunnels_module
-    tunnels_module._PROXY_OWNERS["alice-tunnel"] = "user-a"
+    tunnels_module._PROXY_OWNERS["alice-tunnel"] = USER_A
 
     proxy = {
         "name": "alice-tunnel",
@@ -175,6 +186,6 @@ def test_auto_create_reads_port_from_metadatas_when_localport_is_absent():
         },
     }
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        created = _run(origin_service.auto_sync_tunnel_origins("user-a"))
+        created = _run(origin_service.auto_sync_tunnel_origins(USER_A))
 
     assert created[0]["port"] == 9090

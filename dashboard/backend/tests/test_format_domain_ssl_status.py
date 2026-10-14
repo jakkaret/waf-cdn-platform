@@ -14,9 +14,7 @@ import api.domains as domains_module
 def test_a_domain_with_a_healthy_probed_certificate_reports_active_with_real_fields():
     # waf_ssl_certs' real key schema is HASH="id" -- see
     # services/ssl_cert_monitor.py's _persist_cert_record.
-    domains_module.db.ssl_certs_table.put_item(Item={
-        "id": "healthy.example.com",
-        "domain": "healthy.example.com",
+    domains_module.db.upsert_ssl_cert("healthy.example.com", {
         "status": "ok",
         "not_after": "2026-12-25T00:00:00+00:00",
         "issuer": "Let's Encrypt",
@@ -35,9 +33,7 @@ def test_a_domain_with_a_healthy_probed_certificate_reports_active_with_real_fie
 
 
 def test_a_domain_whose_probe_failed_reports_error_not_a_fake_active():
-    domains_module.db.ssl_certs_table.put_item(Item={
-        "id": "broken.example.com",
-        "domain": "broken.example.com",
+    domains_module.db.upsert_ssl_cert("broken.example.com", {
         "status": "error",
         "error": "connection refused",
         "days_remaining": None,

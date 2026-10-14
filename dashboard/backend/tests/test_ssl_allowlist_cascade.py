@@ -18,20 +18,13 @@ issuance.
 import api.domains as domains_module
 
 
-class _FakeTable:
-    def __init__(self, rows):
-        self.rows = rows
-
-    def scan(self, **_kwargs):
-        return {"Items": self.rows}
-
-
 def _install(monkeypatch, origins, domains):
-    from tests.conftest import FakeDynamoDBService
-    fake_db = FakeDynamoDBService()
-    fake_db.origins_table = _FakeTable(origins)
-    fake_db.domains_table = _FakeTable(domains)
-    monkeypatch.setattr(domains_module, "db", fake_db)
+    """Seed through the store (in-memory fake or PostgreSQL)."""
+    from tests.helpers.seed import seed_domain, seed_origin
+    for o in origins:
+        seed_origin(domains_module.db, o)
+    for d in domains:
+        seed_domain(domains_module.db, d)
 
 
 def test_archived_origin_domain_is_not_allowed_a_certificate(monkeypatch):

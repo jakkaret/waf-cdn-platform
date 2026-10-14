@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# pg_dump of the waf database, kept 7 days. Run from root's crontab:
-#   0 */6 * * * /root/waf_project/deploy/postgres/backup.sh >> /var/log/waf-pg-backup.log 2>&1
+# pg_dump of the waf database, kept 7 days. Scheduled by /etc/cron.d/waf-pg-backup:
+#   0 */6 * * * root /root/waf_project/deploy/postgres/backup.sh >> /var/log/waf-pg-backup.log 2>&1
 # Writes /root/backups/pg/waf-YYYY-MM-DD-HH.dump (custom format) and checks
 # the file is readable with pg_restore --list before pruning old dumps.
 set -euo pipefail

@@ -38,6 +38,11 @@ import api.tunnels as tunnels_module
 import services.origin_service as origin_service
 from services.dynamodb_service import DynamoDBService
 from tests.conftest import InMemoryTable
+from tests.helpers.seed import ensure_user, uid
+
+USER_A = uid("user-a")
+USER_B = uid("user-b")
+EXISTING_1 = uid("existing-1")
 
 
 def _run(coro):
@@ -96,8 +101,15 @@ def _dns_not_pointed_at_us(monkeypatch):
     monkeypatch.setattr(origin_service, "verify_domain_dns", lambda domain, token: False)
 
 
-def setup_function(_):
-    origin_service.db = _FreshFakeDynamoDBService()
+@pytest.fixture(autouse=True)
+def _fresh_store(fake_infrastructure):
+    from services.dynamodb_service import data_backend
+    if data_backend() == "postgres":
+        origin_service.db = DynamoDBService()   # PgStore; conftest empties the tables per test
+    else:
+        origin_service.db = _FreshFakeDynamoDBService()
+    ensure_user(USER_A)
+    ensure_user(USER_B)
     tunnels_module._PROXY_OWNERS.clear()
     # auto_sync_tunnel_origins now shares origin_service's 60s live-proxy
     # cache (2026-09-20 perf fix, collapsing what used to be two separate
@@ -111,14 +123,14 @@ def setup_function(_):
 
 def test_create_registers_a_new_origin_for_an_online_tunnel_whose_owner_newproxy_recorded():
     proxy = _online_proxy("alice-tunnel", "alice.example.com")
-    _claim("alice-tunnel", "user-a")
+    _claim("alice-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        created = _run(origin_service.auto_sync_tunnel_origins("user-a"))
+        created = _run(origin_service.auto_sync_tunnel_origins(USER_A))
 
     assert len(created) == 1
-    assert created[0]["admin_user_id"] == "user-a"
+    assert created[0]["admin_user_id"] == USER_A
     assert created[0]["ip"] == "alice.example.com"
-    origins = origin_service.get_origins_for_user("user-a")
+    origins = origin_service.get_origins_for_user(USER_A)
     assert len(origins) == 1
 
 
@@ -132,24 +144,24 @@ def test_online_tunnel_with_no_recorded_owner_is_not_auto_created():
     tunnel's next reconnect (which re-fires NewProxy)."""
     proxy = _online_proxy("alice-tunnel", "alice.example.com")
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        created = _run(origin_service.auto_sync_tunnel_origins("user-a"))
+        created = _run(origin_service.auto_sync_tunnel_origins(USER_A))
 
     assert created == []
-    assert origin_service.get_origins_for_user("user-a") == []
+    assert origin_service.get_origins_for_user(USER_A) == []
 
 
 def test_offline_proxy_is_not_synced():
     proxy = _online_proxy("alice-tunnel", "alice.example.com")
     proxy["status"] = "offline"
-    _claim("alice-tunnel", "user-a")
+    _claim("alice-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        created = _run(origin_service.auto_sync_tunnel_origins("user-a"))
+        created = _run(origin_service.auto_sync_tunnel_origins(USER_A))
     assert created == []
 
 
 def test_frp_daemon_unreachable_fails_closed_to_no_sync_not_a_crash():
     with patch("services.origin_service.httpx.AsyncClient", side_effect=Exception("connection refused")):
-        created = _run(origin_service.auto_sync_tunnel_origins("user-a"))
+        created = _run(origin_service.auto_sync_tunnel_origins(USER_A))
     assert created == []
 
 
@@ -157,16 +169,16 @@ def test_frp_daemon_unreachable_fails_closed_to_no_sync_not_a_crash():
 
 def test_update_restores_a_matching_archived_origin_instead_of_duplicating():
     origin_service.db.create_origin({
-        "id": "existing-1", "admin_user_id": "user-a", "label": "Tunnel (alice.example.com)",
+        "id": EXISTING_1, "admin_user_id": USER_A, "label": "Tunnel (alice.example.com)",
         "ip": "alice.example.com", "port": 3000, "status": "archived",
     })
     proxy = _online_proxy("alice-tunnel", "alice.example.com")
-    _claim("alice-tunnel", "user-a")
+    _claim("alice-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        created = _run(origin_service.auto_sync_tunnel_origins("user-a"))
+        created = _run(origin_service.auto_sync_tunnel_origins(USER_A))
 
     assert created == []  # nothing NEW created
-    restored = origin_service.get_origin("existing-1")
+    restored = origin_service.get_origin(EXISTING_1)
     assert restored["status"] == "active"
 
 
@@ -175,29 +187,29 @@ def test_archived_origin_restores_even_when_the_viewer_is_not_its_owner():
     it must happen regardless of who is viewing (their own auto-sync call
     still triggers it, since FRP's proxy list isn't scoped to a tenant)."""
     origin_service.db.create_origin({
-        "id": "existing-1", "admin_user_id": "user-a", "label": "Tunnel (alice.example.com)",
+        "id": EXISTING_1, "admin_user_id": USER_A, "label": "Tunnel (alice.example.com)",
         "ip": "alice.example.com", "port": 3000, "status": "archived",
     })
     proxy = _online_proxy("alice-tunnel", "alice.example.com")
-    _claim("alice-tunnel", "user-a")
+    _claim("alice-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        _run(origin_service.auto_sync_tunnel_origins("user-b"))
+        _run(origin_service.auto_sync_tunnel_origins(USER_B))
 
-    assert origin_service.get_origin("existing-1")["status"] == "active"
+    assert origin_service.get_origin(EXISTING_1)["status"] == "active"
 
 
 # --------------------------------------------------------------- duplicate
 
 def test_repeated_sync_calls_do_not_create_duplicate_origins():
     proxy = _online_proxy("alice-tunnel", "alice.example.com")
-    _claim("alice-tunnel", "user-a")
+    _claim("alice-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        first = _run(origin_service.auto_sync_tunnel_origins("user-a"))
-        second = _run(origin_service.auto_sync_tunnel_origins("user-a"))
+        first = _run(origin_service.auto_sync_tunnel_origins(USER_A))
+        second = _run(origin_service.auto_sync_tunnel_origins(USER_A))
 
     assert len(first) == 1
     assert second == []  # already matched on the second call, nothing new
-    assert len(origin_service.get_origins_for_user("user-a")) == 1
+    assert len(origin_service.get_origins_for_user(USER_A)) == 1
 
 
 def test_repeated_sync_calls_from_a_different_viewer_do_not_create_duplicates_either():
@@ -208,17 +220,17 @@ def test_repeated_sync_calls_from_a_different_viewer_do_not_create_duplicates_ei
     every time they loaded the page. The check must be global, not scoped to
     the caller."""
     proxy = _online_proxy("alice-tunnel", "alice.example.com")
-    _claim("alice-tunnel", "user-a")
+    _claim("alice-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        _run(origin_service.auto_sync_tunnel_origins("user-a"))
-        _run(origin_service.auto_sync_tunnel_origins("user-b"))
-        _run(origin_service.auto_sync_tunnel_origins("user-b"))
-        _run(origin_service.auto_sync_tunnel_origins("user-a"))
+        _run(origin_service.auto_sync_tunnel_origins(USER_A))
+        _run(origin_service.auto_sync_tunnel_origins(USER_B))
+        _run(origin_service.auto_sync_tunnel_origins(USER_B))
+        _run(origin_service.auto_sync_tunnel_origins(USER_A))
 
-    all_origins = origin_service.db.origins_table.scan()["Items"]
+    all_origins = origin_service.db.list_origins()
     matching = [o for o in all_origins if o.get("ip") == "alice.example.com"]
     assert len(matching) == 1
-    assert matching[0]["admin_user_id"] == "user-a"
+    assert matching[0]["admin_user_id"] == USER_A
 
 
 # -------------------------------------------------------- tenant isolation
@@ -229,13 +241,13 @@ def test_a_tunnel_claimed_by_one_user_is_not_reassignable_via_a_different_viewer
     must never create a second, independent origin record for the identical
     physical tunnel, and must never end up owning it."""
     proxy = _online_proxy("shared-tunnel", "shared.example.com")
-    _claim("shared-tunnel", "user-a")
+    _claim("shared-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        first = _run(origin_service.auto_sync_tunnel_origins("user-a"))
-        second = _run(origin_service.auto_sync_tunnel_origins("user-b"))
+        first = _run(origin_service.auto_sync_tunnel_origins(USER_A))
+        second = _run(origin_service.auto_sync_tunnel_origins(USER_B))
 
     assert len(first) == 1
-    assert first[0]["admin_user_id"] == "user-a"
+    assert first[0]["admin_user_id"] == USER_A
     assert second == [], (
         "user-b's auto-sync call created a second origin for a tunnel "
         "user-a already claimed -- cross-tenant origin hijack via "
@@ -248,17 +260,17 @@ def test_origin_ownership_is_not_transferable_by_a_different_user_calling_sync()
     the DB record's admin_user_id must still say user-a -- not get
     overwritten or duplicated under user-b -- when user-b later syncs."""
     proxy = _online_proxy("shared-tunnel", "shared.example.com")
-    _claim("shared-tunnel", "user-a")
+    _claim("shared-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        _run(origin_service.auto_sync_tunnel_origins("user-a"))
-        _run(origin_service.auto_sync_tunnel_origins("user-b"))
+        _run(origin_service.auto_sync_tunnel_origins(USER_A))
+        _run(origin_service.auto_sync_tunnel_origins(USER_B))
 
     all_origins_for_domain = [
-        o for o in origin_service.db.origins_table.scan()["Items"]
+        o for o in origin_service.db.list_origins()
         if o.get("ip") == "shared.example.com"
     ]
     owners = {o["admin_user_id"] for o in all_origins_for_domain}
-    assert owners == {"user-a"}, (
+    assert owners == {USER_A}, (
         f"expected the shared tunnel to remain owned by user-a only, found "
         f"owners={owners} -- a second origin record was created under a "
         f"different account for the same physical tunnel"
@@ -272,22 +284,22 @@ def test_proxy_owner_claimed_by_someone_else_than_the_existing_origin_record_is_
     minted). auto_sync must not silently reassign it -- that decision needs a
     human -- so the record stays owned by user-a and nothing new is created."""
     origin_service.db.create_origin({
-        "id": "existing-1", "admin_user_id": "user-a", "label": "Tunnel (alice.example.com)",
+        "id": EXISTING_1, "admin_user_id": USER_A, "label": "Tunnel (alice.example.com)",
         "ip": "alice.example.com", "port": 3000, "status": "active",
     })
     proxy = _online_proxy("alice-tunnel", "alice.example.com")
-    _claim("alice-tunnel", "user-b")
+    _claim("alice-tunnel", USER_B)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        created = _run(origin_service.auto_sync_tunnel_origins("user-b"))
+        created = _run(origin_service.auto_sync_tunnel_origins(USER_B))
 
     assert created == []
-    assert origin_service.get_origin("existing-1")["admin_user_id"] == "user-a"
+    assert origin_service.get_origin(EXISTING_1)["admin_user_id"] == USER_A
 
 
 # ------------------------------------------- domain verification on create
 
 def _created_domain(name):
-    return next(d for d in origin_service.db.domains_table.scan()["Items"] if d["domain_name"] == name)
+    return next(d for d in origin_service.db.list_domains() if d["domain_name"] == name)
 
 
 def test_external_tunnel_domain_stays_unverified_until_dns_points_at_us():
@@ -295,9 +307,9 @@ def test_external_tunnel_domain_stays_unverified_until_dns_points_at_us():
     Without DNS proof the domain must not become verified (no TLS cert, no
     host mapping) -- otherwise anyone can pre-claim someone else's domain."""
     proxy = _online_proxy("squat-tunnel", "victim.example.com")
-    _claim("squat-tunnel", "user-a")
+    _claim("squat-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        _run(origin_service.auto_sync_tunnel_origins("user-a"))
+        _run(origin_service.auto_sync_tunnel_origins(USER_A))
 
     d = _created_domain("victim.example.com")
     assert d["dns_verified"] is False
@@ -308,9 +320,9 @@ def test_external_tunnel_domain_already_pointed_at_us_is_verified(monkeypatch):
     seen = []
     monkeypatch.setattr(origin_service, "verify_domain_dns", lambda domain, token: seen.append(domain) or True)
     proxy = _online_proxy("owner-tunnel", "httpbin.example.com")
-    _claim("owner-tunnel", "user-a")
+    _claim("owner-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        _run(origin_service.auto_sync_tunnel_origins("user-a"))
+        _run(origin_service.auto_sync_tunnel_origins(USER_A))
 
     assert seen == ["httpbin.example.com"]
     d = _created_domain("httpbin.example.com")
@@ -323,8 +335,8 @@ def test_own_zone_subdomain_tunnel_is_verified_without_a_dns_lookup(monkeypatch)
         raise AssertionError("own-zone subdomain must not need a DNS check")
     monkeypatch.setattr(origin_service, "verify_domain_dns", no_lookup)
     proxy = _online_proxy("own-tunnel", "shop.waf-it-kku.online")
-    _claim("own-tunnel", "user-a")
+    _claim("own-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        _run(origin_service.auto_sync_tunnel_origins("user-a"))
+        _run(origin_service.auto_sync_tunnel_origins(USER_A))
 
     assert _created_domain("shop.waf-it-kku.online")["dns_verified"] is True

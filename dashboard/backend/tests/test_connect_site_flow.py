@@ -25,8 +25,9 @@ from api import auth as auth_module
 from api import origins as origins_module
 from services.nginx_site_service import reconcile_site_routes
 from services.rate_limiter import limiter
+from tests.helpers.seed import ensure_user, seed_domain, seed_origin, uid
 
-DIRECT_IP = {"id": "o-direct", "ip": "203.0.113.10", "port": 443, "origin_scheme": "https",
+DIRECT_IP = {"id": uid("o-direct"), "ip": "203.0.113.10", "port": 443, "origin_scheme": "https",
              "connection_mode": "direct", "status": "pending"}
 
 
@@ -72,16 +73,16 @@ def test_generated_text_is_identical_on_every_call():
 def test_only_verified_active_direct_origins_are_desired():
     origins = [
         DIRECT_IP,
-        {"id": "o-legacy", "ip": "203.0.113.20", "port": 80},  # no connection_mode
-        {"id": "o-agent", "ip": "a.example.com", "port": 3000, "connection_mode": "agent"},
-        {"id": "o-archived", "ip": "203.0.113.30", "port": 80, "connection_mode": "direct", "status": "archived"},
+        {"id": uid("o-legacy"), "ip": "203.0.113.20", "port": 80},  # no connection_mode
+        {"id": uid("o-agent"), "ip": "a.example.com", "port": 3000, "connection_mode": "agent"},
+        {"id": uid("o-archived"), "ip": "203.0.113.30", "port": 80, "connection_mode": "direct", "status": "archived"},
     ]
     domains = [
-        {"origin_id": "o-direct", "domain_name": "shop.example.com", "dns_verified": True},
-        {"origin_id": "o-direct", "domain_name": "pending.example.com", "dns_verified": False},
-        {"origin_id": "o-legacy", "domain_name": "legacy.example.com", "dns_verified": True},
-        {"origin_id": "o-agent", "domain_name": "a.example.com", "dns_verified": True},
-        {"origin_id": "o-archived", "domain_name": "gone.example.com", "dns_verified": True},
+        {"origin_id": uid("o-direct"), "domain_name": "shop.example.com", "dns_verified": True},
+        {"origin_id": uid("o-direct"), "domain_name": "pending.example.com", "dns_verified": False},
+        {"origin_id": uid("o-legacy"), "domain_name": "legacy.example.com", "dns_verified": True},
+        {"origin_id": uid("o-agent"), "domain_name": "a.example.com", "dns_verified": True},
+        {"origin_id": uid("o-archived"), "domain_name": "gone.example.com", "dns_verified": True},
     ]
     assert set(nss.desired_direct_sites(domains, origins)) == {"shop.example.com"}
 
@@ -142,23 +143,23 @@ MANAGED = nss.MANAGED_MARKER + "\nserver { }"
 
 def _seed(origins, domains):
     for o in origins:
-        nss.db.origins_table.put_item(Item=dict(o))
+        seed_origin(nss.db, o)
     for d in domains:
-        nss.db.domains_table.put_item(Item=dict(d))
+        seed_domain(nss.db, d)
 
 
 def test_reconcile_adds_the_missing_route_and_activates_the_origin(container):
-    _seed([DIRECT_IP], [{"id": "d1", "origin_id": "o-direct", "domain_name": "shop.example.com", "dns_verified": True}])
+    _seed([DIRECT_IP], [{"id": uid("d1"), "origin_id": uid("o-direct"), "domain_name": "shop.example.com", "dns_verified": True}])
     summary = reconcile_site_routes()
     assert summary["added"] == ["shop.example.com"]
     assert container.files["shop.example.com"].startswith(nss.MANAGED_MARKER)
     assert container.reloads == 1
     assert nss.deployed_direct_domains() == {"shop.example.com"}
-    assert nss.db.origins_table.get_item(Key={"id": "o-direct"})["Item"]["status"] == "active"
+    assert nss.db.get_origin_by_id(uid("o-direct"))["status"] == "active"
 
 
 def test_reconcile_is_a_no_op_when_nothing_changed(container):
-    _seed([DIRECT_IP], [{"id": "d1", "origin_id": "o-direct", "domain_name": "shop.example.com", "dns_verified": True}])
+    _seed([DIRECT_IP], [{"id": uid("d1"), "origin_id": uid("o-direct"), "domain_name": "shop.example.com", "dns_verified": True}])
     reconcile_site_routes()
     summary = reconcile_site_routes()
     assert summary == {"added": [], "updated": [], "removed": [], "failed": []}
@@ -168,8 +169,8 @@ def test_reconcile_is_a_no_op_when_nothing_changed(container):
 def test_reconcile_never_touches_routes_of_pre_existing_origins(container):
     # e.g. scripts/qa/seed.py's hand-deployed Mode A routes
     container.files["legacy.example.com"] = "server { }"
-    _seed([{"id": "o-legacy", "ip": "203.0.113.20", "port": 80}],
-          [{"id": "d1", "origin_id": "o-legacy", "domain_name": "legacy.example.com", "dns_verified": True}])
+    _seed([{"id": uid("o-legacy"), "ip": "203.0.113.20", "port": 80}],
+          [{"id": uid("d1"), "origin_id": uid("o-legacy"), "domain_name": "legacy.example.com", "dns_verified": True}])
     summary = reconcile_site_routes()
     assert summary["removed"] == []
     assert "legacy.example.com" in container.files
@@ -179,8 +180,8 @@ def test_reconcile_never_touches_routes_of_pre_existing_origins(container):
 def test_reconcile_removes_its_own_routes_of_deleted_domains_and_archived_origins(container):
     container.files["deleted.example.com"] = MANAGED
     container.files["archived.example.com"] = MANAGED
-    _seed([dict(DIRECT_IP, id="o-arch", status="archived")],
-          [{"id": "d1", "origin_id": "o-arch", "domain_name": "archived.example.com", "dns_verified": True}])
+    _seed([dict(DIRECT_IP, id=uid("o-arch"), status="archived")],
+          [{"id": uid("d1"), "origin_id": uid("o-arch"), "domain_name": "archived.example.com", "dns_verified": True}])
     summary = reconcile_site_routes()
     assert summary["removed"] == ["archived.example.com", "deleted.example.com"]
     assert container.files == {}
@@ -189,7 +190,7 @@ def test_reconcile_removes_its_own_routes_of_deleted_domains_and_archived_origin
 def test_review6_a_hand_placed_file_without_a_db_row_is_kept(container):
     # Review finding 6: files with no domain row used to be deleted.
     container.files["status.example.org"] = "server { server_name status.example.org; }"
-    _seed([DIRECT_IP], [{"id": "d1", "origin_id": "o-direct", "domain_name": "shop.example.com", "dns_verified": True}])
+    _seed([DIRECT_IP], [{"id": uid("d1"), "origin_id": uid("o-direct"), "domain_name": "shop.example.com", "dns_verified": True}])
     summary = reconcile_site_routes()
     assert summary["removed"] == []
     assert "status.example.org" in container.files
@@ -204,7 +205,7 @@ def test_reconcile_keeps_files_when_the_domains_table_reads_empty(container):
 
 def test_reconcile_undoes_a_refused_file_and_does_not_reload(container, monkeypatch):
     container.files["legacy.example.com"] = "old text"
-    _seed([DIRECT_IP], [{"id": "d1", "origin_id": "o-direct", "domain_name": "shop.example.com", "dns_verified": True}])
+    _seed([DIRECT_IP], [{"id": uid("d1"), "origin_id": uid("o-direct"), "domain_name": "shop.example.com", "dns_verified": True}])
     _nginx_rejects(container, monkeypatch, marker="203.0.113.10")  # only the new file is bad
     summary = reconcile_site_routes()
     assert summary["failed"] == ["shop.example.com"]
@@ -216,7 +217,7 @@ def test_reconcile_undoes_a_refused_file_and_does_not_reload(container, monkeypa
 def test_review9_site_files_are_read_with_one_exec(container):
     for d in ("a.example.com", "b.example.com", "c.example.com"):
         container.files[d] = MANAGED
-    _seed([DIRECT_IP], [{"id": "d1", "origin_id": "o-direct", "domain_name": "shop.example.com", "dns_verified": True}])
+    _seed([DIRECT_IP], [{"id": uid("d1"), "origin_id": uid("o-direct"), "domain_name": "shop.example.com", "dns_verified": True}])
     reconcile_site_routes()
     assert container.commands.count("tar") == 1
     assert "cat" not in container.commands
@@ -304,7 +305,7 @@ def tenant(register_user, auth_header):
 
 
 def _origins():
-    return nss.db.origins_table.scan()["Items"]
+    return nss.db.list_origins()
 
 
 def test_connect_with_the_agent_creates_one_origin_and_one_domain(client, tenant):
@@ -378,7 +379,7 @@ def test_connect_verifies_at_once_when_dns_already_points_at_us(client, tenant, 
     r = client.post("/api/onboarding/connect", headers=tenant["headers"],
                     json={"domain": "shop.example.com", "mode": "agent", "port": 3000})
     assert r.json()["verified"] is True
-    [row] = nss.db.domains_table.scan()["Items"]
+    [row] = nss.db.list_domains()
     assert row["dns_verified"] is True
 
 
@@ -494,8 +495,8 @@ def test_worker_skips_malformed_names_and_backs_off(monkeypatch):
     monkeypatch.setattr(worker_module, "_failures", {})
     monkeypatch.setattr(worker_module, "_reported_invalid", set())
     db = nss.db
-    db.domains_table.put_item(Item={"id": "bad", "domain_name": "waf_project_web.com", "dns_verified": False})
-    db.domains_table.put_item(Item={"id": "ok", "domain_name": "shop.example.com", "dns_verified": False})
+    seed_domain(db, {"id": uid("bad"), "domain_name": "waf_project_web.com", "dns_verified": False})
+    seed_domain(db, {"id": uid("ok"), "domain_name": "shop.example.com", "dns_verified": False})
 
     asyncio.run(worker_module.check_pending_domains(db, now=0))
     assert calls == ["shop.example.com"]
@@ -516,27 +517,28 @@ def test_worker_runs_the_shared_verified_steps(monkeypatch):
         seen.append((origin_id, name))
     monkeypatch.setattr(domains_module, "after_domain_verified", _after)
     db = nss.db
-    db.domains_table.put_item(Item={"id": "d1", "origin_id": "o1", "domain_name": "shop.example.com", "dns_verified": False})
+    seed_domain(db, {"id": uid("d1"), "origin_id": uid("o1"), "domain_name": "shop.example.com", "dns_verified": False})
     assert asyncio.run(worker_module.check_pending_domains(db, now=0)) == ["shop.example.com"]
-    assert seen == [("o1", "shop.example.com")]
-    assert db.domains_table.get_item(Key={"id": "d1"})["Item"]["dns_verified"] is True
+    assert seen == [(uid("o1"), "shop.example.com")]
+    assert db.get_domain(uid("d1"))["dns_verified"] is True
 
 
 # --------------------------------------------------------------- auto-sync
 
 def test_auto_sync_adopts_an_agent_origin_instead_of_duplicating_it(monkeypatch):
-    origin_service.create_origin("u1", label="shop.example.com", ip="shop.example.com", port=3000,
+    ensure_user(uid("u1"))
+    origin_service.create_origin(uid("u1"), label="shop.example.com", ip="shop.example.com", port=3000,
                                  connection_mode="agent", origin_scheme="http")
-    tunnels_module._PROXY_OWNERS["shop-example-com"] = "u1"
+    tunnels_module._PROXY_OWNERS["shop-example-com"] = uid("u1")
     monkeypatch.setattr(origin_service, "verify_domain_dns", lambda d, t: False)
     proxy = {"name": "shop-example-com", "status": "online",
              "conf": {"customDomains": ["shop.example.com"], "metadatas": {"port": "3000"}}}
     monkeypatch.setattr(origin_service, "get_live_proxies", AsyncMock(return_value=[proxy]))
     try:
-        asyncio.run(origin_service.auto_sync_tunnel_origins("u1"))
+        asyncio.run(origin_service.auto_sync_tunnel_origins(uid("u1")))
     finally:
         tunnels_module._PROXY_OWNERS.pop("shop-example-com", None)
-    [origin] = origin_service.db.origins_table.scan()["Items"]
+    [origin] = origin_service.db.list_origins()
     assert origin["status"] == "active"
     assert origin["is_tunnel"] is True
     assert origin["tunnel_name"] == "shop-example-com"
@@ -565,7 +567,7 @@ def test_security_direct_mode_refuses_the_platforms_own_hosts(address, monkeypat
     monkeypatch.delenv("WAF_SELF_IPS", raising=False)
     assert nss.direct_upstream_allowed(address) is False
     origin = dict(DIRECT_IP, ip=address, port=8000, origin_scheme="http")
-    domains = [{"origin_id": "o-direct", "domain_name": "shop.example.com", "dns_verified": True}]
+    domains = [{"origin_id": uid("o-direct"), "domain_name": "shop.example.com", "dns_verified": True}]
     assert nss.desired_direct_sites(domains, [origin]) == {}
 
 
@@ -587,7 +589,7 @@ def test_review1_reconcile_never_routes_a_direct_origin_to_a_hostname_or_private
     domains = [
         {"origin_id": "o-host", "domain_name": "a.example.com", "dns_verified": True},
         {"origin_id": "o-priv", "domain_name": "b.example.com", "dns_verified": True},
-        {"origin_id": "o-direct", "domain_name": "shop.example.com", "dns_verified": True},
+        {"origin_id": uid("o-direct"), "domain_name": "shop.example.com", "dns_verified": True},
     ]
     assert set(nss.desired_direct_sites(domains, origins)) == {"shop.example.com"}
 
@@ -689,7 +691,7 @@ def test_review3_viewers_see_status_but_no_token_and_cause_no_writes(client, ten
     [d] = body["domains"]
     assert d["dns"]["instructions"]["txt_record"]["value"] == ""   # token withheld
     assert checked == []                                           # no DNS check run for a viewer
-    [row] = nss.db.domains_table.scan()["Items"]
+    [row] = nss.db.list_domains()
     assert row["dns_verified"] is False
     [origin] = _origins()
     assert origin["status"] == "pending" and not origin.get("is_tunnel")
@@ -705,7 +707,7 @@ def test_review4_rollback_also_removes_a_domain_row_written_before_the_failure(c
         client.post("/api/onboarding/connect", headers=tenant["headers"],
                     json={"domain": "shop.example.com", "mode": "agent", "port": 3000})
     assert _origins() == []
-    assert nss.db.domains_table.scan()["Items"] == []
+    assert nss.db.list_domains() == []
     monkeypatch.undo()
 
 
@@ -768,7 +770,7 @@ def test_review3_editors_still_get_the_token_and_the_checks(client, tenant, monk
 # Second code review (2026-10-11) of the fixed branch.
 
 def test_rereview1_a_file_stays_unlive_while_its_reload_keeps_failing(container, monkeypatch):
-    _seed([DIRECT_IP], [{"id": "d1", "origin_id": "o-direct", "domain_name": "shop.example.com", "dns_verified": True}])
+    _seed([DIRECT_IP], [{"id": uid("d1"), "origin_id": uid("o-direct"), "domain_name": "shop.example.com", "dns_verified": True}])
 
     def _refuse():
         raise RuntimeError("nginx reload failed")
@@ -783,7 +785,7 @@ def test_rereview1_a_file_stays_unlive_while_its_reload_keeps_failing(container,
 
 def test_rereview2_an_unmanaged_file_for_a_desired_domain_is_not_overwritten(container):
     container.files["shop.example.com"] = "server { server_name shop.example.com; } # hand-written"
-    _seed([DIRECT_IP], [{"id": "d1", "origin_id": "o-direct", "domain_name": "shop.example.com", "dns_verified": True}])
+    _seed([DIRECT_IP], [{"id": uid("d1"), "origin_id": uid("o-direct"), "domain_name": "shop.example.com", "dns_verified": True}])
     summary = reconcile_site_routes()
     assert container.files["shop.example.com"].endswith("# hand-written")
     assert summary["failed"] == ["shop.example.com"]
@@ -791,7 +793,7 @@ def test_rereview2_an_unmanaged_file_for_a_desired_domain_is_not_overwritten(con
 
 
 def test_rereview3_an_already_broken_config_blames_no_tenant(container, monkeypatch):
-    _seed([DIRECT_IP], [{"id": "d1", "origin_id": "o-direct", "domain_name": "shop.example.com", "dns_verified": True}])
+    _seed([DIRECT_IP], [{"id": uid("d1"), "origin_id": uid("o-direct"), "domain_name": "shop.example.com", "dns_verified": True}])
 
     def _broken():
         raise RuntimeError("nginx: [emerg] someone else's file")
@@ -840,8 +842,7 @@ def test_rereview6_editing_a_direct_origin_keeps_the_address_rules(client, tenan
 
 def test_rereview6_progress_flags_an_unroutable_direct_address(client, tenant, monkeypatch):
     origin_id = _connect(client, tenant, mode="direct", port=443, origin_address="203.0.113.10")
-    nss.db.origins_table.update_item(Key={"id": origin_id}, UpdateExpression="SET ip = :ip",
-                                     ExpressionAttributeValues={":ip": "app.example.com"})
+    nss.db.update_origin(origin_id, {"ip": "app.example.com"})
     monkeypatch.setattr(onboarding_module, "verify_domain_dns", lambda d, t: True)
     p = client.get(f"/api/onboarding/progress/{origin_id}", headers=tenant["headers"]).json()
     assert p["domains"][0]["connection"]["status"] == "error"
@@ -858,9 +859,9 @@ def test_rereview8_editors_cannot_mint_agent_commands(client, tenant, register_u
 
 
 def test_rereview10_onboarding_status_does_not_depend_on_scan_order():
-    origins = [{"id": "o1", "created_at": "2026-10-09"}]
-    a = {"id": "a", "origin_id": "o1", "domain_name": "a.example.com", "dns_verified": False}
-    b = {"id": "b", "origin_id": "o1", "domain_name": "b.example.com", "dns_verified": True}
+    origins = [{"id": uid("o1"), "created_at": "2026-10-09"}]
+    a = {"id": "a", "origin_id": uid("o1"), "domain_name": "a.example.com", "dns_verified": False}
+    b = {"id": "b", "origin_id": uid("o1"), "domain_name": "b.example.com", "dns_verified": True}
     s1 = onboarding_module.compute_onboarding_status(origins, [a, b])
     s2 = onboarding_module.compute_onboarding_status(origins, [b, a])
     assert s1 == s2

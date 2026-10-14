@@ -1,8 +1,8 @@
 import os
 from fastapi import APIRouter, HTTPException, Depends, Response, Request, status
 from fastapi.responses import RedirectResponse, JSONResponse
-from pydantic import BaseModel, EmailStr
-from typing import Optional
+from pydantic import BaseModel, EmailStr, Field
+from typing import Literal, Optional
 from services.auth_service import AuthService
 from services.rbac import get_current_user, require_admin
 from services.rate_limiter import limiter
@@ -44,8 +44,8 @@ def _clear_session_cookies(response) -> None:
 class RegisterRequest(BaseModel):
     email: EmailStr
     username: str
-    password: str
-    role: Optional[str] = "admin"
+    password: str = Field(min_length=1)
+    role: Optional[Literal["admin", "viewer"]] = "admin"
 
 
 class LoginRequest(BaseModel):
@@ -69,21 +69,21 @@ class UpdateRoleRequest(BaseModel):
 
 # Local register / login
 
+def _first_user_admin_enabled() -> bool:
+    return _os.getenv("WAF_FIRST_USER_ADMIN", "false").strip().lower() == "true"
+
+
 @router.post("/register")
 @limiter.limit("10/minute")
 async def register(request: Request, req: RegisterRequest, response: Response):
-    # Only admin can create admin accounts
-    # For the very first user, allow admin registration
-    existing_users = auth_service.list_users()
-    
-    role = req.role
-    if len(existing_users) == 0:
-        # First user becomes admin automatically
+    # Self-registration never grants admin. The first admin is seeded by an
+    # operator (scripts/seed_admin.py): on the public site, "the first user
+    # to register becomes admin" handed the platform to whoever signed up
+    # first after the database was reset. WAF_FIRST_USER_ADMIN=true restores
+    # the old bootstrap rule (the test suite uses it).
+    role = "viewer"
+    if _first_user_admin_enabled() and auth_service.count_users() == 0:
         role = "admin"
-    elif role == "admin":
-        # Only admins can create other admins - enforced at route level
-        # For simplicity, first registration as admin requires existing admin approval
-        role = "viewer"
 
     try:
         user = auth_service.register_local(
@@ -237,8 +237,14 @@ async def delete_user(
 ):
     if user_id == admin.get("user_id"):
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
-    auth_service.delete_user(user_id)
-    return {"message": "User deleted"}
+    # Origins the user still owns are archived with the deletion.
+    archived = auth_service.delete_user(user_id) or 0
+    if archived:
+        from services.origin_service import _invalidate_origins_caches
+        from services.tenant_service import invalidate_tenant_cache
+        invalidate_tenant_cache()
+        _invalidate_origins_caches()
+    return {"message": "User deleted", "archived_origins": archived}
 
 
 # Helpers
