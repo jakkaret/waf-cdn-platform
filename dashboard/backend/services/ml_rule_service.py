@@ -41,7 +41,7 @@ class MLRuleService:
         self.db = DynamoDBService()
         self.rule_manager = RuleManager()
         # Ensure the table is accessible
-        self.table = self.db.dynamodb.Table("waf_pending_rules")
+        self._table = self.db.dynamodb.Table("waf_pending_rules")
 
     def create_pending_rule(self, rule_data: Dict[str, Any], created_by: str = "ml-auto") -> Dict[str, Any]:
         """Save a new pending rule to DynamoDB."""
@@ -91,7 +91,7 @@ class MLRuleService:
             "last_seen_at": timestamp,
         }
 
-        self.table.put_item(Item=item)
+        self._table.put_item(Item=item)
         return item
 
     def find_pending_by_dedup_key(self, dedup_key: str) -> Optional[Dict[str, Any]]:
@@ -109,7 +109,7 @@ class MLRuleService:
         examples = [_example(rule_data, timestamp)] + list(rule.get("examples") or [])
         examples = examples[:MAX_EXAMPLES]
         hit_count = int(rule.get("hit_count") or 1) + 1
-        self.table.update_item(
+        self._table.update_item(
             Key={"rule_id": rule["rule_id"], "created_at": rule["created_at"]},
             UpdateExpression="SET hit_count = :n, examples = :ex, last_seen_at = :t",
             ExpressionAttributeValues={":n": hit_count, ":ex": examples, ":t": timestamp},
@@ -118,7 +118,7 @@ class MLRuleService:
 
     def save_backtest(self, rule: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         """Keep the latest backtest on the rule so the queue shows it without re-running."""
-        self.table.update_item(
+        self._table.update_item(
             Key={"rule_id": rule["rule_id"], "created_at": rule["created_at"]},
             UpdateExpression="SET backtest = :b",
             ExpressionAttributeValues={":b": result},
@@ -129,13 +129,13 @@ class MLRuleService:
         """List rules, optionally filtered by status."""
         try:
             if status:
-                response = self.table.query(
+                response = self._table.query(
                     IndexName='status-index',
                     KeyConditionExpression=Key('status').eq(status)
                 )
                 items = response.get("Items", [])
             else:
-                response = self.table.scan()
+                response = self._table.scan()
                 items = response.get("Items", [])
             
             # Sort by created_at descending
@@ -150,7 +150,7 @@ class MLRuleService:
             # Since created_at is the sort key, we need to query by rule_id and scan if we don't know created_at,
             # OR we can query the partition key. Wait, the partition key is rule_id and sort key is created_at.
             # Querying just the partition key works to get all items with that rule_id.
-            response = self.table.query(
+            response = self._table.query(
                 KeyConditionExpression=Key('rule_id').eq(rule_id)
             )
             items = response.get("Items", [])
@@ -198,7 +198,7 @@ class MLRuleService:
         
         # 4. Update DynamoDB
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        self.table.update_item(
+        self._table.update_item(
             Key={"rule_id": rule_id, "created_at": rule["created_at"]},
             UpdateExpression="SET #s = :status, reviewed_by = :reviewer, reviewed_at = :time, deployed_rule_id = :drid",
             ExpressionAttributeNames={"#s": "status"},
@@ -223,7 +223,7 @@ class MLRuleService:
             raise ValueError(f"Rule is already {rule.get('status')}")
             
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        self.table.update_item(
+        self._table.update_item(
             Key={"rule_id": rule_id, "created_at": rule["created_at"]},
             UpdateExpression="SET #s = :status, reviewed_by = :reviewer, reviewed_at = :time, reject_reason = :reason",
             ExpressionAttributeNames={"#s": "status"},
@@ -249,7 +249,7 @@ class MLRuleService:
         """
         pending, kwargs = [], {"IndexName": "status-index", "KeyConditionExpression": Key("status").eq("pending")}
         while True:
-            response = self.table.query(**kwargs)
+            response = self._table.query(**kwargs)
             pending.extend(response.get("Items", []))
             if not response.get("LastEvaluatedKey"):
                 break
@@ -261,7 +261,7 @@ class MLRuleService:
             if with_defaults(item)["generator"] != "rf-regex":
                 continue
             try:
-                self.table.update_item(
+                self._table.update_item(
                     Key={"rule_id": item["rule_id"], "created_at": item["created_at"]},
                     UpdateExpression="SET #s = :status, reviewed_by = :reviewer, reviewed_at = :time, reject_reason = :reason",
                     ConditionExpression="#s = :pending",
@@ -293,7 +293,7 @@ class MLRuleService:
             except Exception:
                 pass
                 
-        self.table.delete_item(
+        self._table.delete_item(
             Key={"rule_id": rule_id, "created_at": rule["created_at"]}
         )
         return True

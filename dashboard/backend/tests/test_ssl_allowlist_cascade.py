@@ -27,7 +27,8 @@ class _FakeTable:
 
 
 def _install(monkeypatch, origins, domains):
-    fake_db = type("_FakeDb", (), {})()
+    from tests.conftest import FakeDynamoDBService
+    fake_db = FakeDynamoDBService()
     fake_db.origins_table = _FakeTable(origins)
     fake_db.domains_table = _FakeTable(domains)
     monkeypatch.setattr(domains_module, "db", fake_db)

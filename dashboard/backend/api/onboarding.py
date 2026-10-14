@@ -104,7 +104,7 @@ async def get_onboarding_status(current_user: dict = Depends(get_current_user)):
 
     from services.dynamodb_service import DynamoDBService
     db = DynamoDBService()
-    domain_items = db.domains_table.scan().get("Items", [])
+    domain_items = db.list_domains()
 
     return compute_onboarding_status(origins, domain_items)
 
@@ -228,11 +228,9 @@ async def connect_site(payload: ConnectRequest, current_user: dict = Depends(get
         # Roll back everything this call wrote. create_domain_record can fail
         # after its put_item (audit write, config sync), and a domain row left
         # pointing at a deleted origin would block the name for good.
-        from boto3.dynamodb.conditions import Attr
-        from api.domains import db as domains_db, scan_domains
+        from api.domains import db as domains_db
         try:
-            for row in scan_domains(Attr("origin_id").eq(origin_id)):
-                domains_db.domains_table.delete_item(Key={"id": row["id"]})
+            domains_db.delete_domains_for_origin(origin_id)
         finally:
             origin_service.discard_new_origin(origin_id, user_id)
         raise
@@ -269,15 +267,7 @@ _last_reconcile_request: dict = {}
 
 def _domains_for_origin(origin_id: str) -> list:
     from api.domains import db as domains_db
-    try:
-        from boto3.dynamodb.conditions import Key
-        return domains_db.domains_table.query(
-            IndexName="origin_id-index", KeyConditionExpression=Key("origin_id").eq(origin_id)
-        ).get("Items", [])
-    except Exception:
-        from boto3.dynamodb.conditions import Attr
-        from api.domains import scan_domains
-        return scan_domains(Attr("origin_id").eq(origin_id))
+    return domains_db.list_domains(origin_id=origin_id)
 
 
 async def _check_pending(d: dict) -> tuple:

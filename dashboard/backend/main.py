@@ -9,7 +9,6 @@ load_dotenv(find_dotenv())
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "http://178.104.53.123:5173,http://178.104.53.123:3000,http://178.104.53.123:8000,http://178.104.53.123,http://waf-main-dashboard.duckdns.org,https://waf-main-dashboard.duckdns.org")
 ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
-from services.fetch_logs import get_recent_logs
 from services.clickhouse_service import ClickHouseService
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi import FastAPI, Depends, Query
@@ -98,10 +97,11 @@ def _port_open(port: int, host: str = "127.0.0.1") -> bool:
         return sock.connect_ex((host, port)) == 0
 
 
-def _dynamodb_table_status():
-    # Sync boto3 DescribeTable -- callers must run this off the event loop.
+def _db_ping():
+    # Blocking reachability probe of the control-plane store -- callers must
+    # run this off the event loop. Raises when the store is unreachable.
     from services.dynamodb_service import DynamoDBService
-    return DynamoDBService().domains_table.table_status
+    return DynamoDBService().ping()
 
 
 # Dedicated pool for the status probes. They are I/O-bound (socket connects,
@@ -146,7 +146,7 @@ async def system_status(current_user: dict = Depends(require_viewer_or_above)):
     db_status, db_detail = "offline", "unreachable"
     try:
         # Reading table_status makes a DescribeTable call -- the reachability probe.
-        await loop.run_in_executor(_PROBE_POOL, _dynamodb_table_status)
+        await loop.run_in_executor(_PROBE_POOL, _db_ping)
         db_status, db_detail = "online", "DynamoDB reachable"
     except Exception as exc:
         db_detail = f"DynamoDB error: {exc}"[:200]

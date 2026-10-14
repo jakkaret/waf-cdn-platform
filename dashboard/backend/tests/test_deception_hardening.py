@@ -72,8 +72,7 @@ def test_host_is_logged_for_tenant_attribution():
             saved.setdefault(table, entry)
             return True
 
-    svc = DeceptionService(ch_service=CH(), db_service=None)
-    svc._db = None
+    svc = DeceptionService(ch_service=CH())
     event = DeceptionLogEvent(
         request_id="r1", timestamp=0, rule_id="9000000", attack_category="LFI",
         template_id="path_traversal", response_status=200, execution_result="deceived",

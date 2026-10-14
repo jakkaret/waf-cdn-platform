@@ -1,16 +1,13 @@
-import asyncio
-import json
-import os
-import time
-import logging
-from datetime import datetime
-from services.dynamodb_service import DynamoDBService
-from services.clickhouse_service import ClickHouseService
-from services.geoip import country_code
+"""Normalize one CDN edge access-log record into the access_logs row shape.
 
-logger = logging.getLogger(__name__)
-db = DynamoDBService()
-ch = ClickHouseService()
+Moved here from the removed CDN log forwarder module (its file-tailing forwarder and
+the DynamoDB waf_logs writer were dead code) so the live caller, the CDN
+ingest endpoint in api/cdn.py, keeps working after that file was removed.
+"""
+import time
+from datetime import datetime
+
+from services.geoip import country_code
 
 SEVERITY_NUM_MAP = {
     "0": "CRITICAL",
@@ -31,16 +28,6 @@ SEVERITY_NUM_MAP = {
     7: "DEBUG",
 }
 
-def save_hybrid_log(data: dict):
-    if ch.connected:
-        ch.save_log("access_logs", data)
-    db.save_log(data)
-
-BASE_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../../../")
-)
-
-REGIONS = ["sg", "jp", "th"]
 
 def normalize_cdn_access(data, region):
     method = data.get("method", "")
@@ -103,40 +90,3 @@ def normalize_cdn_access(data, region):
         "alert": False,
         "raw": data
     }
-
-async def tail_file(path):
-    print("CDN Log Forward Opening:", path)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    if not os.path.exists(path):
-        with open(path, 'w') as f:
-            pass
-
-    with open(path, "r", encoding="utf-8") as f:
-        f.seek(0, os.SEEK_END)
-        while True:
-            line = f.readline()
-            if not line:
-                await asyncio.sleep(0.5)
-                continue
-            yield line.strip()
-
-async def process_cdn_log(region):
-    log_path = os.path.join(BASE_DIR, f"logs/cdn/{region}/access.json")
-    async for line in tail_file(log_path):
-        try:
-            raw = json.loads(line)
-            logs_to_process = raw.get("logs", [raw]) if isinstance(raw, dict) else [raw]
-            
-            for log_entry in logs_to_process:
-                if not isinstance(log_entry, dict):
-                    continue
-                data = normalize_cdn_access(log_entry, region)
-                save_hybrid_log(data)
-                
-        except Exception as e:
-            print(f"cdn log error ({region}):", e)
-
-async def cdn_log_forward_worker():
-    print("🚀 Starting CDN log forwarder...")
-    tasks = [process_cdn_log(region) for region in REGIONS]
-    await asyncio.gather(*tasks)

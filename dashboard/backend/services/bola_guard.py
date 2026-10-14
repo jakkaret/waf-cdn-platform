@@ -280,13 +280,8 @@ class BOLAGuard:
         """Attempts to load custom BOLA policies from DynamoDB"""
         try:
             db = self._get_db()
-            if db and hasattr(db, "rules_table"):
-                from boto3.dynamodb.conditions import Attr
-                resp = db.rules_table.scan(
-                    FilterExpression=Attr("type").eq("bola_policy")
-                )
-                items = resp.get("Items", [])
-                for item in items:
+            if db and hasattr(db, "list_bola_policies"):
+                for item in db.list_bola_policies():
                     self.add_policy(item, persist=False)
         except Exception as e:
             logger.debug("Could not load persisted BOLA policies from DynamoDB: %s", e)
@@ -295,7 +290,7 @@ class BOLAGuard:
         """Persists a BOLA policy to DynamoDB if available"""
         try:
             db = self._get_db()
-            if db and hasattr(db, "rules_table"):
+            if db and hasattr(db, "put_bola_policy"):
                 item = {
                     "id": policy["id"],
                     "type": "bola_policy",
@@ -310,7 +305,7 @@ class BOLAGuard:
                     "methods": policy.get("methods", ["ALL"]),
                     "updated_at": str(int(time.time()))
                 }
-                db.rules_table.put_item(Item=item)
+                db.put_bola_policy(item)
         except Exception as e:
             logger.debug("Failed to persist BOLA policy to DynamoDB: %s", e)
 
@@ -318,8 +313,8 @@ class BOLAGuard:
         """Removes a BOLA policy from DynamoDB"""
         try:
             db = self._get_db()
-            if db and hasattr(db, "rules_table"):
-                db.rules_table.delete_item(Key={"id": policy_id})
+            if db and hasattr(db, "delete_bola_policy"):
+                db.delete_bola_policy(policy_id)
         except Exception as e:
             logger.debug("Failed to delete persisted BOLA policy from DynamoDB: %s", e)
 

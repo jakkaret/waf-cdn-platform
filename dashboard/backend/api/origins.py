@@ -509,14 +509,10 @@ async def update_captcha_config(
     origin: dict = Depends(verify_origin_edit_access),
 ):
     try:
-        from boto3.dynamodb.conditions import Attr
-        domains_response = origin_service.db.domains_table.scan(
-            FilterExpression=Attr("origin_id").eq(origin.get("id"))
-        )
         domains = [
             str(item.get("domain_name", ""))
-            for item in domains_response.get("Items", [])
-            if item.get("domain_name") and item.get("dns_verified", False)
+            for item in origin_service.db.list_domains(origin_id=origin.get("id"), dns_verified=True)
+            if item.get("domain_name")
         ]
         config = save_origin_config(origin.get("id"), payload.model_dump(), domains)
     except RuntimeError as exc:
@@ -539,14 +535,10 @@ async def update_otp_config(
     origin: dict = Depends(verify_origin_edit_access),
 ):
     try:
-        from boto3.dynamodb.conditions import Attr
-        domains_response = origin_service.db.domains_table.scan(
-            FilterExpression=Attr("origin_id").eq(origin.get("id"))
-        )
         domains = [
             str(item.get("domain_name", ""))
-            for item in domains_response.get("Items", [])
-            if item.get("domain_name") and item.get("dns_verified", False)
+            for item in origin_service.db.list_domains(origin_id=origin.get("id"), dns_verified=True)
+            if item.get("domain_name")
         ]
         config = save_otp_origin_config(origin.get("id"), payload.model_dump(), domains)
     except RuntimeError as exc:

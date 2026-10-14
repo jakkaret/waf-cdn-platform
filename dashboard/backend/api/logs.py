@@ -7,7 +7,6 @@ from services.dynamodb_service import DynamoDBService
 from services.rbac import require_viewer_or_above
 from services.pii_masker import pii_masker, zk_hash
 from services.explainability_service import explainability_service
-from services.fetch_logs import get_recent_logs
 from services.tenant_service import build_tenant_origin_filter, get_user_origins_and_domains
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
@@ -65,36 +64,11 @@ async def get_logs(
             origin_clause=clause,
         )
 
-    # ClickHouse itself is unavailable. services/fetch_logs.py's
-    # get_recent_logs() is a legacy, PRE-multi-tenant DynamoDB buffer
-    # (waf_logs, queried under a single shared "default-user" partition --
-    # it has no per-tenant scoping mechanism at all, unlike ClickHouse's
-    # access_logs). Real cross-tenant leak fixed 2026-09-22 (found via
-    # GET /recent below, which had the same fallback but reachable even
-    # with ClickHouse connected): never show this buffer to a non-admin,
-    # there is no way to know whose traffic is in it.
-    if current_user.get("role") != "admin":
-        return {"logs": [], "total": 0, "page": page, "limit": limit, "total_pages": 1}
-
-    # Fallback to DynamoDB/in-memory logs
-    raw_logs = get_recent_logs(limit=limit)
-    enriched_logs = []
-    for l in raw_logs:
-        exp = explainability_service.explain_event(l)
-        l.update(exp)
-        masked_l, pii_meta = pii_masker.mask_payload(l)
-        masked_l.update(pii_meta)
-        if has_pii is not None and masked_l.get("is_pii_masked") != has_pii:
-            continue
-        enriched_logs.append(masked_l)
-
-    return {
-        "logs": enriched_logs,
-        "total": len(enriched_logs),
-        "page": page,
-        "limit": limit,
-        "total_pages": 1
-    }
+    # ClickHouse itself is unavailable. The old fallback read the legacy
+    # DynamoDB waf_logs buffer (pre-multi-tenant, one shared "default-user"
+    # partition, rows overwriting each other per second); it was removed
+    # with the move to PostgreSQL. Say so plainly instead of serving it.
+    raise HTTPException(status_code=503, detail="ClickHouse unavailable")
 
 
 @router.get("/stream")
@@ -173,21 +147,8 @@ async def fetch_recent_logs(
         # scoped result exactly as given, even when empty.
         return {"logs": res.get("logs", [])}
 
-    # ClickHouse itself is unavailable -- see get_logs() above for why this
-    # legacy DynamoDB fallback (waf_logs, shared "default-user" partition,
-    # no per-tenant scoping at all) must stay admin-only.
-    if current_user.get("role") != "admin":
-        return {"logs": []}
-
-    raw = get_recent_logs(limit=limit)
-    enriched = []
-    for l in raw:
-        exp = explainability_service.explain_event(l)
-        l.update(exp)
-        masked_l, pii_meta = pii_masker.mask_payload(l)
-        masked_l.update(pii_meta)
-        enriched.append(masked_l)
-    return {"logs": enriched}
+    # ClickHouse itself is unavailable: no fallback store (see get_logs()).
+    raise HTTPException(status_code=503, detail="ClickHouse unavailable")
 
 
 @router.get("/filters")

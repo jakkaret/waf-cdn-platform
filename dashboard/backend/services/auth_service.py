@@ -192,6 +192,29 @@ class AuthService:
             print("list_users error:", e)
             return []
 
+    def list_telegram_recipients(self):
+        """Users who connected a Telegram chat for alert delivery."""
+        try:
+            resp = self.users_table.scan(FilterExpression=Attr("telegram_chat_id").exists())
+            return resp.get("Items", [])
+        except Exception as e:
+            logger.error("list_telegram_recipients error: %s", e)
+            return []
+
+    def set_telegram_chat_id(self, user_id: str, chat_id: Optional[str]) -> None:
+        """Connect ('123') or disconnect (None/'') the user's alert chat."""
+        if chat_id:
+            self.users_table.update_item(
+                Key={"user_id": user_id},
+                UpdateExpression="SET telegram_chat_id = :c",
+                ExpressionAttributeValues={":c": str(chat_id)},
+            )
+        else:
+            self.users_table.update_item(
+                Key={"user_id": user_id},
+                UpdateExpression="REMOVE telegram_chat_id",
+            )
+
     def update_user_role(self, user_id: str, role: str):
         allowed = {"admin", "viewer"}
         if role not in allowed:

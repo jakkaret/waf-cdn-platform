@@ -128,8 +128,6 @@ def test_recent_logs_a_properly_scoped_but_empty_result_never_falls_back_to_the_
     returned as empty, not treated as "ClickHouse had nothing to say"."""
     monkeypatch.setattr(logs_module.ch, "connected", True)
     monkeypatch.setattr(logs_module.ch, "get_logs", MagicMock(return_value={"logs": []}))
-    fallback_spy = MagicMock(return_value=[{"url": "/someone-elses-real-request", "user_id": "default-user"}])
-    monkeypatch.setattr(logs_module, "get_recent_logs", fallback_spy)
 
     register_user(email="logs-empty-bootstrap@example.com", username="logs_empty_bootstrap")
     owner = register_user(email="logs-empty-owner@example.com", username="logs_empty_owner", role="viewer")
@@ -143,7 +141,6 @@ def test_recent_logs_a_properly_scoped_but_empty_result_never_falls_back_to_the_
     resp = client.get("/api/logs/recent", headers=headers)
     assert resp.status_code == 200
     assert resp.json() == {"logs": []}
-    fallback_spy.assert_not_called()
 
 
 def test_admin_can_view_all_logs_with_no_domain_filter(
@@ -281,3 +278,19 @@ def test_owned_origin_is_filtered_on_the_host_column_not_url_keywords(
     legacy = clause.split("host = 'juiceshop.example.com'", 1)[1]
     assert "%juice%" not in clause.split("host = ''", 1)[0]
     assert "host = '' AND" in legacy
+
+
+def test_logs_answer_503_when_clickhouse_is_down_instead_of_a_legacy_buffer(
+    client: TestClient, register_user, auth_header, monkeypatch
+):
+    """The admin-only fallback to the DynamoDB waf_logs buffer was removed
+    with the move to PostgreSQL: with ClickHouse down both log endpoints say
+    so with a 503 rather than serving another store."""
+    monkeypatch.setattr(logs_module.ch, "connected", False)
+    admin = register_user(email="logs-503-admin@example.com", username="logs_503_admin")
+    headers = auth_header(admin["access_token"])
+
+    for path in ("/api/logs", "/api/logs/recent"):
+        resp = client.get(path, headers=headers)
+        assert resp.status_code == 503, path
+        assert resp.json()["detail"] == "ClickHouse unavailable"

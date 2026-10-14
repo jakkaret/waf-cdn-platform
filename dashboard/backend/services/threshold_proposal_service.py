@@ -204,7 +204,7 @@ class ThresholdProposalStore:
     def __init__(self):
         from services.dynamodb_service import DynamoDBService
         self.db = DynamoDBService()
-        self.table = self.db.dynamodb.Table("waf_threshold_proposals")
+        self._table = self.db.dynamodb.Table("waf_threshold_proposals")
 
     def create(self, proposal: Dict[str, Any], created_by: str = "ml-auto") -> Dict[str, Any]:
         item = dict(proposal)
@@ -212,15 +212,15 @@ class ThresholdProposalStore:
         item["status"] = "pending"
         item["created_by"] = created_by
         item["created_at"] = _now_iso()
-        self.table.put_item(Item=item)
+        self._table.put_item(Item=item)
         return item
 
     def get(self, proposal_id: str) -> Optional[Dict[str, Any]]:
-        resp = self.table.get_item(Key={"proposal_id": proposal_id})
+        resp = self._table.get_item(Key={"proposal_id": proposal_id})
         return resp.get("Item")
 
     def list(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
-        items = self.table.scan().get("Items", [])
+        items = self._table.scan().get("Items", [])
         if status:
             items = [i for i in items if i.get("status") == status]
         return items
@@ -240,7 +240,7 @@ class ThresholdProposalStore:
         settings_service.update_settings({"inbound_anomaly_threshold": proposal["proposed_threshold"]})
 
         timestamp = _now_iso()
-        self.table.update_item(
+        self._table.update_item(
             Key={"proposal_id": proposal_id},
             UpdateExpression="SET #s = :status, approved_by = :who, approved_at = :time, previous_threshold = :prev",
             ExpressionAttributeNames={"#s": "status"},
@@ -267,7 +267,7 @@ class ThresholdProposalStore:
             raise ValueError(f"Proposal is already {proposal.get('status')}")
 
         timestamp = _now_iso()
-        self.table.update_item(
+        self._table.update_item(
             Key={"proposal_id": proposal_id},
             UpdateExpression="SET #s = :status, rejected_by = :who, rejected_at = :time, reject_reason = :reason",
             ExpressionAttributeNames={"#s": "status"},
@@ -298,7 +298,7 @@ class ThresholdProposalStore:
         settings_service.update_settings({"inbound_anomaly_threshold": proposal["previous_threshold"]})
 
         timestamp = _now_iso()
-        self.table.update_item(
+        self._table.update_item(
             Key={"proposal_id": proposal_id},
             UpdateExpression="SET #s = :status, rolled_back_by = :who, rolled_back_at = :time",
             ExpressionAttributeNames={"#s": "status"},

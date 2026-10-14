@@ -64,9 +64,12 @@ def test_dns_verified_domain_is_allowed(monkeypatch):
     """The original "bring your own domain" path -- must keep working."""
     monkeypatch.setattr(
         domains_module.db.domains_table, "scan",
-        lambda **kw: {"Items": [{"domain_name": "myapp.example.com", "dns_verified": True}]},
+        lambda **kw: {"Items": [{"domain_name": "myapp.example.com", "dns_verified": True,
+                                 "origin_id": "o1"}]},
     )
-    monkeypatch.setattr(domains_module.db.origins_table, "scan", lambda **kw: {"Items": []})
+    # Every domain row belongs to an origin (a foreign key in PostgreSQL).
+    monkeypatch.setattr(domains_module.db.origins_table, "scan",
+                        lambda **kw: {"Items": [{"id": "o1", "status": "active"}]})
 
     async def _no_proxies():
         return []
@@ -147,9 +150,11 @@ def test_a_transient_frp_dashboard_failure_does_not_reject_everything(monkeypatc
     refresh and lock out every domain including DB-verified ones."""
     monkeypatch.setattr(
         domains_module.db.domains_table, "scan",
-        lambda **kw: {"Items": [{"domain_name": "myapp.example.com", "dns_verified": True}]},
+        lambda **kw: {"Items": [{"domain_name": "myapp.example.com", "dns_verified": True,
+                                 "origin_id": "o1"}]},
     )
-    monkeypatch.setattr(domains_module.db.origins_table, "scan", lambda **kw: {"Items": []})
+    monkeypatch.setattr(domains_module.db.origins_table, "scan",
+                        lambda **kw: {"Items": [{"id": "o1", "status": "active"}]})
 
     async def _broken_proxies():
         raise Exception("FRP dashboard unreachable")

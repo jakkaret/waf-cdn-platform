@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
 from services.gemini_service import gemini_service
 from services import threat_intel
-from boto3.dynamodb.conditions import Attr
 
 load_dotenv()
 
@@ -35,9 +34,8 @@ def _get_telegram_users() -> list:
         return _user_cache
 
     try:
-        result = db.dynamodb.Table("waf_users").scan(
-            FilterExpression=Attr("telegram_chat_id").exists()
-        ).get("Items", [])
+        from services.rbac import auth_service
+        result = auth_service.list_telegram_recipients()
         _user_cache = result
         _user_cache_ts = now
         logger.debug("Refreshed telegram user cache: %d users", len(_user_cache))
@@ -165,8 +163,8 @@ async def dispatch_telegram_alert(data: dict):
         origin_id = await asyncio.to_thread(db.get_origin_id_for_domain, domain) or db.ALERTS_UNATTRIBUTED
         try:
             await asyncio.to_thread(
-                db.alerts_table.put_item,
-                Item={
+                db.put_alert,
+                {
                     "origin_id": origin_id,
                     # No longer a key. Kept because every pre-migration row
                     # carries it and some UI still surfaces it.

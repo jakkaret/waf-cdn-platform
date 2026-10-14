@@ -16,4 +16,4 @@ def test_persist_policy_writes_to_dynamodb(monkeypatch):
     policy = {"id": "p1", "name": "n", "path_pattern": "/api/users/{id}", "claim_key": "sub",
               "resource_type": "user_id", "action": "BLOCK", "allow_admin": True, "description": ""}
     persist(policy)
-    assert fake_db.rules_table.put_item.called, "policy was not written (NameError swallowed?)"
+    assert fake_db.put_bola_policy.called, "policy was not written (NameError swallowed?)"

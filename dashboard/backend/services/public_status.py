@@ -123,30 +123,14 @@ def _record_history_sample(components: List[dict], db=None, now: Optional[dt.dat
 
     for c in components:
         healthy = 1 if c.get("status") == "operational" else 0
-        _db.status_history_table.update_item(
-            Key={"component_id": c["id"], "date_bucket": date_bucket},
-            UpdateExpression="SET #exp = :exp, #name = :name ADD #sc :one, #hc :healthy",
-            ExpressionAttributeNames={
-                "#exp": "expires_at",
-                "#name": "name",
-                "#sc": "sample_count",
-                "#hc": "healthy_count",
-            },
-            ExpressionAttributeValues={
-                ":exp": expires_at,
-                ":name": c.get("name", c["id"]),
-                ":one": 1,
-                ":healthy": healthy,
-            },
-        )
+        _db.record_status_sample(c["id"], date_bucket, c.get("name", c["id"]),
+                                 bool(healthy), expires_at)
 
 
 def get_uptime_history(days: int = DEFAULT_HISTORY_DAYS, db=None, now: Optional[dt.datetime] = None) -> Dict[str, list]:
     """Returns {component_id: [{"date": "YYYY-MM-DD", "uptime_pct": float|None}, ...]}
     for the last `days` days, oldest first. None means no samples were
     recorded that day (not "0% uptime")."""
-    from boto3.dynamodb.conditions import Key
-
     _db = db if db is not None else globals()["db"]
     now = now or dt.datetime.now(dt.timezone.utc)
     dates = [(now - dt.timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
@@ -157,9 +141,7 @@ def get_uptime_history(days: int = DEFAULT_HISTORY_DAYS, db=None, now: Optional[
         cid = region.lower()
         rows_by_date = {}
         try:
-            items = _db.status_history_table.query(
-                KeyConditionExpression=Key("component_id").eq(cid)
-            ).get("Items", [])
+            items = _db.get_status_history([cid], since=dates[-1]).get(cid, [])
         except Exception as e:
             print(f"[public_status] history query failed for {cid}: {e}")
             items = []

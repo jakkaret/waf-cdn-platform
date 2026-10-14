@@ -3,7 +3,7 @@
 access_logs.country used to be filled in with a guess: log ingestion
 defaulted a missing value to "TH" (services/clickhouse_service.py), and the
 CDN path derived it from the *edge node's* region, not from the client at
-all (services/cdn_log_forward.py). The result was that 100% of rows said TH
+all (the old CDN log forwarder). The result was that 100% of rows said TH
 and the dashboard's Geographic Distribution panel showed one country no
 matter who was actually connecting -- a fabricated categorical value, the
 same class of bug resolve_edge_node() already documents for edge_node.
