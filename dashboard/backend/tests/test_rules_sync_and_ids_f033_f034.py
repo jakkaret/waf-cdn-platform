@@ -22,13 +22,17 @@ def test_generated_whitelist_rule_id_is_unique(tmp_path, monkeypatch):
     for name in ("BLOCKLIST_TXT", "WHITELIST_TXT", "BLOCKLIST_CONF", "WHITELIST_CONF"):
         monkeypatch.setattr(ip_rules, name, tmp_path / getattr(ip_rules, name).name)
     svc = ip_rules.IPRuleService()
-    conn = svc._get_conn()
-    conn.execute(
-        "INSERT INTO ip_rules (ip, rule_type, created_at) VALUES (?, 'allow', 1), (?, 'block', 1)",
-        ("203.0.113.5", "198.51.100.9"),
-    )
-    conn.commit()
-    conn.close()
+    if svc._pg is not None:   # PostgreSQL mode: waf.ip_rules
+        svc._pg.upsert("203.0.113.5", "allow", "t", "t", None, "manual")
+        svc._pg.upsert("198.51.100.9", "block", "t", "t", None, "manual")
+    else:
+        conn = svc._get_conn()
+        conn.execute(
+            "INSERT INTO ip_rules (ip, rule_type, created_at) VALUES (?, 'allow', 1), (?, 'block', 1)",
+            ("203.0.113.5", "198.51.100.9"),
+        )
+        conn.commit()
+        conn.close()
     svc._sync_files_from_db()
 
     generated = (tmp_path / ip_rules.WHITELIST_CONF.name).read_text() + (

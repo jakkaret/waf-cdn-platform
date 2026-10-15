@@ -317,6 +317,10 @@ async def startup_event():
     print("=" * 50)
     if not hasattr(app.state, "alert_task"):
         app.state.alert_task = asyncio.create_task(alert_worker())
+    # Retention for the PostgreSQL store (DynamoDB had TTL attributes).
+    if data_backend() == "postgres" and not hasattr(app.state, "retention_task"):
+        from services.retention_worker import retention_worker
+        app.state.retention_task = asyncio.create_task(retention_worker())
     if not hasattr(app.state, "log_forward_task"):
         app.state.log_forward_task = asyncio.create_task(log_forward_worker())
     if not hasattr(app.state, "cleanup_pending_task"):

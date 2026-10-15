@@ -1066,3 +1066,107 @@ class PgThresholdProposalRepository:
         return self.to_proposal(pool.q1(
             f"UPDATE threshold_proposals SET {sets} WHERE proposal_id = %s AND status = %s RETURNING *",
             (*params, pid, from_status)))
+
+
+# ----------------------------------------------------------------------
+# global IP rules and rate-limit rules (were SQLite data/*.db)
+# ----------------------------------------------------------------------
+_IP_SELECT = ("SELECT id, abbrev(ip) AS ip, rule_type, reason, added_by, created_at, expires_at, hits, source "
+              "FROM ip_rules ")
+
+
+class PgIPRuleRepository:
+    """Rows keep the SQLite shape: ip as text ('1.2.3.4', '10.0.0.0/24'),
+    created_at / expires_at as epoch ints."""
+
+    @staticmethod
+    def to_rule(row: dict) -> Dict[str, Any]:
+        rule = dict(row)
+        rule["created_at"] = epoch_int(row["created_at"])
+        rule["expires_at"] = epoch_int(row["expires_at"]) if row["expires_at"] else None
+        return rule
+
+    def delete_expired(self) -> int:
+        return pool.exec_("DELETE FROM ip_rules WHERE expires_at IS NOT NULL AND expires_at < now()")
+
+    def ips(self, rule_type: str) -> List[str]:
+        return [r["ip"] for r in pool.q("SELECT abbrev(ip) AS ip FROM ip_rules WHERE rule_type = %s "
+                                        "ORDER BY created_at DESC", (rule_type,))]
+
+    def list(self, rule_type: Optional[str] = None, search: Optional[str] = None) -> List[Dict[str, Any]]:
+        clauses, params = [], []
+        if rule_type and rule_type.lower() != "all":
+            clauses.append("rule_type = %s")
+            params.append(rule_type.lower())
+        if search:
+            like = f"%{search.strip()}%"
+            clauses.append("(abbrev(ip) ILIKE %s OR reason ILIKE %s OR added_by ILIKE %s)")
+            params.extend([like, like, like])
+        where = ("WHERE " + " AND ".join(clauses) + " ") if clauses else ""
+        return [self.to_rule(r) for r in pool.q(_IP_SELECT + where + "ORDER BY created_at DESC", params)]
+
+    def upsert(self, ip: str, rule_type: str, reason: str, added_by: str,
+               expires_at: Optional[int], source: str) -> None:
+        """INSERT OR REPLACE semantics: the same address keeps its row id."""
+        pool.exec_(
+            "INSERT INTO ip_rules (ip, rule_type, reason, added_by, created_at, expires_at, source) "
+            "VALUES (%s::inet, %s, %s, %s, now(), %s, %s) ON CONFLICT (ip) DO UPDATE SET "
+            "rule_type = EXCLUDED.rule_type, reason = EXCLUDED.reason, added_by = EXCLUDED.added_by, "
+            "created_at = now(), expires_at = EXCLUDED.expires_at, source = EXCLUDED.source",
+            (ip, rule_type, reason, added_by, from_epoch(expires_at), source))
+
+    def delete(self, ips: List[str]) -> int:
+        if not ips:
+            return 0
+        return pool.exec_("DELETE FROM ip_rules WHERE ip = ANY(%s::inet[])", (list(ips),))
+
+    def stats(self) -> Dict[str, int]:
+        r = pool.q1("SELECT count(*) FILTER (WHERE rule_type = 'block') AS blocked, "
+                    "count(*) FILTER (WHERE rule_type = 'allow') AS allowed, "
+                    "count(*) FILTER (WHERE rule_type = 'block' AND expires_at IS NOT NULL) AS temp FROM ip_rules")
+        return {"total_blocked": r["blocked"], "total_allowed": r["allowed"], "temp_banned": r["temp"],
+                "permanent_blocked": r["blocked"] - r["temp"]}
+
+
+_RATE_COLUMNS = ("name", "path_pattern", "method", "limit_count", "window_seconds", "burst", "action", "enabled")
+
+
+class PgRateLimitRepository:
+    """Rows keep the SQLite shape: enabled as int 1/0, created_at as epoch int."""
+
+    @staticmethod
+    def to_rule(row: Optional[dict]) -> Optional[Dict[str, Any]]:
+        if not row:
+            return None
+        rule = dict(row)
+        rule["enabled"] = 1 if row["enabled"] else 0
+        rule["created_at"] = epoch_int(row["created_at"])
+        return rule
+
+    def list(self) -> List[Dict[str, Any]]:
+        return [self.to_rule(r) for r in pool.q("SELECT * FROM rate_limit_rules ORDER BY created_at, id")]
+
+    def add(self, rule_id: str, name: str, path_pattern: str, method: str, limit_count: int,
+            window_seconds: int, burst: int, action: str) -> None:
+        pool.exec_("INSERT INTO rate_limit_rules (id, name, path_pattern, method, limit_count, window_seconds, "
+                   "burst, action, enabled) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, true)",
+                   (rule_id, name, path_pattern, method.upper(), limit_count, window_seconds, burst, action))
+
+    def update(self, rule_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        values = {}
+        for key in _RATE_COLUMNS:
+            if key in data:
+                value = data[key]
+                if key == "enabled":
+                    value = bool(value)
+                elif key == "method" and value is not None:
+                    value = str(value).upper()
+                values[key] = value
+        if not values:
+            return None
+        query = sql.SQL("UPDATE rate_limit_rules SET {} WHERE id = %s RETURNING *").format(
+            sql.SQL(", ").join(sql.SQL("{} = {}").format(sql.Identifier(k), sql.Placeholder()) for k in values))
+        return self.to_rule(pool.q1(query.as_string(), [*values.values(), rule_id]))
+
+    def delete(self, rule_id: str) -> bool:
+        return pool.exec_("DELETE FROM rate_limit_rules WHERE id = %s", (rule_id,)) > 0
