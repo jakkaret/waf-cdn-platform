@@ -1,17 +1,14 @@
 import os
 import time
-import uuid
 import hmac
 import hashlib
 import logging
 from typing import Optional, Dict
 from datetime import datetime, timedelta
 
-import boto3
 import requests
 from dotenv import load_dotenv, find_dotenv
 import jwt  # PyJWT (replaced python-jose 2026-09-30 to drop the ecdsa CVE dep)
-from boto3.dynamodb.conditions import Attr, Key
 
 logger = logging.getLogger(__name__)
 
@@ -47,26 +44,16 @@ ph = PasswordHasher(
 
 
 class AuthService:
+    """Accounts in PostgreSQL (waf.users + waf.user_identities) through
+    services.pg_store.PgUserRepository. Returned user dicts keep the shape
+    callers rely on (see PgUserRepository). __init__ does no I/O: scripts and
+    tests build this at module level."""
+
+    backend = "postgres"
+
     def __init__(self):
-        from services.dynamodb_service import data_backend
-        self.backend = data_backend()
-        if self.backend == "postgres":
-            # No boto3 resource and no I/O: scripts and tests build this at
-            # module level. Accounts live in waf.users / waf.user_identities.
-            from services.pg_store import PgUserRepository
-            self.users_table = None
-            self._pg = PgUserRepository()
-            return
-        self.region = os.getenv("AWS_REGION", "ap-southeast-1")
-        endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
-        self.dynamodb = boto3.resource(
-            "dynamodb",
-            region_name=self.region,
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            endpoint_url=endpoint_url,
-        )
-        self.users_table = self.dynamodb.Table("waf_users")
+        from services.pg_store import PgUserRepository
+        self._pg = PgUserRepository()
 
     def hash_password(self, password: str) -> str:
         return ph.hash(password)
@@ -91,78 +78,24 @@ class AuthService:
             return None
 
     def get_user_by_id(self, user_id: str) -> Optional[Dict]:
-        if self.backend == "postgres":
-            try:
-                return self._pg.get_by_id(user_id)
-            except Exception as e:
-                logger.error("get_user_by_id error: %s", e)
-                return None
         try:
-            resp = self.users_table.get_item(Key={"user_id": user_id})
-            return resp.get("Item")
+            return self._pg.get_by_id(user_id)
         except Exception as e:
-            print("get_user_by_id error:", e)
+            logger.error("get_user_by_id error: %s", e)
             return None
 
     def get_user_by_email(self, email: str) -> Optional[Dict]:
-        if self.backend == "postgres":
-            try:
-                return self._pg.get_by_email(email)
-            except Exception as e:
-                logger.error("get_user_by_email error: %s", e)
-                return None
         try:
-            # [Q1 FIX] ลองใช้ GSI query ก่อน (ประสิทธิภาพดีกว่า)
-            try:
-                resp = self.users_table.query(
-                    IndexName="EmailIndex",
-                    KeyConditionExpression=Key("email").eq(email)
-                )
-                items = resp.get("Items", [])
-                if items:
-                    return items[0]
-            except Exception as e:
-                # ถ้ายังไม่มี Index จะเกิด ClientError: ValidationException
-                logger.debug("EmailIndex not found, falling back to scan. Error: %s", e)
-
-            # Fallback ไปใช้ scan ถ้า GSI ยังไม่ได้สร้าง
-            resp = self.users_table.scan(
-                FilterExpression=Attr("email").eq(email)
-            )
-            items = resp.get("Items", [])
-            return items[0] if items else None
+            return self._pg.get_by_email(email)
         except Exception as e:
             logger.error("get_user_by_email error: %s", e)
             return None
 
     def get_user_by_provider(self, provider: str, provider_id: str) -> Optional[Dict]:
-        if self.backend == "postgres":
-            try:
-                return self._pg.get_by_provider(provider, provider_id)
-            except Exception as e:
-                logger.error("get_user_by_provider error: %s", e)
-                return None
         try:
-            # [Q1 FIX] ลองใช้ GSI query ก่อน
-            try:
-                resp = self.users_table.query(
-                    IndexName="ProviderIndex",
-                    KeyConditionExpression=Key("auth_provider").eq(provider) & Key("provider_id").eq(provider_id)
-                )
-                items = resp.get("Items", [])
-                if items:
-                    return items[0]
-            except Exception as e:
-                logger.debug("ProviderIndex not found, falling back to scan. Error: %s", e)
-
-            # Fallback scan
-            resp = self.users_table.scan(
-                FilterExpression=Attr("auth_provider").eq(provider) & Attr("provider_id").eq(provider_id)
-            )
-            items = resp.get("Items", [])
-            return items[0] if items else None
+            return self._pg.get_by_provider(provider, provider_id)
         except Exception as e:
-            print("get_user_by_provider error:", e)
+            logger.error("get_user_by_provider error: %s", e)
             return None
 
     def create_user(
@@ -175,144 +108,62 @@ class AuthService:
         provider_id: Optional[str] = None,
         avatar_url: Optional[str] = None,
     ) -> Dict:
-        if self.backend == "postgres":
-            if auth_provider == "local" and not password:
-                raise ValueError("Password is required")
-            return self._pg.create(
-                email=email, username=username,
-                password_hash=self.hash_password(password) if password else None,
-                role=role, auth_provider=auth_provider, provider_id=provider_id,
-                avatar_url=avatar_url,
-            )
-        user_id = str(uuid.uuid4())
-        now = datetime.utcnow().isoformat() + "Z"
-
-        item = {
-            "user_id": user_id,
-            "email": email,
-            "username": username,
-            "role": role,
-            "created_at": now,
-            "last_login": now,
-        }
-        if auth_provider:
-            item["auth_provider"] = auth_provider
-        if provider_id:
-            item["provider_id"] = provider_id
-        if avatar_url:
-            item["avatar_url"] = avatar_url
-
-        if password:
-            item["password_hash"] = self.hash_password(password)
-        else:
-            item["password_hash"] = ""
-
-        self.users_table.put_item(Item=item)
-        return item
+        """Insert a user (and its Google/Telegram identity, same transaction).
+        A duplicate email or identity raises a ValueError."""
+        if auth_provider == "local" and not password:
+            raise ValueError("Password is required")
+        return self._pg.create(
+            email=email, username=username,
+            password_hash=self.hash_password(password) if password else None,
+            role=role, auth_provider=auth_provider, provider_id=provider_id,
+            avatar_url=avatar_url,
+        )
 
     def update_last_login(self, user_id: str):
-        if self.backend == "postgres":
-            try:
-                self._pg.touch_login(user_id)
-            except Exception as e:
-                logger.error("update_last_login error: %s", e)
-            return
         try:
-            self.users_table.update_item(
-                Key={"user_id": user_id},
-                UpdateExpression="SET last_login = :t",
-                ExpressionAttributeValues={":t": datetime.utcnow().isoformat() + "Z"},
-            )
+            self._pg.touch_login(user_id)
         except Exception as e:
-            print("update_last_login error:", e)
+            logger.error("update_last_login error: %s", e)
 
     def list_users(self):
-        if self.backend == "postgres":
-            try:
-                return self._pg.list()
-            except Exception as e:
-                logger.error("list_users error: %s", e)
-                return []
         try:
-            resp = self.users_table.scan()
-            return resp.get("Items", [])
+            return self._pg.list()
         except Exception as e:
-            print("list_users error:", e)
+            logger.error("list_users error: %s", e)
             return []
 
     def count_users(self) -> int:
-        if self.backend == "postgres":
-            return self._pg.count()
-        return len(self.list_users())
+        return self._pg.count()
 
     def list_telegram_recipients(self):
         """Users who connected a Telegram chat for alert delivery."""
-        if self.backend == "postgres":
-            try:
-                return self._pg.list_telegram_recipients()
-            except Exception as e:
-                logger.error("list_telegram_recipients error: %s", e)
-                return []
         try:
-            resp = self.users_table.scan(FilterExpression=Attr("telegram_chat_id").exists())
-            return resp.get("Items", [])
+            return self._pg.list_telegram_recipients()
         except Exception as e:
             logger.error("list_telegram_recipients error: %s", e)
             return []
 
     def set_telegram_chat_id(self, user_id: str, chat_id: Optional[str]) -> None:
         """Connect ('123') or disconnect (None/'') the user's alert chat."""
-        if self.backend == "postgres":
-            self._pg.set_field(user_id, "telegram_chat_id", str(chat_id) if chat_id else None)
-            return
-        if chat_id:
-            self.users_table.update_item(
-                Key={"user_id": user_id},
-                UpdateExpression="SET telegram_chat_id = :c",
-                ExpressionAttributeValues={":c": str(chat_id)},
-            )
-        else:
-            self.users_table.update_item(
-                Key={"user_id": user_id},
-                UpdateExpression="REMOVE telegram_chat_id",
-            )
+        self._pg.set_field(user_id, "telegram_chat_id", str(chat_id) if chat_id else None)
 
     def update_user_role(self, user_id: str, role: str):
-        allowed = {"admin", "viewer"}
-        if role not in allowed:
+        if role not in {"admin", "viewer"}:
             raise ValueError("Invalid role")
-        if self.backend == "postgres":
-            if not self._pg.set_field(user_id, "role", role):
-                raise ValueError("User not found")
-            return
-        self.users_table.update_item(
-            Key={"user_id": user_id},
-            UpdateExpression="SET #r = :r",
-            ExpressionAttributeNames={"#r": "role"},
-            ExpressionAttributeValues={":r": role},
-        )
+        if not self._pg.set_field(user_id, "role", role):
+            raise ValueError("User not found")
 
     def delete_user(self, user_id: str) -> int:
-        """Delete the account. In PostgreSQL the origins it still owns are
-        archived in the same transaction; returns how many were archived."""
-        if self.backend == "postgres":
-            return self._pg.delete(user_id)
-        self.users_table.delete_item(Key={"user_id": user_id})
-        return 0
+        """Delete the account; origins it still owns are archived in the same
+        transaction. Returns how many were archived."""
+        return self._pg.delete(user_id)
 
     def set_threat_intel_opt_in(self, user_id: str, enabled: bool) -> None:
         """services/threat_intel.py reads this field fresh (never cached) on
         every write and read, so opting out here takes effect on the very
         next attack -- see that module's docstring for why that direction
         matters more than opt-in lag would."""
-        if self.backend == "postgres":
-            self._pg.set_field(user_id, "share_threat_intel", bool(enabled))
-            return
-        self.users_table.update_item(
-            Key={"user_id": user_id},
-            UpdateExpression="SET share_threat_intel = :v",
-            ExpressionAttributeValues={":v": bool(enabled)},
-        )
+        self._pg.set_field(user_id, "share_threat_intel", bool(enabled))
 
     def register_local(self, email: str, username: str, password: str, role: str = "viewer") -> Dict:
         existing = self.get_user_by_email(email)
@@ -381,15 +232,9 @@ class AuthService:
 
         if user:
             self.update_last_login(user["user_id"])
-            if not user.get("avatar_url") and avatar and self.backend == "postgres":
+            if not user.get("avatar_url") and avatar:
                 self._pg.set_field(user["user_id"], "avatar_url", avatar)
                 user["avatar_url"] = avatar
-            elif not user.get("avatar_url") and avatar:
-                self.users_table.update_item(
-                    Key={"user_id": user["user_id"]},
-                    UpdateExpression="SET avatar_url = :a",
-                    ExpressionAttributeValues={":a": avatar},
-                )
             return user
 
         return self.create_user(

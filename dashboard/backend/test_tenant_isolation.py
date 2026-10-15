@@ -136,11 +136,11 @@ for oid, tok in created["origins"]:
 # every run -- the table already carries more stale test accounts than real ones.
 if created["users"]:
     sys.path.insert(0, "/root/waf_project/dashboard/backend")
-    from services.dynamodb_service import DynamoDBService
-    users_table = DynamoDBService().waf_users
+    from services.auth_service import AuthService
+    auth = AuthService()
     for uid in created["users"]:
         try:
-            users_table.delete_item(Key={"user_id": uid})
+            auth.delete_user(uid)
             print("  deleted account", uid)
         except Exception as exc:
             print("  could not delete account", uid, exc)

@@ -1,13 +1,10 @@
 """Phase 3 (users, origins, domains on PostgreSQL): API-level behaviour the
 migration must keep or newly guarantee."""
-import os
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-PG_MODE = os.environ.get("DATA_BACKEND", "").strip().lower() == "postgres"
-pg_only = pytest.mark.skipif(not PG_MODE, reason="PostgreSQL-only guarantee (DATA_BACKEND=postgres)")
 
 
 @pytest.fixture()
@@ -39,7 +36,6 @@ def test_duplicate_domain_is_a_400_with_the_same_message(full_client, register_u
     assert resp.json()["detail"] == "Domain name p3-shop.example.org is already registered."
 
 
-@pg_only
 def test_viewer_never_sees_the_tunnel_token_hash(full_client, register_user, auth_header):
     # Issuing an agent token needs a platform admin who owns the origin.
     _admin, _owner, viewer, h, origin_id = _setup(full_client, register_user, auth_header, creator="admin")
@@ -58,7 +54,6 @@ def test_viewer_never_sees_the_tunnel_token_hash(full_client, register_user, aut
     assert ok.status_code == 200, ok.text
 
 
-@pg_only
 def test_a_tunnel_host_claimed_by_another_origin_is_a_409(full_client, register_user, auth_header):
     _admin, _owner, _viewer, h, origin_a = _setup(full_client, register_user, auth_header, creator="admin")
     origin_b = full_client.post("/api/origins", json={"label": "P3b", "ip": "203.0.113.71", "port": 80},
@@ -71,7 +66,6 @@ def test_a_tunnel_host_claimed_by_another_origin_is_a_409(full_client, register_
     assert second.status_code == 409
 
 
-@pg_only
 def test_deleting_an_origin_owner_archives_their_origins(full_client, register_user, auth_header):
     _admin, owner, _viewer, h, origin_id = _setup(full_client, register_user, auth_header)
     resp = full_client.delete(f"/api/auth/users/{owner['user']['user_id']}", headers=h["admin"])

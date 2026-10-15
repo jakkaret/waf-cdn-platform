@@ -10,7 +10,7 @@ sys.path.insert(0, "/root/waf_project/dashboard/backend")
 from services.dynamodb_service import DynamoDBService
 
 BASE = "http://127.0.0.1:8000/api/domains/check-ssl-allowed"
-rows = DynamoDBService().domains_table.scan().get("Items", [])
+rows = DynamoDBService().list_domains()
 failures = 0
 
 for r in sorted(rows, key=lambda x: str(x.get("domain_name"))):

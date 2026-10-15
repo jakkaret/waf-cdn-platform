@@ -6,11 +6,9 @@ explain an incident -- settings changes, rule approve/reject, origin
 updates, viewer/editor grants -- not by what's easiest to instrument. Read
 endpoints are never logged.
 
-DynamoDB (legacy): write_audit_event() swallows its own failures, so an
-audit outage never breaks the mutation it records. PostgreSQL: fail-closed --
-the event is written in the same transaction as the change (callers wrap
-both in db.pool.transaction / services.txn.atomic), so a change that cannot
-be audited does not happen.
+Fail-closed: the event is written in the same transaction as the change
+(callers wrap both in services.txn.atomic), so a change that cannot be
+audited does not happen. Retention (180 days) is waf.run_retention().
 """
 import datetime as dt
 import secrets
@@ -44,39 +42,21 @@ def write_audit_event(
     _db = db if db is not None else globals()["db"]
     now = now or _now_utc()
     event_id = f"{int(now.timestamp() * 1000):020d}#{secrets.token_hex(4)}"
-    expires_at = int((now + dt.timedelta(days=RETENTION_DAYS)).timestamp())
 
-    if getattr(_db, "backend", "") == "postgres":
-        # PostgreSQL: fail-closed. The INSERT runs on the caller's open
-        # transaction (db.pool.transaction) when there is one, so the audit
-        # row and the change it records commit or roll back together; an
-        # error propagates instead of being swallowed.
-        _db.put_audit_event({
-            "scope_id": scope_id,
-            "event_id": event_id,
-            "timestamp": now.isoformat(),
-            "actor_user_id": actor_user_id,
-            "actor_username": actor_username,
-            "action": action,
-            "summary": summary,
-            "details": details or {},
-        })
-        return
-
-    try:
-        _db.put_audit_event({
-            "scope_id": scope_id,
-            "event_id": event_id,
-            "timestamp": now.isoformat(),
-            "actor_user_id": actor_user_id,
-            "actor_username": actor_username,
-            "action": action,
-            "summary": summary,
-            "details": details or {},
-            "expires_at": expires_at,
-        })
-    except Exception as e:
-        print(f"[audit_log] failed to write event for scope={scope_id} action={action}: {e}")
+    # Fail-closed: the INSERT runs on the caller's open transaction
+    # (db.pool.transaction / services.txn.atomic) when there is one, so the
+    # event and the change it records commit or roll back together, and an
+    # error propagates instead of being swallowed.
+    _db.put_audit_event({
+        "scope_id": scope_id,
+        "event_id": event_id,
+        "timestamp": now.isoformat(),
+        "actor_user_id": actor_user_id,
+        "actor_username": actor_username,
+        "action": action,
+        "summary": summary,
+        "details": details or {},
+    })
 
 
 def get_audit_log(

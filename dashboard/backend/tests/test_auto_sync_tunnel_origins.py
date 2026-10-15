@@ -37,7 +37,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import api.tunnels as tunnels_module
 import services.origin_service as origin_service
 from services.dynamodb_service import DynamoDBService
-from tests.conftest import InMemoryTable
 from tests.helpers.seed import ensure_user, uid
 
 USER_A = uid("user-a")
@@ -47,18 +46,6 @@ EXISTING_1 = uid("existing-1")
 
 def _run(coro):
     return asyncio.run(coro)
-
-
-class _FreshFakeDynamoDBService(DynamoDBService):
-    """Same reuse-the-real-business-logic approach as conftest.py's
-    FakeDynamoDBService, but with per-instance (not module-shared) backing
-    lists -- avoids any dependency on conftest's autouse _STORE-clearing
-    fixture's timing relative to this file's setup_function calls.
-    """
-
-    def __init__(self):  # noqa: super() intentionally not called - no boto3 here
-        self.origins_table = InMemoryTable([])
-        self.domains_table = InMemoryTable([])
 
 
 def _fake_frp_response(proxies):
@@ -103,11 +90,7 @@ def _dns_not_pointed_at_us(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _fresh_store(fake_infrastructure):
-    from services.dynamodb_service import data_backend
-    if data_backend() == "postgres":
-        origin_service.db = DynamoDBService()   # PgStore; conftest empties the tables per test
-    else:
-        origin_service.db = _FreshFakeDynamoDBService()
+    origin_service.db = DynamoDBService()   # conftest empties the tables per test
     ensure_user(USER_A)
     ensure_user(USER_B)
     tunnels_module._PROXY_OWNERS.clear()

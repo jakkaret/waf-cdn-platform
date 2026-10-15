@@ -9,11 +9,10 @@ import json, sys, urllib.request, urllib.error
 sys.path.insert(0, "/root/waf_project/dashboard/backend")
 from datetime import timedelta
 from services.auth_service import AuthService
-from services.dynamodb_service import DynamoDBService
 
 BASE = "http://127.0.0.1:8000"
 
-admins = [u for u in DynamoDBService().waf_users.scan().get("Items", [])
+admins = [u for u in AuthService().list_users()
           if str(u.get("role", "")).lower() == "admin"]
 if not admins:
     raise SystemExit("no admin account exists to authenticate as")

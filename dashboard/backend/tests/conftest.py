@@ -1,37 +1,11 @@
 """
 Shared pytest fixtures for the backend test suite.
 
-Ruling R3 (task-7-brief.md): tests run in-process against
-fastapi.testclient.TestClient, with every external store faked at its
-service boundary. No live DynamoDB, ClickHouse, or Redis is required, and no
-network call is allowed to leave the machine.
-
-Strategy
---------
-1. Force a handful of dummy environment variables *before* any application
-   module is imported, so:
-   - boto3 DynamoDB "resource" construction (lazy, no network by itself)
-     never accidentally talks to real AWS if it isn't overridden below, and
-   - any accidental real DynamoDB call that slips through (e.g. BOLAGuard's
-     import-time policy load in services/bola_guard.py) fails instantly
-     against an unused loopback port instead of reaching the internet.
-2. Provide a tiny in-memory stand-in for the DynamoDB table operations the
-   production code actually calls (get_item/put_item/scan/query/update_item/
-   delete_item), shared through a module-level store that is cleared before
-   every test.
-3. In an autouse fixture, monkeypatch the *already-imported* singletons
-   (api.auth.auth_service, services.rbac.auth_service, services.origin_service.db,
-   api.ai_summary.db, api.rules.rule_manager) so their tables/paths point at
-   the fakes, and
-   monkeypatch services.dynamodb_service.DynamoDBService itself so that any
-   fresh construction (e.g. services.rbac.verify_origin_ownership's local
-   `from services.dynamodb_service import DynamoDBService`) also lands on
-   the fake, sharing the same backing store.
-4. Build a *minimal* FastAPI test app containing only the routers under
-   test (auth, origins, rules, ai_summary) rather than importing
-   dashboard/backend/main.py, which also wires up Telegram/Cloudflare/ML
-   singletons and background asyncio workers that have nothing to do with
-   these five scenarios and would otherwise need faking too.
+Tests run in-process against fastapi.testclient.TestClient. The control-plane
+store is a real, throwaway PostgreSQL database built from db/migrations
+(tests/pg_harness.py; TEST_DATABASE_URL must point at a disposable server) and
+emptied before every test. Redis is fakeredis, ClickHouse and docker/nginx are
+stubbed at their service boundary, and no network call leaves the machine.
 """
 import os
 import sys
@@ -45,13 +19,6 @@ import pytest
 #    already-set variable, so setting these first also shields the suite from
 #    a real dashboard/backend/../.env (or CI's own env) leaking in.
 # ---------------------------------------------------------------------------
-os.environ["AWS_ACCESS_KEY_ID"] = "testing"
-os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
-os.environ["AWS_REGION"] = "us-east-1"
-os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
-# Unused loopback port: any DynamoDB call that isn't faked below fails
-# instantly with "connection refused" instead of reaching real AWS.
-os.environ["DYNAMODB_ENDPOINT_URL"] = "http://127.0.0.1:1"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-pytest-only"
 os.environ["SESSION_COOKIE_SECURE"] = "false"  # TestClient uses http; let Set-Cookie come back
 # Production seeds its first admin (scripts/seed_admin.py) and never lets
@@ -97,26 +64,20 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 # ---------------------------------------------------------------------------
-# 1c. PostgreSQL mode (DATA_BACKEND=postgres): services.dynamodb_service then
-#     exports PgStore, and the suite runs against a throwaway database made
-#     from db/migrations (tests/pg_harness.py). Method groups already moved
-#     to PostgreSQL run real SQL; the rest still use the in-memory tables
-#     below until their migration phase. The default (dynamodb) mode is
-#     unchanged.
+# 1c. PostgreSQL: one throwaway database per test run (tests/pg_harness.py),
+#     emptied before every test by fake_infrastructure below.
 # ---------------------------------------------------------------------------
-PG_MODE = os.environ.get("DATA_BACKEND", "").strip().lower() == "postgres"
 from tests import pg_harness  # noqa: E402
 
-if PG_MODE:
-    if not pg_harness.enabled():
-        pytest.exit("DATA_BACKEND=postgres needs TEST_DATABASE_URL (a disposable server)", returncode=4)
-    pg_harness.ensure_database()
+if not pg_harness.enabled():
+    pytest.exit("TEST_DATABASE_URL is required: the suite runs on a disposable PostgreSQL "
+                "(e.g. postgresql://postgres@127.0.0.1:55432/postgres)", returncode=4)
+pg_harness.ensure_database()
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "pg: needs a real PostgreSQL (TEST_DATABASE_URL)")
 
-from boto3.dynamodb.conditions import And, Or, Equals  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from slowapi import _rate_limit_exceeded_handler  # noqa: E402
@@ -124,7 +85,6 @@ from slowapi.errors import RateLimitExceeded  # noqa: E402
 
 from services.rate_limiter import limiter  # noqa: E402
 from services.dynamodb_service import DynamoDBService  # noqa: E402
-import services.dynamodb_service as dynamodb_service_module  # noqa: E402
 import services.origin_service as origin_service_module  # noqa: E402
 import services.tenant_service as tenant_service_module  # noqa: E402
 import services.rbac as rbac_module  # noqa: E402
@@ -142,357 +102,23 @@ import services.threat_intel as threat_intel_module  # noqa: E402
 import services.public_status as public_status_module  # noqa: E402
 
 
-# ---------------------------------------------------------------------------
-# Generic in-memory stand-in for the DynamoDB table operations the
-# production code calls. Not a general-purpose DynamoDB emulator: it only
-# understands Key/Attr .eq() and And/Or combinations (all this codebase
-# uses), and "SET a = :x, b = :y[, ...] [REMOVE c[, d...]]" update
-# expressions (the only shape used anywhere in services/*.py).
-# ---------------------------------------------------------------------------
-
-def _eval_condition(cond, item):
-    if isinstance(cond, And):
-        left, right = cond._values
-        return _eval_condition(left, item) and _eval_condition(right, item)
-    if isinstance(cond, Or):
-        left, right = cond._values
-        return _eval_condition(left, item) or _eval_condition(right, item)
-    if isinstance(cond, Equals):
-        attr, value = cond._values
-        return item.get(attr.name) == value
-    raise NotImplementedError(f"Unsupported fake-table condition: {type(cond)!r}")
-
-
-def _split_update_clauses(expr: str) -> dict:
-    """DynamoDB UpdateExpression can carry up to one each of SET/ADD/DELETE/
-    REMOVE, in any order, each introduced by its own keyword and running
-    until the next one. Splits `expr` into {keyword: body}; production code
-    in this repo only ever uses one or two of these at once (SET alone,
-    SET+REMOVE, ADD alone, DELETE alone -- verified against every
-    UpdateExpression string in services/dynamodb_service.py), but this
-    parses generally rather than hard-coding those combinations.
-    """
-    import re
-    parts = re.split(r"\s+(SET|ADD|DELETE|REMOVE)\s+", " " + expr.strip())
-    # parts[0] is empty (nothing before the first keyword); then alternating
-    # keyword, body, keyword, body, ...
-    clauses: dict = {}
-    for i in range(1, len(parts), 2):
-        clauses[parts[i]] = parts[i + 1].strip()
-    return clauses
-
-
-def _apply_update_expression(item, expr, attr_values=None, attr_names=None):
-    attr_values = attr_values or {}
-    attr_names = attr_names or {}
-    clauses = _split_update_clauses(expr)
-
-    set_part = clauses.get("SET", "")
-    if set_part:
-        for assignment in set_part.split(","):
-            assignment = assignment.strip()
-            if not assignment:
-                continue
-            name_tok, val_tok = (p.strip() for p in assignment.split("=", 1))
-            name = attr_names.get(name_tok, name_tok)
-            value = attr_values.get(val_tok, val_tok)
-            item[name] = value
-
-    remove_part = clauses.get("REMOVE", "")
-    if remove_part:
-        for name_tok in remove_part.split(","):
-            name_tok = name_tok.strip()
-            if not name_tok:
-                continue
-            item.pop(attr_names.get(name_tok, name_tok), None)
-
-    # ADD/DELETE on a Set-typed attribute: real DynamoDB creates the set on
-    # first ADD if it doesn't exist yet, and a DELETE against a set that
-    # doesn't contain the value (or doesn't exist) is a no-op, never an
-    # error -- both mirrored here.
-    #
-    # 2026-09-21: real DynamoDB's ADD is arithmetic on a Number attribute
-    # (services/threat_intel.py's hit_count atomic counter) but a set-union
-    # on a String/Number Set attribute (tenant_hashes here, viewer sets
-    # elsewhere) -- two genuinely different operations sharing one keyword.
-    # This previously always took the set-union branch, which would have
-    # silently turned a numeric counter into a one-element set instead of
-    # incrementing it.
-    add_part = clauses.get("ADD", "")
-    if add_part:
-        for assignment in add_part.split(","):
-            assignment = assignment.strip()
-            if not assignment:
-                continue
-            name_tok, val_tok = assignment.split(None, 1)
-            name = attr_names.get(name_tok, name_tok)
-            value = attr_values.get(val_tok.strip(), val_tok.strip())
-            existing = item.get(name)
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                item[name] = (existing or 0) + value
-                continue
-            if not isinstance(existing, set):
-                existing = set(existing) if existing else set()
-            existing |= set(value) if isinstance(value, (set, frozenset)) else {value}
-            item[name] = existing
-
-    delete_part = clauses.get("DELETE", "")
-    if delete_part:
-        for assignment in delete_part.split(","):
-            assignment = assignment.strip()
-            if not assignment:
-                continue
-            name_tok, val_tok = assignment.split(None, 1)
-            name = attr_names.get(name_tok, name_tok)
-            value = attr_values.get(val_tok.strip(), val_tok.strip())
-            existing = item.get(name)
-            if isinstance(existing, set):
-                existing -= set(value) if isinstance(value, (set, frozenset)) else {value}
-                if existing:
-                    item[name] = existing
-                else:
-                    item.pop(name, None)
-
-    return item
-
-
-class InMemoryTable:
-    """Stands in for a boto3 DynamoDB Table resource, backed by a shared list."""
-
-    def __init__(self, rows, key_fields=None):
-        self.rows = rows  # shared list object; only ever mutated in place
-        # The real table's primary key field names (e.g. {"user_id",
-        # "alert_id"} for waf_alerts, confirmed live via describe_table),
-        # so put_item can replace an existing row by primary key --
-        # matching real DynamoDB's PutItem contract -- instead of always
-        # appending a duplicate. None (the default) keeps every caller
-        # that never needs this (append-only usage, the common case)
-        # unaffected.
-        self._key_fields = set(key_fields) if key_fields else None
-
-    def put_item(self, Item):
-        if self._key_fields:
-            for i, row in enumerate(self.rows):
-                if all(row.get(k) == Item.get(k) for k in self._key_fields):
-                    self.rows[i] = dict(Item)
-                    return {}
-        self.rows.append(dict(Item))
-        return {}
-
-    def batch_writer(self):
-        """Minimal stand-in for boto3's Table.batch_writer() context
-        manager -- real batching (up to 25 items/request) is an AWS network
-        optimisation with no equivalent need in an in-memory fake; each
-        put_item here goes straight through this table's own put_item, so
-        it gets the same replace-by-key behavior."""
-        table = self
-
-        class _FakeBatchWriter:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc_info):
-                return False
-
-            def put_item(self, Item):
-                return table.put_item(Item)
-
-            def delete_item(self, Key):
-                return table.delete_item(Key)
-
-        return _FakeBatchWriter()
-
-    def get_item(self, Key):
-        for row in self.rows:
-            if all(row.get(k) == v for k, v in Key.items()):
-                return {"Item": row}
-        return {}
-
-    def scan(self, FilterExpression=None, Limit=None, ExclusiveStartKey=None, **_kwargs):
-        items = list(self.rows)
-        if FilterExpression is not None:
-            items = [i for i in items if _eval_condition(FilterExpression, i)]
-        if Limit:
-            items = items[:Limit]
-        return {"Items": items}
-
-    def query(self, KeyConditionExpression=None, IndexName=None, **_kwargs):
-        items = list(self.rows)
-        if KeyConditionExpression is not None:
-            items = [i for i in items if _eval_condition(KeyConditionExpression, i)]
-        return {"Items": items}
-
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None,
-                     ExpressionAttributeNames=None, **_kwargs):
-        for row in self.rows:
-            if all(row.get(k) == v for k, v in Key.items()):
-                _apply_update_expression(row, UpdateExpression, ExpressionAttributeValues,
-                                          ExpressionAttributeNames)
-                return {}
-        # 2026-09-21: real DynamoDB's update_item *creates* the item if no
-        # row matches Key (that's exactly why ADD is the standard atomic
-        # counter pattern -- create-or-increment in one call, no read-modify
-        # -write race). This fake silently no-op'd instead, which every
-        # caller so far worked around with an explicit get_item-then-
-        # put_item/update_item split. services/threat_intel.py's
-        # cross-tenant pattern counter needs real ADD-creates-if-missing
-        # semantics for concurrent-tenant correctness, so this now mirrors
-        # AWS rather than the previous simplification.
-        new_row = dict(Key)
-        self.rows.append(new_row)
-        _apply_update_expression(new_row, UpdateExpression, ExpressionAttributeValues,
-                                  ExpressionAttributeNames)
-        return {}
-
-    def delete_item(self, Key):
-        for i, row in enumerate(self.rows):
-            if all(row.get(k) == v for k, v in Key.items()):
-                self.rows.pop(i)
-                break
-        return {}
-
-
-# table name -> list[dict]; cleared before every test by the autouse fixture.
-_STORE: dict = {}
-
-
-# Real composite-key tables (HASH+RANGE), confirmed live via
-# describe_table where noted. A table absent from this map defaults to no
-# known key fields (append-only put_item, the pre-existing behavior) --
-# only add an entry here once the real schema has actually been checked.
-_TABLE_KEY_FIELDS = {
-    # waf_alerts was HASH=user_id, RANGE=alert_id (confirmed live
-    # 2026-09-22, the mark-all-read bug investigation). user_id was the
-    # constant "default-user" written by the only writer, so it identified
-    # nothing; migrated 2026-09-23 to waf_alerts_v2 keyed by the origin the
-    # alert actually belongs to. Both are listed: the old table still
-    # exists untouched as the rollback target.
-    "waf_alerts": {"user_id", "alert_id"},
-    "waf_alerts_v2": {"origin_id", "alert_id"},
-}
-
-
-def _table(name: str) -> InMemoryTable:
-    _STORE.setdefault(name, [])
-    return InMemoryTable(_STORE[name], key_fields=_TABLE_KEY_FIELDS.get(name))
-
-
-class FakeDynamoDBService(DynamoDBService):
-    """
-    Real DynamoDBService business logic (create_origin, get_origins_by_user,
-    update_origin, ...) reused unchanged -- only __init__ is overridden, to
-    swap the boto3-backed tables for InMemoryTable instances instead of
-    reimplementing that logic in the test suite.
-    """
-
-    def __init__(self):  # noqa: super() intentionally not called - no boto3 here
-        self.region = "test"
-        self.alerts_table_name = "waf_alerts_v2"
-        self.logs_table_name = "waf_logs"
-        self.rules_table_name = "waf_rules"
-        self.users_table_name = "waf_users"
-        self.alerts_table = _table("waf_alerts_v2")
-        self.alerts_legacy_table = _table("waf_alerts")
-        self.logs_table = _table("waf_logs")
-        self.rules_table = _table("waf_rules")
-        self.waf_users = _table("waf_users")
-        self.origins_table = _table("waf_origins")
-        self.domains_table = _table("waf_domains")
-        self.ssl_certs_table = _table("waf_ssl_certs")
-        self.pending_rules_table = _table("waf_pending_rules")
-        self.threat_patterns_table = _table("waf_threat_patterns")
-        self.status_history_table = _table("waf_status_history")
-        self.audit_log_table = _table("waf_audit_log")
-        self.postmortems_table = _table("waf_postmortems")
-
-
 @pytest.fixture(autouse=True)
 def fake_infrastructure(monkeypatch, tmp_path):
-    """Patch every external-store singleton at its service boundary (Ruling R3)."""
+    """Fresh state for every test: empty database tables (default rate-limit
+    rules re-seeded), empty fakeredis, and every non-database boundary
+    stubbed (Ruling R3). Module-level store singletons (db = DynamoDBService()
+    in many modules) all reach the same test database through db.pool, so
+    they need no patching."""
     _SharedFakeRedis().flushall()
-    _STORE.clear()
-    if PG_MODE:
-        pg_harness.reset()
+    pg_harness.reset()
 
-    # DynamoDB: patch the class itself so any fresh construction (e.g. the
-    # local import inside services.rbac.verify_origin_ownership) also lands
-    # on the fake and shares the same backing store as origin_service.db.
-    monkeypatch.setattr(dynamodb_service_module, "DynamoDBService", FakeDynamoDBService)
-    monkeypatch.setattr(origin_service_module, "db", FakeDynamoDBService())
-    # origin_service also keeps process-wide, in-memory caches (live FRP
-    # proxy list; origins_table.scan() result; per-user get_origins_by_user
-    # result) alongside the db singleton above -- a fresh fake db per test
-    # is worthless if a prior test's cached result survives into it. Reset
-    # all three here, at the same place db itself is reset, so any future
-    # test using any of them gets this for free instead of needing its own
-    # setup_function boilerplate.
+    # origin_service keeps process-wide, in-memory caches (live FRP proxy
+    # list; origins scan; per-user origins) -- reset them so one test's cached
+    # result never survives into the next.
     monkeypatch.setattr(origin_service_module, "_LIVE_PROXIES_CACHE", None)
     monkeypatch.setattr(origin_service_module, "_ORIGINS_SCAN_CACHE", None)
     monkeypatch.setattr(origin_service_module, "_USER_ORIGINS_CACHE", {})
-    # api/ai_summary.py also does `db = DynamoDBService()` at import time
-    # (used by /api/ai/notifications/feed and /mark-read); not exercised by
-    # any of the five required scenarios today, but left unpatched it is a
-    # real (if inert, thanks to the loopback DYNAMODB_ENDPOINT_URL above)
-    # DynamoDBService instance that shares no state with the fake store --
-    # patch it the same way so no future test can silently hit it.
-    monkeypatch.setattr(ai_summary_module, "db", FakeDynamoDBService())
-    # api/domains.py also does `db = DynamoDBService()` at import time (used
-    # by both its /api/domains router and the /api/origins/{id}/domains
-    # router mounted for T11) -- same reasoning as ai_summary above: patch it
-    # so its domains_table shares the same backing store as the fake used by
-    # origin_service.db and verify_origin_ownership's local construction.
-    monkeypatch.setattr(domains_module, "db", FakeDynamoDBService())
-    # api/alerts.py also does `db = DynamoDBService()` at import time (used
-    # by /api/alerts/recent's get_all_alerts and connect/poll's
-    # waf_users.update_item chat-id save) -- same reasoning as ai_summary
-    # and domains above: caught live by a real test (connect/poll's save
-    # tried a real network connection to the loopback DYNAMODB_ENDPOINT_URL
-    # and failed with a 500 instead of writing to the fake store).
-    monkeypatch.setattr(alerts_module, "db", FakeDynamoDBService())
-    # api/tunnels.py (plural -- the FRP one; distinct from api/tunnel.py
-    # singular, the cloudwaf one, which is file-state based and doesn't use
-    # this db singleton) also does `db = DynamoDBService()` at import time,
-    # used by create_tunnel_token/get_tunnel_config's _assert_domain_claimable
-    # (domains_table.scan()) and get_tunnels_status. Same gap class as
-    # alerts.py above -- caught live by a real test attempting a genuine
-    # DynamoDB connection to the dummy loopback endpoint.
-    monkeypatch.setattr(tunnels_module, "db", FakeDynamoDBService())
-    # services/threat_intel.py's `db = DynamoDBService()` and
-    # `auth_service = AuthService()` (used by record_pattern_hit,
-    # get_trending_patterns and _build_domain_owner_map), plus
-    # api/threat_intel.py's own separate AuthService() instance (used by the
-    # PATCH /opt-in endpoint) -- same gap class as every other module in
-    # this list, and api/threat_intel.py's auth_service in particular must
-    # share the same users_table as api.auth's so a user registered via
-    # /api/auth/register is the same account seen by /api/threat-intel/*.
-    monkeypatch.setattr(threat_intel_module, "db", FakeDynamoDBService())
-    monkeypatch.setattr(threat_intel_module.auth_service, "users_table", _table("waf_users"))
-    monkeypatch.setattr(threat_intel_api_module.auth_service, "users_table", _table("waf_users"))
-    # services/public_status.py's `db = DynamoDBService()` (used by
-    # get_uptime_history/_record_history_sample) -- same gap class as every
-    # other module in this list.
-    monkeypatch.setattr(public_status_module, "db", FakeDynamoDBService())
-    # services/tenant_service.py's `db = DynamoDBService()` (used by
-    # get_user_origins_and_domains, called from api/analytics.py,
-    # api/copilot.py, api/ai_summary.py and api/tunnels.py's
-    # get_tunnels_status) was the one singleton in this list that had never
-    # been patched -- every caller silently saw "this user owns nothing" in
-    # every test, since the function's own try/except swallows the
-    # unpatched instance's connection failure and returns ([], [], [])
-    # rather than raising. FakeDynamoDBService() always shares state through
-    # the module-level _STORE regardless of how many instances are
-    # constructed, so this needs nothing beyond the same one-line pattern.
-    monkeypatch.setattr(tenant_service_module, "db", FakeDynamoDBService())
-
-    # Auth: both api.auth's and services.rbac's AuthService singletons must
-    # see the same users, so point both at the same backing list.
-    monkeypatch.setattr(auth_module.auth_service, "users_table", _table("waf_users"))
-    monkeypatch.setattr(rbac_module.auth_service, "users_table", _table("waf_users"))
-    # services/origin_service.py's own AuthService() instance (used by
-    # list_origin_viewers and the viewer-grant endpoints' get_user_by_email
-    # lookup) must see the same registered users as api.auth's, or a real
-    # registered user looks like "no account found" to those calls.
-    monkeypatch.setattr(origin_service_module.auth_service, "users_table", _table("waf_users"))
+    monkeypatch.setattr(tenant_service_module, "_TENANT_CACHE", {})
 
     # Rule files/nginx: rule_manager is instantiated at import time against
     # the *real* modsecurity/custom-rules directory, and reload/test shell
@@ -504,16 +130,13 @@ def fake_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(rules_module.rule_manager, "reload_nginx", lambda: None)
     # api.tenant_rules and api.managed_rules both import this same rule_manager
     # instance (services/tenant_rules.py, services/managed_ruleset.py), so the
-    # three patches above already cover them -- only their own DynamoDB
-    # singleton needs separate faking.
-    monkeypatch.setattr(managed_rules_module, "_db", FakeDynamoDBService())
+    # three patches above already cover them.
 
     # Direct-mode site routes: verify/delete endpoints schedule
     # reconcile_site_routes() in the background, which shells out to `docker
     # exec`. No-op it here; tests of the reconcile itself call the function
     # they imported directly and fake _docker.
     from services import nginx_site_service as nginx_site_module
-    monkeypatch.setattr(nginx_site_module, "db", FakeDynamoDBService())
     monkeypatch.setattr(nginx_site_module, "reconcile_site_routes", lambda: {})
     monkeypatch.setattr(nginx_site_module, "_deployed_domains", set())
     monkeypatch.setattr(nginx_site_module, "_failed_domains", {})
@@ -522,7 +145,7 @@ def fake_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(nginx_site_module, "_unreloaded", set())
 
     # Deception layer: its audit logger lazily builds a real ClickHouseService
-    # (production credentials) and DynamoDBService. Without this, every test
+    # (production credentials). Without this, every test
     # that hits /api/deception/respond wrote fake attack rows into the live
     # access_logs / security_audit_logs (happened 2026-09-27). Swap the classes
     # the module constructs *and* the already-built singleton's sinks.
@@ -565,12 +188,9 @@ def client(app: FastAPI) -> TestClient:
 
 
 @pytest.fixture()
-def db() -> FakeDynamoDBService:
-    """A standalone fake DynamoDB instance sharing the same backing _STORE
-    the autouse fixture clears before each test -- for tests that take `db`
-    as an explicit function parameter (dependency injection) rather than
-    reading a module's own patched singleton."""
-    return FakeDynamoDBService()
+def db() -> DynamoDBService:
+    """The store (PgStore) on the test database, emptied before each test."""
+    return DynamoDBService()
 
 
 DEFAULT_PASSWORD = "Sup3rSecret!"

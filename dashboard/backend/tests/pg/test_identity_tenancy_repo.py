@@ -1,6 +1,5 @@
 """Phase 3: users, origins, members, domains, hostnames and SSL records on
-PostgreSQL, with parity checks against the DynamoDB-era store (in-memory
-tables) for the dict shapes callers rely on."""
+PostgreSQL, and the dict shapes callers rely on."""
 import uuid
 from datetime import datetime
 
@@ -20,22 +19,10 @@ def _fresh_pool():
     pool.close_pool()
 
 
-def _fake_store():
-    from services.dynamodb_service import _DynamoBackedStore
-    from tests.conftest import _table
-
-    class _Fake(_DynamoBackedStore):
-        def __init__(self):  # noqa: super() not called - no boto3
-            self.origins_table = _table("waf_origins")
-            self.domains_table = _table("waf_domains")
-            self.ssl_certs_table = _table("waf_ssl_certs")
-    return _Fake()
-
-
-@pytest.fixture(params=["fake", "pg"])
-def store(request):
+@pytest.fixture()
+def store():
     from services.pg_store import PgStore
-    return _fake_store() if request.param == "fake" else PgStore()
+    return PgStore()
 
 
 def _users():

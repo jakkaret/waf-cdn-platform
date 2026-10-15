@@ -6,7 +6,7 @@
 2. Expired temporary IP bans: removed by IPRuleService, which also re-renders
    the ModSecurity block/allow files and reloads nginx -- the database cannot
    do that part, so it is not in run_retention().
-Started by main.py only when DATA_BACKEND=postgres.
+Started by main.py at startup.
 """
 import asyncio
 import logging

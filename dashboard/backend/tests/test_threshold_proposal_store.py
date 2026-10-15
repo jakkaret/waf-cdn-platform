@@ -18,36 +18,6 @@ import pytest
 from services.threshold_proposal_service import ThresholdProposalStore
 
 
-class _FakeTable:
-    def __init__(self):
-        self.rows: dict[str, dict] = {}
-
-    def put_item(self, Item):
-        self.rows[Item["proposal_id"]] = dict(Item)
-
-    def get_item(self, Key):
-        row = self.rows.get(Key["proposal_id"])
-        return {"Item": dict(row)} if row else {}
-
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues, ExpressionAttributeNames=None):
-        row = self.rows.get(Key["proposal_id"])
-        if row is None:
-            return
-        names = ExpressionAttributeNames or {}
-        # Minimal SET-clause interpreter, sufficient for this store's own
-        # update expressions (comma-separated "field = :val" pairs).
-        set_clause = UpdateExpression.split("SET", 1)[1]
-        for part in set_clause.split(","):
-            field, _, value_key = part.strip().partition("=")
-            field = field.strip()
-            value_key = value_key.strip()
-            field = names.get(field, field)
-            row[field] = ExpressionAttributeValues[value_key]
-
-    def scan(self):
-        return {"Items": [dict(r) for r in self.rows.values()]}
-
-
 class _FakeSettingsService:
     def __init__(self, initial_threshold=5):
         self._settings = {"inbound_anomaly_threshold": initial_threshold}
@@ -64,12 +34,7 @@ class _FakeSettingsService:
 
 @pytest.fixture
 def store():
-    from services.dynamodb_service import data_backend
-    if data_backend() == "postgres":
-        return ThresholdProposalStore()   # waf.threshold_proposals, emptied per test
-    s = ThresholdProposalStore.__new__(ThresholdProposalStore)
-    s._table = _FakeTable()
-    return s
+    return ThresholdProposalStore()   # waf.threshold_proposals, emptied per test
 
 
 @pytest.fixture

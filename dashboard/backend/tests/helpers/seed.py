@@ -1,6 +1,6 @@
 """Seed rows with real uuids through the store, for tests that used literal
 ids ('o1', 'u1', 'd1', 'o-direct') which PostgreSQL's uuid columns reject.
-Works in both modes: the in-memory fake and DATA_BACKEND=postgres."""
+Rows go through the store into the test PostgreSQL database."""
 from __future__ import annotations
 
 import uuid
@@ -76,26 +76,14 @@ def uid(label: str) -> str:
     return str(uuid.uuid5(_NS, label))
 
 
-def _pg_mode() -> bool:
-    from services.dynamodb_service import data_backend
-    return data_backend() == "postgres"
-
-
 def ensure_user(user_id: str, role: str = "viewer") -> str:
     """Make sure a user row with exactly this id exists; return the id."""
     if not user_id:
         return user_id
-    if _pg_mode():
-        from db import pool
-        pool.exec_("INSERT INTO users (user_id, email, username, role, password_hash) "
-                   "VALUES (%s, %s, %s, %s, '$argon2id$seed') ON CONFLICT (user_id) DO NOTHING",
-                   (user_id, f"{user_id}@seed.example.com", f"seed_{user_id[:8]}", role))
-    else:
-        from services.rbac import auth_service
-        if not auth_service.get_user_by_id(user_id):
-            auth_service.users_table.put_item(Item={
-                "user_id": user_id, "email": f"{user_id}@seed.example.com",
-                "username": f"seed_{user_id[:8]}", "role": role, "password_hash": ""})
+    from db import pool
+    pool.exec_("INSERT INTO users (user_id, email, username, role, password_hash) "
+               "VALUES (%s, %s, %s, %s, '$argon2id$seed') ON CONFLICT (user_id) DO NOTHING",
+               (user_id, f"{user_id}@seed.example.com", f"seed_{user_id[:8]}", role))
     return user_id
 
 

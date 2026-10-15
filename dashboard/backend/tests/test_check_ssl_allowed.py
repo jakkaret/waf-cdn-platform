@@ -47,8 +47,6 @@ def test_unregistered_domain_is_still_rejected(monkeypatch):
     """Regression guard for the original P0: a domain with zero presence
     anywhere (no DNS-verified record, no tunnel_domains, no live FRP
     proxy) must never be allowed a certificate."""
-    monkeypatch.setattr(domains_module.db.domains_table, "scan", lambda **kw: {"Items": []})
-    monkeypatch.setattr(domains_module.db.origins_table, "scan", lambda **kw: {"Items": []})
 
     async def _no_proxies():
         return []
@@ -96,8 +94,6 @@ def test_live_frp_proxy_domain_is_allowed(monkeypatch):
     """New: a domain with a currently-online FRP proxy (the config-generator
     flow, which persists no DB "verified" record at all) must be allowed --
     this is the only real signal that flow's issued tokens are legitimate."""
-    monkeypatch.setattr(domains_module.db.domains_table, "scan", lambda **kw: {"Items": []})
-    monkeypatch.setattr(domains_module.db.origins_table, "scan", lambda **kw: {"Items": []})
 
     async def _fake_proxies():
         return [{
@@ -117,8 +113,6 @@ def test_offline_frp_proxy_domain_is_not_allowed(monkeypatch):
     """An FRP proxy that exists in the dashboard but is offline right now
     must not grant a cert -- only a currently-live tunnel counts as real
     evidence of legitimate ownership."""
-    monkeypatch.setattr(domains_module.db.domains_table, "scan", lambda **kw: {"Items": []})
-    monkeypatch.setattr(domains_module.db.origins_table, "scan", lambda **kw: {"Items": []})
 
     async def _fake_proxies():
         return [{

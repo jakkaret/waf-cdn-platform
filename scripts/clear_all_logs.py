@@ -1,6 +1,5 @@
 import os
 import sys
-import boto3
 from dotenv import load_dotenv
 
 load_dotenv("/root/waf_project/dashboard/backend/.env")
@@ -43,50 +42,6 @@ for lf in log_files:
         except Exception as e:
             print(f"  [-] Failed to truncate {lf}: {e}")
 
-# 3. Clear DynamoDB waf_logs & waf_alerts if any new items arrived
-print("\n[3] Clearing AWS DynamoDB Tables...")
-REGION = os.getenv("AWS_REGION", "ap-southeast-1")
-AWS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
-AWS_SECRET = os.getenv("AWS_SECRET_ACCESS_KEY")
-ENDPOINT_URL = os.getenv("DYNAMODB_ENDPOINT_URL")
-
-try:
-    dynamodb = boto3.resource(
-        "dynamodb",
-        region_name=REGION,
-        aws_access_key_id=AWS_KEY,
-        aws_secret_access_key=AWS_SECRET,
-        endpoint_url=ENDPOINT_URL,
-    )
-    for tbl_name in ["waf_logs", "waf_alerts"]:
-        table = dynamodb.Table(tbl_name)
-        key_names = [k["AttributeName"] for k in table.key_schema]
-        projection_expression = ", ".join(f"#{k}" for k in key_names)
-        expr_attr_names = {f"#{k}": k for k in key_names}
-        
-        response = table.scan(
-            ProjectionExpression=projection_expression,
-            ExpressionAttributeNames=expr_attr_names
-        )
-        items = response.get("Items", [])
-        while "LastEvaluatedKey" in response:
-            response = table.scan(
-                ProjectionExpression=projection_expression,
-                ExpressionAttributeNames=expr_attr_names,
-                ExclusiveStartKey=response["LastEvaluatedKey"]
-            )
-            items.extend(response.get("Items", []))
-            
-        if items:
-            with table.batch_writer() as batch:
-                for item in items:
-                    key = {k: item[k] for k in key_names}
-                    batch.delete_item(Key=key)
-            print(f"  [+] Deleted {len(items)} items from DynamoDB '{tbl_name}'")
-        else:
-            print(f"  [+] DynamoDB '{tbl_name}' is already 0 items")
-except Exception as e:
-    print(f"  [-] DynamoDB clear error: {e}")
 
 print("\n" + "=" * 60)
 print("  ALL LOGS IN CLICKHOUSE, DYNAMODB & LOCAL FILES PURGED (0)!")

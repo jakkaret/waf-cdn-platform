@@ -15,9 +15,7 @@ def generate_test_token():
     never reached. Resolving an admin at run time keeps the test pointed at the
     application rather than at stale fixture data.
     """
-    from services.dynamodb_service import DynamoDBService
-
-    users = DynamoDBService().waf_users.scan().get("Items", [])
+    users = AuthService().list_users()
     admins = [u for u in users if str(u.get("role", "")).lower() == "admin"]
     if not admins:
         raise SystemExit("no admin account exists to authenticate as")

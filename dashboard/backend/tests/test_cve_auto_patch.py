@@ -142,9 +142,7 @@ def client(app: FastAPI) -> TestClient:
 
 @pytest.fixture(autouse=True)
 def _patch_audit_log_db(monkeypatch, fake_infrastructure):
-    from tests.conftest import FakeDynamoDBService, _STORE
-    _STORE["waf_audit_log"] = []
-    monkeypatch.setattr(audit_log_module, "db", FakeDynamoDBService())
+    return None  # audit_log.db writes to the test database, which conftest empties per test
 
 
 @pytest.fixture()
@@ -390,9 +388,7 @@ from api import origins as origins_module  # noqa: E402
 
 @pytest.fixture()
 def origins_client(monkeypatch, fake_infrastructure):
-    from tests.conftest import FakeDynamoDBService, _STORE
-    _STORE["waf_audit_log"] = []
-    monkeypatch.setattr(audit_log_module, "db", FakeDynamoDBService())
+    # audit_log.db writes to the test database, which conftest empties per test.
     app = FastAPI()
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

@@ -4,12 +4,12 @@ Self-registration never grants admin (api/auth.py), so the first admin after
 a database reset is created here by an operator on the server.
 
     # owner account; a random password is written to a root-only file
-    DATA_BACKEND=postgres python scripts/seed_admin.py \
+    python scripts/seed_admin.py \
         --email owner@example.com --username owner --role admin \
         --generate-password /root/.waf-secrets/owner_login_password
 
     # accounts from an env file of `export PREFIX_EMAIL=...` / `PREFIX_PASSWORD=...`
-    DATA_BACKEND=postgres python scripts/seed_admin.py \
+    python scripts/seed_admin.py \
         --from-env /root/t_creds.env --prefix ADMIN --role admin
 
 Idempotent: an existing account keeps its password; only its role is set.
@@ -55,8 +55,6 @@ def seed(email: str, username: str, role: str, password: str | None) -> str:
     from services.auth_service import AuthService
 
     auth = AuthService()
-    if getattr(auth, "backend", "") != "postgres":
-        sys.exit("DATA_BACKEND=postgres is required")
     existing = auth.get_user_by_email(email)
     if existing:
         if existing.get("role") != role:

@@ -24,9 +24,7 @@ ORIGIN_1 = uid("origin-1")  # audit scope_id must be an origin uuid (or "global"
 
 @pytest.fixture(autouse=True)
 def _patch_audit_log_db(monkeypatch, fake_infrastructure):
-    from tests.conftest import FakeDynamoDBService, _STORE
-    _STORE["waf_audit_log"] = []
-    monkeypatch.setattr(audit_log_module, "db", FakeDynamoDBService())
+    return None  # audit_log.db writes to the test database, which conftest empties per test
 
 
 def _origin(origin_id=ORIGIN_1, ip="203.0.113.9"):

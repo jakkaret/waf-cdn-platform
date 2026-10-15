@@ -234,55 +234,10 @@ def test_probe_certificate_rejects_a_self_signed_cert_when_not_explicitly_truste
 # check_domain_certificate: orchestration with injected probe/db/alert
 # ---------------------------------------------------------------------------
 
-class _FakeTable:
-    """waf_ssl_certs' real key schema is HASH="id" (confirmed via
-    describe_table 2026-09-21) -- see services/ssl_cert_monitor.py's
-    _persist_cert_record for why it's keyed by the domain string itself."""
-
-    def __init__(self):
-        self.rows = {}
-
-    def get_item(self, Key):
-        row = self.rows.get(Key["id"])
-        return {"Item": row} if row else {}
-
-    def put_item(self, Item):
-        self.rows[Item["id"]] = dict(Item)
-        return {}
-
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None,
-                     ExpressionAttributeNames=None, **_kw):
-        row = self.rows.setdefault(Key["id"], {"id": Key["id"]})
-        # Minimal SET-only support -- the only shape check_domain_certificate
-        # uses. Resolves #fN placeholders via ExpressionAttributeNames, since
-        # production code now always aliases field names (caught live:
-        # "status" is a DynamoDB reserved word and a bare `status = :v`
-        # expression is rejected by real AWS).
-        names = ExpressionAttributeNames or {}
-        assert UpdateExpression.startswith("SET ")
-        assignments = UpdateExpression[4:].split(",")
-        for a in assignments:
-            name_tok, val_token = (p.strip() for p in a.split("="))
-            name = names.get(name_tok, name_tok)
-            row[name] = ExpressionAttributeValues[val_token]
-        return {}
-
-
-from tests.conftest import FakeDynamoDBService  # noqa: E402
-
-
-class _FakeTableDB(FakeDynamoDBService):
-    """The real store methods (get_ssl_cert/upsert_ssl_cert) over one fake table."""
-
-    def __init__(self):  # noqa: super() intentionally not called
-        self.ssl_certs_table = _FakeTable()
-
-
 def _FakeDB():
-    """DynamoDB mode: one isolated fake table. PostgreSQL mode: the real
-    store (conftest empties the database before every test)."""
-    from services.dynamodb_service import DynamoDBService, data_backend
-    return DynamoDBService() if data_backend() == "postgres" else _FakeTableDB()
+    """The store on the test database (emptied before every test)."""
+    from services.dynamodb_service import DynamoDBService
+    return DynamoDBService()
 
 
 def test_check_domain_certificate_persists_a_healthy_result_without_alerting():

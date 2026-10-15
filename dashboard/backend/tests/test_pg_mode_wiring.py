@@ -1,14 +1,8 @@
-"""In DATA_BACKEND=postgres mode the suite must really run on PgStore and a
-real database -- never silently on the in-memory fake alone."""
-import os
+"""The suite really runs on PgStore and a real, per-test emptied database."""
 
-import pytest
 
 from tests import pg_harness
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("DATA_BACKEND", "").strip().lower() != "postgres",
-    reason="DATA_BACKEND is not postgres")
 
 
 def test_store_class_is_pgstore_in_pg_mode():

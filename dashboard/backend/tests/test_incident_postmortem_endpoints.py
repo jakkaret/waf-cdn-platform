@@ -34,9 +34,7 @@ def client(app: FastAPI) -> TestClient:
 
 @pytest.fixture(autouse=True)
 def _patch_dbs(monkeypatch, fake_infrastructure):
-    from tests.conftest import FakeDynamoDBService, _STORE
-    _STORE["waf_audit_log"] = []
-    monkeypatch.setattr(audit_log_module, "db", FakeDynamoDBService())
+    # audit_log.db writes to the test database, which conftest empties per test.
     # Never touch real ClickHouse from these HTTP-level tests -- the
     # ClickHouse-connected path is already proven directly in
     # test_incident_postmortem_timeline.py.

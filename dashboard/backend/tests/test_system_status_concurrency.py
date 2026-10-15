@@ -50,9 +50,7 @@ def test_status_shape(status_app):
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {"db", "services", "cdn_nodes", "workers", "system"}
-    from services.dynamodb_service import data_backend
-    db_name = "PostgreSQL" if data_backend() == "postgres" else "DynamoDB"
-    assert body["db"] == {"status": "online", "detail": f"{db_name} reachable"}
+    assert body["db"] == {"status": "online", "detail": "PostgreSQL reachable"}
     assert list(body["services"]) == ["dashboard_api", "waf_nginx", "redis",
                                       "clickhouse", "frps", "control_api"]
     assert body["services"]["redis"] == {"status": "online", "port": 6379,

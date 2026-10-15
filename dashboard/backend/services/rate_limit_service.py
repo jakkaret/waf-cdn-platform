@@ -1,191 +1,47 @@
 import os
 import time
 import uuid
-import sqlite3
 import redis
 import logging
-from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
-
-# WAF_DATA_DIR lets the test suite point this at a temp dir instead of the
-# tracked runtime files in data/.
-DATA_DIR = Path(os.getenv("WAF_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DATA_DIR / "rate_limits.db"
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 
 class RateLimitService:
-    _pg = None  # PgRateLimitRepository in PostgreSQL mode
+    """Rate-limit rule definitions in waf.rate_limit_rules (the three default
+    rules are seeded by migration 0002); request counters stay in Redis. No
+    I/O at construction: built at import time in api/rate_limits.py and
+    api/limiter.py."""
 
     def __init__(self):
-        from services.dynamodb_service import data_backend
-        if data_backend() == "postgres":
-            # waf.rate_limit_rules (default rules seeded by migration 0002).
-            # No I/O here: built at import time in api/rate_limits.py and
-            # api/limiter.py.
-            from services.pg_store import PgRateLimitRepository
-            self._pg = PgRateLimitRepository()
-        else:
-            self._init_db()
+        from services.pg_store import PgRateLimitRepository
+        self._pg = PgRateLimitRepository()
         try:
             self.redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True, socket_connect_timeout=2)
         except Exception as e:
             logger.warning(f"Redis connection failed: {e}")
             self.redis_client = None
 
-    def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init_db(self):
-        conn = self._get_conn()
-        try:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS rate_rules (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    path_pattern TEXT NOT NULL,
-                    method TEXT NOT NULL DEFAULT 'ALL',
-                    limit_count INTEGER NOT NULL,
-                    window_seconds INTEGER NOT NULL,
-                    burst INTEGER NOT NULL DEFAULT 0,
-                    action TEXT NOT NULL DEFAULT '429',       -- '429' or 'temp_ban'
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    created_at INTEGER NOT NULL
-                )
-            """)
-            conn.commit()
-
-            # Insert initial standard rules if empty
-            cursor = conn.execute("SELECT COUNT(*) FROM rate_rules")
-            if cursor.fetchone()[0] == 0:
-                now = int(time.time())
-                default_rules = [
-                    (
-                        "rule_auth_protect",
-                        "Authentication Brute-Force Guard",
-                        "/api/auth/*",
-                        "POST",
-                        10,
-                        60,
-                        2,
-                        "429",
-                        1,
-                        now
-                    ),
-                    (
-                        "rule_global_api",
-                        "Global API Spike Protection",
-                        "/api/*",
-                        "ALL",
-                        120,
-                        60,
-                        20,
-                        "429",
-                        1,
-                        now
-                    ),
-                    (
-                        "rule_edge_flood",
-                        "Edge Anti-Flooding Shield",
-                        "*",
-                        "ALL",
-                        50,
-                        1,
-                        10,
-                        "429",
-                        1,
-                        now
-                    ),
-                ]
-                conn.executemany("""
-                    INSERT INTO rate_rules (id, name, path_pattern, method, limit_count, window_seconds, burst, action, enabled, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, default_rules)
-                conn.commit()
-        finally:
-            conn.close()
-
     def list_rules(self) -> List[Dict]:
-        if self._pg is not None:
-            return self._pg.list()
-        conn = self._get_conn()
-        try:
-            rows = conn.execute("SELECT * FROM rate_rules ORDER BY created_at ASC").fetchall()
-            return [dict(r) for r in rows]
-        finally:
-            conn.close()
+        return self._pg.list()
 
     def add_rule(self, name: str, path_pattern: str, limit_count: int, window_seconds: int,
                  method: str = "ALL", burst: int = 0, action: str = "429") -> Dict:
         rule_id = f"rule_{uuid.uuid4().hex[:8]}"
-        now = int(time.time())
-        if self._pg is not None:
-            self._pg.add(rule_id, name.strip(), path_pattern.strip(), method, limit_count, window_seconds,
-                         burst, action)
-            return {"id": rule_id, "name": name, "path_pattern": path_pattern, "limit_count": limit_count,
-                    "window_seconds": window_seconds, "enabled": 1}
-        conn = self._get_conn()
-        try:
-            conn.execute("""
-                INSERT INTO rate_rules (id, name, path_pattern, method, limit_count, window_seconds, burst, action, enabled, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-            """, (rule_id, name.strip(), path_pattern.strip(), method.upper(), limit_count, window_seconds, burst, action, now))
-            conn.commit()
-            return {
-                "id": rule_id,
-                "name": name,
-                "path_pattern": path_pattern,
-                "limit_count": limit_count,
-                "window_seconds": window_seconds,
-                "enabled": 1
-            }
-        finally:
-            conn.close()
+        self._pg.add(rule_id, name.strip(), path_pattern.strip(), method, limit_count, window_seconds,
+                     burst, action)
+        return {"id": rule_id, "name": name, "path_pattern": path_pattern, "limit_count": limit_count,
+                "window_seconds": window_seconds, "enabled": 1}
 
     def update_rule(self, rule_id: str, data: Dict) -> Optional[Dict]:
-        if self._pg is not None:
-            return self._pg.update(rule_id, data)
-        conn = self._get_conn()
-        try:
-            fields = []
-            params = []
-            allowed_fields = ["name", "path_pattern", "method", "limit_count", "window_seconds", "burst", "action", "enabled"]
-            for k in allowed_fields:
-                if k in data:
-                    fields.append(f"{k} = ?")
-                    params.append(data[k])
-
-            if not fields:
-                return None
-
-            params.append(rule_id)
-            query = f"UPDATE rate_rules SET {', '.join(fields)} WHERE id = ?"
-            cursor = conn.execute(query, params)
-            conn.commit()
-            if cursor.rowcount > 0:
-                row = conn.execute("SELECT * FROM rate_rules WHERE id = ?", (rule_id,)).fetchone()
-                return dict(row) if row else None
-            return None
-        finally:
-            conn.close()
+        return self._pg.update(rule_id, data)
 
     def delete_rule(self, rule_id: str) -> bool:
-        if self._pg is not None:
-            return self._pg.delete(rule_id)
-        conn = self._get_conn()
-        try:
-            cursor = conn.execute("DELETE FROM rate_rules WHERE id = ?", (rule_id,))
-            conn.commit()
-            return cursor.rowcount > 0
-        finally:
-            conn.close()
+        return self._pg.delete(rule_id)
 
     def get_throttled_clients(self) -> List[Dict]:
         """Scan Redis for active rate-limited clients in the sliding window."""
