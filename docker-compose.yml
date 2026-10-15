@@ -2,7 +2,6 @@ services:
   waf:
     image: owasp/modsecurity-crs@sha256:4d5e1c4605df9a89ca85db742d8e7e39cbbf5b656264091ed9ab1211d2476e6a  # CRS 4.25.1-nginx-lts (multiarch digest) -- rollback: re-pin 095ec5...=3.3.10
     container_name: waf-nginx
-    env_file: .env
     user: root
     ports:
       - "8080:8080"
@@ -20,11 +19,15 @@ services:
       - ./html/403.html:/usr/share/nginx/html/403.html:ro
       - ./nginx/templates/conf/server.key:/etc/nginx/conf/server.key
       - ./nginx/templates/conf/server.crt:/etc/nginx/conf/server.crt
+    # Only the two secrets the templates use (H80). This container takes
+    # traffic straight from the internet, so it must not get the whole .env.
     environment:
       PARANOIA: 1
       ANOMALY_INBOUND: 10
       ANOMALY_OUTBOUND: 10
       TZ: Asia/Bangkok
+      ML_RELAY_SECRET: "${ML_RELAY_SECRET:?set ML_RELAY_SECRET in .env}"
+      DECEPTION_INTERNAL_KEY: "${DECEPTION_INTERNAL_KEY:?set DECEPTION_INTERNAL_KEY in .env}"
     depends_on:
       - dvwa
     extra_hosts:
