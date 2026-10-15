@@ -38,3 +38,13 @@ def test_bundle_changes_when_a_rule_changes(monkeypatch, tmp_path):
     before = client.get("/api/sync/bundle").content
     (rules / "custom-1.conf").write_text('SecRule ARGS "@contains y" "id:1,deny"\n')
     assert client.get("/api/sync/bundle").content != before
+
+
+def test_bundle_default_allow_list_accepts_edges_over_wireguard(monkeypatch, tmp_path):
+    main, _ = _load_main(monkeypatch, tmp_path)
+    monkeypatch.delenv("EDGE_ALLOWED_IPS")
+    main = importlib.reload(main)
+    assert {"10.88.0.2", "10.88.0.3"} <= main._EDGE_ALLOWED_IPS
+    assert "10.88.0.1" not in main._EDGE_ALLOWED_IPS
+    # TestClient's peer is "testclient", which the default list does not hold.
+    assert TestClient(main.app).get("/api/sync/bundle").status_code == 404

@@ -18,10 +18,15 @@ map $http_upgrade $connection_upgrade {
 #
 # This list is also the allow-list for port 8080 in the host firewall
 # (/etc/ufw/after.rules, DOCKER-USER): a new edge must be added in both places.
+# The 10.88.0.x entries are the edges' WireGuard addresses
+# (deploy/wireguard/README.md); the firewall accepts them only on wg0, so they
+# cannot be spoofed from the internet.
 geo $from_trusted_proxy {
     default         0;
     45.154.26.91    1;   # edge-th
     57.158.25.236   1;   # edge-asia
+    10.88.0.2       1;   # edge-th over WireGuard
+    10.88.0.3       1;   # edge-asia over WireGuard
     172.18.0.0/16   1;   # waf-net containers (Main's Caddy)
     172.18.0.1      0;   # docker gateway / docker-proxy
 }

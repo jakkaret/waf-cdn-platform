@@ -15,6 +15,7 @@ from services.clickhouse_service import ClickHouseService
 from services.log_normalize import normalize_cdn_access
 from services.telegram_listener import dispatch_telegram_alert
 from services.pii_masker import pii_masker
+from services.edge_tunnel import EDGE_TUNNEL_IPS
 from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter
 
 logger = logging.getLogger(__name__)
@@ -423,7 +424,11 @@ async def cdn_logs(
 # edge-th's did before that endpoint existed at all. Derived from
 # REGIONS_META instead of a second hardcoded literal, so a third real edge
 # only needs adding there, not here too.
-_KNOWN_EDGE_FORWARDER_IPS = {meta["ip"] for region, meta in REGIONS_META.items() if region != "MAIN"}
+# Once an edge talks to Main over WireGuard its forwarder arrives from its
+# tunnel address instead (services/edge_tunnel.py).
+_KNOWN_EDGE_FORWARDER_IPS = {
+    meta["ip"] for region, meta in REGIONS_META.items() if region != "MAIN"
+} | EDGE_TUNNEL_IPS
 
 
 class CdnLogIngestPayload(BaseModel):

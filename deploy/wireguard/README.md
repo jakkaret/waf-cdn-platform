@@ -1,0 +1,72 @@
+# WireGuard between the CDN edges and Main
+
+The edges forward every visitor request to Main (waf-nginx :8080), pull the
+rule bundle from control-api (:8070), send their logs and Caddy's
+on-demand-TLS check to the backend (:8000). Before this link all of it went
+over plain HTTP across the internet. Now it goes through a WireGuard tunnel.
+
+| Host | Public IP | Tunnel IP |
+|---|---|---|
+| Main | 178.104.53.123 (UDP 51820) | 10.88.0.1 |
+| edge-th | 45.154.26.91 | 10.88.0.2 |
+| edge-asia | 57.158.25.236 (Azure, behind NAT) | 10.88.0.3 |
+
+The edges dial Main (`PersistentKeepalive = 25`), so nothing has to be opened
+on the edge side or in Azure. Each edge only routes `10.88.0.1/32` through the
+tunnel.
+
+## Set up
+
+`wg-setup.sh` is installed on each host as `/usr/local/sbin/wg-setup.sh`.
+
+1. On every host: `wg-setup.sh key`. This installs wireguard-tools, creates
+   `/etc/wireguard/wg0.key` (600) and prints the **public** key. The private key
+   never leaves the host; `wg0.conf` loads it with `PostUp`.
+2. Main: `wg-setup.sh main <edge-th-pub> <edge-asia-pub>`.
+3. Edges: `wg-setup.sh edge 10.88.0.2 <main-pub>` (edge-th) and
+   `wg-setup.sh edge 10.88.0.3 <main-pub>` (edge-asia).
+4. Firewalls for UDP 51820 to Main, from the two edge IPs only:
+   - ufw on Main: `ufw allow from <edge-ip> to any port 51820 proto udp`
+   - **the Hetzner Cloud Firewall in front of Main** (console): it drops
+     everything not listed there before ufw sees it.
+5. Check: `wg show wg0` on Main shows a recent handshake for both peers, and
+   `ping 10.88.0.1` works from each edge.
+
+`wg0.conf` clamps TCP MSS on traffic forwarded into the tunnel: the docker
+bridges run at MTU 1500 and wg0 at 1420, and without the clamp small
+responses work while large ones stall.
+
+## What trusts the tunnel addresses
+
+Requests through the tunnel arrive from 10.88.0.2/10.88.0.3, not from the
+edges' public IPs, so these lists include them:
+
+- `geo $from_trusted_proxy` in `nginx/templates/conf.d/default.conf.template`
+  (believe the edge's X-Real-IP)
+- `EDGE_ALLOWED_IPS` default in `cdn/control-api/main.py` (rule bundle, blocklist)
+- `dashboard/backend/services/edge_tunnel.py`, used by `/api/cdn/logs/ingest`
+  and the `KNOWN_EDGE_IPS` skip in `services/log_forward.py`
+
+`tests/test_edge_tunnel_ips.py` keeps them in sync.
+
+Main's firewall accepts the tunnel addresses only on `wg0`, so they cannot be
+spoofed from the internet:
+
+- `DOCKER-USER` (in the CLOUDWAF block of `/etc/ufw/after.rules`): from
+  10.88.0.2/10.88.0.3 on wg0 to 8070 and 8080, everything else from wg0 dropped
+- ufw: `allow in on wg0 from 10.88.0.2|10.88.0.3 to any port 8000 proto tcp`
+
+## Switch an edge to the tunnel
+
+In the edge's compose directory (`/root/edge_node` on edge-th,
+`/opt/edge_node` on edge-asia):
+
+1. Back up `.env` and `edge/Caddyfile`.
+2. `.env`: `MAIN_SERVER_IP=10.88.0.1` (compose builds the origin, control-api
+   and backend URLs from it) and `CONTROL_API_URL=http://10.88.0.1:8070`.
+3. `edge/Caddyfile`: `ask http://10.88.0.1:8000/api/domains/check-ssl-allowed`.
+   The file is bind-mounted, so rewrite it in place (same inode), then
+   `docker exec cdn-caddy-ssl caddy reload --config /etc/caddy/Caddyfile`.
+4. `docker compose up -d` recreates cdn-edge-node and cdn-log-forwarder.
+
+Rollback: restore the two files, `docker compose up -d`, `caddy reload`.
