@@ -82,3 +82,8 @@ nginx/custom_sites/
 
 # Database/service passwords created by deploy/postgres/bootstrap.sh -- never commit
 /secrets/
+
+# Build caches and retired runtime data (H90, H91)
+.pycache/
+*.db
+*.db.*

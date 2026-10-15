@@ -33,6 +33,14 @@ import api.origins as origins_module
 import services.origin_service as origin_service
 from tests.helpers.seed import ensure_user, uid
 
+
+@pytest.fixture(autouse=True)
+def _frp_admin_configured(monkeypatch):
+    # These tests cover the frps poll itself, so frps credentials are set;
+    # without them the poll is skipped on purpose (test_frp_admin_auth_h70.py).
+    monkeypatch.setenv("FRP_ADMIN_USER", "test-admin")
+    monkeypatch.setenv("FRP_ADMIN_PASS", "test-pass")
+
 USER_A = uid("user-a")
 USER_B = uid("user-b")
 

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CDN_DIR="${ROOT_DIR}/cdn"
 
-CONTROL_TOKEN="${CDN_CONTROL_TOKEN:***REDACTED***}"
+CONTROL_TOKEN="${CDN_CONTROL_TOKEN:?set CDN_CONTROL_TOKEN in cdn/.env}"
 SYNC_WAIT_SEC="${CDN_SYNC_WAIT_SEC:-8}"
 
 EDGE_SG_HOST="${EDGE_SG_HOST:-http://localhost:8081}"

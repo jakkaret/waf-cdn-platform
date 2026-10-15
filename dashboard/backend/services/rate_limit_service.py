@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
 
 
 class RateLimitService:
@@ -21,7 +22,7 @@ class RateLimitService:
         from services.pg_store import PgRateLimitRepository
         self._pg = PgRateLimitRepository()
         try:
-            self.redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True, socket_connect_timeout=2)
+            self.redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True, socket_connect_timeout=2)
         except Exception as e:
             logger.warning(f"Redis connection failed: {e}")
             self.redis_client = None

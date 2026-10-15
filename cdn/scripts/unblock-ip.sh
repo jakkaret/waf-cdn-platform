@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CONTROL_API_HOST="${CONTROL_API_HOST:-http://localhost:8070}"
-TOKEN="${CDN_CONTROL_TOKEN:***REDACTED***}"
+TOKEN="${CDN_CONTROL_TOKEN:?set CDN_CONTROL_TOKEN in cdn/.env}"
 IP="${1:-}"
 
 if [[ -z "$IP" ]]; then

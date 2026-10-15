@@ -5,7 +5,7 @@ EDGE_SG="${EDGE_SG:-http://localhost:8081}"
 EDGE_JP="${EDGE_JP:-http://localhost:8082}"
 EDGE_TH="${EDGE_TH:-http://localhost:8086}"
 PURGE_API="${PURGE_API:-http://localhost:8090}"
-PURGE_TOKEN="${CDN_PURGE_TOKEN:***REDACTED***}"
+PURGE_TOKEN="${CDN_PURGE_TOKEN:?set CDN_PURGE_TOKEN in cdn/.env}"
 TARGET_PATH="${1:-/dvwa/images/login_logo.png}"
 
 check_health() {
