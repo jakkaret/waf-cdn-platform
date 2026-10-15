@@ -58,11 +58,15 @@ CONTROL_TOKEN = os.getenv("CONTROL_TOKEN", "")
 # addresses below are already proven to be the edges' real egress IPs --
 # dashboard/backend/api/cdn.py gates /api/cdn/logs/ingest on the same list
 # and both forwarders are delivering through it.
+#
+# 10.88.0.2/10.88.0.3 are the same edges over WireGuard (2026-10-15,
+# deploy/wireguard/README.md); dashboard/backend/services/edge_tunnel.py
+# holds the same pair.
 _EDGE_ALLOWED_IPS = {
     ip.strip()
     for ip in os.getenv(
         "EDGE_ALLOWED_IPS",
-        "45.154.26.91,57.158.25.236,127.0.0.1,::1,172.17.0.1,172.18.0.1",
+        "45.154.26.91,57.158.25.236,10.88.0.2,10.88.0.3,127.0.0.1,::1,172.17.0.1,172.18.0.1",
     ).split(",")
     if ip.strip()
 }

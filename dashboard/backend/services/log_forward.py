@@ -5,6 +5,7 @@ import os
 import time
 from datetime import datetime
 from services.clickhouse_service import ClickHouseService
+from services.edge_tunnel import EDGE_TUNNEL_IPS
 from services.telegram_listener import dispatch_telegram_alert
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,10 @@ log_buffer = {}
 # only accepted edge-th's forwarder until now), so the exact double-count
 # failure mode described in #3 is now reachable for edge-asia as soon as
 # its own forwarder container is live, not just a theoretical future risk.
-KNOWN_EDGE_IPS = {"172.18.0.2", "45.154.26.91", "57.158.25.236"}
+#
+# 10.88.0.x (2026-10-15): the same edges once they reach Main over WireGuard
+# -- their requests then show the tunnel address as remote_addr.
+KNOWN_EDGE_IPS = {"172.18.0.2", "45.154.26.91", "57.158.25.236"} | EDGE_TUNNEL_IPS
 
 SEVERITY_NUM_MAP = {
     "0": "CRITICAL",
