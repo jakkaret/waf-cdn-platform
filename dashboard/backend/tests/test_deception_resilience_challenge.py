@@ -2,7 +2,7 @@
 Adversarial Empirical Challenge Test Suite for WAF Honeypot Deception Layer.
 Authored by challenger_m1_2 to rigorously stress-test:
 1. Endpoint security on /api/deception/respond:
-   - Missing key, empty key, partial/spoofed keys, special characters, null bytes, unicode.
+   - Missing key, empty key, partial/spoofed keys, special characters, null bytes, unicode.  (gitleaks:allow)
    - Timing attack resistance on X-Internal-Deception-Key.
    - All HTTP verbs (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, and invalid verbs).
    - Large payloads (64KB, 1MB, 5MB, 10MB), non-UTF-8 binary data, malformed/deep JSON.

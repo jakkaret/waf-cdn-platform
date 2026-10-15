@@ -80,7 +80,7 @@ verify() {
 expect "empty token is rejected"            "$(verify '{"token":"","domains":["x.example.com"]}')" 401
 expect "malformed token is rejected"        "$(verify '{"token":"not-a-token","domains":["x.example.com"]}')" 401
 expect "unknown origin id is rejected"      "$(verify '{"token":"cwt_00000000-0000-0000-0000-000000000000_deadbeef","domains":["x.example.com"]}')" 401
-expect "right origin, wrong secret rejected" "$(verify '{"token":"cwt_dc2cb510-4f78-41be-8846-21b49ba42563_wrongsecret","domains":["'"$TUNNEL_HOST"'"]}')" 401
+expect "right origin, wrong secret rejected" "$(verify '{"token":"cwt_dc2cb510-4f78-41be-8846-21b49ba42563_wrongsecret","domains":["'"$TUNNEL_HOST"'"]}')" 401  # gitleaks:allow (deliberately wrong secret)
 expect "issuing a token needs authentication" \
   "$("$CURL" -s -m 12 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
      -d '{"origin_id":"x","domains":["y"]}' "http://$MAIN:8000/api/tunnel/issue-token")" 401
