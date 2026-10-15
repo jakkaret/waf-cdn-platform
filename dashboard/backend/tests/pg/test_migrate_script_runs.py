@@ -17,3 +17,11 @@ def test_migrate_script_starts():
 def test_no_db_module_shadows_the_standard_library():
     names = {p.stem for p in (BACKEND / "db").glob("*.py")}
     assert not names & set(sys.stdlib_module_names)
+
+
+def test_hidden_files_are_not_migrations(tmp_path):
+    from db import migrate
+    (tmp_path / "0001_init.sql").write_text("select 1;")
+    (tmp_path / "._0001_init.sql").write_bytes(b"\x00\x05\x16\x07 macOS metadata")
+    (tmp_path / ".0002_draft.sql").write_text("select 2;")
+    assert [p.name for p in migrate.migration_files(tmp_path)] == ["0001_init.sql"]

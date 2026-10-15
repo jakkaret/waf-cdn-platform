@@ -6,14 +6,28 @@
 
 | อะไร | ที่ |
 |---|---|
-| container | `waf-postgres` (postgres:16.15-alpine) เป็น compose project แยก `deploy/postgres/compose.yml` ไม่เกี่ยวกับ docker-compose.yml หลัก |
-| พอร์ต | `127.0.0.1:5432` เท่านั้น |
+| container | service `postgres` ใน `docker-compose.yml` หลัก ชื่อ container `waf-postgres` (postgres:16.15-alpine) |
+| พอร์ต | `127.0.0.1:5432` เท่านั้น (เปลี่ยนได้ด้วย `WAF_PG_PORT`) |
 | ข้อมูล | docker volume `waf_pgdata` |
 | schema | `waf` มี 19 ตาราง, `schema_migrations` และ view `origin_hostnames` |
 | migration | `dashboard/backend/db/migrations/*.sql` รันด้วย `db/migrate.py` (ไฟล์ที่ apply แล้วห้ามแก้ ให้เพิ่มไฟล์ใหม่) |
-| รหัสผ่าน | `/root/.waf-secrets/` (700/600) ได้แก่ `pg_owner.env` (DSN ของเจ้าของ schema ใช้กับ migrate เท่านั้น), `pg_app_password`, `pg_maint_password` |
-| ค่าที่แอปใช้ | `.env`: `DATABASE_URL` (role `waf_app_login`), `DATABASE_URL_MAINT` (role `waf_maint_login`) |
-| backup | `/etc/cron.d/waf-pg-backup` รัน `deploy/postgres/backup.sh` ทุก 6 ชม. ไปที่ `/root/backups/pg/` และเก็บไว้ 7 วัน |
+| รหัสผ่าน | โฟลเดอร์ `WAF_SECRETS_DIR` (บน Main คือ `/root/.waf-secrets/`; เครื่องใหม่ค่าเริ่มต้นคือ `./secrets/` ซึ่ง git ไม่ track) ได้แก่ `pg_owner_password` (compose secret), `pg_owner.env` (DSN ของเจ้าของ schema ใช้กับ migrate เท่านั้น), `pg_app_password`, `pg_maint_password` |
+| ค่าที่แอปใช้ | `.env`: `DATABASE_URL` (role `waf_app_login`), `DATABASE_URL_MAINT` (role `waf_maint_login`), `JWT_SECRET_KEY` |
+| backup | `/etc/cron.d/waf-pg-backup` รัน `deploy/postgres/backup.sh` ทุก 6 ชม. ไปที่ `WAF_BACKUP_DIR` (บน Main คือ `/root/backups/pg/`) และเก็บไว้ 7 วัน |
+
+## ติดตั้งบนเครื่องใหม่ (หลัง clone)
+
+ต้องมี docker compose, openssl และ Python 3.12+ ที่ติดตั้ง `dashboard/backend/requirements.txt` แล้ว (ค่าเริ่มต้นคือ `dashboard/backend/.venv`; ถ้าอยู่ที่อื่นให้ตั้ง `PYTHON=`)
+
+```bash
+cp .env.example .env                  # แล้วใส่ค่าอื่นของระบบตามต้องการ
+bash deploy/postgres/bootstrap.sh     # สร้างรหัสผ่าน, start postgres, migrate, สร้าง role, เติม .env
+dashboard/backend/.venv/bin/python dashboard/backend/scripts/seed_admin.py \
+    --email you@example.com --role admin --generate-password secrets/admin_login_password
+docker compose up -d                  # service อื่นของระบบ
+```
+
+`bootstrap.sh` รันซ้ำได้: ไม่สร้างรหัสใหม่ทับของเดิม และไม่แก้ค่าที่มีอยู่แล้วใน `.env` (เติมเฉพาะค่าที่ว่างหรือยังไม่มี รวมถึงสร้าง `JWT_SECRET_KEY` แบบสุ่มเมื่อว่าง)
 
 ## Role
 
@@ -92,6 +106,7 @@ TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55432/postgres python -m pytes
 
 ## ของเดิมที่ปลดระวางแล้ว
 
+- compose project แยก `waf-postgres` (`deploy/postgres/compose.yml`) เลิกใช้แล้ว ย้าย container เดิมมาอยู่ใต้ `docker-compose.yml` หลักเมื่อ 15 ต.ค. 2026 (ใช้ volume `waf_pgdata` เดิม)
 - DynamoDB:
   - โค้ดไม่เรียกแล้ว และถอน boto3 ออกจาก venv แล้ว
   - ลบ AWS key ออกจาก `.env` แล้ว (backup อยู่ใน `/root/backups/pre-pg-switch-20261014-210433/`)

@@ -44,7 +44,8 @@ def _owner_dsn() -> str:
 
 
 def migration_files(directory: Path = MIGRATIONS_DIR) -> list[Path]:
-    return sorted(p for p in directory.glob("*.sql") if p.is_file())
+    # Hidden files (editor swap files, macOS "._" metadata) are never migrations.
+    return sorted(p for p in directory.glob("*.sql") if p.is_file() and not p.name.startswith("."))
 
 
 def applied_versions(conn: psycopg.Connection) -> set[str]:

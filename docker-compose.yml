@@ -137,11 +137,58 @@ services:
     networks:
       - waf-net
 
+  # Control-plane database (users, origins, domains, alerts, audit, rules).
+  # The dashboard backend runs on the host (systemd), so the port is bound to
+  # 127.0.0.1 only. The superuser password is a compose secret read from a
+  # file outside git; deploy/postgres/bootstrap.sh creates it, applies
+  # dashboard/backend/db/migrations and the app/maintenance login roles, and
+  # writes DATABASE_URL / DATABASE_URL_MAINT to .env.
+  #   bash deploy/postgres/bootstrap.sh     (once per machine, idempotent)
+  postgres:
+    image: postgres:16.15-alpine
+    container_name: ${WAF_PG_CONTAINER:-waf-postgres}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: waf_owner
+      POSTGRES_DB: waf
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_owner_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    secrets:
+      - pg_owner_password
+    # Small host (~3.7 GB RAM shared with ClickHouse): default shared_buffers
+    # and few connections (app pool 12 + retention worker + psql/migrate).
+    command:
+      - postgres
+      - -c
+      - max_connections=30
+      - -c
+      - log_min_duration_statement=1000
+    ports:
+      - "127.0.0.1:${WAF_PG_PORT:-5432}:5432"
+    volumes:
+      - waf_pgdata:/var/lib/postgresql/data
+      - ${WAF_BACKUP_DIR:-./backups/pg}:/backups
+    shm_size: 128m
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U waf_owner -d waf"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - waf-net
+
 volumes:
   caddy_data:
   caddy_config:
   clickhouse_data:
   control_data:
+  waf_pgdata:
+    name: ${WAF_PG_VOLUME:-waf_pgdata}
+
+secrets:
+  pg_owner_password:
+    file: ${WAF_SECRETS_DIR:-./secrets}/pg_owner_password
 
 networks:
   waf-net:
