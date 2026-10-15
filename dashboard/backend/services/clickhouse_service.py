@@ -1,5 +1,6 @@
 import os
 import clickhouse_connect
+from dotenv import find_dotenv, load_dotenv
 from clickhouse_connect.driver.exceptions import ClickHouseError
 import logging
 import time
@@ -7,6 +8,11 @@ import uuid
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Modules build ClickHouseService() at import time, possibly before anything
+# else has loaded the root .env (same lookup as db/pool.py).
+load_dotenv(find_dotenv())
+load_dotenv(os.path.join(os.path.dirname(__file__), "../../../.env"))
 
 from services.geoip import country_code
 
@@ -76,17 +82,24 @@ def normalize_host(value) -> str:
 
 
 class ClickHouseService:
-    def __init__(self, host='localhost', port=8123, username='default', password='mysecurepassword'):
-        self.host = host
-        self.port = port
-        self.username = username
-        self.password = password
+    def __init__(self, host=None, port=None, username=None, password=None):
+        # Connection settings come from the environment (root .env). There is
+        # deliberately no default password: a missing CLICKHOUSE_PASSWORD
+        # means "not connected", never a well-known credential.
+        self.host = host or os.getenv("CLICKHOUSE_HOST") or "127.0.0.1"
+        self.port = int(port or os.getenv("CLICKHOUSE_PORT") or 8123)
+        self.username = username or os.getenv("CLICKHOUSE_USER") or "default"
+        self.password = password if password is not None else os.getenv("CLICKHOUSE_PASSWORD", "")
         self.client = None
         self.connected = False
         self.connect()
         self.init_db()
 
     def connect(self):
+        if not self.password:
+            print("⚠️ CLICKHOUSE_PASSWORD is not set; ClickHouse is disabled.")
+            self.connected = False
+            return
         try:
             self.client = clickhouse_connect.get_client(
                 host=self.host,

@@ -27,7 +27,7 @@ dashboard/backend/.venv/bin/python dashboard/backend/scripts/seed_admin.py \
 docker compose up -d                  # service อื่นของระบบ
 ```
 
-`bootstrap.sh` รันซ้ำได้: ไม่สร้างรหัสใหม่ทับของเดิม และไม่แก้ค่าที่มีอยู่แล้วใน `.env` (เติมเฉพาะค่าที่ว่างหรือยังไม่มี รวมถึงสร้าง `JWT_SECRET_KEY` แบบสุ่มเมื่อว่าง)
+`bootstrap.sh` รันซ้ำได้: ไม่สร้างรหัสใหม่ทับของเดิม และไม่แก้ค่าที่มีอยู่แล้วใน `.env` (เติมเฉพาะค่าที่ว่างหรือยังไม่มี รวมถึงสุ่ม `JWT_SECRET_KEY`, `CLICKHOUSE_PASSWORD`, `CONTROL_TOKEN` และ `ML_RELAY_SECRET` ให้เมื่อว่าง ค่าพวกนี้ต้องมีก่อน เพราะ `docker-compose.yml` จะไม่ยอมรันถ้าขาด)
 
 ## Role
 

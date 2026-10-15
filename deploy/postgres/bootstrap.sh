@@ -11,9 +11,10 @@
 #   3. applies dashboard/backend/db/migrations as waf_owner (db/migrate.py);
 #   4. creates LOGIN roles waf_app_login (IN ROLE waf_app) and
 #      waf_maint_login (IN ROLE waf_maintenance) with role-level timeouts;
-#   5. sets JWT_SECRET_KEY (random), WAF_SECRETS_DIR, WAF_BACKUP_DIR,
-#      DATABASE_URL and DATABASE_URL_MAINT in the repo's .env when missing or
-#      empty (existing values are never replaced).
+#   5. sets random JWT_SECRET_KEY, CLICKHOUSE_PASSWORD, CONTROL_TOKEN and
+#      ML_RELAY_SECRET (before any compose call), then WAF_SECRETS_DIR,
+#      WAF_BACKUP_DIR, DATABASE_URL and DATABASE_URL_MAINT in the repo's .env
+#      when missing or empty (existing values are never replaced).
 # The owner DSN goes ONLY to $WAF_SECRETS_DIR/pg_owner.env, never to .env:
 # the app must not be able to run DDL or disable the audit_logs triggers.
 # Passwords are never printed.
@@ -80,6 +81,15 @@ printf 'DATABASE_URL_OWNER=postgresql://waf_owner:%s@127.0.0.1:%s/waf\n' "$OWNER
   > "$SECRETS/pg_owner.env"
 chmod 600 "$SECRETS/pg_owner.env"
 
+# Secrets docker-compose.yml interpolates (${VAR:?}): compose refuses to run
+# any service while one is missing, so they are generated before the first
+# compose call. Existing values are kept.
+add_env JWT_SECRET_KEY "$(openssl rand -hex 32)"
+add_env CLICKHOUSE_PASSWORD "$(openssl rand -hex 24)"
+add_env CLICKHOUSE_HOST 127.0.0.1
+add_env CONTROL_TOKEN "$(openssl rand -hex 32)"
+add_env ML_RELAY_SECRET "$(openssl rand -hex 32)"
+
 "${COMPOSE[@]}" up -d --no-deps postgres
 for _ in $(seq 1 30); do
   if docker exec "$CONTAINER" pg_isready -U waf_owner -d waf >/dev/null 2>&1; then
@@ -110,9 +120,6 @@ REVOKE ALL ON DATABASE waf FROM PUBLIC;
 GRANT CONNECT ON DATABASE waf TO waf_app, waf_maintenance;
 SQL
 
-# The backend refuses to start without a JWT signing key (api tokens and
-# session cookies); a fresh machine gets a random one, an existing one is kept.
-add_env JWT_SECRET_KEY "$(openssl rand -hex 32)"
 add_env WAF_SECRETS_DIR "$SECRETS"
 add_env WAF_BACKUP_DIR "$BACKUPS"
 add_env DATABASE_URL "postgresql://waf_app_login:$APP_PW@127.0.0.1:$PORT/waf"

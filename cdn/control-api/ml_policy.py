@@ -34,7 +34,8 @@ RELAY_URL = os.getenv(
     "http://host.docker.internal:8000/api/ml/shadow/decision",
 )
 RELAY_HEADER_NAME = "X-Internal-ML-Relay"
-RELAY_HEADER_VALUE = "nginx-shadow-v1"
+# Shared secret with dashboard-backend (F-019); unset = no relay call (pass).
+RELAY_HEADER_VALUE = os.getenv("ML_RELAY_SECRET", "")
 
 DEFAULT_POLICY = {
     "ml_enforcement_enabled": False,
@@ -66,6 +67,9 @@ async def ml_access_decision(request) -> str:
     if not policy.get("ml_enforcement_enabled"):
         return "pass"  # short-circuits before any HTTP call: zero added
         # latency for the default (and currently only) production state.
+    if not RELAY_HEADER_VALUE:
+        logger.warning("ML_RELAY_SECRET is not set, fail-open pass")
+        return "pass"
 
     headers = {
         RELAY_HEADER_NAME: RELAY_HEADER_VALUE,
