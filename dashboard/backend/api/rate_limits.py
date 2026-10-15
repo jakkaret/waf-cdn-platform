@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict
+from pydantic import BaseModel, Field, field_validator
+from typing import Literal, Optional, List, Dict
 from services.rate_limit_service import RateLimitService
 from services.rbac import require_viewer_or_above, require_admin
 
@@ -15,18 +15,28 @@ class RateRuleCreate(BaseModel):
     limit_count: int = Field(..., ge=1, description="Max allowed requests within time window")
     window_seconds: int = Field(..., ge=1, description="Sliding window duration in seconds")
     burst: int = Field(0, ge=0, description="Allowed burst count above the limit")
-    action: str = Field("429", description="Action to take: '429' or 'temp_ban'")
+    action: Literal["429", "temp_ban"] = Field("429", description="Action to take: '429' or 'temp_ban'")
+
+    @field_validator("method")
+    @classmethod
+    def _upper_method(cls, v: str) -> str:
+        return v.strip().upper()
 
 
 class RateRuleUpdate(BaseModel):
     name: Optional[str] = None
     path_pattern: Optional[str] = None
     method: Optional[str] = None
-    limit_count: Optional[int] = None
-    window_seconds: Optional[int] = None
-    burst: Optional[int] = None
-    action: Optional[str] = None
-    enabled: Optional[int] = None
+    limit_count: Optional[int] = Field(None, ge=1)
+    window_seconds: Optional[int] = Field(None, ge=1)
+    burst: Optional[int] = Field(None, ge=0)
+    action: Optional[Literal["429", "temp_ban"]] = None
+    enabled: Optional[int] = Field(None, ge=0, le=1)
+
+    @field_validator("method")
+    @classmethod
+    def _upper_method(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip().upper() if v is not None else v
 
 
 class ResetClientRequest(BaseModel):

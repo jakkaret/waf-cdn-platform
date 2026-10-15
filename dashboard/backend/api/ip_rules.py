@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Literal, Optional, List
 from services.ip_rule_service import IPRuleService
 from services.rbac import require_viewer_or_above, require_admin
 
@@ -10,10 +10,10 @@ service = IPRuleService()
 
 class IPRuleCreate(BaseModel):
     ip: str = Field(..., description="IP address or CIDR notation (e.g. 192.168.1.1 or 10.0.0.0/24)")
-    rule_type: str = Field("block", description="'block' or 'allow'")
+    rule_type: Literal["block", "allow"] = Field("block", description="'block' or 'allow'")
     reason: str = Field("Manual entry", description="Reason for the rule")
     duration_seconds: Optional[int] = Field(None, description="TTL in seconds. None/0 means permanent")
-    source: str = Field("manual", description="Origin of rule ('manual', 'ml_analyst', 'rate_limit')")
+    source: Literal["manual", "ml_analyst", "rate_limit"] = Field("manual", description="Origin of rule")
 
 
 class BulkDeleteRequest(BaseModel):

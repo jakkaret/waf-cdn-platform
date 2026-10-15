@@ -20,8 +20,18 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 
 class RateLimitService:
+    _pg = None  # PgRateLimitRepository in PostgreSQL mode
+
     def __init__(self):
-        self._init_db()
+        from services.dynamodb_service import data_backend
+        if data_backend() == "postgres":
+            # waf.rate_limit_rules (default rules seeded by migration 0002).
+            # No I/O here: built at import time in api/rate_limits.py and
+            # api/limiter.py.
+            from services.pg_store import PgRateLimitRepository
+            self._pg = PgRateLimitRepository()
+        else:
+            self._init_db()
         try:
             self.redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True, socket_connect_timeout=2)
         except Exception as e:
@@ -103,6 +113,8 @@ class RateLimitService:
             conn.close()
 
     def list_rules(self) -> List[Dict]:
+        if self._pg is not None:
+            return self._pg.list()
         conn = self._get_conn()
         try:
             rows = conn.execute("SELECT * FROM rate_rules ORDER BY created_at ASC").fetchall()
@@ -114,6 +126,11 @@ class RateLimitService:
                  method: str = "ALL", burst: int = 0, action: str = "429") -> Dict:
         rule_id = f"rule_{uuid.uuid4().hex[:8]}"
         now = int(time.time())
+        if self._pg is not None:
+            self._pg.add(rule_id, name.strip(), path_pattern.strip(), method, limit_count, window_seconds,
+                         burst, action)
+            return {"id": rule_id, "name": name, "path_pattern": path_pattern, "limit_count": limit_count,
+                    "window_seconds": window_seconds, "enabled": 1}
         conn = self._get_conn()
         try:
             conn.execute("""
@@ -133,6 +150,8 @@ class RateLimitService:
             conn.close()
 
     def update_rule(self, rule_id: str, data: Dict) -> Optional[Dict]:
+        if self._pg is not None:
+            return self._pg.update(rule_id, data)
         conn = self._get_conn()
         try:
             fields = []
@@ -158,6 +177,8 @@ class RateLimitService:
             conn.close()
 
     def delete_rule(self, rule_id: str) -> bool:
+        if self._pg is not None:
+            return self._pg.delete(rule_id)
         conn = self._get_conn()
         try:
             cursor = conn.execute("DELETE FROM rate_rules WHERE id = ?", (rule_id,))

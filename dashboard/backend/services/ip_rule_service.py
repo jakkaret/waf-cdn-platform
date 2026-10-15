@@ -26,10 +26,24 @@ WHITELIST_CONF = CUSTOM_RULES_DIR / "custom-000001-global-whitelist.conf"
 
 
 class IPRuleService:
+    _pg = None  # PgIPRuleRepository in PostgreSQL mode
+
     def __init__(self):
-        self._init_db()
+        from services.dynamodb_service import data_backend
         self.rule_manager = RuleManager()
+        if data_backend() == "postgres":
+            # waf.ip_rules. No I/O here (api/ip_rules.py builds this at
+            # import time): the files are rendered on first use.
+            from services.pg_store import PgIPRuleRepository
+            self._pg = PgIPRuleRepository()
+            self._synced = False
+            return
+        self._init_db()
         self._sync_files_from_db()
+
+    def _ensure_synced(self):
+        if self._pg is not None and not self._synced:
+            self._sync_files_from_db()
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(DB_PATH)
@@ -82,6 +96,15 @@ class IPRuleService:
 
     def _sync_files_from_db(self):
         """Re-generate global_blocklist.txt, global_whitelist.txt and the corresponding ModSec .conf files."""
+        if self._pg is not None:
+            # Expiry stays here (not in run_retention()): an expired ban has
+            # to leave the rendered ModSecurity files too.
+            self._pg.delete_expired()
+            blocked_ips = self._pg.ips("block")
+            allowed_ips = self._pg.ips("allow")
+            self._synced = True
+            self._write_files(blocked_ips, allowed_ips)
+            return
         now = int(time.time())
         conn = self._get_conn()
         try:
@@ -98,7 +121,9 @@ class IPRuleService:
             allowed_ips = [r["ip"] for r in allowed_rows if r["ip"]]
         finally:
             conn.close()
+        self._write_files(blocked_ips, allowed_ips)
 
+    def _write_files(self, blocked_ips: List[str], allowed_ips: List[str]) -> None:
         # 1. Write Blocklist Text
         BLOCKLIST_TXT.write_text("\n".join(blocked_ips) + ("\n" if blocked_ips else ""), encoding="utf-8")
         if blocked_ips:
@@ -130,6 +155,12 @@ class IPRuleService:
 
     def list_rules(self, rule_type: Optional[str] = None, search: Optional[str] = None) -> List[Dict]:
         self._sync_files_from_db()
+        if self._pg is not None:
+            now = int(time.time())
+            rules = self._pg.list(rule_type, search)
+            for item in rules:
+                item["remaining_seconds"] = max(0, item["expires_at"] - now) if item["expires_at"] else None
+            return rules
         conn = self._get_conn()
         try:
             query = "SELECT * FROM ip_rules WHERE 1=1"
@@ -171,6 +202,13 @@ class IPRuleService:
         now = int(time.time())
         expires_at = (now + duration_seconds) if (duration_seconds and duration_seconds > 0) else None
 
+        if self._pg is not None:
+            self._pg.upsert(validated_ip, rule_type, reason.strip()[:200], added_by[:64], expires_at, source[:32])
+            self._sync_files_from_db()
+            applied = self._reload_nginx()
+            return {"status": "success", "ip": validated_ip, "rule_type": rule_type,
+                    "expires_at": expires_at, "nginx_applied": applied}
+
         conn = self._get_conn()
         try:
             conn.execute("""
@@ -192,8 +230,26 @@ class IPRuleService:
             "nginx_applied": applied,
         }
 
+    def _valid_ips(self, ips: List[str]) -> List[str]:
+        """Only well-formed addresses reach PostgreSQL's inet column (a bad
+        one would abort the statement with a 500 instead of "not found")."""
+        valid = []
+        for ip in ips:
+            try:
+                valid.append(self._validate_ip_or_cidr(ip))
+            except ValueError:
+                continue
+        return valid
+
     def delete_rule(self, ip: str) -> bool:
         ip = ip.strip()
+        if self._pg is not None:
+            valid = self._valid_ips([ip])
+            deleted = bool(valid) and self._pg.delete(valid) > 0
+            if deleted:
+                self._sync_files_from_db()
+                self._reload_nginx()
+            return deleted
         conn = self._get_conn()
         try:
             cursor = conn.execute("DELETE FROM ip_rules WHERE ip = ?", (ip,))
@@ -210,6 +266,12 @@ class IPRuleService:
     def bulk_delete(self, ips: List[str]) -> int:
         if not ips:
             return 0
+        if self._pg is not None:
+            deleted_count = self._pg.delete(self._valid_ips(ips))
+            if deleted_count > 0:
+                self._sync_files_from_db()
+                self._reload_nginx()
+            return deleted_count
         conn = self._get_conn()
         try:
             placeholders = ",".join("?" for _ in ips)
@@ -225,6 +287,9 @@ class IPRuleService:
         return deleted_count
 
     def get_stats(self) -> Dict:
+        if self._pg is not None:
+            self._ensure_synced()
+            return self._pg.stats()
         conn = self._get_conn()
         try:
             total_blocked = conn.execute("SELECT COUNT(*) FROM ip_rules WHERE rule_type = 'block'").fetchone()[0]

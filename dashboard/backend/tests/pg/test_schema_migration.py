@@ -179,7 +179,7 @@ def test_maintenance_role_runs_retention(db):
     c = db["conn"]
     with _as_role(c, "waf_maintenance"):
         rows = c.execute("SELECT table_name FROM run_retention()").fetchall()
-    assert [r[0] for r in rows] == ["audit_logs", "threat_patterns", "status_history_days"]
+    assert [r[0] for r in rows] == ["audit_logs", "threat_patterns", "status_history_days", "alerts"]
 
 
 def test_dry_run_reports_pending_without_applying(tmp_path):
