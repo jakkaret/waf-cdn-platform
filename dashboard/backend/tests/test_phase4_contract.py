@@ -219,3 +219,17 @@ def test_audit_uptime_and_postmortem_shapes():
     assert (got["start_time"], got["end_time"]) == ("2026-10-01 00:00:00", "2026-10-01 06:00:00")
     assert got["stats"] == {"requests": 1.5}
     assert [p["id"] for p in db.list_postmortems([origin["id"]])] == [item["id"]]
+
+
+def test_mark_read_needs_the_alerts_own_origin():
+    from services.dynamodb_service import DynamoDBService
+    db = DynamoDBService()
+    mine = seed_origin(db, {"id": "mr-mine"})
+    other = seed_origin(db, {"id": "mr-other"})
+    assert db.save_alert("x", "ALT-MR", "1.2.3.4", "/a", "403", "m", origin_id=mine["id"])
+    db.mark_alert_read(other["id"], "ALT-MR")            # wrong partition: no effect
+    db.mark_alert_read("unattributed", "ALT-MR")
+    db.mark_alert_read("not-a-uuid", "ALT-MR")
+    assert {a["alert_id"]: a["read"] for a in db.get_all_alerts()}["ALT-MR"] is False
+    db.mark_alert_read(mine["id"], "ALT-MR")
+    assert {a["alert_id"]: a["read"] for a in db.get_all_alerts()}["ALT-MR"] is True

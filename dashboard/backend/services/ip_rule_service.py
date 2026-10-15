@@ -102,9 +102,9 @@ class IPRuleService:
             self._pg.delete_expired()
             blocked_ips = self._pg.ips("block")
             allowed_ips = self._pg.ips("allow")
+            changed = self._write_files(blocked_ips, allowed_ips)
             self._synced = True
-            self._write_files(blocked_ips, allowed_ips)
-            return
+            return changed
         now = int(time.time())
         conn = self._get_conn()
         try:
@@ -121,9 +121,16 @@ class IPRuleService:
             allowed_ips = [r["ip"] for r in allowed_rows if r["ip"]]
         finally:
             conn.close()
-        self._write_files(blocked_ips, allowed_ips)
+        return self._write_files(blocked_ips, allowed_ips)
 
-    def _write_files(self, blocked_ips: List[str], allowed_ips: List[str]) -> None:
+    @staticmethod
+    def _files_snapshot() -> tuple:
+        return tuple(p.read_text(encoding="utf-8") if p.exists() else None
+                     for p in (BLOCKLIST_TXT, WHITELIST_TXT, BLOCKLIST_CONF, WHITELIST_CONF))
+
+    def _write_files(self, blocked_ips: List[str], allowed_ips: List[str]) -> bool:
+        """Render the four files from the given lists; True when any changed."""
+        before = self._files_snapshot()
         # 1. Write Blocklist Text
         BLOCKLIST_TXT.write_text("\n".join(blocked_ips) + ("\n" if blocked_ips else ""), encoding="utf-8")
         if blocked_ips:
@@ -152,6 +159,7 @@ class IPRuleService:
         else:
             if WHITELIST_CONF.exists():
                 WHITELIST_CONF.unlink()
+        return self._files_snapshot() != before
 
     def list_rules(self, rule_type: Optional[str] = None, search: Optional[str] = None) -> List[Dict]:
         self._sync_files_from_db()

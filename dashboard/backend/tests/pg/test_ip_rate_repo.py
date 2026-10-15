@@ -112,3 +112,18 @@ def test_retention_runs_as_maintenance_and_not_as_the_app():
         pool.close_pool()
     finally:
         admin.execute(f"DROP ROLE IF EXISTS {role}")
+
+
+def test_every_retention_run_renders_the_files_from_the_table(ip_service):
+    """Files that drifted from the table (failed render, restart) are fixed on
+    the next run even when no ban expired: an allow rule removed from the
+    table must not keep bypassing the WAF from a stale whitelist file."""
+    svc, tmp = ip_service
+    reloads = []
+    svc._reload_nginx = lambda: reloads.append(1) or True
+    (tmp / "global_whitelist.txt").write_text("203.0.113.77\n")   # stale entry, not in the table
+    from services.retention_worker import expire_ip_bans
+    assert expire_ip_bans(svc) == 0
+    assert "203.0.113.77" not in (tmp / "global_whitelist.txt").read_text()
+    assert reloads == [1]
+    assert expire_ip_bans(svc) == 0 and reloads == [1]     # nothing changed: no reload
