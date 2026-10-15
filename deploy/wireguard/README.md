@@ -56,6 +56,13 @@ spoofed from the internet:
   10.88.0.2/10.88.0.3 on wg0 to 8070 and 8080, everything else from wg0 dropped
 - ufw: `allow in on wg0 from 10.88.0.2|10.88.0.3 to any port 8000 proto tcp`
 
+Since both edges were switched, the public path is closed
+(`close-public-path.sh`): no rule lets the edges' public IPs reach 8080, 8070
+or 8000 any more. If the tunnel is down, the edges cannot reach Main at all;
+to fall back, restore `/etc/ufw/after.rules`, `user.rules`, `user6.rules` and
+`iptables-restore` the `iptables.save` from that script's backup, then roll
+the edges back.
+
 ## Switch an edge to the tunnel
 
 `edge-switch.sh check <dir>` tests the tunnel from inside each edge container;
@@ -92,3 +99,5 @@ ClickHouse rows keep `edge_node = edge-asia`.
 - 2026-10-15: edge-asia switched and verified the same way (10.88.0.3).
   Both edges now use only the tunnel; no TCP from their public IPs reaches
   Main's 8080/8070/8000.
+- 2026-10-15: public path closed on Main. From the edges, 8080/8070/8000 on
+  178.104.53.123 time out; over the tunnel all checks pass.
