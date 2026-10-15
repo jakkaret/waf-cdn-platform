@@ -175,8 +175,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
+    # Its own network, NOT waf-net: nothing in this compose needs the
+    # database (the backend reaches it on 127.0.0.1), and waf-net carries the
+    # deliberately vulnerable dvwa test app and the WAF/edge containers.
     networks:
-      - waf-net
+      - pg-net
 
 volumes:
   caddy_data:
@@ -192,4 +195,6 @@ secrets:
 
 networks:
   waf-net:
+    driver: bridge
+  pg-net:
     driver: bridge

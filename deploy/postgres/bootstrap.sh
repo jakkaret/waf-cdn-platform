@@ -27,7 +27,10 @@ set -euo pipefail
 REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 ENV_FILE=$REPO/.env
 BACKEND=$REPO/dashboard/backend
+# .env holds secrets (JWT key, database passwords): owner-only from the start.
+umask 077
 touch "$ENV_FILE"
+chmod 600 "$ENV_FILE"
 
 env_value() {  # value of KEY from the environment, else from .env
   local key=$1
@@ -58,7 +61,6 @@ COMPOSE=(docker compose -f "$REPO/docker-compose.yml")
 [ -x "$PYTHON" ] || { echo "Python with the backend requirements not found at $PYTHON (set PYTHON=...)" >&2; exit 1; }
 "$PYTHON" -c 'import psycopg, psycopg_pool' # fail early if the driver is missing
 
-umask 077
 mkdir -p "$SECRETS" "$BACKUPS"
 chmod 700 "$SECRETS" "$BACKUPS"
 
@@ -112,6 +114,7 @@ add_env WAF_SECRETS_DIR "$SECRETS"
 add_env WAF_BACKUP_DIR "$BACKUPS"
 add_env DATABASE_URL "postgresql://waf_app_login:$APP_PW@127.0.0.1:$PORT/waf"
 add_env DATABASE_URL_MAINT "postgresql://waf_maint_login:$MAINT_PW@127.0.0.1:$PORT/waf"
+chmod 600 "$ENV_FILE"   # sed -i may have recreated it
 
 echo "bootstrap done: $CONTAINER up on 127.0.0.1:$PORT, migrations applied, login roles ready"
 echo "first admin: $PYTHON $BACKEND/scripts/seed_admin.py --email <you> --role admin --generate-password $SECRETS/admin_login_password"
