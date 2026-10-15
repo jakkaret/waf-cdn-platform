@@ -104,12 +104,10 @@ jobs:
           retention-days: 7
 
   # ── Job 4: Backend Unit Tests ───────────────────────────────────────────
-  # tests/conftest.py fakes DynamoDB/ClickHouse/Redis/docker at their service
-  # boundary, so no LocalStack is needed. Not gated on lint: a style finding
-  # must not hide a failing test.
-  # PostgreSQL (the control-plane store replacing DynamoDB) is a real
-  # service: tests/pg_harness.py builds a throwaway database from
-  # db/migrations for the tests/pg suite, so those tests run, not skip.
+  # The control-plane store is a real PostgreSQL service: tests/pg_harness.py
+  # builds a throwaway database from db/migrations and conftest empties it
+  # before every test. ClickHouse/Redis/docker are faked at their service
+  # boundary. Not gated on lint: a style finding must not hide a failing test.
   test-backend:
     name: "Test: Backend (pytest)"
     runs-on: ubuntu-latest
@@ -153,46 +151,6 @@ jobs:
           name: backend-coverage
           path: dashboard/backend/coverage.xml
           retention-days: 14
-
-  # ── Job 4a: Backend tests on PostgreSQL (DATA_BACKEND=postgres) ────────
-  # Production runs on PostgreSQL since 2026-10-15: the whole suite runs
-  # against a real database here (tests/pg_harness.py).
-  test-backend-pg:
-    name: "Test: Backend on PostgreSQL (pytest)"
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: dashboard/backend
-    services:
-      postgres:
-        image: postgres:16.15-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATA_BACKEND: postgres
-      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.BACKEND_PYTHON_VERSION }}
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt pytest httpx pytest-asyncio fakeredis
-
-      - name: Run pytest (PostgreSQL mode)
-        run: pytest tests/ -q --tb=short
 
   # ── Job 4b: control-api Tests (CAPTCHA / OTP shield) ───────────────────
   test-control-api:

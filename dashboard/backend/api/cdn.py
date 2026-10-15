@@ -433,7 +433,7 @@ class CdnLogIngestPayload(BaseModel):
 
 def _store_cdn_log_batch(entries: list, region: str) -> Tuple[int, list]:
     """Runs as ONE unit in a single worker thread (see below) -- ch.save_log/
-    _db.save_log are synchronous (boto3, clickhouse-connect) and measured
+    _db.save_log were synchronous (the DynamoDB client, clickhouse-connect) and measured
     ~5.9s for a single entry in production (likely real AWS DynamoDB
     round-trip latency, not diagnosed further here -- out of scope for this
     fix). Calling them directly in the async route blocked the event loop

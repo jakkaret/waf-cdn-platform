@@ -1,16 +1,12 @@
-"""PostgreSQL implementation of the control-plane store (schema `waf`).
+"""The control-plane store: PostgreSQL (schema `waf`).
 
-Selected with DATA_BACKEND=postgres: services/dynamodb_service.py then
-exports PgStore under the old DynamoDBService name, so the 26+ modules that
-import it need no change.
+services/dynamodb_service.py still exports this class as DynamoDBService, the
+name the 26+ modules that use the store were written against; DynamoDB itself
+is gone (migration completed 2026-10-15).
 
-Method groups move here phase by phase (migration plan Phases 3-5). Until a
-group is implemented it is inherited from the DynamoDB-backed store, which in
-production fails exactly as it did before the switch. That base class is
-removed in Phase 7, once every method is SQL.
-
-Returned dicts keep the DynamoDB-era shape: ids as str, the timestamp format
-each table had (db/values.py), and optional attributes absent rather than None.
+Returned dicts keep the shapes callers were written for: ids as str, the
+timestamp format each table had (db/values.py), and optional attributes absent
+rather than None.
 
 __init__ does no I/O: modules build this at import time.
 """
@@ -24,7 +20,6 @@ from psycopg import sql
 from db import pool
 from db.errors import ForeignKeyConflict, UniqueConflict
 from db.values import as_uuid, from_epoch, epoch_int, iso_offset, iso_z_us, parse_ts
-from services.dynamodb_service import DomainAlreadyClaimed, DuplicateDomain, _DynamoBackedStore
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +54,18 @@ def _norm_host(name: Any) -> str:
     return str(name or "").strip().lower().rstrip(".")
 
 
-class PgStore(_DynamoBackedStore):
-    backend = "postgres"
+class DuplicateDomain(ValueError):
+    """A domain with this name is already registered."""
 
-    def __init__(self):
-        # The inherited (not yet converted) methods need the boto3 table
-        # handles; building them is local object construction, not I/O.
-        super().__init__()
+
+class DomainAlreadyClaimed(ValueError):
+    """A tunnel hostname is already claimed by another origin."""
+
+
+class PgStore:
+    backend = "postgres"
+    # Alerts whose Host matched no registered domain (origin_id NULL).
+    ALERTS_UNATTRIBUTED = "unattributed"
 
     def ping(self) -> bool:
         """Reachability probe for /api/system/status (raises on failure)."""

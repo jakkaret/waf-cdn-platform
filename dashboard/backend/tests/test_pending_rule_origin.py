@@ -34,21 +34,6 @@ from services.ml_rule_service import MLRuleService
 from tests.helpers.seed import seed_origin, uid
 
 
-class _FakeTable:
-    def __init__(self):
-        self.items = []
-
-    def put_item(self, Item):
-        self.items.append(dict(Item))
-
-    def query(self, KeyConditionExpression=None, **_kwargs):
-        # get_rule_detail() queries by the rule_id partition key; the fake
-        # keeps every written item and filters on the value the condition
-        # was built with.
-        wanted = getattr(KeyConditionExpression, "_values", (None, None))[1]
-        return {"Items": [i for i in self.items if i.get("rule_id") == wanted]}
-
-
 ORIGIN_ABC, ORIGIN_XYZ = uid("origin-abc"), uid("origin-xyz")
 
 
@@ -60,15 +45,8 @@ def service(monkeypatch):
     # PostgreSQL), so the origins it names are created first.
     seed_origin(store, {"id": ORIGIN_ABC, "label": "shop"})
     seed_origin(store, {"id": ORIGIN_XYZ, "label": "xyz"})
-    if dynamodb_service_module.data_backend() == "postgres":
-        monkeypatch.setattr(ml_rule_service_module, "RuleManager", MagicMock())
-        return MLRuleService()          # waf.pending_rules
-    table = _FakeTable()
-    fake_db = MagicMock()
-    fake_db.dynamodb.Table.return_value = table
-    monkeypatch.setattr(ml_rule_service_module, "DynamoDBService", lambda: fake_db)
     monkeypatch.setattr(ml_rule_service_module, "RuleManager", MagicMock())
-    return MLRuleService()
+    return MLRuleService()          # waf.pending_rules
 
 
 def test_cve_proposal_records_the_matched_origin(service):

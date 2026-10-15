@@ -25,7 +25,6 @@ fails: an opted-out tenant's attacks must never reach the shared table at
 all -- asserted on the table being empty, not on an API response.
 """
 import datetime as dt
-import os
 
 import pytest
 
@@ -95,15 +94,6 @@ def test_record_pattern_hit_never_writes_the_raw_user_id_or_any_ip_or_url(db):
         "pattern_key", "rule_id", "attack_type", "time_bucket",
         "hit_count", "tenant_hashes", "updated_at", "expires_at",
     }
-
-
-@pytest.mark.skipif(os.environ.get("DATA_BACKEND", "").strip().lower() == "postgres",
-                    reason="DynamoDB TTL attribute; PostgreSQL expires rows with run_retention()")
-def test_record_pattern_hit_sets_a_ttl_in_the_future(db):
-    now = dt.datetime(2026, 9, 21, 12, 0, tzinfo=dt.timezone.utc)
-    threat_intel.record_pattern_hit("user-alice", "942100", "SQL Injection", db=db, now=now)
-    row = db.threat_patterns_table.scan()["Items"][0]
-    assert row["expires_at"] > int(now.timestamp())
 
 
 def test_record_pattern_hit_from_two_different_users_counts_two_distinct_tenants(db):

@@ -50,14 +50,8 @@ bob_token = r.json()["access_token"]
 bob_id = r.json()["user"]["user_id"]
 log("PASS", "setup: register bob (viewer)", f"user_id={bob_id}")
 
-import boto3
-ddb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "ap-southeast-1"))
-ddb.Table("waf_users").update_item(
-    Key={"user_id": bob_id},
-    UpdateExpression="SET #r = :r",
-    ExpressionAttributeNames={"#r": "role"},
-    ExpressionAttributeValues={":r": "admin"},
-)
+from services.auth_service import AuthService
+AuthService().update_user_role(bob_id, "admin")
 r = client.post("/api/auth/login", json={"email": bob_email, "password": password})
 assert r.status_code == 200, r.text
 bob_token = r.json()["access_token"]

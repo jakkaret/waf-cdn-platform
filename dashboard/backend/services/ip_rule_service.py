@@ -1,6 +1,4 @@
-import os
 import time
-import sqlite3
 import re
 import ipaddress
 import logging
@@ -9,12 +7,6 @@ from typing import List, Dict, Optional
 from services.rule_manager import RuleManager, NginxConfigError
 
 logger = logging.getLogger(__name__)
-
-# WAF_DATA_DIR lets the test suite point this at a temp dir instead of the
-# tracked runtime files in data/.
-DATA_DIR = Path(os.getenv("WAF_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DATA_DIR / "ip_rules.db"
 
 CUSTOM_RULES_DIR = Path(__file__).resolve().parent.parent.parent.parent / "modsecurity" / "custom-rules"
 CUSTOM_RULES_DIR.mkdir(parents=True, exist_ok=True)
@@ -26,49 +18,20 @@ WHITELIST_CONF = CUSTOM_RULES_DIR / "custom-000001-global-whitelist.conf"
 
 
 class IPRuleService:
-    _pg = None  # PgIPRuleRepository in PostgreSQL mode
+    """Global IP/CIDR block and allow rules (waf.ip_rules), rendered into the
+    ModSecurity block/allow files. No I/O at construction (api/ip_rules.py
+    builds this at import time); the files are rendered on first use and by
+    the hourly retention worker."""
 
     def __init__(self):
-        from services.dynamodb_service import data_backend
+        from services.pg_store import PgIPRuleRepository
         self.rule_manager = RuleManager()
-        if data_backend() == "postgres":
-            # waf.ip_rules. No I/O here (api/ip_rules.py builds this at
-            # import time): the files are rendered on first use.
-            from services.pg_store import PgIPRuleRepository
-            self._pg = PgIPRuleRepository()
-            self._synced = False
-            return
-        self._init_db()
-        self._sync_files_from_db()
+        self._pg = PgIPRuleRepository()
+        self._synced = False
 
     def _ensure_synced(self):
-        if self._pg is not None and not self._synced:
+        if not self._synced:
             self._sync_files_from_db()
-
-    def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init_db(self):
-        conn = self._get_conn()
-        try:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS ip_rules (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ip TEXT NOT NULL UNIQUE,
-                    rule_type TEXT NOT NULL DEFAULT 'block',  -- 'block' or 'allow'
-                    reason TEXT NOT NULL DEFAULT 'Manual entry',
-                    added_by TEXT NOT NULL DEFAULT 'admin',
-                    created_at INTEGER NOT NULL,
-                    expires_at INTEGER DEFAULT NULL,         -- NULL means Permanent
-                    hits INTEGER NOT NULL DEFAULT 0,
-                    source TEXT NOT NULL DEFAULT 'manual'   -- 'manual', 'ml_analyst', 'rate_limit'
-                )
-            """)
-            conn.commit()
-        finally:
-            conn.close()
 
     def _validate_ip_or_cidr(self, ip_str: str) -> str:
         ip_str = ip_str.strip()
@@ -96,32 +59,12 @@ class IPRuleService:
 
     def _sync_files_from_db(self):
         """Re-generate global_blocklist.txt, global_whitelist.txt and the corresponding ModSec .conf files."""
-        if self._pg is not None:
-            # Expiry stays here (not in run_retention()): an expired ban has
-            # to leave the rendered ModSecurity files too.
-            self._pg.delete_expired()
-            blocked_ips = self._pg.ips("block")
-            allowed_ips = self._pg.ips("allow")
-            changed = self._write_files(blocked_ips, allowed_ips)
-            self._synced = True
-            return changed
-        now = int(time.time())
-        conn = self._get_conn()
-        try:
-            # Delete expired entries
-            conn.execute("DELETE FROM ip_rules WHERE expires_at IS NOT NULL AND expires_at < ?", (now,))
-            conn.commit()
-
-            # Query active blocklist
-            blocked_rows = conn.execute("SELECT ip FROM ip_rules WHERE rule_type = 'block' ORDER BY created_at DESC").fetchall()
-            blocked_ips = [r["ip"] for r in blocked_rows if r["ip"]]
-
-            # Query active whitelist
-            allowed_rows = conn.execute("SELECT ip FROM ip_rules WHERE rule_type = 'allow' ORDER BY created_at DESC").fetchall()
-            allowed_ips = [r["ip"] for r in allowed_rows if r["ip"]]
-        finally:
-            conn.close()
-        return self._write_files(blocked_ips, allowed_ips)
+        # Expiry stays here (not in run_retention()): an expired ban has to
+        # leave the rendered ModSecurity files too.
+        self._pg.delete_expired()
+        changed = self._write_files(self._pg.ips("block"), self._pg.ips("allow"))
+        self._synced = True
+        return changed
 
     @staticmethod
     def _files_snapshot() -> tuple:
@@ -163,42 +106,11 @@ class IPRuleService:
 
     def list_rules(self, rule_type: Optional[str] = None, search: Optional[str] = None) -> List[Dict]:
         self._sync_files_from_db()
-        if self._pg is not None:
-            now = int(time.time())
-            rules = self._pg.list(rule_type, search)
-            for item in rules:
-                item["remaining_seconds"] = max(0, item["expires_at"] - now) if item["expires_at"] else None
-            return rules
-        conn = self._get_conn()
-        try:
-            query = "SELECT * FROM ip_rules WHERE 1=1"
-            params = []
-
-            if rule_type and rule_type.lower() != 'all':
-                query += " AND rule_type = ?"
-                params.append(rule_type.lower())
-
-            if search:
-                query += " AND (ip LIKE ? OR reason LIKE ? OR added_by LIKE ?)"
-                search_param = f"%{search.strip()}%"
-                params.extend([search_param, search_param, search_param])
-
-            query += " ORDER BY created_at DESC"
-            rows = conn.execute(query, params).fetchall()
-
-            now = int(time.time())
-            result = []
-            for r in rows:
-                item = dict(r)
-                if item["expires_at"]:
-                    remaining = item["expires_at"] - now
-                    item["remaining_seconds"] = max(0, remaining)
-                else:
-                    item["remaining_seconds"] = None
-                result.append(item)
-            return result
-        finally:
-            conn.close()
+        now = int(time.time())
+        rules = self._pg.list(rule_type, search)
+        for item in rules:
+            item["remaining_seconds"] = max(0, item["expires_at"] - now) if item["expires_at"] else None
+        return rules
 
     def add_rule(self, ip: str, rule_type: str = "block", reason: str = "Manual entry",
                  added_by: str = "admin", duration_seconds: Optional[int] = None, source: str = "manual") -> Dict:
@@ -210,33 +122,11 @@ class IPRuleService:
         now = int(time.time())
         expires_at = (now + duration_seconds) if (duration_seconds and duration_seconds > 0) else None
 
-        if self._pg is not None:
-            self._pg.upsert(validated_ip, rule_type, reason.strip()[:200], added_by[:64], expires_at, source[:32])
-            self._sync_files_from_db()
-            applied = self._reload_nginx()
-            return {"status": "success", "ip": validated_ip, "rule_type": rule_type,
-                    "expires_at": expires_at, "nginx_applied": applied}
-
-        conn = self._get_conn()
-        try:
-            conn.execute("""
-                INSERT OR REPLACE INTO ip_rules (ip, rule_type, reason, added_by, created_at, expires_at, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (validated_ip, rule_type, reason.strip()[:200], added_by[:64], now, expires_at, source[:32]))
-            conn.commit()
-        finally:
-            conn.close()
-
+        self._pg.upsert(validated_ip, rule_type, reason.strip()[:200], added_by[:64], expires_at, source[:32])
         self._sync_files_from_db()
         applied = self._reload_nginx()
-
-        return {
-            "status": "success",
-            "ip": validated_ip,
-            "rule_type": rule_type,
-            "expires_at": expires_at,
-            "nginx_applied": applied,
-        }
+        return {"status": "success", "ip": validated_ip, "rule_type": rule_type,
+                "expires_at": expires_at, "nginx_applied": applied}
 
     def _valid_ips(self, ips: List[str]) -> List[str]:
         """Only well-formed addresses reach PostgreSQL's inet column (a bad
@@ -250,22 +140,8 @@ class IPRuleService:
         return valid
 
     def delete_rule(self, ip: str) -> bool:
-        ip = ip.strip()
-        if self._pg is not None:
-            valid = self._valid_ips([ip])
-            deleted = bool(valid) and self._pg.delete(valid) > 0
-            if deleted:
-                self._sync_files_from_db()
-                self._reload_nginx()
-            return deleted
-        conn = self._get_conn()
-        try:
-            cursor = conn.execute("DELETE FROM ip_rules WHERE ip = ?", (ip,))
-            conn.commit()
-            deleted = cursor.rowcount > 0
-        finally:
-            conn.close()
-
+        valid = self._valid_ips([ip.strip()])
+        deleted = bool(valid) and self._pg.delete(valid) > 0
         if deleted:
             self._sync_files_from_db()
             self._reload_nginx()
@@ -274,40 +150,12 @@ class IPRuleService:
     def bulk_delete(self, ips: List[str]) -> int:
         if not ips:
             return 0
-        if self._pg is not None:
-            deleted_count = self._pg.delete(self._valid_ips(ips))
-            if deleted_count > 0:
-                self._sync_files_from_db()
-                self._reload_nginx()
-            return deleted_count
-        conn = self._get_conn()
-        try:
-            placeholders = ",".join("?" for _ in ips)
-            cursor = conn.execute(f"DELETE FROM ip_rules WHERE ip IN ({placeholders})", ips)
-            conn.commit()
-            deleted_count = cursor.rowcount
-        finally:
-            conn.close()
-
+        deleted_count = self._pg.delete(self._valid_ips(ips))
         if deleted_count > 0:
             self._sync_files_from_db()
             self._reload_nginx()
         return deleted_count
 
     def get_stats(self) -> Dict:
-        if self._pg is not None:
-            self._ensure_synced()
-            return self._pg.stats()
-        conn = self._get_conn()
-        try:
-            total_blocked = conn.execute("SELECT COUNT(*) FROM ip_rules WHERE rule_type = 'block'").fetchone()[0]
-            total_allowed = conn.execute("SELECT COUNT(*) FROM ip_rules WHERE rule_type = 'allow'").fetchone()[0]
-            temp_banned = conn.execute("SELECT COUNT(*) FROM ip_rules WHERE rule_type = 'block' AND expires_at IS NOT NULL").fetchone()[0]
-            return {
-                "total_blocked": total_blocked,
-                "total_allowed": total_allowed,
-                "temp_banned": temp_banned,
-                "permanent_blocked": total_blocked - temp_banned
-            }
-        finally:
-            conn.close()
+        self._ensure_synced()
+        return self._pg.stats()

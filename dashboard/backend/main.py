@@ -143,8 +143,7 @@ async def system_status(current_user: dict = Depends(require_viewer_or_above)):
         for (name, (port, desc)), is_open in zip(SERVICES.items(), port_results)
     }
 
-    from services.dynamodb_service import data_backend
-    db_name = "PostgreSQL" if data_backend() == "postgres" else "DynamoDB"
+    db_name = "PostgreSQL"
     db_status, db_detail = "offline", "unreachable"
     try:
         await loop.run_in_executor(_PROBE_POOL, _db_ping)
@@ -289,24 +288,20 @@ async def health_check():
     # SELECT 1 is ~1ms): a deploy check must see "db": "down" when the app
     # is up but cannot reach its database. Bounded to 1s off the loop.
     result = {"status": "ok", "clickhouse": "connected" if ch.connected else "disconnected"}
-    from services.dynamodb_service import data_backend
-    if data_backend() == "postgres":
-        from db import pool as pg_pool
-        result["db"] = "ok" if await asyncio.to_thread(pg_pool.ping, 1.0) else "down"
+    from db import pool as pg_pool
+    result["db"] = "ok" if await asyncio.to_thread(pg_pool.ping, 1.0) else "down"
     return result
 
 # Startup & Shutdown
 @app.on_event("startup")
 async def startup_event():
-    from services.dynamodb_service import data_backend
-    if data_backend() == "postgres":
-        from db import pool as pg_pool
-        try:
-            await asyncio.to_thread(pg_pool.open_pool, 10.0)
-        except Exception as exc:
-            # Keep serving: /api/health reports "db": "down" and requests
-            # retry through the pool, instead of the process crash-looping.
-            print(f"PostgreSQL pool warm-up failed: {exc}")
+    from db import pool as pg_pool
+    try:
+        await asyncio.to_thread(pg_pool.open_pool, 10.0)
+    except Exception as exc:
+        # Keep serving: /api/health reports "db": "down" and requests
+        # retry through the pool, instead of the process crash-looping.
+        print(f"PostgreSQL pool warm-up failed: {exc}")
     print("=" * 50)
     print("WAF Dashboard API Starting...")
     print("=" * 50)
@@ -317,8 +312,8 @@ async def startup_event():
     print("=" * 50)
     if not hasattr(app.state, "alert_task"):
         app.state.alert_task = asyncio.create_task(alert_worker())
-    # Retention for the PostgreSQL store (DynamoDB had TTL attributes).
-    if data_backend() == "postgres" and not hasattr(app.state, "retention_task"):
+    # Retention for the PostgreSQL store (replaces DynamoDB's TTL).
+    if not hasattr(app.state, "retention_task"):
         from services.retention_worker import retention_worker
         app.state.retention_task = asyncio.create_task(retention_worker())
     if not hasattr(app.state, "log_forward_task"):
@@ -372,10 +367,8 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     print("WAF Dashboard API Shutting down...")
-    from services.dynamodb_service import data_backend
-    if data_backend() == "postgres":
-        from db import pool as pg_pool
-        pg_pool.close_pool()
+    from db import pool as pg_pool
+    pg_pool.close_pool()
 
 # Registered ahead of the SPA catch-all below -- Starlette matches routes in
 # registration order, so without these two, requests for /robots.txt and

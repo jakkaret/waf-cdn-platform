@@ -72,8 +72,8 @@ check("config-generator without authentication", st, {401, 403})
 
 if me.get("user_id"):
     sys.path.insert(0, "/root/waf_project/dashboard/backend")
-    from services.dynamodb_service import DynamoDBService
-    DynamoDBService().waf_users.delete_item(Key={"user_id": me["user_id"]})
+    from services.auth_service import AuthService
+    AuthService().delete_user(me["user_id"])
     print("cleaned up test account", me["user_id"])
 
 fails = [r for r in results if not r[0]]

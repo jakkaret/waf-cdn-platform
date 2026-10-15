@@ -12,7 +12,6 @@ Scenario: an analysed request queues rule proposals for admin review.
 
 The ML service and ClickHouse are faked; MLRuleService runs for real on an in-memory table.
 """
-import os
 import asyncio
 from unittest.mock import MagicMock
 
@@ -35,49 +34,9 @@ from services.rate_limiter import limiter
 # In-memory waf_pending_rules
 # ---------------------------------------------------------------------------
 
-class _FakeTable:
-    def __init__(self, page_size=None):
-        self.items = []
-        self.page_size = page_size  # set to make query() paginate like DynamoDB
-
-    def _find(self, key):
-        return next(i for i in self.items if i["rule_id"] == key["rule_id"] and i["created_at"] == key["created_at"])
-
-    def put_item(self, Item):
-        self.items.append(dict(Item))
-
-    def query(self, KeyConditionExpression=None, IndexName=None, ExclusiveStartKey=None, **_kwargs):
-        name, wanted = KeyConditionExpression._values[0].name, KeyConditionExpression._values[1]
-        found = [dict(i) for i in self.items if i.get(name) == wanted]
-        if not self.page_size:
-            return {"Items": found}
-        start = ExclusiveStartKey or 0
-        page = {"Items": found[start:start + self.page_size]}
-        if start + self.page_size < len(found):
-            page["LastEvaluatedKey"] = start + self.page_size
-        return page
-
-    def scan(self, **_kwargs):
-        return {"Items": [dict(i) for i in self.items]}
-
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues, ExpressionAttributeNames=None,
-                    ConditionExpression=None):
-        item = self._find(Key)
-        names = ExpressionAttributeNames or {}
-        if ConditionExpression == "#s = :pending" and item["status"] != "pending":
-            raise RuntimeError("ConditionalCheckFailedException")
-        for assignment in UpdateExpression.removeprefix("SET ").split(","):
-            field, value = (s.strip() for s in assignment.split("="))
-            item[names.get(field, field)] = ExpressionAttributeValues[value]
-
-
-PG_MODE = os.environ.get("DATA_BACKEND", "").strip().lower() == "postgres"
-dynamodb_only = pytest.mark.skipif(PG_MODE, reason="DynamoDB-specific (pagination / conditional update race)")
-
-
 class _PgRulesView:
-    """PostgreSQL mode: what the tests read as `table.items` -- the rows of
-    waf.pending_rules (emptied before every test by conftest)."""
+    """What the tests read as `table.items`: the rows of waf.pending_rules
+    (emptied before every test by conftest)."""
 
     @property
     def items(self):
@@ -87,13 +46,7 @@ class _PgRulesView:
 
 def _make_table(monkeypatch, page_size=None):
     monkeypatch.setattr(ml_rule_service_module, "RuleManager", MagicMock())
-    if PG_MODE:
-        return _PgRulesView()
-    table = _FakeTable(page_size=page_size)
-    fake_db = MagicMock()
-    fake_db.dynamodb.Table.return_value = table
-    monkeypatch.setattr(ml_rule_service_module, "DynamoDBService", lambda: fake_db)
-    return table
+    return _PgRulesView()
 
 
 @pytest.fixture()
@@ -143,15 +96,6 @@ def test_reviewed_rule_is_not_a_merge_target(table):
     service.reject_rule(first["rule_id"], rejected_by="admin")
     assert service.find_pending_by_dedup_key("gen3-detector:v_sqli_libinjection") is None
     assert service.find_pending_by_dedup_key("") is None
-
-
-@dynamodb_only
-def test_rows_written_before_the_new_fields_get_defaults(table):
-    table.items.append({"rule_id": "old", "created_at": "2026-09-01T00:00:00Z", "status": "pending",
-                        "created_by": "cve-auto", "pattern": "@rx x"})
-    rule = MLRuleService().get_rule_detail("old")
-    assert rule["generator"] == "cve" and rule["hit_count"] == 1 and rule["examples"] == []
-    assert rule["last_seen_at"] == "2026-09-01T00:00:00Z"
 
 
 # ---------------------------------------------------------------------------
@@ -360,22 +304,6 @@ def test_reject_legacy_rejects_only_pending_rf_rules_across_pages(monkeypatch):
     assert service.get_rule_detail(legacy[0]["rule_id"])["reject_reason"] == "retired"
 
 
-@dynamodb_only
-def test_reject_legacy_skips_a_rule_reviewed_meanwhile(table):
-    service = MLRuleService()
-    rule = service.create_pending_rule(legacy_rule(1))
-    real_query = table.query
-
-    def query_then_approve(**kwargs):  # an admin approves between the query and the update
-        page = real_query(**kwargs)
-        table._find({"rule_id": rule["rule_id"], "created_at": rule["created_at"]})["status"] = "approved"
-        return page
-
-    table.query = query_then_approve
-    assert service.reject_legacy_pending("op", "retired") == {"rejected": 0, "skipped": 1}
-    assert table.items[0]["status"] == "approved"
-
-
 def test_reject_legacy_endpoint_is_admin_only(rules_client, register_user, auth_header, monkeypatch, table):
     service = MLRuleService()
     monkeypatch.setattr(ml_rules_module, "rule_service", service)
@@ -392,7 +320,6 @@ def test_reject_legacy_endpoint_is_admin_only(rules_client, register_user, auth_
     assert events and events[0]["details"]["rejected"] == 1
 
 
-@pytest.mark.skipif(not PG_MODE, reason="PostgreSQL: the reject is one UPDATE ... WHERE status = 'pending'")
 def test_reject_legacy_leaves_an_already_approved_rule_alone(table, monkeypatch):
     service = MLRuleService()
     rule = service.create_pending_rule(legacy_rule(1))

@@ -49,9 +49,7 @@ def _patch_audit_log_db(monkeypatch, fake_infrastructure):
     _STORE.setdefault(name, []) returns whatever list already sits at that
     key, so any stale list must be replaced here directly rather than
     relying on _STORE.clear() having already emptied it."""
-    from tests.conftest import FakeDynamoDBService, _STORE
-    _STORE["waf_audit_log"] = []
-    monkeypatch.setattr(audit_log_module, "db", FakeDynamoDBService())
+    return None  # audit_log.db writes to the test database, which conftest empties per test
 
 
 @pytest.fixture()

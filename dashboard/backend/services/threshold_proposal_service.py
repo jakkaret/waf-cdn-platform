@@ -17,7 +17,6 @@ the central safety property here is refusing to let one origin's traffic
 that also changes protection for every other origin sharing this WAF.
 """
 import logging
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -189,7 +188,7 @@ class ThresholdProposalStore:
     """Persistence + approval lifecycle for threshold proposals: pending ->
     approved|rejected; an approved proposal can additionally be rolled_back.
     Mirrors ml_rule_service.py's pending-rule lifecycle shape, backed by its
-    own DynamoDB table (a threshold proposal isn't a WAF rule).
+    own table, waf.threshold_proposals (a threshold proposal isn't a WAF rule).
 
     Never applies anything on its own -- create() only ever writes
     status="pending". SettingsService.update_settings() is called exactly
@@ -201,45 +200,22 @@ class ThresholdProposalStore:
     never invents a default identity if the caller omits one.
     """
 
-    _pg = None  # PgThresholdProposalRepository in PostgreSQL mode
-
     def __init__(self):
-        from services.dynamodb_service import DynamoDBService, data_backend
+        from services.dynamodb_service import DynamoDBService
+        from services.pg_store import PgThresholdProposalRepository
         self.db = DynamoDBService()
-        # postgres: waf.threshold_proposals (no I/O here: built at import
-        # time in api/threshold_proposals.py).
-        self._pg = None
-        if data_backend() == "postgres":
-            from services.pg_store import PgThresholdProposalRepository
-            self._pg = PgThresholdProposalRepository()
-            self._table = None
-        else:
-            self._table = self.db.dynamodb.Table("waf_threshold_proposals")
+        # waf.threshold_proposals. No I/O here: built at import time in
+        # api/threshold_proposals.py.
+        self._pg = PgThresholdProposalRepository()
 
     def create(self, proposal: Dict[str, Any], created_by: str = "ml-auto") -> Dict[str, Any]:
-        if self._pg is not None:
-            return self._pg.create(proposal, created_by)
-        item = dict(proposal)
-        item["proposal_id"] = str(uuid.uuid4())
-        item["status"] = "pending"
-        item["created_by"] = created_by
-        item["created_at"] = _now_iso()
-        self._table.put_item(Item=item)
-        return item
+        return self._pg.create(proposal, created_by)
 
     def get(self, proposal_id: str) -> Optional[Dict[str, Any]]:
-        if self._pg is not None:
-            return self._pg.get(proposal_id)
-        resp = self._table.get_item(Key={"proposal_id": proposal_id})
-        return resp.get("Item")
+        return self._pg.get(proposal_id)
 
     def list(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
-        if self._pg is not None:
-            return self._pg.list(status)
-        items = self._table.scan().get("Items", [])
-        if status:
-            items = [i for i in items if i.get("status") == status]
-        return items
+        return self._pg.list(status)
 
     def approve(self, proposal_id: str, approved_by: str, settings_service) -> Dict[str, Any]:
         proposal = self.get(proposal_id)
@@ -255,36 +231,15 @@ class ThresholdProposalStore:
 
         settings_service.update_settings({"inbound_anomaly_threshold": proposal["proposed_threshold"]})
 
-        if self._pg is not None:
-            updated = self._pg.transition(
-                proposal_id, "pending",
-                "status = 'approved', approved_by = %s, approved_at = now(), previous_threshold = %s",
-                (approved_by, previous_threshold))
-            if updated is None:
-                # Approved/rejected by someone else meanwhile: undo the change.
-                settings_service.update_settings({"inbound_anomaly_threshold": previous_threshold})
-                raise ValueError("Proposal is no longer pending")
-            return updated
-
-        timestamp = _now_iso()
-        self._table.update_item(
-            Key={"proposal_id": proposal_id},
-            UpdateExpression="SET #s = :status, approved_by = :who, approved_at = :time, previous_threshold = :prev",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={
-                ":status": "approved",
-                ":who": approved_by,
-                ":time": timestamp,
-                ":prev": previous_threshold,
-            },
-        )
-        proposal.update({
-            "status": "approved",
-            "approved_by": approved_by,
-            "approved_at": timestamp,
-            "previous_threshold": previous_threshold,
-        })
-        return proposal
+        updated = self._pg.transition(
+            proposal_id, "pending",
+            "status = 'approved', approved_by = %s, approved_at = now(), previous_threshold = %s",
+            (approved_by, previous_threshold))
+        if updated is None:
+            # Approved/rejected by someone else meanwhile: undo the change.
+            settings_service.update_settings({"inbound_anomaly_threshold": previous_threshold})
+            raise ValueError("Proposal is no longer pending")
+        return updated
 
     def reject(self, proposal_id: str, rejected_by: str, reason: str = "") -> Dict[str, Any]:
         proposal = self.get(proposal_id)
@@ -292,35 +247,13 @@ class ThresholdProposalStore:
             raise ValueError("Proposal not found")
         if proposal.get("status") != "pending":
             raise ValueError(f"Proposal is already {proposal.get('status')}")
-
-        if self._pg is not None:
-            updated = self._pg.transition(
-                proposal_id, "pending",
-                "status = 'rejected', rejected_by = %s, rejected_at = now(), reject_reason = %s",
-                (rejected_by, reason))
-            if updated is None:
-                raise ValueError("Proposal is no longer pending")
-            return updated
-
-        timestamp = _now_iso()
-        self._table.update_item(
-            Key={"proposal_id": proposal_id},
-            UpdateExpression="SET #s = :status, rejected_by = :who, rejected_at = :time, reject_reason = :reason",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={
-                ":status": "rejected",
-                ":who": rejected_by,
-                ":time": timestamp,
-                ":reason": reason,
-            },
-        )
-        proposal.update({
-            "status": "rejected",
-            "rejected_by": rejected_by,
-            "rejected_at": timestamp,
-            "reject_reason": reason,
-        })
-        return proposal
+        updated = self._pg.transition(
+            proposal_id, "pending",
+            "status = 'rejected', rejected_by = %s, rejected_at = now(), reject_reason = %s",
+            (rejected_by, reason))
+        if updated is None:
+            raise ValueError("Proposal is no longer pending")
+        return updated
 
     def rollback(self, proposal_id: str, rolled_back_by: str, settings_service) -> Dict[str, Any]:
         proposal = self.get(proposal_id)
@@ -333,28 +266,9 @@ class ThresholdProposalStore:
 
         settings_service.update_settings({"inbound_anomaly_threshold": proposal["previous_threshold"]})
 
-        if self._pg is not None:
-            updated = self._pg.transition(
-                proposal_id, "approved",
-                "status = 'rolled_back', rolled_back_by = %s, rolled_back_at = now()", (rolled_back_by,))
-            if updated is None:
-                raise ValueError("Proposal is no longer approved")
-            return updated
-
-        timestamp = _now_iso()
-        self._table.update_item(
-            Key={"proposal_id": proposal_id},
-            UpdateExpression="SET #s = :status, rolled_back_by = :who, rolled_back_at = :time",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={
-                ":status": "rolled_back",
-                ":who": rolled_back_by,
-                ":time": timestamp,
-            },
-        )
-        proposal.update({
-            "status": "rolled_back",
-            "rolled_back_by": rolled_back_by,
-            "rolled_back_at": timestamp,
-        })
-        return proposal
+        updated = self._pg.transition(
+            proposal_id, "approved",
+            "status = 'rolled_back', rolled_back_by = %s, rolled_back_at = now()", (rolled_back_by,))
+        if updated is None:
+            raise ValueError("Proposal is no longer approved")
+        return updated

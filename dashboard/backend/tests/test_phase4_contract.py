@@ -1,7 +1,5 @@
 """Phase 4 (alerts, ML rules, threshold, audit, status, postmortems on
-PostgreSQL): the guarantees the migration plan asks for. PostgreSQL-only
-(DATA_BACKEND=postgres); the DynamoDB path keeps its old behaviour."""
-import os
+PostgreSQL): the guarantees the migration plan asks for."""
 import threading
 import uuid
 from unittest.mock import AsyncMock, MagicMock
@@ -12,8 +10,6 @@ from fastapi.testclient import TestClient
 
 from tests.helpers.seed import seed_domain, seed_origin, uid
 
-pytestmark = pytest.mark.skipif(os.environ.get("DATA_BACKEND", "").strip().lower() != "postgres",
-                                reason="PostgreSQL-only guarantees (DATA_BACKEND=postgres)")
 
 
 def _audit_rows(scope_id):

@@ -1,95 +1,58 @@
-import unittest
-from unittest.mock import patch
-import asyncio
-import sys
-import os
-import uuid
-import boto3
+"""Manual check of the DNS verification flow against the configured database.
 
-# Add backend to path
+Creates its own throwaway user, origin and domain in PostgreSQL, checks a
+matching TXT record verifies the domain, and removes all three afterwards.
+"""
+import os
+import sys
+import unittest
+import uuid
+from unittest.mock import patch
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../dashboard/backend')))
 
-from services.dynamodb_service import DynamoDBService
-from services.dns_service import verify_domain_dns
-from services.dns_verification_worker import dns_verification_worker
+from services.auth_service import AuthService  # noqa: E402
+from services.dynamodb_service import DynamoDBService  # noqa: E402
+from services.dns_service import verify_domain_dns  # noqa: E402
+
 
 class TestDNSVerification(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        import dotenv
-        dotenv.load_dotenv()
         self.db = DynamoDBService()
-        self.test_origin_id = "3c400818-b11f-4f4c-bd65-988b2c8360cc" # existing test origin
-        self.test_domain_name = f"e2e-test-{uuid.uuid4().hex[:8]}.com"
-        self.test_token = f"waf-token-test-{uuid.uuid4().hex[:8]}"
-        self.domain_id = str(uuid.uuid4())
-        
-        # 1. Create a test domain in DynamoDB
-        print(f"[Test] Creating test domain {self.test_domain_name} in DB...")
-        self.db.domains_table.put_item(
-            Item={
-                "id": self.domain_id,
-                "origin_id": self.test_origin_id,
-                "domain_name": self.test_domain_name,
-                "verification_token": self.test_token,
-                "dns_verified": False,
-                "ssl_status": "none"
-            }
-        )
-        
+        self.auth = AuthService()
+        tag = uuid.uuid4().hex[:8]
+        self.user = self.auth.create_user(email=f"dns-test-{tag}@example.com", username=f"dns_{tag}",
+                                          password=uuid.uuid4().hex)
+        self.origin_id = str(uuid.uuid4())
+        assert self.db.create_origin({"id": self.origin_id, "admin_user_id": self.user["user_id"],
+                                      "label": "dns-test", "ip": "203.0.113.10", "port": 80})
+        self.test_domain_name = f"e2e-test-{tag}.example.com"
+        self.test_token = f"waf-token-test-{tag}"
+        self.domain_id = self.db.create_domain({
+            "origin_id": self.origin_id, "domain_name": self.test_domain_name,
+            "verification_token": self.test_token, "dns_verified": False, "ssl_status": "none",
+        })["id"]
+
     async def asyncTearDown(self):
-        # Clean up
-        print(f"[Test] Cleaning up domain {self.test_domain_name} from DB...")
-        self.db.domains_table.delete_item(Key={"id": self.domain_id})
+        self.db.hard_delete_origin(self.origin_id)   # domains go with it
+        self.auth.delete_user(self.user["user_id"])
 
     @patch('services.dns_service.resolve_txt')
     @patch('services.dns_service.resolve_cname')
     async def test_verification_success(self, mock_cname, mock_txt):
-        print("[Test] Testing verification success scenario (Mocking matching TXT record)...")
-        # Mock TXT record to return the matching token
         mock_cname.return_value = ""
         mock_txt.return_value = [f"waf-verification-token={self.test_token}"]
-        
-        # Verify using dns_service
-        is_ok = verify_domain_dns(self.test_domain_name, self.test_token)
-        self.assertTrue(is_ok, "DNS verification should succeed with matching TXT record")
-        
-        # Run worker one-off check
-        print("[Test] Running worker iteration mock check...")
-        from boto3.dynamodb.conditions import Attr
-        
-        # Let's verify the worker can process it
-        response = self.db.domains_table.scan(
-            FilterExpression=Attr("dns_verified").eq(False) & Attr("id").eq(self.domain_id)
-        )
-        unverified = response.get("Items", [])
-        self.assertEqual(len(unverified), 1)
-        
-        # Perform worker processing
-        domain_item = unverified[0]
-        verified_ok = verify_domain_dns(domain_item["domain_name"], domain_item["verification_token"])
-        self.assertTrue(verified_ok)
-        
-        # Update in database
-        self.db.domains_table.update_item(
-            Key={"id": self.domain_id},
-            UpdateExpression="SET dns_verified = :verified, ssl_status = :ssl",
-            ExpressionAttributeValues={
-                ":verified": True,
-                ":ssl": "pending"
-            }
-        )
-        
-        # Check that it updated
-        updated_res = self.db.domains_table.get_item(Key={"id": self.domain_id})
-        updated_item = updated_res.get("Item", {})
-        self.assertTrue(updated_item.get("dns_verified"))
-        self.assertEqual(updated_item.get("ssl_status"), "pending")
-        
-        print("\n" + "=" * 60)
-        print("✅ DNS VERIFICATION SERVICE TEST SUCCESSFUL!")
-        print("   The background worker scans unverified domains, performs TXT/CNAME checks,")
-        print("   and transitions verified domains to 'dns_verified=True' and 'ssl_status=pending'")
-        print("=" * 60)
+        self.assertTrue(verify_domain_dns(self.test_domain_name, self.test_token))
+
+        pending = [d for d in self.db.list_domains(dns_verified=False) if d["id"] == self.domain_id]
+        self.assertEqual(len(pending), 1)
+        self.assertTrue(verify_domain_dns(pending[0]["domain_name"], pending[0]["verification_token"]))
+        self.db.update_domain(self.domain_id, {"dns_verified": True, "ssl_status": "pending"})
+
+        updated = self.db.get_domain(self.domain_id)
+        self.assertTrue(updated["dns_verified"])
+        self.assertEqual(updated["ssl_status"], "pending")
+
 
 if __name__ == "__main__":
     unittest.main()

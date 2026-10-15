@@ -8,7 +8,6 @@ button calls markRead(undefined) -- its own documented way of meaning
 {"alert_id": null}. The endpoint then silently does nothing and still
 returns {"success": True}, so the very next feed fetch shows the exact
 same unread count."""
-import os
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -99,34 +98,3 @@ def test_mark_all_read_with_zero_alerts_does_not_error(client, register_user, au
     resp = client.post("/api/ai/notifications/mark-read", json={}, headers=h)
     assert resp.status_code == 200, resp.text
 
-
-@pytest.mark.skipif(os.environ.get("DATA_BACKEND", "").strip().lower() == "postgres",
-                    reason="DynamoDB key-schema check; in PostgreSQL alert_id is the primary key")
-def test_mark_read_uses_the_real_composite_key_schema(client, register_user, auth_header, monkeypatch):
-    """The deeper real bug: the key schema is composite, not a plain
-    alert_id key, and a Key that does not match it raises
-    ValidationException -- which this handler's blanket except turns into
-    a 500. This locks in the exact Key shape passed to update_item, which
-    a behavioural pass/fail on the fake in-memory table alone cannot
-    distinguish (it matches on whatever subset of fields is given, unlike
-    real DynamoDB).
-
-    Updated 2026-09-23 for the migration to waf_alerts_v2: the partition
-    key is now origin_id (the origin the alert belongs to) instead of
-    user_id, which was the constant "default-user" and identified
-    nothing."""
-    from unittest.mock import MagicMock
-
-    user = register_user(email="notif-user4@example.com", username="notif_user4")
-    h = auth_header(user["access_token"])
-    _seed_alert("alert-composite")
-
-    update_spy = MagicMock()
-    monkeypatch.setattr(ai_summary_module.db.alerts_table, "update_item", update_spy)
-
-    resp = client.post("/api/ai/notifications/mark-read", json={"alert_id": "alert-composite"}, headers=h)
-    assert resp.status_code == 200, resp.text
-
-    assert update_spy.call_count == 1
-    key_used = update_spy.call_args.kwargs["Key"]
-    assert key_used == {"origin_id": "unattributed", "alert_id": "alert-composite"}
