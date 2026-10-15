@@ -2,9 +2,12 @@ import os
 import time
 import hmac
 import hashlib
+import base64
+import secrets
+from urllib.parse import urlencode
 import logging
-from typing import Optional, Dict
-from datetime import datetime, timedelta
+from typing import Optional, Dict, Tuple
+from datetime import datetime, timedelta, timezone
 
 import requests
 from dotenv import load_dotenv, find_dotenv
@@ -46,6 +49,10 @@ ph = PasswordHasher(
     memory_cost=65536,
     parallelism=2,
 )
+
+
+class GoogleLoginRejected(Exception):
+    """Google sign-in refused; str(exc) is a short code for the login page."""
 
 
 class AuthService:
@@ -187,18 +194,47 @@ class AuthService:
         self.update_last_login(user["user_id"])
         return user
 
-    def get_google_auth_url(self) -> str:
+    # --- Google OAuth (N21: state + PKCE + nonce; N10: no linking by email) ---
+    # The per-login state, PKCE verifier and nonce travel in a short-lived
+    # HttpOnly cookie, signed with a key derived from (not equal to) the session
+    # key so it can never be mistaken for a session token.
+    _OAUTH_KEY_SUFFIX = "|google-oauth-flow"
+
+    def start_google_flow(self, link: bool = False) -> Tuple[str, str]:
+        """Returns (auth_url, signed_flow_cookie)."""
+        state = secrets.token_urlsafe(32)
+        verifier = secrets.token_urlsafe(64)
+        nonce = secrets.token_urlsafe(24)
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
         params = {
             "client_id": GOOGLE_CLIENT_ID,
             "redirect_uri": GOOGLE_REDIRECT_URI,
             "response_type": "code",
             "scope": "openid email profile",
-            "access_type": "offline",
+            "state": state,
+            "nonce": nonce,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
         }
-        query = "&".join(f"{k}={v}" for k, v in params.items())
-        return f"https://accounts.google.com/o/oauth2/v2/auth?{query}"
+        flow = jwt.encode(
+            {"state": state, "cv": verifier, "nonce": nonce, "link": bool(link),
+             "exp": datetime.now(timezone.utc) + timedelta(minutes=10)},
+            SECRET_KEY + self._OAUTH_KEY_SUFFIX, algorithm=ALGORITHM)
+        return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}", flow
 
-    def exchange_google_code(self, code: str) -> Optional[Dict]:
+    def read_google_flow(self, flow_cookie: Optional[str], state: Optional[str]) -> Optional[Dict]:
+        """The flow started in this browser, if state matches; else None."""
+        if not flow_cookie or not state:
+            return None
+        try:
+            flow = jwt.decode(flow_cookie, SECRET_KEY + self._OAUTH_KEY_SUFFIX, algorithms=[ALGORITHM])
+        except Exception:
+            return None
+        if not hmac.compare_digest(str(flow.get("state", "")), str(state)):
+            return None
+        return flow
+
+    def exchange_google_code(self, code: str, code_verifier: str, nonce: str) -> Optional[Dict]:
         token_resp = requests.post(
             "https://oauth2.googleapis.com/token",
             data={
@@ -207,14 +243,25 @@ class AuthService:
                 "client_secret": GOOGLE_CLIENT_SECRET,
                 "redirect_uri": GOOGLE_REDIRECT_URI,
                 "grant_type": "authorization_code",
+                "code_verifier": code_verifier,
             },
+            timeout=10,
         )
         if token_resp.status_code != 200:
-            print("Google token exchange failed:", token_resp.text)
+            logger.warning("Google token exchange failed: HTTP %s", token_resp.status_code)
             return None
 
         tokens = token_resp.json()
         access_token = tokens.get("access_token")
+        # The id_token comes straight from Google's token endpoint over TLS, so
+        # its claims can be read without re-verifying the signature (OIDC 3.1.3.7).
+        try:
+            claims = jwt.decode(tokens.get("id_token", ""), options={"verify_signature": False})
+        except Exception:
+            return None
+        if not hmac.compare_digest(str(claims.get("nonce", "")), str(nonce)):
+            logger.warning("Google id_token nonce mismatch")
+            return None
 
         info_resp = requests.get(
             "https://www.googleapis.com/oauth2/v3/userinfo",
@@ -225,15 +272,29 @@ class AuthService:
 
         return info_resp.json()
 
-    def login_or_register_google(self, google_user: Dict) -> Dict:
+    def login_or_register_google(self, google_user: Dict, link_to: Optional[Dict] = None) -> Dict:
+        """N10: Google signs in only to an account it is linked to. An email
+        match alone never grants access to an existing account: the owner must
+        sign in with the password first and link Google (link_to)."""
         provider_id = google_user.get("sub")
         email = google_user.get("email", "")
         name = google_user.get("name", email.split("@")[0])
         avatar = google_user.get("picture", "")
+        if not provider_id or google_user.get("email_verified") is not True:
+            raise GoogleLoginRejected("google_email_unverified")
 
         user = self.get_user_by_provider("google", provider_id)
-        if not user:
-            user = self.get_user_by_email(email)
+        if link_to is not None:
+            if user and user["user_id"] != link_to["user_id"]:
+                raise GoogleLoginRejected("google_linked_elsewhere")
+            if not user:
+                try:
+                    self._pg.link_identity(link_to["user_id"], "google", provider_id)
+                except ValueError:
+                    raise GoogleLoginRejected("google_link_conflict")
+            user = self.get_user_by_id(link_to["user_id"])
+        elif not user and self.get_user_by_email(email):
+            raise GoogleLoginRejected("google_link_required")
 
         if user:
             self.update_last_login(user["user_id"])

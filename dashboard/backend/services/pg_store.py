@@ -795,8 +795,12 @@ class PgUserRepository:
     def get_by_provider(self, provider: str, provider_id: str) -> Optional[Dict]:
         if not provider_id:
             return None
+        # Join on the identity itself, not on auth_provider: a password account
+        # can have Google linked to it later (N10), and must be found by it.
         return self._to_user(pool.q1(
-            _USER_SELECT.replace("LEFT JOIN", "JOIN") + "WHERE i.provider = %s AND i.provider_user_id = %s",
+            _USER_SELECT.split("FROM users u")[0]
+            + "FROM user_identities i JOIN users u ON u.user_id = i.user_id "
+            "WHERE i.provider = %s AND i.provider_user_id = %s",
             (provider, str(provider_id))))
 
     def create(self, email: str, username: str, password_hash: Optional[str], role: str,
@@ -814,6 +818,13 @@ class PgUserRepository:
                 pool.exec_("INSERT INTO user_identities (provider, provider_user_id, user_id) "
                            "VALUES (%s, %s, %s)", (auth_provider, str(provider_id), row["user_id"]))
         return self.get_by_id(row["user_id"])
+
+    def link_identity(self, user_id: str, provider: str, provider_user_id: str) -> None:
+        """Attach an OAuth identity to an existing, signed-in user. An identity
+        already linked to someone, or a second one of the same provider for this
+        user, raises UniqueConflict."""
+        pool.exec_("INSERT INTO user_identities (provider, provider_user_id, user_id) "
+                   "VALUES (%s, %s, %s)", (provider, str(provider_user_id), as_uuid(user_id)))
 
     def touch_login(self, user_id: str) -> None:
         uid = as_uuid(user_id)

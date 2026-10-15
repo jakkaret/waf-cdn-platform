@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends, Response, Request, status
 from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from typing import Literal, Optional
-from services.auth_service import AuthService
+from services.auth_service import AuthService, GoogleLoginRejected
 from services.rbac import get_current_user, require_admin
 from services.rate_limiter import limiter
 
@@ -144,19 +144,50 @@ async def logout(response: Response):
 
 # Google OAuth
 
+GOOGLE_FLOW_COOKIE = "g_oauth_flow"
+GOOGLE_FLOW_PATH = "/api/auth/google"
+
+
+def _google_error(code: str) -> RedirectResponse:
+    resp = RedirectResponse(url=f"/login?error={code}", status_code=302)
+    resp.delete_cookie(GOOGLE_FLOW_COOKIE, path=GOOGLE_FLOW_PATH, samesite="lax", secure=_cookie_secure())
+    return resp
+
+
 @router.get("/google")
-async def google_login():
-    url = auth_service.get_google_auth_url()
-    return RedirectResponse(url)
+async def google_login(request: Request, link: bool = False):
+    """Start Google sign-in. link=true attaches Google to the account that is
+    signed in right now (the only way to use Google on an existing account)."""
+    if link:
+        get_current_user(request, None)  # 401 unless signed in
+    url, flow = auth_service.start_google_flow(link=link)
+    resp = RedirectResponse(url)
+    resp.set_cookie(GOOGLE_FLOW_COOKIE, flow, httponly=True, samesite="lax",
+                    secure=_cookie_secure(), max_age=600, path=GOOGLE_FLOW_PATH)
+    return resp
 
 
 @router.get("/google/callback")
-async def google_callback(code: str, response: Response):
-    google_user = auth_service.exchange_google_code(code)
+async def google_callback(request: Request, code: str = "", state: str = ""):
+    # N21: the callback must finish a flow this browser started (state), with
+    # the PKCE verifier and nonce from that flow.
+    flow = auth_service.read_google_flow(request.cookies.get(GOOGLE_FLOW_COOKIE), state)
+    if not flow or not code:
+        return _google_error("google_state")
+    google_user = auth_service.exchange_google_code(code, flow["cv"], flow["nonce"])
     if not google_user:
-        raise HTTPException(status_code=400, detail="Google authentication failed")
+        return _google_error("google_failed")
 
-    user = auth_service.login_or_register_google(google_user)
+    link_to = None
+    if flow.get("link"):
+        try:
+            link_to = get_current_user(request, None)
+        except HTTPException:
+            return _google_error("google_link_session")
+    try:
+        user = auth_service.login_or_register_google(google_user, link_to=link_to)
+    except GoogleLoginRejected as exc:
+        return _google_error(str(exc))
 
     token = auth_service.create_access_token({
         "sub": user["user_id"],
@@ -169,9 +200,10 @@ async def google_callback(code: str, response: Response):
     # ใช้ HttpOnly cookie เป็น auth mechanism เพียงอย่างเดียว
     # Frontend จะเรียก GET /api/auth/me ผ่าน cookie เพื่อ hydrate session เอง
     resp = RedirectResponse(
-        url="/oauth-success",
+        url="/settings?google=linked" if link_to else "/oauth-success",
         status_code=302
     )
+    resp.delete_cookie(GOOGLE_FLOW_COOKIE, path=GOOGLE_FLOW_PATH, samesite="lax", secure=_cookie_secure())
     _set_session_cookies(resp, token)
     return resp
 
