@@ -12,6 +12,7 @@ Scenario: an analysed request queues rule proposals for admin review.
 
 The ML service and ClickHouse are faked; MLRuleService runs for real on an in-memory table.
 """
+import os
 import asyncio
 from unittest.mock import MagicMock
 
@@ -70,14 +71,34 @@ class _FakeTable:
             item[names.get(field, field)] = ExpressionAttributeValues[value]
 
 
-@pytest.fixture()
-def table(monkeypatch):
-    table = _FakeTable()
+PG_MODE = os.environ.get("DATA_BACKEND", "").strip().lower() == "postgres"
+dynamodb_only = pytest.mark.skipif(PG_MODE, reason="DynamoDB-specific (pagination / conditional update race)")
+
+
+class _PgRulesView:
+    """PostgreSQL mode: what the tests read as `table.items` -- the rows of
+    waf.pending_rules (emptied before every test by conftest)."""
+
+    @property
+    def items(self):
+        from services.pg_store import PgPendingRuleRepository
+        return PgPendingRuleRepository().list()
+
+
+def _make_table(monkeypatch, page_size=None):
+    monkeypatch.setattr(ml_rule_service_module, "RuleManager", MagicMock())
+    if PG_MODE:
+        return _PgRulesView()
+    table = _FakeTable(page_size=page_size)
     fake_db = MagicMock()
     fake_db.dynamodb.Table.return_value = table
     monkeypatch.setattr(ml_rule_service_module, "DynamoDBService", lambda: fake_db)
-    monkeypatch.setattr(ml_rule_service_module, "RuleManager", MagicMock())
     return table
+
+
+@pytest.fixture()
+def table(monkeypatch):
+    return _make_table(monkeypatch)
 
 
 def legacy_rule(n):
@@ -124,6 +145,7 @@ def test_reviewed_rule_is_not_a_merge_target(table):
     assert service.find_pending_by_dedup_key("") is None
 
 
+@dynamodb_only
 def test_rows_written_before_the_new_fields_get_defaults(table):
     table.items.append({"rule_id": "old", "created_at": "2026-09-01T00:00:00Z", "status": "pending",
                         "created_by": "cve-auto", "pattern": "@rx x"})
@@ -324,11 +346,7 @@ def test_admin_backtest_stores_the_result(rules_client, register_user, auth_head
 # ---------------------------------------------------------------------------
 
 def test_reject_legacy_rejects_only_pending_rf_rules_across_pages(monkeypatch):
-    table = _FakeTable(page_size=2)
-    fake_db = MagicMock()
-    fake_db.dynamodb.Table.return_value = table
-    monkeypatch.setattr(ml_rule_service_module, "DynamoDBService", lambda: fake_db)
-    monkeypatch.setattr(ml_rule_service_module, "RuleManager", MagicMock())
+    table = _make_table(monkeypatch, page_size=2)
     service = MLRuleService()
     legacy = [service.create_pending_rule(legacy_rule(n)) for n in range(3)]
     service.create_pending_rule({"pattern": "@rx x", "source_url": "/old"})  # written before `generator` existed
@@ -342,6 +360,7 @@ def test_reject_legacy_rejects_only_pending_rf_rules_across_pages(monkeypatch):
     assert service.get_rule_detail(legacy[0]["rule_id"])["reject_reason"] == "retired"
 
 
+@dynamodb_only
 def test_reject_legacy_skips_a_rule_reviewed_meanwhile(table):
     service = MLRuleService()
     rule = service.create_pending_rule(legacy_rule(1))
@@ -371,3 +390,13 @@ def test_reject_legacy_endpoint_is_admin_only(rules_client, register_user, auth_
     assert resp.status_code == 200 and resp.json() == {"rejected": 1, "skipped": 0}
     assert table.items[0]["status"] == "rejected"
     assert events and events[0]["details"]["rejected"] == 1
+
+
+@pytest.mark.skipif(not PG_MODE, reason="PostgreSQL: the reject is one UPDATE ... WHERE status = 'pending'")
+def test_reject_legacy_leaves_an_already_approved_rule_alone(table, monkeypatch):
+    service = MLRuleService()
+    rule = service.create_pending_rule(legacy_rule(1))
+    service.rule_manager.list_rules.return_value = []
+    service.approve_rule(rule["rule_id"], approved_by="admin")
+    assert service.reject_legacy_pending("op", "retired") == {"rejected": 0, "skipped": 0}
+    assert table.items[0]["status"] == "approved"

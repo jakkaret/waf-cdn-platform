@@ -17,6 +17,9 @@ import pytest
 from api import ai_summary as ai_summary_module
 from api.ai_summary import build_incident_timeline
 import services.audit_log as audit_log_module
+from tests.helpers.seed import uid
+
+ORIGIN_1 = uid("origin-1")  # audit scope_id must be an origin uuid (or "global")
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +29,7 @@ def _patch_audit_log_db(monkeypatch, fake_infrastructure):
     monkeypatch.setattr(audit_log_module, "db", FakeDynamoDBService())
 
 
-def _origin(origin_id="origin-1", ip="203.0.113.9"):
+def _origin(origin_id=ORIGIN_1, ip="203.0.113.9"):
     return {"id": origin_id, "ip": ip, "label": "test-origin"}
 
 
@@ -44,7 +47,7 @@ def test_timeline_correlates_a_global_settings_change_with_an_origin_scoped_aler
     )
     # An origin-scoped event in the same window, to prove both scopes merge.
     audit_log_module.write_audit_event(
-        scope_id="origin-1", actor_user_id="owner-1", actor_username="owner_x",
+        scope_id=ORIGIN_1, actor_user_id="owner-1", actor_username="owner_x",
         action="origin.update", summary="แก้ origin: label",
         details={"label": {"old": "a", "new": "b"}},
         now=datetime(2026, 9, 22, 3, 5, 0, tzinfo=timezone.utc),

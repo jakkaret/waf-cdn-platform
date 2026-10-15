@@ -64,6 +64,9 @@ class _FakeSettingsService:
 
 @pytest.fixture
 def store():
+    from services.dynamodb_service import data_backend
+    if data_backend() == "postgres":
+        return ThresholdProposalStore()   # waf.threshold_proposals, emptied per test
     s = ThresholdProposalStore.__new__(ThresholdProposalStore)
     s._table = _FakeTable()
     return s
@@ -78,6 +81,7 @@ def _sample_proposal():
     return {
         "current_threshold": 5,
         "proposed_threshold": 7,
+        "lookback_hours": 24,   # always set by build_proposal(); NOT NULL in PostgreSQL
         "reason": "test reason",
         "evidence": {"origins": []},
     }

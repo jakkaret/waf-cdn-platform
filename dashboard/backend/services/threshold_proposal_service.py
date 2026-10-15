@@ -201,14 +201,24 @@ class ThresholdProposalStore:
     never invents a default identity if the caller omits one.
     """
 
+    _pg = None  # PgThresholdProposalRepository in PostgreSQL mode
+
     def __init__(self):
         from services.dynamodb_service import DynamoDBService, data_backend
         self.db = DynamoDBService()
-        # postgres: no boto3 table handle (built at import time in
-        # api/threshold_proposals.py). The SQL lands in migration Phase 4.
-        self._table = None if data_backend() == "postgres" else self.db.dynamodb.Table("waf_threshold_proposals")
+        # postgres: waf.threshold_proposals (no I/O here: built at import
+        # time in api/threshold_proposals.py).
+        self._pg = None
+        if data_backend() == "postgres":
+            from services.pg_store import PgThresholdProposalRepository
+            self._pg = PgThresholdProposalRepository()
+            self._table = None
+        else:
+            self._table = self.db.dynamodb.Table("waf_threshold_proposals")
 
     def create(self, proposal: Dict[str, Any], created_by: str = "ml-auto") -> Dict[str, Any]:
+        if self._pg is not None:
+            return self._pg.create(proposal, created_by)
         item = dict(proposal)
         item["proposal_id"] = str(uuid.uuid4())
         item["status"] = "pending"
@@ -218,10 +228,14 @@ class ThresholdProposalStore:
         return item
 
     def get(self, proposal_id: str) -> Optional[Dict[str, Any]]:
+        if self._pg is not None:
+            return self._pg.get(proposal_id)
         resp = self._table.get_item(Key={"proposal_id": proposal_id})
         return resp.get("Item")
 
     def list(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        if self._pg is not None:
+            return self._pg.list(status)
         items = self._table.scan().get("Items", [])
         if status:
             items = [i for i in items if i.get("status") == status]
@@ -240,6 +254,17 @@ class ThresholdProposalStore:
         previous_threshold = settings_service.get_settings().get("inbound_anomaly_threshold")
 
         settings_service.update_settings({"inbound_anomaly_threshold": proposal["proposed_threshold"]})
+
+        if self._pg is not None:
+            updated = self._pg.transition(
+                proposal_id, "pending",
+                "status = 'approved', approved_by = %s, approved_at = now(), previous_threshold = %s",
+                (approved_by, previous_threshold))
+            if updated is None:
+                # Approved/rejected by someone else meanwhile: undo the change.
+                settings_service.update_settings({"inbound_anomaly_threshold": previous_threshold})
+                raise ValueError("Proposal is no longer pending")
+            return updated
 
         timestamp = _now_iso()
         self._table.update_item(
@@ -267,6 +292,15 @@ class ThresholdProposalStore:
             raise ValueError("Proposal not found")
         if proposal.get("status") != "pending":
             raise ValueError(f"Proposal is already {proposal.get('status')}")
+
+        if self._pg is not None:
+            updated = self._pg.transition(
+                proposal_id, "pending",
+                "status = 'rejected', rejected_by = %s, rejected_at = now(), reject_reason = %s",
+                (rejected_by, reason))
+            if updated is None:
+                raise ValueError("Proposal is no longer pending")
+            return updated
 
         timestamp = _now_iso()
         self._table.update_item(
@@ -298,6 +332,14 @@ class ThresholdProposalStore:
             )
 
         settings_service.update_settings({"inbound_anomaly_threshold": proposal["previous_threshold"]})
+
+        if self._pg is not None:
+            updated = self._pg.transition(
+                proposal_id, "approved",
+                "status = 'rolled_back', rolled_back_by = %s, rolled_back_at = now()", (rolled_back_by,))
+            if updated is None:
+                raise ValueError("Proposal is no longer approved")
+            return updated
 
         timestamp = _now_iso()
         self._table.update_item(

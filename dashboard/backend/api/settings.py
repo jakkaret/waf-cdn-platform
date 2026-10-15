@@ -1,9 +1,11 @@
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from services.settings_service import SettingsService, mask_settings
 from services.rbac import require_viewer_or_above, require_admin
 from services import audit_log
+from services.txn import atomic
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 service = SettingsService()
@@ -67,16 +69,33 @@ async def update_settings(
                 changed[field] = {"old": old_value, "new": new_value}
 
         if changed:
-            audit_log.write_audit_event(
-                scope_id=AUDIT_SCOPE_GLOBAL,
-                actor_user_id=current_user.get("user_id"),
-                actor_username=current_user.get("username", ""),
-                action="settings.update",
-                summary=f"แก้ system settings: {', '.join(changed.keys())}",
-                details=changed,
-            )
+            try:
+                # Settings live in a file, so they cannot share a database
+                # transaction: the file is written first, then the audit
+                # event in its own short transaction. If the audit cannot be
+                # written (PostgreSQL audit is fail-closed), the previous
+                # values are put back so no change goes unrecorded.
+                with atomic():
+                    audit_log.write_audit_event(
+                        scope_id=AUDIT_SCOPE_GLOBAL,
+                        actor_user_id=current_user.get("user_id"),
+                        actor_username=current_user.get("username", ""),
+                        action="settings.update",
+                        summary=f"แก้ system settings: {', '.join(changed.keys())}",
+                        details=changed,
+                    )
+            except Exception as audit_exc:
+                try:
+                    service.update_settings({k: before.get(k) for k in changed})
+                except Exception as undo_exc:
+                    logging.getLogger(__name__).critical(
+                        "settings changed without an audit event and could not be reverted: "
+                        "audit=%s revert=%s", audit_exc, undo_exc)
+                raise HTTPException(status_code=500, detail="Settings not saved: the audit log is unavailable")
 
         return {"status": "success", "settings": mask_settings(updated)}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

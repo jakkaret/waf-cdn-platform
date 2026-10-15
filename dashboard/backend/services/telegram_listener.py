@@ -128,7 +128,7 @@ async def dispatch_telegram_alert(data: dict):
 
         # 2. Save alert into AWS DynamoDB waf_alerts with AI analysis
         timestamp_int = int(data.get("timestamp") or time.time())
-        rand_suffix = secrets.token_hex(2).upper()
+        rand_suffix = secrets.token_hex(8).upper()  # 2 bytes collided within a second
         raw_alert_id = data.get("alert_id")
         if raw_alert_id:
             # Strip IP suffix if existing caller passed timestamp-ip format

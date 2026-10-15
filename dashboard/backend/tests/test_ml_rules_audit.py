@@ -70,9 +70,13 @@ def test_approving_a_rule_writes_a_real_audit_event(
     client, register_user, auth_header, fake_rule_service,
 ):
     admin_h = _admin(client, register_user, auth_header)
-    fake_rule_service.approve_rule.return_value = {
-        "rule_id": "rule-1", "attack_type": "SQLi", "deployed_rule_id": 990123,
-    }
+    def _approve(rule_id, approved_by, on_approved=None, on_deploy_failed=None):
+        # The service records the audit event itself (same transaction as the
+        # status change), through the on_approved callback the endpoint gives it.
+        rule = {"rule_id": "rule-1", "attack_type": "SQLi", "deployed_rule_id": 990123}
+        on_approved(rule)
+        return rule
+    fake_rule_service.approve_rule.side_effect = _approve
 
     resp = client.post("/api/ml-rules/rule-1/approve", headers=admin_h)
     assert resp.status_code == 200, resp.text

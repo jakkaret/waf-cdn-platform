@@ -13,6 +13,7 @@ from services.otp_config import (
     save_origin_config as save_otp_origin_config,
 )
 from services import audit_log
+from services.txn import atomic
 from services.cve_feed import DEFAULT_WINDOW_DAYS, fetch_recent_cves, match_cves_to_origins, select_search_terms
 
 router = APIRouter(prefix="/api/origins", tags=["Origins"])
@@ -291,31 +292,35 @@ async def update_origin(
                 detail="A direct-mode origin needs a public IP address (not a hostname or one of the WAF's own hosts)",
             )
     try:
-        success = origin_service.update_origin(
-            origin_id=origin_id,
-            label=payload.label,
-            ip=payload.ip,
-            port=payload.port,
-            tech_stack_tags=payload.tech_stack_tags,
-        )
-        if success and is_direct and (payload.ip or payload.port is not None):
-            if payload.port in (80, 443):
+        # The change and its audit event commit together (PostgreSQL).
+        with atomic():
+            success = origin_service.update_origin(
+                origin_id=origin_id,
+                label=payload.label,
+                ip=payload.ip,
+                port=payload.port,
+                tech_stack_tags=payload.tech_stack_tags,
+            )
+            route_changed = success and is_direct and (payload.ip or payload.port is not None)
+            if route_changed and payload.port in (80, 443):
                 # Re-derive the scheme for the standard ports; other ports keep
                 # the one the connect flow detected.
                 origin_service.db.update_origin(
                     origin_id, {"origin_scheme": "https" if payload.port == 443 else "http"})
+            if success:
+                changed = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+                audit_log.write_audit_event(
+                    scope_id=origin_id,
+                    actor_user_id=current_user.get("user_id"),
+                    actor_username=current_user.get("username", ""),
+                    action="origin.update",
+                    summary=f"แก้ไข origin: {', '.join(changed.keys()) or 'ไม่มีการเปลี่ยนแปลง'}",
+                    details=changed,
+                )
+        if route_changed:
             from api.domains import schedule_site_reconcile
             schedule_site_reconcile()
         if success:
-            changed = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
-            audit_log.write_audit_event(
-                scope_id=origin_id,
-                actor_user_id=current_user.get("user_id"),
-                actor_username=current_user.get("username", ""),
-                action="origin.update",
-                summary=f"แก้ไข origin: {', '.join(changed.keys()) or 'ไม่มีการเปลี่ยนแปลง'}",
-                details=changed,
-            )
             return {"status": "success", "message": "Origin updated successfully"}
         raise HTTPException(status_code=500, detail="Failed to update origin")
     except ValueError as e:
@@ -388,19 +393,20 @@ async def add_origin_viewer(
     target_id = target.get("user_id")
     if target_id == origin.get("admin_user_id"):
         raise HTTPException(status_code=400, detail="You already own this origin")
-    success = origin_service.db.add_origin_viewer(origin.get("id"), target_id)
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to add viewer")
+    with atomic():
+        success = origin_service.db.add_origin_viewer(origin.get("id"), target_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to add viewer")
+        audit_log.write_audit_event(
+            scope_id=origin.get("id"),
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="viewer.grant",
+            summary=f"เพิ่ม viewer: {target.get('email', target_id)}",
+            details={"viewer_user_id": target_id, "email": target.get("email", "")},
+        )
     from services.tenant_service import invalidate_tenant_cache
     invalidate_tenant_cache(target_id)
-    audit_log.write_audit_event(
-        scope_id=origin.get("id"),
-        actor_user_id=current_user.get("user_id"),
-        actor_username=current_user.get("username", ""),
-        action="viewer.grant",
-        summary=f"เพิ่ม viewer: {target.get('email', target_id)}",
-        details={"viewer_user_id": target_id, "email": target.get("email", "")},
-    )
     return {"status": "success", "viewer": {"user_id": target_id, "username": target.get("username", ""), "email": target.get("email", "")}}
 
 @router.delete("/{origin_id}/viewers/{viewer_user_id}")
@@ -409,19 +415,20 @@ async def remove_origin_viewer(
     origin: dict = Depends(verify_origin_ownership),
     current_user: dict = Depends(get_current_user),
 ):
-    success = origin_service.db.remove_origin_viewer(origin.get("id"), viewer_user_id)
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to remove viewer")
+    with atomic():
+        success = origin_service.db.remove_origin_viewer(origin.get("id"), viewer_user_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to remove viewer")
+        audit_log.write_audit_event(
+            scope_id=origin.get("id"),
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="viewer.revoke",
+            summary=f"เอา viewer ออก: {viewer_user_id}",
+            details={"viewer_user_id": viewer_user_id},
+        )
     from services.tenant_service import invalidate_tenant_cache
     invalidate_tenant_cache(viewer_user_id)
-    audit_log.write_audit_event(
-        scope_id=origin.get("id"),
-        actor_user_id=current_user.get("user_id"),
-        actor_username=current_user.get("username", ""),
-        action="viewer.revoke",
-        summary=f"เอา viewer ออก: {viewer_user_id}",
-        details={"viewer_user_id": viewer_user_id},
-    )
     return {"status": "success", "message": "Viewer removed"}
 
 # --- Team Workspace (2026-09-22): editor role, mirrors viewer endpoints
@@ -446,19 +453,20 @@ async def add_origin_editor(
     target_id = target.get("user_id")
     if target_id == origin.get("admin_user_id"):
         raise HTTPException(status_code=400, detail="You already own this origin")
-    success = origin_service.db.add_origin_editor(origin.get("id"), target_id)
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to add editor")
+    with atomic():
+        success = origin_service.db.add_origin_editor(origin.get("id"), target_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to add editor")
+        audit_log.write_audit_event(
+            scope_id=origin.get("id"),
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="editor.grant",
+            summary=f"เพิ่ม editor: {target.get('email', target_id)}",
+            details={"editor_user_id": target_id, "email": target.get("email", "")},
+        )
     from services.tenant_service import invalidate_tenant_cache
     invalidate_tenant_cache(target_id)
-    audit_log.write_audit_event(
-        scope_id=origin.get("id"),
-        actor_user_id=current_user.get("user_id"),
-        actor_username=current_user.get("username", ""),
-        action="editor.grant",
-        summary=f"เพิ่ม editor: {target.get('email', target_id)}",
-        details={"editor_user_id": target_id, "email": target.get("email", "")},
-    )
     return {"status": "success", "editor": {"user_id": target_id, "username": target.get("username", ""), "email": target.get("email", "")}}
 
 @router.delete("/{origin_id}/editors/{editor_user_id}")
@@ -471,19 +479,20 @@ async def remove_origin_editor(
         # The creator is the Admin that can never be removed, so an origin
         # can never end up without one.
         raise HTTPException(status_code=400, detail="The origin's creator cannot be removed")
-    success = origin_service.db.remove_origin_editor(origin.get("id"), editor_user_id)
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to remove editor")
+    with atomic():
+        success = origin_service.db.remove_origin_editor(origin.get("id"), editor_user_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to remove editor")
+        audit_log.write_audit_event(
+            scope_id=origin.get("id"),
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="editor.revoke",
+            summary=f"เอา editor ออก: {editor_user_id}",
+            details={"editor_user_id": editor_user_id},
+        )
     from services.tenant_service import invalidate_tenant_cache
     invalidate_tenant_cache(editor_user_id)
-    audit_log.write_audit_event(
-        scope_id=origin.get("id"),
-        actor_user_id=current_user.get("user_id"),
-        actor_username=current_user.get("username", ""),
-        action="editor.revoke",
-        summary=f"เอา editor ออก: {editor_user_id}",
-        details={"editor_user_id": editor_user_id},
-    )
     return {"status": "success", "message": "Editor removed"}
 
 @router.get("/{origin_id}/audit-log")

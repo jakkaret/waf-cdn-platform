@@ -162,7 +162,7 @@ def test_record_history_sample_increments_sample_and_healthy_counts(db):
     public_status._record_history_sample(components, db=db, now=now)
     public_status._record_history_sample(components, db=db, now=now)
 
-    row = db.status_history_table.get_item(Key={"component_id": "th", "date_bucket": "2026-09-22"})["Item"]
+    [row] = [r for r in db.get_status_history(["th"])["th"] if r["date_bucket"] == "2026-09-22"]
     assert row["sample_count"] == 2
     assert row["healthy_count"] == 2
 
@@ -172,7 +172,7 @@ def test_record_history_sample_does_not_count_a_degraded_sample_as_healthy(db):
     public_status._record_history_sample(
         [{"id": "th", "name": "Thailand", "status": "degraded"}], db=db, now=now,
     )
-    row = db.status_history_table.get_item(Key={"component_id": "th", "date_bucket": "2026-09-22"})["Item"]
+    [row] = [r for r in db.get_status_history(["th"])["th"] if r["date_bucket"] == "2026-09-22"]
     assert row["sample_count"] == 1
     assert row["healthy_count"] == 0
 

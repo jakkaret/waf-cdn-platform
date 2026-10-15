@@ -12,15 +12,23 @@ updates, viewer/editor grants) -- not by what's easiest to instrument.
 Read endpoints are never logged here.
 """
 import datetime as dt
+import os
+
+import pytest
 
 import services.audit_log as audit_log
+from tests.helpers.seed import uid
+
+PG_MODE = os.environ.get("DATA_BACKEND", "").strip().lower() == "postgres"
+# scope_id is an origin uuid or "global"; actor ids are user uuids.
+ORIGIN_123, O1, ALICE = uid("origin-123"), uid("o1"), uid("user-alice")
 
 
 def test_write_audit_event_persists_the_real_fields(db):
     now = dt.datetime(2026, 9, 22, 3, 10, tzinfo=dt.timezone.utc)
     audit_log.write_audit_event(
-        scope_id="origin-123",
-        actor_user_id="user-alice",
+        scope_id=ORIGIN_123,
+        actor_user_id=ALICE,
         actor_username="alice",
         action="settings.update",
         summary="เปลี่ยน paranoia_level จาก 1 เป็น 3",
@@ -28,40 +36,37 @@ def test_write_audit_event_persists_the_real_fields(db):
         db=db,
         now=now,
     )
-    rows = db.audit_log_table.query(
-        KeyConditionExpression=__import__("boto3").dynamodb.conditions.Key("scope_id").eq("origin-123")
-    )["Items"]
+    rows = db.query_audit_events(ORIGIN_123)
     assert len(rows) == 1
     row = rows[0]
-    assert row["actor_user_id"] == "user-alice"
+    assert row["actor_user_id"] == ALICE
     assert row["action"] == "settings.update"
     assert row["details"]["old"] == 1
     assert row["details"]["new"] == 3
-    assert row["timestamp"] == now.isoformat()
+    assert dt.datetime.fromisoformat(row["timestamp"]) == now
 
 
+@pytest.mark.skipif(PG_MODE, reason="DynamoDB TTL attribute; PostgreSQL uses run_retention() (tests/pg)")
 def test_write_audit_event_sets_a_future_ttl(db):
     now = dt.datetime(2026, 9, 22, 3, 10, tzinfo=dt.timezone.utc)
     audit_log.write_audit_event(
-        scope_id="origin-123", actor_user_id="u", actor_username="u",
+        scope_id=ORIGIN_123, actor_user_id="u", actor_username="u",
         action="origin.update", summary="test", db=db, now=now,
     )
     row = db.audit_log_table.query(
-        KeyConditionExpression=__import__("boto3").dynamodb.conditions.Key("scope_id").eq("origin-123")
+        KeyConditionExpression=__import__("boto3").dynamodb.conditions.Key("scope_id").eq(ORIGIN_123)
     )["Items"][0]
     assert row["expires_at"] > int(now.timestamp())
 
 
 def test_two_events_for_the_same_scope_never_collide(db):
     now = dt.datetime(2026, 9, 22, 3, 10, tzinfo=dt.timezone.utc)
-    audit_log.write_audit_event(scope_id="o1", actor_user_id="u", actor_username="u", action="a", summary="1", db=db, now=now)
-    audit_log.write_audit_event(scope_id="o1", actor_user_id="u", actor_username="u", action="a", summary="2", db=db, now=now)
-    rows = db.audit_log_table.query(
-        KeyConditionExpression=__import__("boto3").dynamodb.conditions.Key("scope_id").eq("o1")
-    )["Items"]
-    assert len(rows) == 2
+    audit_log.write_audit_event(scope_id=O1, actor_user_id="u", actor_username="u", action="a", summary="1", db=db, now=now)
+    audit_log.write_audit_event(scope_id=O1, actor_user_id="u", actor_username="u", action="a", summary="2", db=db, now=now)
+    assert len(db.query_audit_events(O1)) == 2
 
 
+@pytest.mark.skipif(PG_MODE, reason="DynamoDB path only: PostgreSQL audit is fail-closed (next test)")
 def test_write_audit_event_never_raises_on_a_db_failure(db, monkeypatch):
     def _broken_put_item(**kw):
         raise RuntimeError("dynamodb unreachable")
@@ -70,7 +75,7 @@ def test_write_audit_event_never_raises_on_a_db_failure(db, monkeypatch):
     # it's trying to record (e.g. a real settings update should still
     # succeed even if the audit write fails).
     audit_log.write_audit_event(
-        scope_id="o1", actor_user_id="u", actor_username="u",
+        scope_id=O1, actor_user_id="u", actor_username="u",
         action="a", summary="s", db=db,
     )
 
@@ -78,22 +83,32 @@ def test_write_audit_event_never_raises_on_a_db_failure(db, monkeypatch):
 def test_get_audit_log_returns_events_newest_first(db):
     t0 = dt.datetime(2026, 9, 22, 3, 0, tzinfo=dt.timezone.utc)
     t1 = dt.datetime(2026, 9, 22, 3, 5, tzinfo=dt.timezone.utc)
-    audit_log.write_audit_event(scope_id="o1", actor_user_id="u", actor_username="u", action="a", summary="first", db=db, now=t0)
-    audit_log.write_audit_event(scope_id="o1", actor_user_id="u", actor_username="u", action="a", summary="second", db=db, now=t1)
+    audit_log.write_audit_event(scope_id=O1, actor_user_id="u", actor_username="u", action="a", summary="first", db=db, now=t0)
+    audit_log.write_audit_event(scope_id=O1, actor_user_id="u", actor_username="u", action="a", summary="second", db=db, now=t1)
 
-    events = audit_log.get_audit_log("o1", db=db)
+    events = audit_log.get_audit_log(O1, db=db)
     assert [e["summary"] for e in events] == ["second", "first"]
 
 
 def test_get_audit_log_can_filter_to_a_time_window(db):
     old = dt.datetime(2026, 9, 20, 3, 0, tzinfo=dt.timezone.utc)
     recent = dt.datetime(2026, 9, 22, 3, 0, tzinfo=dt.timezone.utc)
-    audit_log.write_audit_event(scope_id="o1", actor_user_id="u", actor_username="u", action="a", summary="old", db=db, now=old)
-    audit_log.write_audit_event(scope_id="o1", actor_user_id="u", actor_username="u", action="a", summary="recent", db=db, now=recent)
+    audit_log.write_audit_event(scope_id=O1, actor_user_id="u", actor_username="u", action="a", summary="old", db=db, now=old)
+    audit_log.write_audit_event(scope_id=O1, actor_user_id="u", actor_username="u", action="a", summary="recent", db=db, now=recent)
 
     events = audit_log.get_audit_log(
-        "o1", db=db,
+        O1, db=db,
         start=dt.datetime(2026, 9, 21, tzinfo=dt.timezone.utc),
         end=dt.datetime(2026, 9, 23, tzinfo=dt.timezone.utc),
     )
     assert [e["summary"] for e in events] == ["recent"]
+
+
+@pytest.mark.skipif(not PG_MODE, reason="PostgreSQL fail-closed audit")
+def test_postgres_audit_is_fail_closed(db, monkeypatch):
+    def _broken(item):
+        raise RuntimeError("audit store unreachable")
+    monkeypatch.setattr(db, "put_audit_event", _broken)
+    with pytest.raises(RuntimeError):
+        audit_log.write_audit_event(scope_id=O1, actor_user_id=ALICE, actor_username="u",
+                                    action="a", summary="s", db=db)

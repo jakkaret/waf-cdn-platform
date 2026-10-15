@@ -31,6 +31,7 @@ import pytest
 
 import services.ml_rule_service as ml_rule_service_module
 from services.ml_rule_service import MLRuleService
+from tests.helpers.seed import seed_origin, uid
 
 
 class _FakeTable:
@@ -48,8 +49,20 @@ class _FakeTable:
         return {"Items": [i for i in self.items if i.get("rule_id") == wanted]}
 
 
+ORIGIN_ABC, ORIGIN_XYZ = uid("origin-abc"), uid("origin-xyz")
+
+
 @pytest.fixture()
 def service(monkeypatch):
+    import services.dynamodb_service as dynamodb_service_module
+    store = dynamodb_service_module.DynamoDBService()
+    # A proposal can only point at an origin that exists (foreign key in
+    # PostgreSQL), so the origins it names are created first.
+    seed_origin(store, {"id": ORIGIN_ABC, "label": "shop"})
+    seed_origin(store, {"id": ORIGIN_XYZ, "label": "xyz"})
+    if dynamodb_service_module.data_backend() == "postgres":
+        monkeypatch.setattr(ml_rule_service_module, "RuleManager", MagicMock())
+        return MLRuleService()          # waf.pending_rules
     table = _FakeTable()
     fake_db = MagicMock()
     fake_db.dynamodb.Table.return_value = table
@@ -64,12 +77,12 @@ def test_cve_proposal_records_the_matched_origin(service):
             "pattern": "@rx evil",
             "attack_type": "CVE Virtual Patch (CVE-2026-1234)",
             "cve_id": "CVE-2026-1234",
-            "origin_id": "origin-abc",
+            "origin_id": ORIGIN_ABC,
             "origin_label": "shop (shop.example.com)",
         },
         created_by="cve-auto",
     )
-    assert item["origin_id"] == "origin-abc"
+    assert item["origin_id"] == ORIGIN_ABC
     assert item["origin_label"] == "shop (shop.example.com)"
 
 
@@ -86,8 +99,8 @@ def test_anomaly_proposal_without_origin_context_stores_empty_not_a_guess(servic
 
 def test_origin_attribution_is_persisted_not_just_returned(service):
     created = service.create_pending_rule(
-        {"pattern": "@rx x", "origin_id": "origin-xyz"}, created_by="cve-auto"
+        {"pattern": "@rx x", "origin_id": ORIGIN_XYZ}, created_by="cve-auto"
     )
     fetched = service.get_rule_detail(created["rule_id"])
     assert fetched is not None
-    assert fetched["origin_id"] == "origin-xyz"
+    assert fetched["origin_id"] == ORIGIN_XYZ
