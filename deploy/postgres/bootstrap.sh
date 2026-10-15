@@ -90,6 +90,7 @@ add_env CLICKHOUSE_HOST 127.0.0.1
 add_env CONTROL_TOKEN "$(openssl rand -hex 32)"
 add_env ML_RELAY_SECRET "$(openssl rand -hex 32)"
 add_env DECEPTION_INTERNAL_KEY "$(openssl rand -hex 32)"
+add_env REDIS_PASSWORD "$(openssl rand -hex 32)"
 
 "${COMPOSE[@]}" up -d --no-deps postgres
 for _ in $(seq 1 30); do

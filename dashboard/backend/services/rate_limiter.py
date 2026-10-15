@@ -9,10 +9,11 @@ limiter = Limiter(key_func=get_remote_address)
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
 
 class RedisRateLimiter:
     def __init__(self):
-        self.redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+        self.redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
         
         # Redis Lua Script for Sliding Window Rate Limiting
         # KEYS[1]: rate limit key

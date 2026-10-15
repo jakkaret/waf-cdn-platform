@@ -6,7 +6,7 @@ services:
     ports:
       - "8070:8070"
     environment:
-      CONTROL_TOKEN: ${CDN_CONTROL_TOKEN:***REDACTED***}
+      CONTROL_TOKEN: "${CDN_CONTROL_TOKEN:?set CDN_CONTROL_TOKEN in cdn/.env}"
       CUSTOM_RULES_DIR: /src/custom-rules
     volumes:
       - ../modsecurity/custom-rules:/src/custom-rules:ro
@@ -182,7 +182,7 @@ services:
     ports:
       - "8090:8090"
     environment:
-      PURGE_TOKEN: ${CDN_PURGE_TOKEN:***REDACTED***}
+      PURGE_TOKEN: "${CDN_PURGE_TOKEN:?set CDN_PURGE_TOKEN in cdn/.env}"
     depends_on:
       - control-api
       - edge-sg

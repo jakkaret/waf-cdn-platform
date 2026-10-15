@@ -21,8 +21,6 @@ db = DynamoDBService()
 auth_service = AuthService()
 
 FRP_DASHBOARD_URL = os.getenv("FRP_DASHBOARD_URL", "http://127.0.0.1:7500/api/proxy/http")
-FRP_ADMIN_USER = os.getenv("FRP_ADMIN_USER", "admin")
-FRP_ADMIN_PASS = os.getenv("FRP_ADMIN_PASS", "admin1234")
 # The frps connection secret. Must come from the environment: the value that
 # used to be hard-coded here as a fallback was published with the repository
 # (2026-09-29), so it can no longer be treated as a secret. Empty = the legacy
@@ -647,12 +645,20 @@ async def get_tunnels_status(
         except Exception:
             pass
 
+    frp_auth = origin_service.frp_admin_auth()
+    if frp_auth is None:
+        logger.warning("FRP_ADMIN_USER/FRP_ADMIN_PASS not set; not calling the frps dashboard API")
+        return {
+            "success": False,
+            "error": "FRP admin credentials are not configured",
+            "tunnels": [],
+            "count": 0,
+            "active_count": 0,
+            "scope": scope,
+        }
     try:
         async with httpx.AsyncClient(timeout=1.2) as client:
-            res = await client.get(
-                FRP_DASHBOARD_URL,
-                auth=(FRP_ADMIN_USER, FRP_ADMIN_PASS)
-            )
+            res = await client.get(FRP_DASHBOARD_URL, auth=frp_auth)
             if res.status_code != 200:
                 result = {
                     "success": False,

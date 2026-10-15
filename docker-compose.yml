@@ -80,8 +80,14 @@ services:
   redis:
     image: redis:alpine
     container_name: waf-redis
+    # Loopback only (the dashboard runs on the host); containers use redis:6379
+    # on waf-net. The password is read from the environment at start, so it is
+    # not written into the compose file or the container's Cmd.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"
+    command: ["sh", "-c", "exec docker-entrypoint.sh redis-server --requirepass \"$$REDIS_PASSWORD\""]
     restart: unless-stopped
     networks:
       - waf-net
@@ -89,9 +95,10 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: waf-clickhouse
+    # Loopback only: the dashboard and log analyzer run on the host.
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
     environment:
@@ -105,8 +112,12 @@ services:
   control-api:
     build: ./cdn/control-api
     container_name: waf-control-api
+    # Loopback for host tools, and Main's WireGuard address for the edges
+    # (deploy/wireguard). docker.service starts after wg-quick@wg0
+    # (deploy/wireguard/docker-after-wg.conf) so this address exists.
     ports:
-      - "8070:8070"
+      - "127.0.0.1:8070:8070"
+      - "10.88.0.1:8070:8070"
     volumes:
       - ./modsecurity/custom-rules:/src/custom-rules:ro
       - control_data:/data
@@ -116,7 +127,7 @@ services:
       CONTROL_TOKEN: "${CONTROL_TOKEN:?set CONTROL_TOKEN in .env}"
       # shared secret of the dashboard ML relay (F-019), same value nginx gets
       ML_RELAY_SECRET: "${ML_RELAY_SECRET:?set ML_RELAY_SECRET in .env}"
-      REDIS_URL: "redis://redis:6379/0"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0"
       # OTP Shield email delivery -- unset by default (see
       # cdn/control-api/email_sender.py: send_otp_email() fails loud and
       # logs, rather than pretending an email went out, until real SMTP

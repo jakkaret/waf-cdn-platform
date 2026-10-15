@@ -22,8 +22,19 @@ ORIGINS_QUOTA_DEFAULT = int(os.getenv("ORIGINS_QUOTA_DEFAULT", "10"))
 DOMAINS_QUOTA_PER_ORIGIN = int(os.getenv("DOMAINS_QUOTA_PER_ORIGIN", "10"))
 
 FRP_DASHBOARD_URL = os.getenv("FRP_DASHBOARD_URL", "http://127.0.0.1:7500/api/proxy/http")
-FRP_ADMIN_USER = os.getenv("FRP_ADMIN_USER", "admin")
-FRP_ADMIN_PASS = os.getenv("FRP_ADMIN_PASS", "admin1234")
+
+
+def frp_admin_auth():
+    """(user, password) for the frps dashboard API, or None when either is
+    unset. There is deliberately no fallback: the old hard-coded admin
+    password was public, so without configured credentials the frps API is
+    simply not called (H70/H87)."""
+    user = os.getenv("FRP_ADMIN_USER", "")
+    password = os.getenv("FRP_ADMIN_PASS", "")
+    if not user or not password:
+        return None
+    return (user, password)
+
 
 # Live FRP proxy list, shared by both auto_sync_tunnel_origins (needs each
 # proxy's full conf to create/match origins) and get_live_online_proxy_names
@@ -103,9 +114,13 @@ async def get_live_proxies(force: bool = False) -> List[Dict]:
         if now - cached_time < LIVE_STATUS_CACHE_TTL:
             return cached_proxies
 
+    auth = frp_admin_auth()
+    if auth is None:
+        logger.warning("FRP_ADMIN_USER/FRP_ADMIN_PASS not set; skipping the frps proxy poll")
+        return _LIVE_PROXIES_CACHE[1] if _LIVE_PROXIES_CACHE else []
     try:
         async with httpx.AsyncClient(timeout=1.5) as client:
-            res = await client.get(FRP_DASHBOARD_URL, auth=(FRP_ADMIN_USER, FRP_ADMIN_PASS))
+            res = await client.get(FRP_DASHBOARD_URL, auth=auth)
             if res.status_code != 200:
                 return _LIVE_PROXIES_CACHE[1] if _LIVE_PROXIES_CACHE else []
             proxies = res.json().get("proxies", [])

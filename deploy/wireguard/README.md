@@ -63,6 +63,12 @@ to fall back, restore `/etc/ufw/after.rules`, `user.rules`, `user6.rules` and
 `iptables-restore` the `iptables.save` from that script's backup, then roll
 the edges back.
 
+control-api is published only on loopback and Main's WireGuard address
+(docker-compose.yml). Docker must therefore start after wg0, or the binding
+fails at boot: install `docker-after-wg.conf` as
+`/etc/systemd/system/docker.service.d/10-wireguard.conf` and run
+`systemctl daemon-reload` (done on Main 2026-10-15).
+
 ## Switch an edge to the tunnel
 
 `edge-switch.sh check <dir>` tests the tunnel from inside each edge container;

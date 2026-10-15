@@ -2,7 +2,7 @@
 set -euo pipefail
 
 API_URL="${CDN_PURGE_API_URL:-http://localhost:8090/purge}"
-TOKEN="${CDN_PURGE_TOKEN:***REDACTED***}"
+TOKEN="${CDN_PURGE_TOKEN:?set CDN_PURGE_TOKEN in cdn/.env}"
 URL_PATH="${1:-}"
 REGION="${2:-ALL}"
 
