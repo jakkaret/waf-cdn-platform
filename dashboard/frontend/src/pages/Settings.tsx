@@ -160,6 +160,12 @@ export const Settings: React.FC = () => {
         }
         action={
           <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => { window.location.href = '/api/auth/google?link=true' }}
+            >
+              Link Google account
+            </Button>
             {isAdmin && (
               <Button
                 variant="brand"

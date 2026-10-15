@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
@@ -22,6 +22,21 @@ export const Login: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const setAuth = useAuthStore((state) => state.setAuth)
+
+  // Google sign-in sends back ?error=<code> when it refuses a login.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('error')
+    const messages: Record<string, string> = {
+      google_link_required: 'This email already has an account. Sign in with your password, then link Google from Settings.',
+      google_email_unverified: 'Google has not verified this email address.',
+      google_linked_elsewhere: 'This Google account is linked to a different user.',
+      google_link_conflict: 'Your account already has a Google account linked.',
+      google_link_session: 'Sign in again, then link Google from Settings.',
+      google_state: 'The Google sign-in expired or did not start here. Please try again.',
+      google_failed: 'Google sign-in failed. Please try again.',
+    }
+    if (code && messages[code]) toast.error(messages[code])
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
