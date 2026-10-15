@@ -1,11 +1,16 @@
+import os
+
 import clickhouse_connect
+from dotenv import find_dotenv, load_dotenv
+
+load_dotenv(find_dotenv())
 
 try:
     client = clickhouse_connect.get_client(
-        host='178.104.53.123',
-        port=8123,
-        username='default',
-        password='mysecurepassword'
+        host=os.getenv("CLICKHOUSE_HOST", "127.0.0.1"),
+        port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+        username=os.getenv("CLICKHOUSE_USER", "default"),
+        password=os.environ["CLICKHOUSE_PASSWORD"],
     )
     print("ClickHouse Server Version:", client.server_version)
     

@@ -1,4 +1,8 @@
 # Native Challenge Engine integration.
+# This is a template: the image's entrypoint renders it with envsubst into
+# /etc/nginx/includes/captcha_server.conf. ML_RELAY_SECRET comes from .env
+# (env_file) and is the shared secret of the dashboard's internal ML relay
+# (F-019); nginx -t fails on an unset value instead of sending an empty one.
 # The auth subrequest runs before the legacy-origin location. On a protected
 # path, GET/HEAD without clearance gets the challenge page (401) and any other
 # method except OPTIONS gets 403 (otp_engine._deny). $waf_client_ip is the
@@ -9,7 +13,7 @@ location = /internal-ml-shadow {
     internal;
     proxy_method GET;
     proxy_pass http://host.docker.internal:8000/api/ml/shadow/decision;
-    proxy_set_header X-Internal-ML-Relay nginx-shadow-v1;
+    proxy_set_header X-Internal-ML-Relay "${ML_RELAY_SECRET}";
     proxy_pass_request_body off;
     proxy_set_header Content-Length "";
     proxy_set_header X-Original-URI $request_uri;
@@ -39,7 +43,7 @@ location = /internal-ml-capture {
     internal;
     proxy_method POST;
     proxy_pass http://host.docker.internal:8000/api/ml/capture;
-    proxy_set_header X-Internal-ML-Relay nginx-shadow-v1;
+    proxy_set_header X-Internal-ML-Relay "${ML_RELAY_SECRET}";
     proxy_set_header X-Original-Host $host;
     proxy_set_header X-Original-URI $request_uri;
     proxy_set_header X-Original-Method $request_method;

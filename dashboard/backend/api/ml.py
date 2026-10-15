@@ -1,3 +1,4 @@
+import hmac
 import ipaddress
 import logging
 import os
@@ -35,7 +36,9 @@ ML_FAST_TIMEOUT = _env_float("ML_FAST_TIMEOUT", 0.5)
 # = do not forward at all (keeps production request samples off a remote ML host).
 ML_CAPTURE_URL = os.getenv("ML_CAPTURE_URL", ML_SERVICE_URL).rstrip("/")
 INTERNAL_RELAY_HEADER = "X-Internal-ML-Relay"
-INTERNAL_RELAY_VALUE = "nginx-shadow-v1"
+# F-019: shared secret between nginx, control-api and this relay. The old
+# value was a constant in the (public) repo; unset now means the relay is off.
+INTERNAL_RELAY_SECRET = os.getenv("ML_RELAY_SECRET", "")
 INTERNAL_RELAY_NETWORK = ipaddress.ip_network("172.16.0.0/12")
 
 # F-113: any viewer could call predict-and-suggest without limit, each call
@@ -106,7 +109,10 @@ async def _attach_explanation(req: PredictRequest, result: dict) -> dict:
 
 
 def _is_internal_relay_request(request: Request) -> bool:
-    if request.headers.get(INTERNAL_RELAY_HEADER) != INTERNAL_RELAY_VALUE:
+    supplied = request.headers.get(INTERNAL_RELAY_HEADER, "")
+    if not INTERNAL_RELAY_SECRET or not hmac.compare_digest(
+        supplied.encode(), INTERNAL_RELAY_SECRET.encode()
+    ):
         return False
     client_host = request.client.host if request.client else ""
     try:

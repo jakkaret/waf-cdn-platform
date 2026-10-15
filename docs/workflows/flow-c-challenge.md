@@ -32,7 +32,7 @@ sequenceDiagram
 ## กลไก
 
 - ทุก `location /` บน Main มี `auth_request /internal-shield-check` → control-api `/api/shield/access` ตัดสินรวม captcha + OTP (+ rate limit ผ่าน `/internal-rate-limit`)
-- ถ้าต้อง challenge คืน 401 พร้อม `X-Shield-Type` → nginx `error_page 401 = /cdn-cgi/challenge` (จาก `nginx/includes/captcha_server.conf`) → หน้า captcha หรือ OTP
+- ถ้าต้อง challenge คืน 401 พร้อม `X-Shield-Type` → nginx `error_page 401 = /cdn-cgi/challenge` (จาก `nginx/templates/includes/captcha_server.conf.template`) → หน้า captcha หรือ OTP
 - ผ่านแล้วได้ cookie `waf_clearance` (captcha) หรือ `waf_otp_clearance` (OTP) และ edge ไม่ cache คำขอที่มี cookie เหล่านี้
 - กฎ WAF action **CHALLENGE** (`deny,status:401`) ใช้เส้นทางเดียวกัน
 

@@ -10,8 +10,16 @@
     auto_https disable_redirects
 }
 
+# The dashboard's internal ML relay (F-019) is for nginx and control-api
+# only, which call :8000 directly; it is never served on the public vhosts.
+(internal_ml_relay) {
+    @internal_ml_relay path /api/ml/shadow/decision* /api/ml/capture*
+    respond @internal_ml_relay 404
+}
+
 # 1. WAF Dashboard Web UI (HTTP & HTTPS)
 waf-it-kku.online, www.waf-it-kku.online, main.waf-it-kku.online, dash.waf-it-kku.online, http://waf-it-kku.online, http://www.waf-it-kku.online, http://main.waf-it-kku.online, http://dash.waf-it-kku.online {
+    import internal_ml_relay
     reverse_proxy http://host.docker.internal:8000 {
         header_up Host {host}
         header_up X-Real-IP {remote_host}
@@ -24,6 +32,7 @@ waf-it-kku.online, www.waf-it-kku.online, main.waf-it-kku.online, dash.waf-it-kk
 http://178.104.53.123, http://localhost, :80 {
     @dashboard host 178.104.53.123 localhost
     handle @dashboard {
+        import internal_ml_relay
         reverse_proxy http://host.docker.internal:8000 {
             header_up Host {host}
             header_up X-Real-IP {remote_host}
