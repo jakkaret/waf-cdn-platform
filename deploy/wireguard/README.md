@@ -77,8 +77,18 @@ In the edge's compose directory (`/root/edge_node` on edge-th,
 
 Rollback: restore the two files, `docker compose up -d`, `caddy reload`.
 
+edge-asia's `cdn-log-forwarder` is not a compose container (it was started
+with `docker run`, `EDGE_REGION=asia`), so `docker compose up -d` there fails
+with a name conflict. Its config is saved as `log-forwarder.inspect.json` in
+the switch backup; it was recreated with the same `docker run` options and
+`MAIN_SERVER_URL=http://10.88.0.1:8000`. Keep `EDGE_REGION=asia` so its
+ClickHouse rows keep `edge_node = edge-asia`.
+
 ## Status
 
 - 2026-10-15: tunnel up on all three hosts; edge-th switched and verified
   (Main sees 10.88.0.2, no traffic left on the public ports, logs reach
   ClickHouse once, rule sync 200).
+- 2026-10-15: edge-asia switched and verified the same way (10.88.0.3).
+  Both edges now use only the tunnel; no TCP from their public IPs reaches
+  Main's 8080/8070/8000.
