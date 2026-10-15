@@ -8,6 +8,7 @@ button calls markRead(undefined) -- its own documented way of meaning
 {"alert_id": null}. The endpoint then silently does nothing and still
 returns {"success": True}, so the very next feed fetch shows the exact
 same unread count."""
+import os
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -99,6 +100,8 @@ def test_mark_all_read_with_zero_alerts_does_not_error(client, register_user, au
     assert resp.status_code == 200, resp.text
 
 
+@pytest.mark.skipif(os.environ.get("DATA_BACKEND", "").strip().lower() == "postgres",
+                    reason="DynamoDB key-schema check; in PostgreSQL alert_id is the primary key")
 def test_mark_read_uses_the_real_composite_key_schema(client, register_user, auth_header, monkeypatch):
     """The deeper real bug: the key schema is composite, not a plain
     alert_id key, and a Key that does not match it raises

@@ -476,6 +476,263 @@ class PgStore(_DynamoBackedStore):
     def set_ssl_last_alerted(self, hostname: str, ts: str) -> None:
         self.upsert_ssl_cert(hostname, {"last_alerted_at": ts})
 
+    # ------------------------------------------------------------------
+    # alerts
+    # ------------------------------------------------------------------
+    _ALERT_OPTIONAL = ("ai_summary", "rule_id", "attack_type", "severity", "edge_node", "message", "request_id")
+
+    def _to_alert(self, row: dict) -> Dict[str, Any]:
+        alert: Dict[str, Any] = {
+            # NULL = not attributable; callers rely on the literal partition
+            # name (a None would fall into the legacy substring host match).
+            "origin_id": str(row["origin_id"]) if row["origin_id"] else self.ALERTS_UNATTRIBUTED,
+            # The constant every alert carried; some UI still shows it.
+            "user_id": "default-user",
+            "alert_id": row["alert_id"],
+            "ip": row["ip"],
+            "url": row["url"],
+            "status": row["status"],
+            "timestamp": iso_z_us(row["created_at"]),
+            "read": bool(row["is_read"]),
+        }
+        if row.get("domain"):
+            alert["domain"] = row["domain"]
+        for key in self._ALERT_OPTIONAL:
+            if row.get(key) is not None:
+                alert[key] = row[key]
+        return alert
+
+    def _insert_alert(self, item: Dict[str, Any]) -> bool:
+        origin = item.get("origin_id")
+        oid = None if origin in (None, "", self.ALERTS_UNATTRIBUTED) else as_uuid(origin)
+        created = parse_ts(item.get("timestamp")) if item.get("timestamp") else None
+        rowcount = pool.exec_(
+            "INSERT INTO alerts (alert_id, origin_id, request_id, domain, ip, url, status, rule_id, "
+            "attack_type, severity, edge_node, ai_summary, message, created_at, is_read) "
+            "VALUES (%s, (SELECT id FROM origins WHERE id = %s), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+            "COALESCE(%s, now()), %s) ON CONFLICT (alert_id) DO NOTHING",
+            (str(item["alert_id"]), oid, item.get("request_id"), str(item.get("domain") or "").strip().lower(),
+             str(item.get("ip") or "unknown"), str(item.get("url") or ""), str(item.get("status") or ""),
+             item.get("rule_id"), item.get("attack_type"), item.get("severity"), item.get("edge_node"),
+             item.get("ai_summary"), item.get("message"), created, bool(item.get("read", False))),
+        )
+        return rowcount > 0
+
+    def put_alert(self, item: Dict) -> None:
+        self._insert_alert(item)
+
+    def save_alert(self, user_id: str, alert_id: str, ip: str, url: str, status: str, message: str,
+                   ai_summary: str = None, rule_id: str = None, attack_type: str = None,
+                   severity: str = None, edge_node: str = None, domain: str = None,
+                   origin_id: str = None) -> bool:
+        try:
+            resolved = str(origin_id or "").strip()
+            if not resolved and domain:
+                resolved = self.get_origin_id_for_domain(domain)
+            self._insert_alert({
+                "alert_id": alert_id, "origin_id": resolved or None, "ip": ip, "url": url,
+                "status": str(status), "message": message, "ai_summary": ai_summary, "rule_id": rule_id,
+                "attack_type": attack_type, "severity": severity, "edge_node": edge_node, "domain": domain,
+            })
+            return True
+        except Exception as e:
+            logger.error("Failed to save alert: %s", e)
+            return False
+
+    def get_all_alerts(self, max_items: int = 2000) -> List[Dict]:
+        try:
+            rows = pool.q("SELECT * FROM alerts ORDER BY created_at DESC LIMIT %s", (int(max_items),))
+            return [self._to_alert(r) for r in rows]
+        except Exception as e:
+            logger.error("Failed to fetch all alerts: %s", e)
+            return []
+
+    def get_alerts_for_origins(self, origin_ids: List[str], max_items: int = 2000) -> List[Dict]:
+        ids = [u for u in (as_uuid(o) for o in origin_ids) if u]
+        if not ids:
+            return []
+        rows = pool.q("SELECT * FROM alerts WHERE origin_id = ANY(%s::uuid[]) "
+                      "ORDER BY created_at DESC LIMIT %s", (ids, int(max_items)))
+        return [self._to_alert(r) for r in rows]
+
+    def mark_alert_read(self, origin_id: str, alert_id: str) -> None:
+        pool.exec_("UPDATE alerts SET is_read = true WHERE alert_id = %s", (str(alert_id),))
+
+    def mark_alerts_read(self, alerts: List[Dict]) -> int:
+        ids = [str(a["alert_id"]) for a in alerts if a.get("alert_id")]
+        if not ids:
+            return 0
+        return pool.exec_("UPDATE alerts SET is_read = true WHERE alert_id = ANY(%s) AND NOT is_read", (ids,))
+
+    # ------------------------------------------------------------------
+    # postmortems
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _to_postmortem(row: dict) -> Dict[str, Any]:
+        return {
+            "id": str(row["id"]),
+            "origin_id": str(row["origin_id"]),
+            "origin_label": row["origin_label"],
+            "created_by": str(row["created_by"]) if row["created_by"] else None,
+            "created_by_username": row["created_by_username"],
+            "created_at": iso_offset(row["created_at"]),
+            "start_time": row["start_text"],
+            "end_time": row["end_text"],
+            "stats": row["stats"],
+            "hourly_buckets": row["hourly_buckets"],
+            "audit_events": row["audit_events"],
+            "ai_narrative": row["ai_narrative"],
+            "ai_narrative_degraded": bool(row["ai_narrative_degraded"]),
+        }
+
+    _PM_SELECT = ("SELECT *, to_char(start_time AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS start_text, "
+                  "to_char(end_time AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS end_text FROM postmortems ")
+
+    def save_postmortem(self, item: Dict) -> None:
+        from psycopg.types.json import Jsonb
+        pool.exec_(
+            "INSERT INTO postmortems (id, origin_id, origin_label, created_by, created_by_username, created_at, "
+            "start_time, end_time, stats, hourly_buckets, audit_events, ai_narrative, ai_narrative_degraded) "
+            "VALUES (%s, %s, %s, %s, %s, COALESCE(%s, now()), %s::timestamp AT TIME ZONE 'UTC', "
+            "%s::timestamp AT TIME ZONE 'UTC', %s, %s, %s, %s, %s)",
+            (as_uuid(item.get("id")), as_uuid(item.get("origin_id")), item.get("origin_label") or "",
+             as_uuid(item.get("created_by")), item.get("created_by_username") or "",
+             parse_ts(item.get("created_at")), item.get("start_time"), item.get("end_time"),
+             Jsonb(item.get("stats") or {}), Jsonb(item.get("hourly_buckets") or []),
+             Jsonb(item.get("audit_events") or []), item.get("ai_narrative"),
+             bool(item.get("ai_narrative_degraded", False))),
+        )
+
+    def list_postmortems(self, origin_ids: List[str], limit: Optional[int] = None) -> List[Dict]:
+        ids = [u for u in (as_uuid(o) for o in origin_ids) if u]
+        if not ids:
+            return []
+        query = self._PM_SELECT + "WHERE origin_id = ANY(%s::uuid[]) ORDER BY created_at DESC"
+        params: list = [ids]
+        if limit:
+            query += " LIMIT %s"
+            params.append(int(limit))
+        return [self._to_postmortem(r) for r in pool.q(query, params)]
+
+    def get_postmortem(self, postmortem_id: str) -> Optional[Dict]:
+        pid = as_uuid(postmortem_id)
+        if pid is None:
+            return None
+        row = pool.q1(self._PM_SELECT + "WHERE id = %s", (pid,))
+        return self._to_postmortem(row) if row else None
+
+    # ------------------------------------------------------------------
+    # public status history
+    # ------------------------------------------------------------------
+    def record_status_sample(self, component_id: str, date_bucket: str, name: str,
+                             healthy: bool, expires_at: int = None) -> None:
+        pool.exec_(
+            "INSERT INTO status_history_days (component_id, date_bucket, name, sample_count, healthy_count) "
+            "VALUES (%s, %s::date, %s, 1, %s) ON CONFLICT (component_id, date_bucket) DO UPDATE SET "
+            "sample_count = status_history_days.sample_count + 1, "
+            "healthy_count = status_history_days.healthy_count + EXCLUDED.healthy_count, "
+            "name = EXCLUDED.name, updated_at = now()",
+            (component_id, date_bucket, name, 1 if healthy else 0),
+        )
+
+    def get_status_history(self, component_ids: List[str], since: Optional[str] = None) -> Dict[str, List[Dict]]:
+        rows = pool.q(
+            "SELECT component_id, date_bucket::text AS date_bucket, name, sample_count, healthy_count "
+            "FROM status_history_days WHERE component_id = ANY(%s) AND (%s::date IS NULL OR date_bucket >= %s::date) "
+            "ORDER BY date_bucket", (list(component_ids), since, since))
+        result: Dict[str, List[Dict]] = {cid: [] for cid in component_ids}
+        for r in rows:
+            result.setdefault(r["component_id"], []).append(dict(r))
+        return result
+
+    # ------------------------------------------------------------------
+    # threat intel
+    # ------------------------------------------------------------------
+    def record_threat_hit(self, rule_id: str, bucket: str, attack_type: str, tenant_hash: str,
+                          expires_at: int = None, updated_at: str = None) -> None:
+        """+1 the (rule, hour) counter and add the tenant hash, atomically."""
+        with pool.transaction():
+            pool.exec_(
+                "INSERT INTO threat_patterns (rule_id, bucket_start, attack_type, hit_count, updated_at) "
+                "VALUES (%s, to_timestamp(%s, 'YYYYMMDDHH24')::timestamp AT TIME ZONE 'UTC', %s, 1, "
+                "COALESCE(%s, now())) ON CONFLICT (rule_id, bucket_start) DO UPDATE SET "
+                "hit_count = threat_patterns.hit_count + 1, attack_type = EXCLUDED.attack_type, "
+                "updated_at = EXCLUDED.updated_at",
+                (str(rule_id), bucket, attack_type, parse_ts(updated_at)),
+            )
+            pool.exec_(
+                "INSERT INTO threat_pattern_contributors (rule_id, bucket_start, tenant_hash) "
+                "VALUES (%s, to_timestamp(%s, 'YYYYMMDDHH24')::timestamp AT TIME ZONE 'UTC', %s) "
+                "ON CONFLICT DO NOTHING", (str(rule_id), bucket, tenant_hash))
+
+    def list_threat_patterns(self) -> List[Dict]:
+        rows = pool.q(
+            "SELECT p.rule_id, p.attack_type, to_char(p.bucket_start AT TIME ZONE 'UTC', 'YYYYMMDDHH24') AS time_bucket, "
+            "p.hit_count, p.updated_at, COALESCE((SELECT array_agg(c.tenant_hash) FROM threat_pattern_contributors c "
+            "WHERE c.rule_id = p.rule_id AND c.bucket_start = p.bucket_start), '{}') AS tenant_hashes "
+            "FROM threat_patterns p ORDER BY p.bucket_start")
+        return [{"pattern_key": f"{r['rule_id']}#{r['time_bucket']}", "rule_id": r["rule_id"],
+                 "attack_type": r["attack_type"], "time_bucket": r["time_bucket"],
+                 "hit_count": int(r["hit_count"]), "tenant_hashes": set(r["tenant_hashes"]),
+                 "updated_at": iso_offset(r["updated_at"])} for r in rows]
+
+    # ------------------------------------------------------------------
+    # audit log (append-only)
+    # ------------------------------------------------------------------
+    def put_audit_event(self, item: Dict) -> None:
+        """INSERT on the open transaction's connection when there is one, so
+        the audit row commits or rolls back with the change it records.
+        Errors propagate (fail-closed)."""
+        from psycopg.types.json import Jsonb
+        pool.exec_(
+            "INSERT INTO audit_logs (event_id, scope_id, occurred_at, actor_user_id, actor_username, action, "
+            "summary, details) VALUES (%s, %s, COALESCE(%s, now()), %s, %s, %s, %s, %s)",
+            (item["event_id"], str(item["scope_id"]), parse_ts(item.get("timestamp")),
+             as_uuid(item.get("actor_user_id")), item.get("actor_username") or "", item["action"],
+             item.get("summary") or "", Jsonb(item.get("details") or {})),
+        )
+
+    def query_audit_events(self, scope_id: str) -> List[Dict]:
+        rows = pool.q("SELECT * FROM audit_logs WHERE scope_id = %s ORDER BY event_id DESC", (str(scope_id),))
+        return [{"scope_id": r["scope_id"], "event_id": r["event_id"], "timestamp": iso_offset(r["occurred_at"]),
+                 "actor_user_id": str(r["actor_user_id"]) if r["actor_user_id"] else "",
+                 "actor_username": r["actor_username"], "action": r["action"], "summary": r["summary"],
+                 "details": r["details"]} for r in rows]
+
+    # ------------------------------------------------------------------
+    # BOLA policies
+    # ------------------------------------------------------------------
+    def list_bola_policies(self) -> List[Dict]:
+        rows = pool.q("SELECT * FROM bola_policies ORDER BY priority, id")
+        return [{"id": r["id"], "type": "bola_policy", "name": r["name"], "path_pattern": r["path_pattern"],
+                 "claim_key": r["claim_key"], "resource_type": r["resource_type"], "action": r["action"],
+                 "allow_admin": bool(r["allow_admin"]), "description": r["description"],
+                 "enabled": bool(r["enabled"]), "methods": list(r["methods"]), "priority": int(r["priority"]),
+                 "updated_at": str(int(r["updated_at"].timestamp()))} for r in rows]
+
+    def put_bola_policy(self, item: Dict) -> None:
+        methods = item.get("methods") or ["ALL"]
+        if isinstance(methods, str):
+            methods = [methods]
+        updated = item.get("updated_at")
+        pool.exec_(
+            "INSERT INTO bola_policies (id, name, path_pattern, claim_key, resource_type, action, allow_admin, "
+            "description, enabled, methods, priority, updated_at) VALUES (%s, %s, %s, %s, %s, upper(%s), %s, %s, %s, "
+            "%s, %s, COALESCE(to_timestamp(%s::bigint), now())) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, "
+            "path_pattern = EXCLUDED.path_pattern, claim_key = EXCLUDED.claim_key, "
+            "resource_type = EXCLUDED.resource_type, action = EXCLUDED.action, allow_admin = EXCLUDED.allow_admin, "
+            "description = EXCLUDED.description, enabled = EXCLUDED.enabled, methods = EXCLUDED.methods, "
+            "priority = EXCLUDED.priority, updated_at = EXCLUDED.updated_at",
+            (str(item["id"]), item.get("name") or "Custom BOLA Policy", item["path_pattern"],
+             item.get("claim_key") or "sub", item.get("resource_type") or "user_id", item.get("action") or "BLOCK",
+             bool(item.get("allow_admin", True)), item.get("description") or "", bool(item.get("enabled", True)),
+             [str(m).upper() for m in methods], int(item.get("priority", 100)),
+             str(int(float(updated))) if updated not in (None, "") else None),
+        )
+
+    def delete_bola_policy(self, policy_id: str) -> None:
+        pool.exec_("DELETE FROM bola_policies WHERE id = %s", (str(policy_id),))
+
 
 # ----------------------------------------------------------------------
 # users (waf.users + waf.user_identities), used by services/auth_service.py
@@ -587,3 +844,225 @@ class PgUserRepository:
                 "updated_at = now() WHERE admin_user_id = %s AND status <> 'archived'", (uid,))
             pool.exec_("DELETE FROM users WHERE user_id = %s", (uid,))
         return archived
+
+
+# ----------------------------------------------------------------------
+# ML / CVE rule proposals (waf.pending_rules), used by ml_rule_service.py
+# ----------------------------------------------------------------------
+from db.values import iso_z_s  # noqa: E402
+
+_PENDING_TEXT = ("pattern", "variable", "attack_type", "severity", "secrule_template", "source_url",
+                 "source_method", "created_by", "origin_label", "generator", "detector")
+# Any ModSecurity id handed out by approve is above this (ml_rule_service START_RULE_ID - 1).
+_FIRST_ML_RULE_ID_MINUS_ONE = 1000499
+# pg_advisory_xact_lock key serialising rule-id allocation across approvers.
+_APPROVE_LOCK_KEY = 7_420_001
+
+
+class PgPendingRuleRepository:
+    """Rule dicts keep the DynamoDB-era shape: '' (not None) for cve_id /
+    dedup_key / origin_id, times as '%Y-%m-%dT%H:%M:%SZ'."""
+
+    @staticmethod
+    def to_rule(row: Optional[dict]) -> Optional[Dict[str, Any]]:
+        if not row:
+            return None
+        rule: Dict[str, Any] = {
+            "rule_id": str(row["rule_id"]),
+            "created_at": iso_z_s(row["created_at"]),
+            "status": row["status"],
+            **{k: row[k] for k in _PENDING_TEXT},
+            "cve_id": row["cve_id"] or "",
+            "origin_id": str(row["origin_id"]) if row["origin_id"] else "",
+            "dedup_key": row["dedup_key"] or "",
+            "hit_count": int(row["hit_count"]),
+            "examples": list(row["examples"] or []),
+            "last_seen_at": iso_z_s(row["last_seen_at"]),
+        }
+        if row.get("backtest") is not None:
+            rule["backtest"] = row["backtest"]
+        for key in ("reviewed_by", "reject_reason"):
+            if row.get(key) is not None:
+                rule[key] = row[key]
+        if row.get("reviewed_at") is not None:
+            rule["reviewed_at"] = iso_z_s(row["reviewed_at"])
+        if row.get("deployed_rule_id") is not None:
+            rule["deployed_rule_id"] = int(row["deployed_rule_id"])
+        return rule
+
+    def create(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        """Insert a proposal. A pending row with the same dedup_key absorbs
+        it instead (hit_count+1, newest examples first, at most 5) -- one
+        statement, so two concurrent proposals cannot both insert."""
+        from psycopg.types.json import Jsonb
+        row = pool.q1(
+            "INSERT INTO pending_rules (rule_id, created_at, status, pattern, variable, attack_type, severity, "
+            "secrule_template, source_url, source_method, created_by, cve_id, origin_id, origin_label, generator, "
+            "detector, dedup_key, hit_count, examples, last_seen_at) VALUES (%(rule_id)s, COALESCE(%(created_at)s, now()), "
+            "'pending', %(pattern)s, %(variable)s, %(attack_type)s, %(severity)s, %(secrule_template)s, %(source_url)s, "
+            "%(source_method)s, %(created_by)s, %(cve_id)s, (SELECT id FROM origins WHERE id = %(origin_id)s), "
+            "%(origin_label)s, %(generator)s, %(detector)s, %(dedup_key)s, 1, %(examples)s, COALESCE(%(created_at)s, now())) "
+            "ON CONFLICT (dedup_key) WHERE status = 'pending' AND dedup_key IS NOT NULL DO UPDATE SET "
+            "hit_count = pending_rules.hit_count + 1, "
+            "examples = (SELECT COALESCE(jsonb_agg(e ORDER BY n), '[]'::jsonb) FROM "
+            "  jsonb_array_elements(EXCLUDED.examples || pending_rules.examples) WITH ORDINALITY AS t(e, n) WHERE n <= 5), "
+            "last_seen_at = EXCLUDED.last_seen_at RETURNING *",
+            {
+                "rule_id": as_uuid(item.get("rule_id")),
+                "created_at": parse_ts(item.get("created_at")),
+                **{k: str(item.get(k) or "") for k in _PENDING_TEXT},
+                "cve_id": item.get("cve_id") or None,
+                "origin_id": as_uuid(item.get("origin_id")),
+                "dedup_key": item.get("dedup_key") or None,
+                "examples": Jsonb(list(item.get("examples") or [])[:5]),
+            },
+        )
+        return self.to_rule(row)
+
+    def get(self, rule_id: str) -> Optional[Dict[str, Any]]:
+        rid = as_uuid(rule_id)
+        if rid is None:
+            return None
+        return self.to_rule(pool.q1("SELECT * FROM pending_rules WHERE rule_id = %s", (rid,)))
+
+    def find_pending_by_dedup_key(self, dedup_key: str) -> Optional[Dict[str, Any]]:
+        if not dedup_key:
+            return None
+        return self.to_rule(pool.q1("SELECT * FROM pending_rules WHERE status = 'pending' AND dedup_key = %s",
+                                    (dedup_key,)))
+
+    def list(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        if status:
+            rows = pool.q("SELECT * FROM pending_rules WHERE status = %s ORDER BY created_at DESC", (status,))
+        else:
+            rows = pool.q("SELECT * FROM pending_rules ORDER BY created_at DESC")
+        return [self.to_rule(r) for r in rows]
+
+    def record_hit(self, rule_id: str, example: Dict[str, Any], seen_at: str) -> Optional[Dict[str, Any]]:
+        from psycopg.types.json import Jsonb
+        rid = as_uuid(rule_id)
+        if rid is None:
+            return None
+        return self.to_rule(pool.q1(
+            "UPDATE pending_rules SET hit_count = hit_count + 1, last_seen_at = %s, "
+            "examples = (SELECT COALESCE(jsonb_agg(e ORDER BY n), '[]'::jsonb) FROM "
+            "  jsonb_array_elements(%s || examples) WITH ORDINALITY AS t(e, n) WHERE n <= 5) "
+            "WHERE rule_id = %s RETURNING *", (parse_ts(seen_at), Jsonb([example]), rid)))
+
+    def save_backtest(self, rule_id: str, result: Dict[str, Any]) -> None:
+        from psycopg.types.json import Jsonb
+        rid = as_uuid(rule_id)
+        if rid is not None:
+            pool.exec_("UPDATE pending_rules SET backtest = %s WHERE rule_id = %s", (Jsonb(result), rid))
+
+    def reserve_approval(self, rule_id: str, approved_by: str, max_file_rule_id: int) -> Dict[str, Any]:
+        """Inside the caller's transaction: lock, check pending, allocate the
+        next ModSecurity id above both the files on disk and every id ever
+        recorded, and mark the rule approved. Raises ValueError like the
+        DynamoDB path did."""
+        rid = as_uuid(rule_id)
+        if rid is None:
+            raise ValueError("Rule not found")
+        pool.exec_("SELECT pg_advisory_xact_lock(%s)", (_APPROVE_LOCK_KEY,))
+        row = pool.q1("SELECT * FROM pending_rules WHERE rule_id = %s FOR UPDATE", (rid,))
+        if not row:
+            raise ValueError("Rule not found")
+        if row["status"] != "pending":
+            raise ValueError(f"Rule is already {row['status']}")
+        top = pool.q1("SELECT max(deployed_rule_id) AS m FROM pending_rules")["m"] or 0
+        new_id = max(int(max_file_rule_id), int(top), _FIRST_ML_RULE_ID_MINUS_ONE) + 1
+        row = pool.q1("UPDATE pending_rules SET status = 'approved', reviewed_by = %s, reviewed_at = now(), "
+                      "deployed_rule_id = %s WHERE rule_id = %s RETURNING *", (approved_by, new_id, rid))
+        return self.to_rule(row)
+
+    def undo_approval(self, rule_id: str, deployed_rule_id: int) -> None:
+        """Compensation when the deploy after commit failed."""
+        pool.exec_("UPDATE pending_rules SET status = 'pending', deployed_rule_id = NULL, reviewed_by = NULL, "
+                   "reviewed_at = NULL WHERE rule_id = %s AND deployed_rule_id = %s",
+                   (as_uuid(rule_id), int(deployed_rule_id)))
+
+    def reject(self, rule_id: str, rejected_by: str, reason: str) -> Dict[str, Any]:
+        rid = as_uuid(rule_id)
+        row = pool.q1("UPDATE pending_rules SET status = 'rejected', reviewed_by = %s, reviewed_at = now(), "
+                      "reject_reason = %s WHERE rule_id = %s AND status = 'pending' RETURNING *",
+                      (rejected_by, reason, rid)) if rid else None
+        if row:
+            return self.to_rule(row)
+        existing = self.get(rule_id)
+        if not existing:
+            raise ValueError("Rule not found")
+        raise ValueError(f"Rule is already {existing.get('status')}")
+
+    def reject_legacy(self, rejected_by: str, reason: str) -> Dict[str, int]:
+        """Reject every pending rf-regex rule; one statement, so a rule
+        approved meanwhile (no longer pending) is simply not matched."""
+        pending = pool.q1("SELECT count(*) AS n FROM pending_rules WHERE status = 'pending' AND generator = 'rf-regex'")["n"]
+        rejected = pool.exec_("UPDATE pending_rules SET status = 'rejected', reviewed_by = %s, reviewed_at = now(), "
+                              "reject_reason = %s WHERE status = 'pending' AND generator = 'rf-regex'",
+                              (rejected_by, reason))
+        return {"rejected": rejected, "skipped": max(int(pending) - rejected, 0)}
+
+    def delete(self, rule_id: str) -> None:
+        rid = as_uuid(rule_id)
+        if rid is not None:
+            pool.exec_("DELETE FROM pending_rules WHERE rule_id = %s", (rid,))
+
+
+# ----------------------------------------------------------------------
+# threshold proposals (waf.threshold_proposals)
+# ----------------------------------------------------------------------
+_THRESHOLD_OPTIONAL_TEXT = ("approved_by", "rejected_by", "reject_reason", "rolled_back_by")
+_THRESHOLD_OPTIONAL_TS = ("approved_at", "rejected_at", "rolled_back_at")
+
+
+class PgThresholdProposalRepository:
+    @staticmethod
+    def to_proposal(row: Optional[dict]) -> Optional[Dict[str, Any]]:
+        if not row:
+            return None
+        p: Dict[str, Any] = {
+            "proposal_id": str(row["proposal_id"]), "status": row["status"],
+            "current_threshold": row["current_threshold"], "proposed_threshold": row["proposed_threshold"],
+            "lookback_hours": row["lookback_hours"], "reason": row["reason"], "evidence": row["evidence"],
+            "created_by": row["created_by"], "created_at": iso_z_s(row["created_at"]),
+        }
+        for key in _THRESHOLD_OPTIONAL_TEXT:
+            if row.get(key) is not None:
+                p[key] = row[key]
+        for key in _THRESHOLD_OPTIONAL_TS:
+            if row.get(key) is not None:
+                p[key] = iso_z_s(row[key])
+        if row.get("previous_threshold") is not None:
+            p["previous_threshold"] = row["previous_threshold"]
+        return p
+
+    def create(self, proposal: Dict[str, Any], created_by: str) -> Dict[str, Any]:
+        from psycopg.types.json import Jsonb
+        row = pool.q1(
+            "INSERT INTO threshold_proposals (current_threshold, proposed_threshold, lookback_hours, reason, "
+            "evidence, created_by) VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
+            (int(proposal["current_threshold"]), int(proposal["proposed_threshold"]),
+             int(proposal["lookback_hours"]), proposal["reason"], Jsonb(proposal.get("evidence") or {}), created_by))
+        return self.to_proposal(row)
+
+    def get(self, proposal_id: str) -> Optional[Dict[str, Any]]:
+        pid = as_uuid(proposal_id)
+        if pid is None:
+            return None
+        return self.to_proposal(pool.q1("SELECT * FROM threshold_proposals WHERE proposal_id = %s", (pid,)))
+
+    def list(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        if status:
+            rows = pool.q("SELECT * FROM threshold_proposals WHERE status = %s ORDER BY created_at DESC", (status,))
+        else:
+            rows = pool.q("SELECT * FROM threshold_proposals ORDER BY created_at DESC")
+        return [self.to_proposal(r) for r in rows]
+
+    def transition(self, proposal_id: str, from_status: str, sets: str, params: tuple) -> Optional[Dict[str, Any]]:
+        """UPDATE ... WHERE status = from_status; None when it was not in that state."""
+        pid = as_uuid(proposal_id)
+        if pid is None:
+            return None
+        return self.to_proposal(pool.q1(
+            f"UPDATE threshold_proposals SET {sets} WHERE proposal_id = %s AND status = %s RETURNING *",
+            (*params, pid, from_status)))

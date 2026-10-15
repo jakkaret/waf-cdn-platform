@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 from services.rbac import get_current_user, verify_origin_ownership, verify_origin_edit_access
 from services import audit_log
+from services.txn import atomic
 from services.dynamodb_service import DynamoDBService, DuplicateDomain
 from services.captcha_config import sync_domain_config
 from services.dns_service import verify_domain_dns, is_claimable_own_wildcard_subdomain, is_platform_subdomain
@@ -211,18 +212,19 @@ async def delete_domain(domain_id: str, current_user: dict = Depends(get_current
 
     # 3. Delete domain
     try:
-        db.delete_domain(domain_id)
+        with atomic():
+            db.delete_domain(domain_id)
+            audit_log.write_audit_event(
+                scope_id=domain["origin_id"],
+                actor_user_id=current_user.get("user_id"),
+                actor_username=current_user.get("username", ""),
+                action="domain.delete",
+                summary=f"ลบโดเมน: {domain.get('domain_name', domain_id)}",
+                details={"domain_id": domain_id, "domain_name": domain.get("domain_name")},
+            )
         invalidate_ssl_allowed_snapshot()
         _refresh_managed_hostmap()
         schedule_site_reconcile()
-        audit_log.write_audit_event(
-            scope_id=domain["origin_id"],
-            actor_user_id=current_user.get("user_id"),
-            actor_username=current_user.get("username", ""),
-            action="domain.delete",
-            summary=f"ลบโดเมน: {domain.get('domain_name', domain_id)}",
-            details={"domain_id": domain_id, "domain_name": domain.get("domain_name")},
-        )
         return {"status": "success", "message": f"Domain {domain['domain_name']} deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -516,9 +518,8 @@ def create_domain_record(origin_id: str, domain_name: str, current_user: dict) -
         "updated_at": now
     }
 
-    _save_new_domain(domain_data)
-
-    if auto_verified:
+    with atomic():
+        _save_new_domain(domain_data)
         # The post-verify steps (config sync, TLS allow-list, hostmap, route)
         # are after_domain_verified(), which every caller awaits for an
         # auto-verified result -- one path for all of them.
@@ -527,9 +528,11 @@ def create_domain_record(origin_id: str, domain_name: str, current_user: dict) -
             actor_user_id=current_user.get("user_id"),
             actor_username=current_user.get("username", ""),
             action="domain.create",
-            summary=f"เพิ่มโดเมน: {domain_name} (auto-verified)",
-            details={"domain_name": domain_name, "auto_verified": True},
+            summary=f"เพิ่มโดเมน: {domain_name} " + ("(auto-verified)" if auto_verified else "(รอ verify DNS)"),
+            details={"domain_name": domain_name, "auto_verified": bool(auto_verified)},
         )
+
+    if auto_verified:
         return {
             "domain": format_domain(domain_data),
             "dns_instructions": None,
@@ -537,15 +540,6 @@ def create_domain_record(origin_id: str, domain_name: str, current_user: dict) -
         }
 
     dns_instructions = dns_instructions_for(domain_name, verification_token)
-
-    audit_log.write_audit_event(
-        scope_id=origin_id,
-        actor_user_id=current_user.get("user_id"),
-        actor_username=current_user.get("username", ""),
-        action="domain.create",
-        summary=f"เพิ่มโดเมน: {domain_name} (รอ verify DNS)",
-        details={"domain_name": domain_name, "auto_verified": False},
-    )
     return {
         "domain": format_domain(domain_data),
         "dns_instructions": dns_instructions,
@@ -587,18 +581,19 @@ async def delete_domain_under_origin(origin_id: str, domain_id: str, current_use
         raise HTTPException(status_code=404, detail="Domain not found")
 
     try:
-        db.delete_domain(domain_id)
+        with atomic():
+            db.delete_domain(domain_id)
+            audit_log.write_audit_event(
+                scope_id=origin_id,
+                actor_user_id=current_user.get("user_id"),
+                actor_username=current_user.get("username", ""),
+                action="domain.delete",
+                summary=f"ลบโดเมน: {domain.get('domain_name', domain_id)}",
+                details={"domain_id": domain_id, "domain_name": domain.get("domain_name")},
+            )
         invalidate_ssl_allowed_snapshot()
         _refresh_managed_hostmap()
         schedule_site_reconcile()
-        audit_log.write_audit_event(
-            scope_id=origin_id,
-            actor_user_id=current_user.get("user_id"),
-            actor_username=current_user.get("username", ""),
-            action="domain.delete",
-            summary=f"ลบโดเมน: {domain.get('domain_name', domain_id)}",
-            details={"domain_id": domain_id, "domain_name": domain.get("domain_name")},
-        )
         return {"status": "success", "message": f"Domain {domain['domain_name']} deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

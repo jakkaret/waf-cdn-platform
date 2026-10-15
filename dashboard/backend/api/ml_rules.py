@@ -6,6 +6,7 @@ from typing import Optional
 from services.ml_rule_service import MLRuleService
 from services.rbac import require_admin
 from services import audit_log, rule_backtest
+from services.txn import atomic
 from services.cve_feed import DEFAULT_WINDOW_DAYS, fetch_recent_cves, match_cves_to_origins, select_search_terms
 from services.gemini_service import gemini_service
 from services.rule_manager import escape_secrule_string
@@ -55,19 +56,29 @@ async def get_ml_rule(rule_id: str, current_user: dict = Depends(require_admin))
 
 @router.post("/{rule_id}/approve")
 async def approve_ml_rule(rule_id: str, current_user: dict = Depends(require_admin)):
-    try:
-        rule = rule_service.approve_rule(rule_id, approved_by=current_user.get("username", "admin"))
+    def _audit(action: str, rule: dict, summary: str) -> None:
         audit_log.write_audit_event(
             scope_id=AUDIT_SCOPE_GLOBAL,
             actor_user_id=current_user.get("user_id"),
             actor_username=current_user.get("username", ""),
-            action="rule.approve",
-            summary=f"อนุมัติ+deploy ML rule: {rule_id}",
+            action=action,
+            summary=summary,
             details={
                 "rule_id": rule_id,
                 "attack_type": rule.get("attack_type") if isinstance(rule, dict) else None,
                 "deployed_rule_id": rule.get("deployed_rule_id") if isinstance(rule, dict) else None,
             },
+        )
+
+    try:
+        # approve_rule records "rule.approve" in the same transaction as the
+        # status change (PostgreSQL), deploys the file after commit, and
+        # records "rule.approve_failed" when the deploy fails.
+        rule = rule_service.approve_rule(
+            rule_id, approved_by=current_user.get("username", "admin"),
+            on_approved=lambda r: _audit("rule.approve", r, f"อนุมัติ+deploy ML rule: {rule_id}"),
+            on_deploy_failed=lambda r, err: _audit(
+                "rule.approve_failed", r, f"deploy ML rule ไม่สำเร็จ คืนสถานะเป็น pending: {rule_id} ({err})"),
         )
         return {"message": "Rule approved and deployed", "rule": rule}
     except ValueError as e:
@@ -84,38 +95,40 @@ LEGACY_REJECT_REASON = "กฎแบบเก่าจาก RandomForest: ร�
 async def reject_legacy_ml_rules(current_user: dict = Depends(require_admin)):
     """Reject every pending "rf-regex" rule in one call (the queue's ~268 RF leftovers)."""
     try:
-        result = rule_service.reject_legacy_pending(
-            rejected_by=current_user.get("username", "admin"), reason=LEGACY_REJECT_REASON
-        )
+        with atomic():
+            result = rule_service.reject_legacy_pending(
+                rejected_by=current_user.get("username", "admin"), reason=LEGACY_REJECT_REASON
+            )
+            audit_log.write_audit_event(
+                scope_id=AUDIT_SCOPE_GLOBAL,
+                actor_user_id=current_user.get("user_id"),
+                actor_username=current_user.get("username", ""),
+                action="rule.reject",
+                summary=f"ปฏิเสธกฎแบบเก่า (RandomForest) ทั้งหมด {result['rejected']} กฎ",
+                details=result | {"reason": LEGACY_REJECT_REASON},
+            )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    audit_log.write_audit_event(
-        scope_id=AUDIT_SCOPE_GLOBAL,
-        actor_user_id=current_user.get("user_id"),
-        actor_username=current_user.get("username", ""),
-        action="rule.reject",
-        summary=f"ปฏิเสธกฎแบบเก่า (RandomForest) ทั้งหมด {result['rejected']} กฎ",
-        details=result | {"reason": LEGACY_REJECT_REASON},
-    )
     return result
 
 
 @router.post("/{rule_id}/reject")
 async def reject_ml_rule(rule_id: str, req: RuleRejectRequest, current_user: dict = Depends(require_admin)):
     try:
-        rule = rule_service.reject_rule(rule_id, rejected_by=current_user.get("username", "admin"), reason=req.reason)
-        audit_log.write_audit_event(
-            scope_id=AUDIT_SCOPE_GLOBAL,
-            actor_user_id=current_user.get("user_id"),
-            actor_username=current_user.get("username", ""),
-            action="rule.reject",
-            summary=f"ปฏิเสธ ML rule: {rule_id}" + (f" ({req.reason})" if req.reason else ""),
-            details={
-                "rule_id": rule_id,
-                "attack_type": rule.get("attack_type") if isinstance(rule, dict) else None,
-                "reason": req.reason,
-            },
-        )
+        with atomic():   # the rejection and its audit event commit together
+            rule = rule_service.reject_rule(rule_id, rejected_by=current_user.get("username", "admin"), reason=req.reason)
+            audit_log.write_audit_event(
+                scope_id=AUDIT_SCOPE_GLOBAL,
+                actor_user_id=current_user.get("user_id"),
+                actor_username=current_user.get("username", ""),
+                action="rule.reject",
+                summary=f"ปฏิเสธ ML rule: {rule_id}" + (f" ({req.reason})" if req.reason else ""),
+                details={
+                    "rule_id": rule_id,
+                    "attack_type": rule.get("attack_type") if isinstance(rule, dict) else None,
+                    "reason": req.reason,
+                },
+            )
         return {"message": "Rule rejected", "rule": rule}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -201,6 +214,7 @@ async def run_cve_scan(
     already_proposed_cve_ids = {i.get("cve_id") for i in existing_items if i.get("cve_id")}
 
     proposals_created = []
+    to_create = []
     skipped_duplicate = 0
     skipped_no_valid_pattern = 0
 
@@ -208,7 +222,7 @@ async def run_cve_scan(
         if match["cve_id"] in already_proposed_cve_ids:
             skipped_duplicate += 1
             continue
-        if len(proposals_created) >= CVE_SCAN_MAX_PROPOSALS:
+        if len(to_create) >= CVE_SCAN_MAX_PROPOSALS:
             break
 
         pattern = await gemini_service.draft_cve_rule_pattern(
@@ -255,27 +269,31 @@ async def run_cve_scan(
             "origin_id": match.get("origin_id", ""),
             "origin_label": match.get("origin_label", ""),
         }
-        created = rule_service.create_pending_rule(rule_data, created_by="cve-auto")
-        proposals_created.append(created)
+        to_create.append(rule_data)
         already_proposed_cve_ids.add(match["cve_id"])
 
-    audit_log.write_audit_event(
-        scope_id=AUDIT_SCOPE_GLOBAL,
-        actor_user_id=current_user.get("user_id"),
-        actor_username=current_user.get("username", ""),
-        action="cve_scan.run",
-        summary=f"สแกน CVE feed: พบ {len(matches)} match, สร้าง proposal {len(proposals_created)} รายการ",
-        details={
-            "window_days": window_days,
-            "cves_scanned": len(vulnerabilities),
-            "keywords_searched": keywords_searched,
-            "keywords_skipped": keywords_skipped,
-            "matches_found": len(matches),
-            "proposals_created": len(proposals_created),
-            "skipped_duplicate": skipped_duplicate,
-            "skipped_no_valid_pattern": skipped_no_valid_pattern,
-        },
-    )
+    # Every external call (NVD, Gemini) is done by now: the proposals and the
+    # scan's audit event go in one short transaction with no I/O inside it.
+    with atomic():
+        for rule_data in to_create:
+            proposals_created.append(rule_service.create_pending_rule(rule_data, created_by="cve-auto"))
+        audit_log.write_audit_event(
+            scope_id=AUDIT_SCOPE_GLOBAL,
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="cve_scan.run",
+            summary=f"สแกน CVE feed: พบ {len(matches)} match, สร้าง proposal {len(proposals_created)} รายการ",
+            details={
+                "window_days": window_days,
+                "cves_scanned": len(vulnerabilities),
+                "keywords_searched": keywords_searched,
+                "keywords_skipped": keywords_skipped,
+                "matches_found": len(matches),
+                "proposals_created": len(proposals_created),
+                "skipped_duplicate": skipped_duplicate,
+                "skipped_no_valid_pattern": skipped_no_valid_pattern,
+            },
+        )
 
     return {
         "status": "success",

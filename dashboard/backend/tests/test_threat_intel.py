@@ -25,6 +25,7 @@ fails: an opted-out tenant's attacks must never reach the shared table at
 all -- asserted on the table being empty, not on an API response.
 """
 import datetime as dt
+import os
 
 import pytest
 
@@ -84,7 +85,7 @@ def test_record_pattern_hit_never_writes_the_raw_user_id_or_any_ip_or_url(db):
         "user-alice", "942100", "SQL Injection", db=db,
         now=dt.datetime(2026, 9, 21, 12, 0, tzinfo=dt.timezone.utc),
     )
-    rows = db.threat_patterns_table.scan().get("Items", [])
+    rows = db.list_threat_patterns()
     assert len(rows) == 1
     row = rows[0]
     blob = str(row)
@@ -96,6 +97,8 @@ def test_record_pattern_hit_never_writes_the_raw_user_id_or_any_ip_or_url(db):
     }
 
 
+@pytest.mark.skipif(os.environ.get("DATA_BACKEND", "").strip().lower() == "postgres",
+                    reason="DynamoDB TTL attribute; PostgreSQL expires rows with run_retention()")
 def test_record_pattern_hit_sets_a_ttl_in_the_future(db):
     now = dt.datetime(2026, 9, 21, 12, 0, tzinfo=dt.timezone.utc)
     threat_intel.record_pattern_hit("user-alice", "942100", "SQL Injection", db=db, now=now)
@@ -108,7 +111,7 @@ def test_record_pattern_hit_from_two_different_users_counts_two_distinct_tenants
     threat_intel.record_pattern_hit("user-alice", "942100", "SQL Injection", db=db, now=now)
     threat_intel.record_pattern_hit("user-bob", "942100", "SQL Injection", db=db, now=now)
 
-    rows = db.threat_patterns_table.scan()["Items"]
+    rows = db.list_threat_patterns()
     assert len(rows) == 1  # same rule_id + same hour bucket -> one row
     assert rows[0]["hit_count"] == 2
     assert len(rows[0]["tenant_hashes"]) == 2
@@ -119,7 +122,7 @@ def test_record_pattern_hit_from_the_same_user_twice_does_not_inflate_distinct_c
     threat_intel.record_pattern_hit("user-alice", "942100", "SQL Injection", db=db, now=now)
     threat_intel.record_pattern_hit("user-alice", "942100", "SQL Injection", db=db, now=now)
 
-    row = db.threat_patterns_table.scan()["Items"][0]
+    row = db.list_threat_patterns()[0]
     assert row["hit_count"] == 2  # raw hits still counted
     assert len(row["tenant_hashes"]) == 1  # but only one real contributor
 
@@ -209,7 +212,7 @@ def test_an_opted_out_tenants_attack_never_reaches_the_shared_table_at_all(db, m
         "quiet-tenant.example.com", "942100", "SQL Injection", db=db,
     )
 
-    assert db.threat_patterns_table.scan()["Items"] == []
+    assert db.list_threat_patterns() == []
 
 
 def test_an_opted_in_tenants_attack_is_recorded_via_domain_resolution(db, monkeypatch):
@@ -224,7 +227,7 @@ def test_an_opted_in_tenants_attack_is_recorded_via_domain_resolution(db, monkey
         "sharer-tenant.example.com", "942100", "SQL Injection", db=db,
     )
 
-    rows = db.threat_patterns_table.scan()["Items"]
+    rows = db.list_threat_patterns()
     assert len(rows) == 1
     assert rows[0]["hit_count"] == 1
 
@@ -236,7 +239,7 @@ def test_a_domain_with_no_resolvable_owner_is_silently_skipped_not_crashed(db, m
         "unknown-domain.example.com", "942100", "SQL Injection", db=db,
     )
 
-    assert db.threat_patterns_table.scan()["Items"] == []
+    assert db.list_threat_patterns() == []
 
 
 def test_opting_out_takes_effect_on_the_very_next_attack_no_stale_sharing(db, monkeypatch):
@@ -250,12 +253,12 @@ def test_opting_out_takes_effect_on_the_very_next_attack_no_stale_sharing(db, mo
     )
 
     threat_intel.record_pattern_hit_for_domain("flippy.example.com", "942100", "SQL Injection", db=db)
-    assert len(db.threat_patterns_table.scan()["Items"]) == 1
+    assert len(db.list_threat_patterns()) == 1
 
     users.set_threat_intel_opt_in("user-flippy", False)  # opts out
 
     threat_intel.record_pattern_hit_for_domain("flippy.example.com", "930120", "Path Traversal", db=db)
-    rows = db.threat_patterns_table.scan()["Items"]
+    rows = db.list_threat_patterns()
     # Still only the one row from before the opt-out -- nothing new landed.
     assert len(rows) == 1
     assert rows[0]["rule_id"] == "942100"
