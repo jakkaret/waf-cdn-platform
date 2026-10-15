@@ -30,9 +30,10 @@ case "$MODE" in
     cp -p .env edge/Caddyfile docker-compose.yml "$BK/"; echo "BACKUP=$BK"
     check; [ "$F" = 0 ] || { echo "precheck failed, not switching"; exit 1; }
     sed -i -e "s#^MAIN_SERVER_IP=.*#MAIN_SERVER_IP=$WG#" -e "s#^CONTROL_API_URL=.*#CONTROL_API_URL=http://$WG:8070#" .env
-    sed "s#ask http://178.104.53.123:8000/#ask http://$WG:8000/#" edge/Caddyfile > /tmp/Caddyfile.new
-    grep -q "ask http://$WG:8000/" /tmp/Caddyfile.new || { echo "Caddyfile edit failed"; exit 1; }
-    cat /tmp/Caddyfile.new > edge/Caddyfile; rm -f /tmp/Caddyfile.new   # same inode: bind-mounted
+    NEW=$(mktemp)   # not a fixed /tmp name: root writes it, and a planted symlink there would be followed
+    sed "s#ask http://178.104.53.123:8000/#ask http://$WG:8000/#" edge/Caddyfile > "$NEW"
+    grep -q "ask http://$WG:8000/" "$NEW" || { rm -f "$NEW"; echo "Caddyfile edit failed"; exit 1; }
+    cat "$NEW" > edge/Caddyfile; rm -f "$NEW"   # same inode: bind-mounted
     docker exec cdn-caddy-ssl caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tail -1
     docker exec cdn-caddy-ssl caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tail -1
     docker compose up -d 2>&1 | grep -v "^ *Container .* Running" | tail -4
