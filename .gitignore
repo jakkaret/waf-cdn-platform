@@ -79,3 +79,6 @@ dashboard/backend/data/managed_ruleset.json
 # Mode A site configs written at runtime by services/nginx_site_service.py;
 # they carry DECEPTION_INTERNAL_KEY.
 nginx/custom_sites/
+
+# Database/service passwords created by deploy/postgres/bootstrap.sh -- never commit
+/secrets/
