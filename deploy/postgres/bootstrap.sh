@@ -37,9 +37,12 @@ env_value() {  # value of KEY from the environment, else from .env
   if [ -n "${!key:-}" ]; then printf '%s' "${!key}"; return; fi
   sed -n "s/^$key=//p" "$ENV_FILE" | tail -1
 }
-add_env() {  # set KEY=VALUE in .env only if KEY is absent or empty
+add_env() {  # set KEY=VALUE in .env only if KEY is absent, empty, or an unexpanded $(...)
   local current
   current=$(sed -n "s/^$1=//p" "$ENV_FILE" | tail -1 | tr -d '"' | tr -d "'")
+  # .env is not run through a shell: "KEY=$(openssl rand -hex 32)" is that
+  # literal (public) text, so it counts as unset and gets a real value.
+  case "$current" in *'$('*|*'`'*) current="" ;; esac
   [ -n "$current" ] && return
   sed -i.bak "/^$1=/d" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
   # a file without a final newline would glue the new line onto its last one

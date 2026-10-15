@@ -22,6 +22,11 @@ if not SECRET_KEY:
     # A built-in fallback secret is public (this repo is public), so anyone
     # could sign an admin token. Refuse to start instead.
     raise RuntimeError("JWT_SECRET_KEY is not set")
+if "$(" in SECRET_KEY or "`" in SECRET_KEY:
+    # .env files are not run through a shell: "JWT_SECRET_KEY=$(openssl rand
+    # -hex 32)" stores that literal text, which is public (found on Main
+    # 2026-10-15). Refuse it like an empty key.
+    raise RuntimeError("JWT_SECRET_KEY is an unexpanded shell command, not a secret")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES") or "60")  # empty value = default
 
