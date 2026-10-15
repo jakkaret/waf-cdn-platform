@@ -556,13 +556,21 @@ class PgStore(_DynamoBackedStore):
         return [self._to_alert(r) for r in rows]
 
     def mark_alert_read(self, origin_id: str, alert_id: str) -> None:
-        pool.exec_("UPDATE alerts SET is_read = true WHERE alert_id = %s", (str(alert_id),))
+        """Only the alert in that origin's partition (as the DynamoDB key
+        (origin_id, alert_id) enforced): an alert id alone is not enough."""
+        oid = None if origin_id in (None, "", self.ALERTS_UNATTRIBUTED) else as_uuid(origin_id)
+        if origin_id not in (None, "", self.ALERTS_UNATTRIBUTED) and oid is None:
+            return
+        pool.exec_("UPDATE alerts SET is_read = true WHERE alert_id = %s AND origin_id IS NOT DISTINCT FROM %s",
+                   (str(alert_id), oid))
 
     def mark_alerts_read(self, alerts: List[Dict]) -> int:
-        ids = [str(a["alert_id"]) for a in alerts if a.get("alert_id")]
-        if not ids:
-            return 0
-        return pool.exec_("UPDATE alerts SET is_read = true WHERE alert_id = ANY(%s) AND NOT is_read", (ids,))
+        n = 0
+        for a in alerts:
+            if a.get("origin_id") and a.get("alert_id"):
+                self.mark_alert_read(a["origin_id"], a["alert_id"])
+                n += 1
+        return n
 
     # ------------------------------------------------------------------
     # postmortems

@@ -28,13 +28,16 @@ def run_database_retention() -> list:
 
 
 def expire_ip_bans(service=None) -> int:
-    """Drop expired temporary bans; re-render and reload only when some went."""
+    """Drop expired temporary bans and re-render the block/allow files from
+    the database on every run -- not only when a row expired -- so the files
+    can never drift from the table (a failed earlier render, a restart, an
+    expired allow rule left in the whitelist would otherwise stay in force).
+    nginx is reloaded only when a file actually changed."""
     from services.pg_store import PgIPRuleRepository
+    if service is None:
+        from api.ip_rules import service
     removed = PgIPRuleRepository().delete_expired()
-    if removed:
-        if service is None:
-            from api.ip_rules import service
-        service._sync_files_from_db()
+    if service._sync_files_from_db():
         service._reload_nginx()
     return removed
 
