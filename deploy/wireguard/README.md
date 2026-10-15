@@ -58,6 +58,12 @@ spoofed from the internet:
 
 ## Switch an edge to the tunnel
 
+`edge-switch.sh check <dir>` tests the tunnel from inside each edge container;
+`edge-switch.sh switch <dir>` does the steps below after a passing check, and
+`edge-switch.sh rollback <dir> <backup>` undoes them. Afterwards, send two
+probes tagged with a random string through the edge and run
+`verify-edge.sh <edge-ip> <tunnel-ip> <tag>` on Main.
+
 In the edge's compose directory (`/root/edge_node` on edge-th,
 `/opt/edge_node` on edge-asia):
 
@@ -70,3 +76,9 @@ In the edge's compose directory (`/root/edge_node` on edge-th,
 4. `docker compose up -d` recreates cdn-edge-node and cdn-log-forwarder.
 
 Rollback: restore the two files, `docker compose up -d`, `caddy reload`.
+
+## Status
+
+- 2026-10-15: tunnel up on all three hosts; edge-th switched and verified
+  (Main sees 10.88.0.2, no traffic left on the public ports, logs reach
+  ClickHouse once, rule sync 200).
