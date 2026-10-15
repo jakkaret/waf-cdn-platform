@@ -17,8 +17,6 @@ KEEP = {
     "waf-it-kku.online", "www.waf-it-kku.online",
     # lab origin sites
     "juiceshop.originweb.site", "httpbin.originweb.site",
-    # old edge name
-    "waf-edge-th.duckdns.org", "www.waf-edge-th.duckdns.org",
 }
 apply = "--apply" in sys.argv
 kept, gone = [], 0
