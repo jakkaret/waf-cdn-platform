@@ -76,3 +76,45 @@ def test_invite_link_ignores_a_spoofed_host_header(client, setup, invite_mailbox
     client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"},
                 headers={**h["owner"], "Host": "evil.example"})
     assert invite_mailbox[0]["link"].startswith("https://waf-it-kku.online/invites/accept?token=")
+
+
+def _origin_id_of(client, h):
+    return _origin(client, h)
+
+
+def test_archived_origin_voids_pending_link(client, setup, invite_mailbox):
+    h, origin_id = setup
+    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"}, headers=h["owner"])
+    pool.exec_("UPDATE origins SET status = 'archived' WHERE id = %s", (origin_id,))
+    assert client.post("/api/invites/accept", json={"token": invite_mailbox[0]["token"]}, headers=h["real"]).status_code == 404
+
+
+def test_revoked_inviter_voids_their_pending_links(client, register_user, auth_header, setup, invite_mailbox):
+    h, origin_id = setup
+    # the owner makes realperson an editor; the editor invites someone; then the
+    # editor is removed -> the editor's pending invitation must stop working
+    client.post(f"/api/origins/{origin_id}/editors", json={"email": "real-person@example.com"}, headers=h["owner"])
+    client.post("/api/invites/accept", json={"token": invite_mailbox[0]["token"]}, headers=h["real"])
+    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"}, headers=h["real"])
+    real_id = client.get("/api/auth/me", headers=h["real"]).json()["user_id"]
+    assert client.delete(f"/api/origins/{origin_id}/editors/{real_id}", headers=h["owner"]).status_code == 200
+    assert client.post("/api/invites/accept", json={"token": invite_mailbox[1]["token"]}, headers=h["squatter"]).status_code == 404
+
+
+def test_removing_a_member_cancels_their_pending_link(client, setup, invite_mailbox):
+    h, origin_id = setup
+    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "real-person@example.com"}, headers=h["owner"])
+    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "real-person@example.com"}, headers=h["owner"])
+    assert client.post("/api/invites/accept", json={"token": invite_mailbox[0]["token"]}, headers=h["real"]).status_code == 200
+    real_id = client.get("/api/auth/me", headers=h["real"]).json()["user_id"]
+    client.delete(f"/api/origins/{origin_id}/viewers/{real_id}", headers=h["owner"])
+    assert client.post("/api/invites/accept", json={"token": invite_mailbox[1]["token"]}, headers=h["real"]).status_code == 404
+    assert client.get(f"/api/origins/{origin_id}", headers=h["real"]).status_code in (403, 404)
+
+
+def test_owner_can_cancel_a_pending_invite(client, setup, invite_mailbox):
+    h, origin_id = setup
+    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"}, headers=h["owner"])
+    inv = client.get(f"/api/origins/{origin_id}/invites", headers=h["owner"]).json()["invites"][0]
+    assert client.delete(f"/api/origins/{origin_id}/invites/{inv['invite_id']}", headers=h["owner"]).status_code == 200
+    assert client.post("/api/invites/accept", json={"token": invite_mailbox[0]["token"]}, headers=h["real"]).status_code == 404

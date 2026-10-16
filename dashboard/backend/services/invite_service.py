@@ -50,10 +50,18 @@ def accept_invite(token: str, user_id: str) -> Optional[Tuple[str, str]]:
     """Grant the invited role to user_id. Returns (origin_id, role), or None if
     the token is unknown, expired or already used. One use per invitation."""
     with pool.transaction():
+        # The invitation is only as good as its source: the origin must still
+        # be live and the inviter must still administer it (owner or editor).
+        # Archiving the origin or revoking the inviter voids pending links.
         row = pool.q1(
-            "UPDATE origin_invites SET accepted_at = now(), accepted_by = %s "
-            "WHERE token_hash = %s AND accepted_at IS NULL AND expires_at > now() "
-            "RETURNING origin_id, role, invited_by",
+            "UPDATE origin_invites i SET accepted_at = now(), accepted_by = %s "
+            "FROM origins o "
+            "WHERE i.token_hash = %s AND i.accepted_at IS NULL AND i.expires_at > now() "
+            "AND o.id = i.origin_id AND o.status NOT IN ('archived', 'deleted') "
+            "AND i.invited_by IS NOT NULL "
+            "AND (o.admin_user_id = i.invited_by OR EXISTS (SELECT 1 FROM origin_members m "
+            "     WHERE m.origin_id = o.id AND m.user_id = i.invited_by AND m.role = 'editor')) "
+            "RETURNING i.origin_id, i.role, i.invited_by",
             (user_id, _hash(token or "")),
         )
         if not row:
@@ -64,6 +72,19 @@ def accept_invite(token: str, user_id: str) -> Optional[Tuple[str, str]]:
             (row["origin_id"], user_id, row["role"], row["invited_by"]),
         )
     return str(row["origin_id"]), row["role"]
+
+
+def cancel_invite(origin_id: str, invite_id: str) -> bool:
+    return pool.exec_(
+        "DELETE FROM origin_invites WHERE origin_id = %s AND invite_id = %s AND accepted_at IS NULL",
+        (origin_id, invite_id)) > 0
+
+
+def cancel_invites_for(origin_id: str, email: str, role: str) -> int:
+    """Revoking a member also voids any link still pending for that address."""
+    return pool.exec_(
+        "DELETE FROM origin_invites WHERE origin_id = %s AND email = %s AND role = %s AND accepted_at IS NULL",
+        (origin_id, (email or "").strip().lower(), role))
 
 
 def pending_invites(origin_id: str) -> list:
