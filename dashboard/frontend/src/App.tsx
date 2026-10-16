@@ -9,6 +9,7 @@ import { Toaster } from 'react-hot-toast'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import OAuthSuccess from './pages/OAuthSuccess'
+import AcceptInvite from './pages/AcceptInvite'
 import Dashboard from './pages/Dashboard'
 import Logs from './pages/Logs'
 import Rules from './pages/Rules'
@@ -104,6 +105,7 @@ export const App: React.FC = () => {
           <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
           <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
           <Route path="/oauth-success" element={<OAuthSuccess />} />
+          <Route path="/invites/accept" element={<AcceptInvite />} />
           <Route path="/status" element={<StatusPage />} />
 
           {/* Protected Routes */}
