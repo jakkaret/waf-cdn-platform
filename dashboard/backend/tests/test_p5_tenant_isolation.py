@@ -152,6 +152,23 @@ def test_status_filter_accepts_only_ascii_status_codes():
         assert status_code_filter(bad) is None, bad
 
 
+def test_logs_api_rejects_malformed_status_with_422(client, register_user, auth_header):
+    # Plan P5.5: a malformed status filter is a 422, not a 500 and not a
+    # silently dropped filter.
+    from fastapi.testclient import TestClient
+    import main
+    tag = uuid.uuid4().hex[:6]
+    h = auth_header(register_user(f"p5s-{tag}@example.com", f"p5s{tag}")["access_token"])
+    c = TestClient(main.app)
+    for path in ("/api/logs", "/api/logs/stream", "/api/logs/histogram"):
+        for bad in ("²⁰⁰", "٤٠٣", "4033", "40", "abc", "0403", "999"):
+            r = c.get(path, params={"status": bad}, headers=h)
+            assert r.status_code == 422, (path, bad, r.status_code)
+        for good in ("ALL", "BLOCKED", "ALLOWED", "403"):
+            r = c.get(path, params={"status": good}, headers=h)
+            assert r.status_code != 422, (path, good, r.text)
+
+
 def test_cdn_logs_limit_is_bounded(client, register_user, auth_header):
     from fastapi.testclient import TestClient
     import main
