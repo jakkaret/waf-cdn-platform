@@ -134,3 +134,18 @@ def seed_domain(db, item: dict) -> dict:
         seed_origin(db, {"id": row["origin_id"]})
     db.create_domain(row)
     return row
+
+
+def make_tunnel_owner(domain: str, user_id: Optional[str] = None, role: str = "viewer") -> str:
+    """A user with an active origin that has DNS-verified `domain` -- what a
+    tunnel token needs since P3.2 (issued, and re-checked on every use, only
+    for the holder of a verified domain). Returns the user id."""
+    user_id = ensure_user(as_id(user_id) if user_id else uid(f"tunnel-owner-{domain}"), role=role)
+    from services.dynamodb_service import DynamoDBService
+    db = DynamoDBService()
+    row = db.get_verified_domain(domain)
+    if row:
+        return user_id
+    origin = make_origin({"user_id": user_id}, db=db)
+    make_domain(origin, domain, db=db)
+    return user_id

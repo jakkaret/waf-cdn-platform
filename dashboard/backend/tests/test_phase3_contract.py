@@ -48,7 +48,10 @@ def test_viewer_never_sees_the_tunnel_token_hash(full_client, register_user, aut
     for path in (f"/api/origins/{origin_id}", "/api/origins"):
         body = full_client.get(path, headers=h["viewer"]).json()
         assert "tunnel_token_hash" not in str(body)
-    # the agent credential still verifies through its own path
+    # the agent credential still verifies through its own path -- for an
+    # active origin (P3.6: verify-agent refuses any other status)
+    from services.dynamodb_service import DynamoDBService
+    DynamoDBService().update_origin(origin_id, {"status": "active"})
     token = issued.json()["token"]
     ok = full_client.post("/api/tunnel/verify-agent", json={"token": token, "domains": ["p3-tunnel.example.org"]})
     assert ok.status_code == 200, ok.text

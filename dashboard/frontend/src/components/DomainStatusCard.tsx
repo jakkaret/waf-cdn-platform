@@ -51,7 +51,7 @@ const StateIcon: React.FC<{ state: CheckView['state'] }> = ({ state }) => {
 
 const AgentCommand: React.FC<{ domain: string; port: number }> = ({ domain, port }) => {
   const [enabled, setEnabled] = useState(false)
-  // The command embeds a 365-day, domain-scoped tunnel token: mint it only
+  // The command embeds a 90-day, domain-scoped tunnel token: mint it only
   // on an explicit click and never keep it cached (same rule as Tunnels.tsx).
   const { data, isFetching, isError } = useQuery({
     queryKey: ['agent-command', domain, port],

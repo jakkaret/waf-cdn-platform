@@ -270,12 +270,18 @@ class PgStore:
         return self._set_member(origin_id, editor_user_id, "editor", False)
 
     def delete_origin(self, origin_id: str) -> bool:
-        """Archive (soft delete)."""
+        """Archive (soft delete). P3.6 (N20): the origin's tunnel agent
+        credential is dropped with it, so the agent cannot connect again; a
+        restore needs a newly issued credential."""
         oid = as_uuid(origin_id)
         if oid is None:
             return False
-        return pool.exec_("UPDATE origins SET status = 'archived', archived_at = now(), deleted_at = NULL, "
-                          "updated_at = now() WHERE id = %s", (oid,)) > 0
+        with pool.transaction():
+            archived = pool.exec_("UPDATE origins SET status = 'archived', archived_at = now(), deleted_at = NULL, "
+                                  "updated_at = now() WHERE id = %s", (oid,)) > 0
+            if archived:
+                pool.exec_("DELETE FROM origin_agent_credentials WHERE origin_id = %s", (oid,))
+        return archived
 
     def restore_origin(self, origin_id: str) -> bool:
         oid = as_uuid(origin_id)
@@ -314,10 +320,80 @@ class PgStore:
         return self._to_domain(pool.q1("SELECT * FROM domains WHERE id = %s", (did,)))
 
     def get_domain_by_name(self, domain_name: str) -> Optional[Dict]:
+        """The verified row for the name if there is one, else the oldest
+        unverified one (P3.5: several origins may hold an unverified row)."""
         name = _norm_host(domain_name)
         if not name:
             return None
-        return self._to_domain(pool.q1("SELECT * FROM domains WHERE domain_name = %s", (name,)))
+        return self._to_domain(pool.q1("SELECT * FROM domains WHERE domain_name = %s "
+                                       "ORDER BY dns_verified DESC, created_at LIMIT 1", (name,)))
+
+    def get_verified_domain(self, domain_name: str) -> Optional[Dict]:
+        name = _norm_host(domain_name)
+        if not name:
+            return None
+        return self._to_domain(pool.q1("SELECT * FROM domains WHERE domain_name = %s AND dns_verified",
+                                       (name,)))
+
+    def count_domains(self, origin_id: str) -> int:
+        oid = as_uuid(origin_id)
+        if oid is None:
+            return 0
+        return int(pool.q1("SELECT count(*) AS n FROM domains WHERE origin_id = %s", (oid,))["n"])
+
+    def tunnel_domain_origin(self, domain_name: str) -> str:
+        """origin_id whose tunnel agent may bind this host ("" when none)."""
+        row = pool.q1("SELECT origin_id FROM origin_tunnel_domains WHERE domain_name = %s",
+                      (_norm_host(domain_name),))
+        return str(row["origin_id"]) if row else ""
+
+    def claim_verified_domain(self, domain_id: str) -> None:
+        """P3.5: mark a domain verified and take the name, in one transaction.
+        Other origins' unverified rows for the same name are dropped. Raises
+        DomainAlreadyClaimed when another origin already holds the name
+        (verified, or as a tunnel host)."""
+        did = as_uuid(domain_id)
+        if did is None:
+            raise ValueError("unknown domain")
+        with pool.transaction():
+            row = pool.q1("SELECT origin_id, domain_name FROM domains WHERE id = %s FOR UPDATE", (did,))
+            if not row:
+                raise ValueError("unknown domain")
+            tunnel = pool.q1("SELECT origin_id FROM origin_tunnel_domains WHERE domain_name = %s",
+                             (row["domain_name"],))
+            if tunnel and tunnel["origin_id"] != row["origin_id"]:
+                raise DomainAlreadyClaimed(f"Domain '{row['domain_name']}' is another origin's tunnel host")
+            try:
+                pool.exec_("UPDATE domains SET dns_verified = true, "
+                           "ssl_status = CASE WHEN ssl_status = 'none' THEN 'pending' ELSE ssl_status END, "
+                           "updated_at = now() WHERE id = %s", (did,))
+            except UniqueConflict as exc:
+                raise DomainAlreadyClaimed(f"Domain '{row['domain_name']}' is already verified by another origin") from exc
+            pool.exec_("DELETE FROM domains WHERE domain_name = %s AND id <> %s AND NOT dns_verified",
+                       (row["domain_name"], did))
+
+    def delete_stale_unverified_domains(self, days: int = 7) -> int:
+        """P3.5: an unverified row that nobody verified within `days` is dropped."""
+        return pool.exec_("DELETE FROM domains WHERE NOT dns_verified "
+                          "AND created_at < now() - make_interval(days => %s)", (int(days),))
+
+    # P3.1: owner of each FRP proxy, recorded by the NewProxy hook.
+    def set_proxy_owner(self, proxy_name: str, user_id: str, domain_name: str) -> bool:
+        uid = as_uuid(user_id)
+        if uid is None or not proxy_name:
+            return False
+        try:
+            pool.exec_("INSERT INTO tunnel_proxy_owners (proxy_name, user_id, domain_name) VALUES (%s, %s, %s) "
+                       "ON CONFLICT (proxy_name) DO UPDATE SET user_id = EXCLUDED.user_id, "
+                       "domain_name = EXCLUDED.domain_name, updated_at = now()",
+                       (str(proxy_name)[:255], uid, _norm_host(domain_name)))
+        except ForeignKeyConflict:
+            return False
+        return True
+
+    def get_proxy_owner(self, proxy_name: str) -> Optional[str]:
+        row = pool.q1("SELECT user_id FROM tunnel_proxy_owners WHERE proxy_name = %s", (str(proxy_name),))
+        return str(row["user_id"]) if row else None
 
     def list_domains(self, origin_id: Optional[str] = None,
                      dns_verified: Optional[bool] = None) -> List[Dict]:
@@ -350,7 +426,8 @@ class PgStore:
         if not clean:
             return ""
         try:
-            row = pool.q1("SELECT origin_id FROM domains WHERE domain_name = %s", (clean,))
+            # Verified rows only: an unverified claim never attributes a Host.
+            row = pool.q1("SELECT origin_id FROM domains WHERE domain_name = %s AND dns_verified", (clean,))
             return str(row["origin_id"]) if row else ""
         except Exception as e:
             logger.error("Failed to resolve origin for domain %s: %s", clean, e)
@@ -869,6 +946,10 @@ class PgUserRepository:
             archived = pool.exec_(
                 "UPDATE origins SET status = 'archived', archived_at = COALESCE(archived_at, now()), "
                 "updated_at = now() WHERE admin_user_id = %s AND status <> 'archived'", (uid,))
+            # P3.6 (N20): their agents' credentials go too; their FRP proxy
+            # owner rows go with the user (ON DELETE CASCADE).
+            pool.exec_("DELETE FROM origin_agent_credentials WHERE origin_id IN "
+                       "(SELECT id FROM origins WHERE admin_user_id = %s)", (uid,))
             pool.exec_("DELETE FROM users WHERE user_id = %s", (uid,))
         return archived
 

@@ -84,9 +84,9 @@ def _online_proxy(name: str, domain: str, local_port: int = 3000) -> dict:
 
 def _claim(proxy_name: str, user_id: str) -> None:
     """Simulates the FRP webhook gatekeeper's NewProxy handler recording true
-    ownership for `proxy_name` -- the real trigger that makes
-    get_proxy_owner(proxy_name) return `user_id`."""
-    tunnels_module._PROXY_OWNERS[proxy_name] = user_id
+    ownership for `proxy_name` (in PostgreSQL since P3.1) -- the real trigger
+    that makes get_proxy_owner(proxy_name) return `user_id`."""
+    DynamoDBService().set_proxy_owner(proxy_name, user_id, "")
 
 
 @pytest.fixture(autouse=True)
@@ -101,7 +101,6 @@ def _fresh_store(fake_infrastructure):
     origin_service.db = DynamoDBService()   # conftest empties the tables per test
     ensure_user(USER_A)
     ensure_user(USER_B)
-    tunnels_module._PROXY_OWNERS.clear()
     # auto_sync_tunnel_origins now shares origin_service's 60s live-proxy
     # cache (2026-09-20 perf fix, collapsing what used to be two separate
     # FRP polls into one) -- without resetting it here, one test's mocked
@@ -158,7 +157,10 @@ def test_frp_daemon_unreachable_fails_closed_to_no_sync_not_a_crash():
 
 # ------------------------------------------------------------------- update
 
-def test_update_restores_a_matching_archived_origin_instead_of_duplicating():
+def test_an_archived_origin_stays_archived_while_its_tunnel_is_online():
+    """P3.6 (H32): archiving is the owner's decision. An agent that is still
+    online used to flip the origin back to active on the next page load; now
+    it stays archived, and no duplicate is created next to it."""
     origin_service.db.create_origin({
         "id": EXISTING_1, "admin_user_id": USER_A, "label": "Tunnel (alice.example.com)",
         "ip": "alice.example.com", "port": 3000, "status": "archived",
@@ -167,26 +169,53 @@ def test_update_restores_a_matching_archived_origin_instead_of_duplicating():
     _claim("alice-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
         created = _run(origin_service.auto_sync_tunnel_origins(USER_A))
+        created += _run(origin_service.auto_sync_tunnel_origins(USER_B))
 
     assert created == []  # nothing NEW created
-    restored = origin_service.get_origin(EXISTING_1)
-    assert restored["status"] == "active"
+    assert origin_service.get_origin(EXISTING_1)["status"] == "archived"
 
 
-def test_archived_origin_restores_even_when_the_viewer_is_not_its_owner():
-    """Restoring is a status flip on an existing record, not a new claim --
-    it must happen regardless of who is viewing (their own auto-sync call
-    still triggers it, since FRP's proxy list isn't scoped to a tenant)."""
+def test_a_new_tunnel_origin_counts_against_the_owners_quota(monkeypatch):
+    """P3.6 (H74): auto-sync used to create origins past the owner's quota."""
+    monkeypatch.setattr(origin_service, "ORIGINS_QUOTA_DEFAULT", 1)
     origin_service.db.create_origin({
-        "id": EXISTING_1, "admin_user_id": USER_A, "label": "Tunnel (alice.example.com)",
-        "ip": "alice.example.com", "port": 3000, "status": "archived",
+        "id": EXISTING_1, "admin_user_id": USER_A, "label": "already here",
+        "ip": "203.0.113.5", "port": 80, "status": "active",
     })
     proxy = _online_proxy("alice-tunnel", "alice.example.com")
     _claim("alice-tunnel", USER_A)
     with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
-        _run(origin_service.auto_sync_tunnel_origins(USER_B))
+        created = _run(origin_service.auto_sync_tunnel_origins(USER_A))
+    assert created == []
+    assert len(origin_service.get_origins_for_user(USER_A)) == 1
 
-    assert origin_service.get_origin(EXISTING_1)["status"] == "active"
+
+def test_a_lookalike_label_of_another_tenant_does_not_capture_the_tunnel():
+    """P3.7 (C5/C6): matching used substrings of labels and addresses, so
+    another tenant's origin labelled "... alice.example.com ..." swallowed
+    alice's tunnel (no origin created for her). Exact matches only now."""
+    origin_service.db.create_origin({
+        "id": EXISTING_1, "admin_user_id": USER_B, "label": "Tunnel (alice.example.com.evil.net)",
+        "ip": "alice.example.com.evil.net", "port": 80, "status": "active",
+    })
+    proxy = _online_proxy("alice-tunnel", "alice.example.com")
+    _claim("alice-tunnel", USER_A)
+    with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
+        created = _run(origin_service.auto_sync_tunnel_origins(USER_A))
+    assert len(created) == 1 and created[0]["admin_user_id"] == USER_A
+    assert origin_service.get_origin(EXISTING_1)["admin_user_id"] == USER_B
+
+
+def test_sync_does_not_modify_the_shared_origins_cache():
+    """P3.7: auto-sync appended to the process-wide origins scan cache."""
+    origin_service._ORIGINS_SCAN_CACHE = None
+    cached = origin_service._scan_all_origins()
+    before = list(cached)
+    proxy = _online_proxy("alice-tunnel", "alice.example.com")
+    _claim("alice-tunnel", USER_A)
+    with patch("services.origin_service.httpx.AsyncClient", return_value=_patched_client([proxy])):
+        _run(origin_service.auto_sync_tunnel_origins(USER_A))
+    assert cached == before
 
 
 # --------------------------------------------------------------- duplicate

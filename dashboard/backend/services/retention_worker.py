@@ -42,12 +42,24 @@ def expire_ip_bans(service=None) -> int:
     return removed
 
 
+UNVERIFIED_DOMAIN_DAYS = 7
+
+
+def expire_unverified_domains(days: int = UNVERIFIED_DOMAIN_DAYS) -> int:
+    """P3.5 (C4/H40): a domain row nobody verified within a week is dropped,
+    so an unverified claim cannot sit on a name."""
+    from services.pg_store import PgStore
+    return PgStore().delete_stale_unverified_domains(days)
+
+
 async def retention_worker():
     while True:
         try:
             results = await asyncio.to_thread(run_database_retention)
             removed = await asyncio.to_thread(expire_ip_bans)
+            stale = await asyncio.to_thread(expire_unverified_domains)
             deleted = {t: n for t, n in results if n} | ({"ip_rules": removed} if removed else {})
+            deleted |= {"unverified_domains": stale} if stale else {}
             if deleted:
                 logger.info("retention: deleted %s", deleted)
         except Exception as exc:

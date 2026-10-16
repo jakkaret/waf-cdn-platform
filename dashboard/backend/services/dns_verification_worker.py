@@ -57,7 +57,11 @@ async def check_pending_domains(db, now: float | None = None) -> list:
         if await asyncio.to_thread(verify_domain_dns, domain_name, token):
             print(f"[DNS Worker] ✅ Domain {domain_name} successfully verified!")
             from api.domains import _mark_verified
-            await asyncio.to_thread(_mark_verified, domain_id)
+            try:
+                await asyncio.to_thread(_mark_verified, domain_id)
+            except Exception as exc:  # 409: another origin took the name first
+                print(f"[DNS Worker] {domain_name} not claimed: {getattr(exc, 'detail', exc)}")
+                continue
             _failures.pop(domain_id, None)
             _next_check.pop(domain_id, None)
             verified.append(domain_name)

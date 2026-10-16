@@ -50,7 +50,27 @@ def _create_origin_with_domain(client, token, auth_header, label, domain_name):
     origin_id = resp.json()["id"]
     resp = client.post(f"/api/origins/{origin_id}/domains", json={"domain_name": domain_name}, headers=h)
     assert resp.status_code == 200, resp.text
+    # A Host is attributed to an origin only once that origin has verified it
+    # (P3.5: an unverified row may be anyone's claim, so it must not show them
+    # that host's alerts). Verify it, as DNS verification would.
+    from services.dynamodb_service import DynamoDBService
+    DynamoDBService().claim_verified_domain(resp.json()["domain"]["domain_id"])
     return origin_id
+
+
+def test_an_unverified_claim_does_not_see_the_hosts_alerts(client, register_user, auth_header):
+    """P3.5: someone who only added another tenant's hostname (unverified)
+    gets none of its alerts."""
+    owner = register_user(email="iso-own@example.com", username="iso_own")
+    squatter = register_user(email="iso-sq@example.com", username="iso_sq")
+    _create_origin_with_domain(client, owner["access_token"], auth_header, "origin-own", "shop-own.example.com")
+    h = auth_header(squatter["access_token"])
+    origin_id = client.post("/api/origins", json={"label": "sq", "ip": "203.0.113.51", "port": 80}, headers=h).json()["id"]
+    resp = client.post(f"/api/origins/{origin_id}/domains", json={"domain_name": "shop-own.example.com"}, headers=h)
+    assert resp.status_code == 400  # verified by the owner already
+    _seed_alert("alert-own-1", "shop-own.example.com")
+    seen = client.get("/api/alerts", headers=h).json()
+    assert "alert-own-1" not in str(seen)
 
 
 def _seed_alert(alert_id, domain, read=False):

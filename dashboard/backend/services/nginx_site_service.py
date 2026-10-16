@@ -199,7 +199,13 @@ server {{
 
 
 def deploy_site_route(domain_name: str, origin: Dict[str, Any]) -> bool:
+    """Write one site file by hand (scripts/qa/seed.py only; the app uses
+    reconcile_site_routes). P3.8 (H38): the origin address is checked like
+    any other -- a public address, or one ORIGIN_ALLOW_PRIVATE_CIDRS allows."""
     domain = _safe_domain(domain_name)
+    from services.origin_service import validate_ip
+    if not validate_ip(str(origin.get("ip", ""))):
+        raise ValueError(f"origin address {origin.get('ip')!r} is not allowed")
     filename = f"site-{domain}.conf"
     config_content = generate_site_nginx_config(domain, origin)
 
@@ -263,29 +269,6 @@ def remove_site_route(domain_name: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to reload nginx after removing {domain}: {e}")
         return False
-
-
-def sync_all_verified_sites() -> int:
-    """Scan all verified domains in DynamoDB and deploy their configs."""
-    try:
-        domains = db.list_domains()
-        origins_list = db.list_origins()
-        origins_by_id = {o["id"]: o for o in origins_list}
-
-        deployed_count = 0
-        for d in domains:
-            if d.get("dns_verified") and d.get("origin_id"):
-                origin = origins_by_id.get(d["origin_id"])
-                if origin and not origin.get("is_tunnel"):
-                    domain_name = d.get("domain_name")
-                    if domain_name:
-                        logger.info(f"Auto-syncing route for {domain_name} -> {origin.get('ip')}:{origin.get('port')}")
-                        if deploy_site_route(domain_name, origin):
-                            deployed_count += 1
-        return deployed_count
-    except Exception as e:
-        logger.error(f"Failed to sync verified sites: {e}")
-        return 0
 
 
 # --- Direct-mode routes: desired state from the database ------------------

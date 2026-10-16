@@ -21,7 +21,9 @@ def bootstrap_client(monkeypatch):
 
 
 def _tunnel_token(**overrides):
-    data = {"sub": "u1", "user_id": "u1", "domain": "myshop.com", "type": "tunnel_token"}
+    from tests.helpers.seed import make_tunnel_owner
+    owner = make_tunnel_owner("myshop.com")  # P3.2: the token's holder owns the verified domain
+    data = {"sub": owner, "user_id": owner, "domain": "myshop.com", "type": "tunnel_token"}
     data.update(overrides)
     return tunnels.auth_service.create_access_token(data, expires_delta=timedelta(days=1))
 
@@ -69,3 +71,36 @@ def test_missing_or_garbage_token_is_rejected(bootstrap_client, token):
 def test_unconfigured_secret_returns_503(bootstrap_client, monkeypatch):
     monkeypatch.setattr(tunnels, "LEGACY_STATIC_TOKEN", "")
     assert _get(bootstrap_client, _tunnel_token()).status_code == 503
+
+
+def test_token_of_a_deleted_user_or_archived_origin_gets_nothing(bootstrap_client):
+    """P3.6 (N20): the token itself is still unexpired, but its holder or its
+    domain's origin is gone."""
+    from services.dynamodb_service import DynamoDBService
+    token = _tunnel_token()
+    db = DynamoDBService()
+    origin_id = db.get_verified_domain("myshop.com")["origin_id"]
+    db.delete_origin(origin_id)
+    assert _get(bootstrap_client, token).status_code == 401
+    db.restore_origin(origin_id)
+    assert _get(bootstrap_client, token).status_code == 200
+    owner = db.get_origin_by_id(origin_id)["admin_user_id"]
+    from services.pg_store import PgUserRepository
+    PgUserRepository().delete(owner)
+    assert _get(bootstrap_client, token).status_code == 401
+
+
+def test_token_for_an_unverified_or_foreign_domain_gets_nothing(bootstrap_client):
+    from tests.helpers.seed import ensure_user, make_domain, make_origin, uid
+    stranger = ensure_user(uid("stranger"))
+    origin = make_origin({"user_id": stranger})
+    make_domain(origin, "pending.example.com", dns_verified=False)
+    pending = tunnels.auth_service.create_access_token(
+        {"sub": stranger, "user_id": stranger, "domain": "pending.example.com", "type": "tunnel_token"},
+        expires_delta=timedelta(days=1))
+    assert _get(bootstrap_client, pending).status_code == 401
+    _tunnel_token()  # myshop.com belongs to its own owner
+    foreign = tunnels.auth_service.create_access_token(
+        {"sub": stranger, "user_id": stranger, "domain": "myshop.com", "type": "tunnel_token"},
+        expires_delta=timedelta(days=1))
+    assert _get(bootstrap_client, foreign).status_code == 401
