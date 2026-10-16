@@ -68,3 +68,11 @@ def test_only_the_token_hash_is_stored(client, setup, invite_mailbox):
     client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"}, headers=h["owner"])
     stored = pool.q1("SELECT token_hash FROM origin_invites")["token_hash"]
     assert invite_mailbox[0]["token"] not in stored and len(stored) == 64
+
+
+def test_invite_link_ignores_a_spoofed_host_header(client, setup, invite_mailbox, monkeypatch):
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://waf-it-kku.online")
+    h, origin_id = setup
+    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"},
+                headers={**h["owner"], "Host": "evil.example"})
+    assert invite_mailbox[0]["link"].startswith("https://waf-it-kku.online/invites/accept?token=")

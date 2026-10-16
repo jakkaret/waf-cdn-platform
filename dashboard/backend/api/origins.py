@@ -398,7 +398,9 @@ def _invite_member(request: Request, origin: dict, current_user: dict, email: st
             summary=f"เชิญ {role}: {email}",
             details={"email": email},
         )
-    link = f"{str(request.base_url).rstrip('/')}/invites/accept?token={token}"
+    # Build the link from configuration, never from the request's Host header,
+    # so a spoofed Host cannot point the emailed token at another site.
+    link = f"{invite_service.public_app_url()}/invites/accept?token={token}"
     sent = invite_service.send_invite_email(email, origin.get("name") or origin.get("label") or origin.get("id"), role, link)
     return {"status": "invited", "email": email, "role": role, "email_sent": sent}
 
