@@ -16,7 +16,7 @@ status: VERIFIED
 | Challenge captcha | VERIFIED (โค้ด) | control-api, nginx includes | พฤติกรรม 429 บน Main ควรทดสอบเพิ่ม |
 | Challenge OTP ทางอีเมล | UNKNOWN | SMTP ไม่ได้ตั้งค่า | |
 | CDN cache | VERIFIED | template + tester | |
-| Cache purge ถึง edge | PARTIAL | `api/cdn.py`, ไม่มี endpoint ที่ edge | บทที่ 24/45 |
+| Cache purge ถึง edge | NOT AVAILABLE | `POST /api/cdn/purge` ตอบ 501, หน้า CDN แสดงปุ่มแบบปิดพร้อมข้อความ "ยังใช้งานไม่ได้จริง" (audit H13, 2026-10-16) | บทที่ 24/45 |
 | Edge-th | VERIFIED | runtime | รับ traffic จริง |
 | Edge-asia | PARTIAL | runtime | ไม่มีเส้นทาง DNS สาธารณะ |
 | GeoDNS | PARTIAL | container รัน, NS เป็น Hostinger | |
@@ -39,4 +39,4 @@ status: VERIFIED
 | Concepts pages | PLANNED | หน้า preview | ไม่ได้เชื่อมการทำงานจริงทั้งหมด |
 | Backup / DR | UNKNOWN | ไม่พบงาน backup | ต้องจัดทำ |
 | CI | PARTIAL | `ci.yml` | trigger ไม่ตรง branch `Backend`, ไม่รัน pytest |
-| Legacy local CDN (SG/JP/TH containers, purge-api, stats) | DEPRECATED | ไม่รัน, log หยุดตั้งแต่ ส.ค. | |
+| Legacy local CDN (SG/JP/TH containers, stats) | DEPRECATED | ไม่รัน, log หยุดตั้งแต่ ส.ค. ลบ `cdn/purge-api` แล้ว (H13) | |

@@ -1,9 +1,8 @@
 import os
 import sys
 import hmac
+import ipaddress
 import json
-import joblib
-import pandas as pd
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -11,11 +10,12 @@ from pydantic import BaseModel
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from ml.feature_engineering import extract_features_from_request, feature_columns_for_model
+from ml.feature_engineering import extract_features_from_request
 from ml.capture_telemetry import capture_request
 from ml.auto_rule_generator import generate_pending_rule
-from ml.attribution import build_attribution_response
+from ml.attribution import format_attribution
 from ml.onnx_inference import OnnxWafInference
+from ml.plain_forest import PlainIsolationForest, PlainRandomForest
 
 # Docs/12-Development-Guide.md T13: the project's stated accuracy target.
 ACCURACY_TARGET = 0.85
@@ -38,25 +38,63 @@ def accuracy_meets_target(eval_results: dict, target: float = ACCURACY_TARGET) -
 
 BASE_DIR = os.path.dirname(__file__)
 MODELS_DIR = os.path.join(BASE_DIR, "models")
-RF_MODEL_PATH = os.path.join(MODELS_DIR, "random_forest_waf.joblib")
-ISO_MODEL_PATH = os.path.join(MODELS_DIR, "isolation_forest_waf.joblib")
+# /predict forests as plain arrays (ml/plain_forest.py). No pickle is ever
+# loaded here (audit H52): the .joblib files are training artifacts only,
+# converted once with ml/export_plain_models.py.
+RF_MODEL_PATH = os.path.join(MODELS_DIR, "random_forest_waf.npz")
+ISO_MODEL_PATH = os.path.join(MODELS_DIR, "isolation_forest_waf.npz")
 RF_ONNX_MODEL_PATH = os.path.join(MODELS_DIR, "random_forest_waf.onnx")
 EVAL_RESULTS_PATH = os.path.join(MODELS_DIR, "eval_results.json")
 # Gen 3 model (ml/train_final_gen3.py). Optional and shadow-only: it is not
 # promoted (gate 3.1-G.0 not passed), so it scores requests but never decides.
-# The ONNX export is preferred (plain data, onnxruntime only); the joblib is the fallback.
+# Served from its ONNX export only (plain data, onnxruntime); there is no joblib fallback (H52).
 # Default: F-noopenappsec (gen3-final-f-noopenappsec-20261002-153004, CSIC + SR-BH only),
 # so the open-appsec benchmark stays unseen data. The older F-canon2 is gen3_f_model.onnx.
 GEN3_ONNX_PATH = os.environ.get("WAF_GEN3_ONNX_PATH", os.path.join(MODELS_DIR, "gen3", "gen3_f_noopenappsec.onnx"))
-GEN3_MODEL_PATH = os.environ.get("WAF_GEN3_MODEL_PATH", os.path.join(MODELS_DIR, "gen3", "gen3_f_noopenappsec.joblib"))
 # Engine behind /predict-fast (the Nginx shadow hook): "gen3" (Gen 3 model, default
 # since 2026-10-13) or "rf" (13-feature RandomForest ONNX, retired). Shadow only while
 # ml_enforcement_enabled is off; without a Gen 3 model the hook answers "unavailable".
 FAST_ENGINE = os.environ.get("WAF_FAST_ENGINE", "gen3").strip().lower()
-# Shared secret for a remote ML host (deploy/azure-ml). Unset = no check, as on
-# the VPS where the API listens on 127.0.0.1 only.
+# Shared secret for a remote ML host (deploy/azure-ml). Unset = no check, which
+# is only allowed while the API is reachable from loopback alone (H51).
 API_TOKEN = os.environ.get("WAF_ML_API_TOKEN", "")
 TOKEN_HEADER = "X-WAF-ML-Token"
+DEFAULT_BIND = "127.0.0.1"
+
+
+def _is_loopback(host: str) -> bool:
+    host = (host or "").strip().strip("[]")
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def bind_host_from_argv(argv) -> str | None:
+    """--host of a `uvicorn ml_api:app --host X` command line, if given."""
+    for i, arg in enumerate(argv):
+        if arg == "--host" and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith("--host="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def check_bind_allowed(host: str, token: str) -> None:
+    """Refuse to serve beyond loopback without a token (audit H51)."""
+    if not token and not _is_loopback(host):
+        raise RuntimeError(
+            f"refusing to listen on {host!r} without WAF_ML_API_TOKEN: "
+            "set a token or bind to 127.0.0.1"
+        )
+
+
+def effective_bind_host() -> str:
+    # Both systemd units start `uvicorn ml_api:app --host ...` (deploy/azure-ml
+    # passes WAF_ML_BIND there); with neither, uvicorn's own default is 127.0.0.1.
+    return bind_host_from_argv(sys.argv) or os.environ.get("WAF_ML_BIND") or DEFAULT_BIND
 DASHBOARD_DIR = os.path.join(BASE_DIR, "dashboard")
 
 app = FastAPI(
@@ -68,7 +106,8 @@ app = FastAPI(
 
 @app.middleware("http")
 async def require_token(request: Request, call_next):
-    """Every path (including /health and the docs) needs the token when WAF_ML_API_TOKEN is set."""
+    """Every path (including /health and the docs) needs the token when WAF_ML_API_TOKEN is set.
+    Without a token the app refuses to start on a non-loopback address (startup_event, H51)."""
     if API_TOKEN and not hmac.compare_digest(request.headers.get(TOKEN_HEADER, "").encode(), API_TOKEN.encode()):
         return JSONResponse(status_code=401, content={"detail": "invalid or missing ML API token"})
     return await call_next(request)
@@ -82,36 +121,28 @@ gen3_model = None
 gen3_error = None
 
 
-def load_gen3_model(path=GEN3_MODEL_PATH, onnx_path=GEN3_ONNX_PATH):
-    """(model, error). ONNX first, then joblib. Never raises: a missing file or
-    libinjection must not stop the API."""
-    errors = []
-    if os.path.exists(onnx_path):
-        try:
-            from ml.gen3_onnx import Gen3OnnxModel  # needs onnxruntime + libinjection
-            return Gen3OnnxModel(onnx_path), None
-        except Exception as exc:
-            errors.append(f"onnx: {type(exc).__name__}: {exc}")
-    if os.path.exists(path):
-        try:
-            import ml.gen3_model  # noqa: F401  (class definition for unpickling; needs libinjection)
-            # joblib.load executes a pickle: only load artifacts produced by
-            # ml/train_final_gen3.py from this repository.
-            return joblib.load(path), "; ".join(errors) or None
-        except Exception as exc:
-            errors.append(f"joblib: {type(exc).__name__}: {exc}")
-    return None, "; ".join(errors) or "Gen 3 model artifact is missing"
+def load_gen3_model(onnx_path=GEN3_ONNX_PATH):
+    """(model, error). ONNX only. Never raises: a missing file or libinjection
+    must not stop the API."""
+    if not os.path.exists(onnx_path):
+        return None, "Gen 3 ONNX model artifact is missing"
+    try:
+        from ml.gen3_onnx import Gen3OnnxModel  # needs onnxruntime + libinjection
+        return Gen3OnnxModel(onnx_path), None
+    except Exception as exc:
+        return None, f"onnx: {type(exc).__name__}: {exc}"
 
 
 @app.on_event("startup")
 def startup_event():
     global rf_model, iso_model, fast_engine, fast_engine_error, eval_results, gen3_model, gen3_error
+    check_bind_allowed(effective_bind_host(), API_TOKEN)
     if os.path.exists(RF_MODEL_PATH):
-        rf_model = joblib.load(RF_MODEL_PATH)
+        rf_model = PlainRandomForest(RF_MODEL_PATH)
         print(f"[+] Loaded Random Forest Model from {RF_MODEL_PATH}")
-    
+
     if os.path.exists(ISO_MODEL_PATH):
-        iso_model = joblib.load(ISO_MODEL_PATH)
+        iso_model = PlainIsolationForest(ISO_MODEL_PATH)
         print(f"[+] Loaded Isolation Forest Model from {ISO_MODEL_PATH}")
 
     if os.path.exists(RF_ONNX_MODEL_PATH):
@@ -283,11 +314,12 @@ def predict_anomaly(req: PredictionRequest):
         method=req.method,
         body=req.body
     )
-    df_feat = pd.DataFrame([features])[feature_columns_for_model(rf_model)]
+    row = {name: features[name] for name in rf_model.feature_names}
+    values = list(row.values())
 
-    rf_pred = rf_model.predict(df_feat)[0]
-    attack_prob = float(rf_model.predict_proba(df_feat)[0][1])
-    iso_score = float(iso_model.decision_function(df_feat)[0]) if iso_model else 0.0
+    rf_pred = rf_model.predict(values)
+    attack_prob = rf_model.predict_proba1(values)
+    iso_score = iso_model.decision_function([features[n] for n in iso_model.feature_names]) if iso_model else 0.0
 
     is_anomaly = bool(rf_pred == 1 or attack_prob > 0.5)
 
@@ -304,7 +336,8 @@ def predict_anomaly(req: PredictionRequest):
     # detection down with it. If it fails for any reason, log and return
     # the original fields unchanged rather than failing the request.
     try:
-        response.update(build_attribution_response(rf_model, df_feat))
+        _, bias, contributions = rf_model.explain(values)
+        response.update(format_attribution(bias, contributions, row))
     except Exception as exc:
         print(f"[!] Attribution failed, returning prediction without it: {exc}")
 
@@ -376,4 +409,6 @@ if os.path.exists(DASHBOARD_DIR):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    host = os.environ.get("WAF_ML_BIND", DEFAULT_BIND)
+    check_bind_allowed(host, API_TOKEN)
+    uvicorn.run(app, host=host, port=int(os.environ.get("WAF_ML_PORT", "5000")))

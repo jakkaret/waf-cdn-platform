@@ -30,6 +30,7 @@ import {
   filterAndSortRules,
   generatorOf,
   legacyPendingCount,
+  renderSecRule,
   timeAgo,
   type BacktestTone,
   type RuleFilters,
@@ -226,7 +227,7 @@ export const MLRules: React.FC = () => {
   }
 
   const copyRule = (rule: MLPendingRule) => {
-    const text = rule.secrule_template.replace('{RULE_ID}', rule.deployed_rule_id ? String(rule.deployed_rule_id) : 'PENDING_ID')
+    const text = renderSecRule(rule)
     navigator.clipboard.writeText(text).then(
       () => toast.success('คัดลอก SecRule แล้ว'),
       () => toast.error('คัดลอกไม่สำเร็จ'),
@@ -353,7 +354,7 @@ export const MLRules: React.FC = () => {
               </div>
               <pre className="m-0 overflow-x-auto rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] p-3 font-mono text-[12px] leading-relaxed text-[var(--text-primary)]">
                 {rule.secrule_template
-                  ? rule.secrule_template.replace('{RULE_ID}', rule.deployed_rule_id ? String(rule.deployed_rule_id) : 'PENDING_ID')
+                  ? renderSecRule(rule)
                   : 'ไม่มี SecRule template'}
               </pre>
               <p className="mt-2 mb-0 text-[12px] leading-relaxed text-[var(--text-muted)]">{GENERATOR_HINT[gen]}</p>

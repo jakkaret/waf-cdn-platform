@@ -12,6 +12,7 @@ ALLOWED_SECRETS = {"ML_RELAY_SECRET", "DECEPTION_INTERNAL_KEY"}
 TEMPLATES = [
     "nginx/templates/conf.d/default.conf.template",
     "nginx/templates/includes/captcha_server.conf.template",
+    "nginx/templates/includes/location_common.conf.template",
     "nginx/nginx.conf.template",
     *[str(p.relative_to(REPO)) for p in (REPO / "nginx/templates/modsecurity.d").glob("*.template")],
 ]

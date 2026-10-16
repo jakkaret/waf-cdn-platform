@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from services.gemini_service import GeminiService
+from services.gemini_service import GeminiService, gemini_headers
 from services.clickhouse_service import ClickHouseService
 from services.rbac import require_viewer_or_above
 from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter
@@ -184,9 +184,9 @@ async def copilot_chat(
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         for model_name in CANDIDATE_MODELS:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
             try:
-                res = await client.post(url, json=payload)
+                res = await client.post(url, json=payload, headers=gemini_headers(api_key))
                 if res.status_code == 200:
                     res_json = res.json()
                     candidates = res_json.get("candidates", [])

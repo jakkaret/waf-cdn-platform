@@ -179,27 +179,6 @@ services:
       cdn-net:
         ipv4_address: 172.28.0.53
 
-  purge-api:
-    build:
-      context: ./purge-api
-    container_name: cdn-purge-api
-    ports:
-      - "8090:8090"
-    environment:
-      PURGE_TOKEN: "${CDN_PURGE_TOKEN:?set CDN_PURGE_TOKEN in cdn/.env}"
-    depends_on:
-      - control-api
-      - edge-sg
-      - edge-jp
-      - edge-th
-    volumes:
-      - edge_sg_cache:/cache/sg
-      - edge_jp_cache:/cache/jp
-      - edge_th_cache:/cache/th
-    restart: unless-stopped
-    networks:
-      - cdn-net
-
   stats:
     build:
       context: ./stats

@@ -26,8 +26,7 @@ ch = ClickHouseService()
 _CDN_NODES_CACHE: Tuple[float, List[Dict[str, Any]]] = (0.0, [])
 CDN_CACHE_TTL = 5.0
 
-CDN_PURGE_API_URL = os.getenv("CDN_PURGE_API_URL", "http://localhost:8080")
-CDN_PURGE_TOKEN = os.getenv("CDN_PURGE_TOKEN", "")  # no guessable default: purge is refused when unset
+PURGE_NOT_AVAILABLE = "Edge cache purge is not available yet: the production edges have no purge endpoint."
 
 # Configured POPs (Thailand Edge POP + Asia Edge POP + Central Core)
 REGIONS_META = {
@@ -349,23 +348,11 @@ async def cdn_purge(
     region: Optional[str] = Query("ALL", description="SG/JP/TH/ALL"),
     current_user: dict = Depends(require_admin),
 ):
-    if not CDN_PURGE_TOKEN:
-        raise HTTPException(status_code=500, detail="CDN_PURGE_TOKEN not configured")
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{CDN_PURGE_API_URL}/purge",
-                params={"url": url, "region": (region or "ALL")},
-                headers={"X-Purge-Token": CDN_PURGE_TOKEN},
-            )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Purge API unreachable: {exc}") from exc
-
-    if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
-
-    return resp.json()
+    # Not available yet (audit H13). The old cdn/purge-api only served the
+    # local SG/JP/TH simulation, computed a cache key the edges do not use and
+    # was never deployed, so it was removed. The production edges have no
+    # purge endpoint yet; say so instead of failing with a 500/502.
+    raise HTTPException(status_code=501, detail=PURGE_NOT_AVAILABLE)
 
 
 @router.get("/logs")

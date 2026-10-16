@@ -4,8 +4,6 @@ set -euo pipefail
 EDGE_SG="${EDGE_SG:-http://localhost:8081}"
 EDGE_JP="${EDGE_JP:-http://localhost:8082}"
 EDGE_TH="${EDGE_TH:-http://localhost:8086}"
-PURGE_API="${PURGE_API:-http://localhost:8090}"
-PURGE_TOKEN="${CDN_PURGE_TOKEN:?set CDN_PURGE_TOKEN in cdn/.env}"
 TARGET_PATH="${1:-/dvwa/images/login_logo.png}"
 
 check_health() {
@@ -37,11 +35,4 @@ echo "== Cache MISS/HIT checks =="
 run_cache_flow SG "$EDGE_SG"
 run_cache_flow JP "$EDGE_JP"
 run_cache_flow TH "$EDGE_TH"
-
-echo "== Purge check =="
-curl -sS -X POST "${PURGE_API}/purge?url=${TARGET_PATH}&region=ALL" -H "X-Purge-Token: ${PURGE_TOKEN}" >/tmp/cdn_purge_result.json
-cat /tmp/cdn_purge_result.json
-
-echo
-echo "== Recheck SG after purge (should be MISS on first call) =="
-run_cache_flow SG "$EDGE_SG"
+# No purge check: the purge-api service was removed (audit H13, 2026-10-16).

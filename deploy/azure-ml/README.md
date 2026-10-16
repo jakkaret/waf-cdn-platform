@@ -72,16 +72,18 @@ NSG เปิดแค่ 2 ช่อง: SSH จาก IP ของคุณ �
 ```bash
 ssh azureuser@<ML_HOST_PUBLIC_IP>
 git clone https://github.com/jakkaret/waf-cdn-platform.git ~/waf-cdn-platform
-sudo bash ~/waf-cdn-platform/deploy/azure-ml/install.sh
+sudo REF=<commit sha หรือ tag ที่ตรวจแล้ว> bash ~/waf-cdn-platform/deploy/azure-ml/install.sh
 ```
+
+ต้องระบุ `REF` ทุกครั้ง (audit H03) เครื่องจะรันโค้ดของ commit นั้นเท่านั้น ไม่ดึงตาม branch `main`
 
 `install.sh` ทำสิ่งต่อไปนี้ (รันซ้ำได้ ใช้ตอนอัปเดตโค้ดด้วย):
 
 1. ติดตั้ง python3-venv, build-essential และ wireguard
 2. สร้าง user `wafml` (ไม่มี shell)
-3. clone โค้ด (repo public `waf-cdn-platform` branch `main` ไม่ต้องใช้ token) ไปที่ `/opt/waf_project`
+3. clone โค้ด (repo public `waf-cdn-platform` ไม่ต้องใช้ token) ไปที่ `/opt/waf_project` แล้ว checkout แบบ detached ที่ `REF`
 4. สร้าง venv จาก `ml/requirements-serve.txt` (ไม่มี LightGBM)
-5. สร้าง `random_forest_waf.onnx` จาก joblib ใน repo
+5. ตรวจ sha256 ของไฟล์โมเดลทุกไฟล์กับ `ml/models/SHA256SUMS` ของ commit นั้น ไม่ตรงคือหยุดติดตั้ง (ไม่มีการ unpickle ไฟล์ .joblib บนเครื่อง ML อีกแล้ว)
 6. สร้าง `/etc/waf-ml/waf-ml.env` พร้อม token แบบสุ่ม
 7. ติดตั้ง `waf-ml.service` (systemd แบบ hardening: โค้ดอ่านอย่างเดียว เขียนได้เฉพาะ `ml/telemetry`)
 
@@ -95,12 +97,8 @@ sudo bash ~/waf-cdn-platform/deploy/azure-ml/install.sh
 `PYTHONPATH=. python ml/export_gen3_onnx.py <path>/gen3_f_model.joblib`
 
 รุ่นที่ใช้ตอนนี้คือ F-noopenappsec (`ml/models/gen3/gen3_f_noopenappsec.onnx`, เทรนจาก CSIC + SR-BH เท่านั้น) อยู่ใน repo แล้ว
-ถ้าเทรนรุ่นใหม่ ให้วางทับด้วยชื่อเดียวกัน:
-
-```bash
-scp gen3_f_model.onnx azureuser@<ML_HOST_PUBLIC_IP>:/tmp/
-ssh azureuser@<ML_HOST_PUBLIC_IP> 'sudo install -m 644 /tmp/gen3_f_model.onnx /opt/waf_project/ml/models/gen3/gen3_f_noopenappsec.onnx && sudo systemctl restart waf-ml'
-```
+ถ้าเทรนรุ่นใหม่ ให้ commit ไฟล์ใหม่ทับชื่อเดิม พร้อมอัปเดตบรรทัดของไฟล์นั้นใน `ml/models/SHA256SUMS`
+แล้วรัน `install.sh` ด้วย `REF` ใหม่ ห้าม scp ไฟล์โมเดลขึ้นเครื่องตรง ๆ เพราะจะข้ามการตรวจ hash
 
 ตรวจสอบ: `/health` → `"gen3_shadow": {"loaded": true, "runtime": "onnx", ...}`
 ไฟล์ `.onnx` เป็นข้อมูลล้วน (ไม่ใช่ pickle) และเก็บ threshold, รายชื่อฟีเจอร์ และ model card ไว้ในตัวไฟล์
@@ -183,7 +181,7 @@ systemctl daemon-reload && systemctl restart waf-dashboard waf-log-analyzer
 
 | งาน | คำสั่ง (เครื่อง Azure) |
 | :--- | :--- |
-| อัปเดตโค้ด | `sudo bash /opt/waf_project/deploy/azure-ml/install.sh` |
+| อัปเดตโค้ด | `sudo REF=<sha หรือ tag> bash /opt/waf_project/deploy/azure-ml/install.sh` |
 | log | `journalctl -u waf-ml -f` |
 | เปลี่ยน token | แก้ `WAF_ML_API_TOKEN` ใน `/etc/waf-ml/waf-ml.env` และ `ML_SERVICE_TOKEN` บน VPS แล้ว restart ทั้ง 2 ฝั่ง |
 | เอนจินของ shadow hook | ค่าเริ่มต้นเป็น Gen 3 (`WAF_FAST_ENGINE=gen3`) ตั้งแต่ 13 ต.ค. 2569 ใช้ RF เดิมได้ด้วย `WAF_FAST_ENGINE=rf` แล้ว restart (ยังเป็น shadow จนกว่าจะผ่าน promotion gate 3.1-G.0) |

@@ -62,8 +62,7 @@ class Gen3ModelTests(unittest.TestCase):
 class Gen3ApiTests(unittest.TestCase):
     def test_missing_artifact_fails_open(self):
         import ml.ml_api as api
-        model, err = api.load_gen3_model(os.path.join(tempfile.gettempdir(), "no-such-gen3-model.joblib"),
-                                         os.path.join(tempfile.gettempdir(), "no-such-gen3-model.onnx"))
+        model, err = api.load_gen3_model(os.path.join(tempfile.gettempdir(), "no-such-gen3-model.onnx"))
         self.assertIsNone(model)
         self.assertIn("missing", err)
 

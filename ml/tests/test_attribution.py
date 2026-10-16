@@ -136,7 +136,7 @@ def test_degradation_predict_survives_attribution_failure(rf_model, monkeypatch)
     def _boom(*_args, **_kwargs):
         raise RuntimeError("simulated attribution failure")
 
-    monkeypatch.setattr(ml_api_module, "build_attribution_response", _boom)
+    monkeypatch.setattr(ml_api_module, "format_attribution", _boom)
 
     with TestClient(ml_api_module.app) as client:
         resp = client.post(

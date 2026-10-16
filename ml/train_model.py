@@ -196,6 +196,12 @@ def train_and_evaluate():
     joblib.dump(iso_model, ISO_MODEL_PATH)
     print(f"[+] Exported Random Forest Classifier -> {RF_MODEL_PATH}")
     print(f"[+] Exported Isolation Forest Model -> {ISO_MODEL_PATH}")
+    # ml_api.py serves the pickle-free copies (H52); refresh them and update
+    # ml/models/SHA256SUMS before committing a retrained model.
+    from ml.plain_forest import export_isolation_forest, export_random_forest
+    export_random_forest(rf_model, RF_MODEL_PATH.replace(".joblib", ".npz"))
+    export_isolation_forest(iso_model, ISO_MODEL_PATH.replace(".joblib", ".npz"))
+    print("[+] Exported pickle-free .npz copies for serving (run ml/export_plain_models.py to verify)")
 
     # Export Metadata & Results JSON
     eval_results = {
