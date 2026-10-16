@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from services.gemini_service import GeminiService, gemini_headers
+from services.ai_quota import check_ai_quota
 from services.clickhouse_service import ClickHouseService
 from services.rbac import require_viewer_or_above
 from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter
@@ -30,12 +31,12 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 class MessageItem(BaseModel):
     role: str = Field(..., description="user or model")
-    content: str = Field(..., description="Message text")
+    content: str = Field(..., max_length=4000, description="Message text")
 
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
-    history: List[MessageItem] = Field(default=[], description="Chat context history")
+    history: List[MessageItem] = Field(default=[], max_length=20, description="Chat context history")
 
 
 @router.post("/chat")
@@ -47,6 +48,7 @@ async def copilot_chat(
     Real-time AI SecOps Assistant with live ClickHouse context and user scoping.
     """
     user_id = current_user.get("user_id")
+    check_ai_quota(user_id)
     username = current_user.get("username", "Security Engineer")
     is_admin = current_user.get("role") == "admin"
     origin_ids, _active_origins, user_domains = get_user_origins_and_domains(user_id)

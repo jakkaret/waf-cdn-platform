@@ -383,13 +383,16 @@ class PgStore:
         if uid is None or not proxy_name:
             return False
         try:
-            pool.exec_("INSERT INTO tunnel_proxy_owners (proxy_name, user_id, domain_name) VALUES (%s, %s, %s) "
-                       "ON CONFLICT (proxy_name) DO UPDATE SET user_id = EXCLUDED.user_id, "
-                       "domain_name = EXCLUDED.domain_name, updated_at = now()",
-                       (str(proxy_name)[:255], uid, _norm_host(domain_name)))
+            # Only the same domain may refresh an existing name (its verified
+            # owner can change); a different domain leaves the row untouched
+            # and reports False so the hook rejects the proxy.
+            n = pool.exec_("INSERT INTO tunnel_proxy_owners (proxy_name, user_id, domain_name) VALUES (%s, %s, %s) "
+                           "ON CONFLICT (proxy_name) DO UPDATE SET user_id = EXCLUDED.user_id, updated_at = now() "
+                           "WHERE tunnel_proxy_owners.domain_name = EXCLUDED.domain_name",
+                           (str(proxy_name)[:255], uid, _norm_host(domain_name)))
         except ForeignKeyConflict:
             return False
-        return True
+        return n > 0
 
     def get_proxy_owner(self, proxy_name: str) -> Optional[str]:
         row = pool.q1("SELECT user_id FROM tunnel_proxy_owners WHERE proxy_name = %s", (str(proxy_name),))

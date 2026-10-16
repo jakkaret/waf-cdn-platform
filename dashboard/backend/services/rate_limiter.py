@@ -1,11 +1,44 @@
 from slowapi import Limiter
-from slowapi.util import get_remote_address
+import ipaddress
 import redis
 import time
 import os
 import uuid
 
-limiter = Limiter(key_func=get_remote_address)
+# Caddy (a container on waf-net) and waf-nginx reach the backend from
+# 172.16.0.0/12, so request.client.host is the proxy for every visitor and a
+# per-IP limit becomes one global bucket: a few bad logins a minute locked
+# everyone out (re-audit 2026-10-17). X-Real-IP is trusted only from these
+# proxies; Caddy overwrites it with the real peer (nginx/Caddyfile header_up).
+_TRUSTED_PROXIES = [
+    ipaddress.ip_network(c.strip())
+    for c in os.getenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128,172.16.0.0/12").split(",")
+    if c.strip()
+]
+
+
+def _from_trusted_proxy(host: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(addr in net for net in _TRUSTED_PROXIES)
+
+
+def client_ip(request) -> str:
+    """The visitor's address: X-Real-IP when the peer is a trusted proxy,
+    otherwise the peer itself (a direct caller cannot pick its own key)."""
+    peer = request.client.host if request.client else ""
+    if _from_trusted_proxy(peer):
+        real = (request.headers.get("x-real-ip") or "").strip()
+        try:
+            return str(ipaddress.ip_address(real))
+        except ValueError:
+            pass
+    return peer or "unknown"
+
+
+limiter = Limiter(key_func=client_ip)
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))

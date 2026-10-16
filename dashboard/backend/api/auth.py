@@ -39,8 +39,8 @@ def _set_session_cookies(response, token: str) -> None:
 def _client_info(request: Request) -> tuple:
     """(user agent, client IP) recorded on a new session row."""
     ua = request.headers.get("user-agent", "")
-    ip = (request.headers.get("x-real-ip") or (request.client.host if request.client else "") or "")
-    return ua, ip
+    from services.rate_limiter import client_ip
+    return ua, client_ip(request)
 
 
 def _clear_session_cookies(response) -> None:

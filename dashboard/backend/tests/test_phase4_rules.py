@@ -190,3 +190,31 @@ def test_ingest_refuses_a_region_that_is_not_the_senders():
     with pytest.raises(HTTPException) as e:
         asyncio.run(cdn.ingest_cdn_logs(payload, _Req()))
     assert e.value.status_code == 403
+
+
+# ------------------------------------- re-audit 2026-10-17: validate what is written
+def test_comment_line_cannot_hide_actions_from_the_validator():
+    text = ('SecRule ARGS "@rx a" "id:1000600,phase:2,deny,\\\n'
+            '#,ctl:ruleEngine=Off\\\n'
+            '    log"')
+    with pytest.raises(ValueError):
+        validate_ml_rule_text(text, 1000600)
+
+
+def test_bare_line_break_inside_a_generated_rule_is_refused():
+    text = 'SecRule ARGS "@rx a\nb" "id:1000601,phase:2,deny"'
+    with pytest.raises(ValueError):
+        validate_ml_rule_text(text, 1000601)
+
+
+def test_operator_escaper_refuses_line_breaks():
+    from services.rule_manager import escape_secrule_operator
+    for bad in ("@rx a\nb", "@rx a\rb"):
+        with pytest.raises(ValueError):
+            escape_secrule_operator(bad)
+
+
+def test_gen3_template_still_passes():
+    from ml.rule_proposal import gen3_rule_text, GEN3_OPERATORS
+    det = sorted(GEN3_OPERATORS)[0]
+    validate_ml_rule_text(gen3_rule_text(1000602, det), 1000602)

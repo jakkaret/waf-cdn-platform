@@ -13,8 +13,10 @@
 # The dashboard's internal ML relay (F-019) is for nginx and control-api
 # only, which call :8000 directly; it is never served on the public vhosts.
 # The FRP gatekeeper hook (P3.1, N1) is for frps on this host only, the same way.
+# The deception responder is nginx's error_page target (re-audit 2026-10-17);
+# on the public vhost its only gate was the internal key header.
 (internal_ml_relay) {
-    @internal_ml_relay path /api/ml/shadow/decision* /api/ml/capture* /api/tunnels/frp-hook*
+    @internal_ml_relay path /api/ml/shadow/decision* /api/ml/capture* /api/tunnels/frp-hook* /api/deception/respond*
     respond @internal_ml_relay 404
 }
 

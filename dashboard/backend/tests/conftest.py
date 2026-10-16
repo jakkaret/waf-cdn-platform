@@ -258,3 +258,17 @@ def invite_mailbox(request, monkeypatch):
 
     monkeypatch.setattr(invite_service, "send_invite_email", fake_send)
     return sent
+
+
+@pytest.fixture(autouse=True)
+def _ai_quota_allows_by_default(monkeypatch):
+    """fakeredis has no Lua, so the real RedisRateLimiter would fail closed
+    (429) in every test that calls copilot or summarize-range. Tests of the
+    quota itself (test_ai_quota_audit2.py) install their own limiter."""
+    import services.ai_quota as ai_quota
+
+    class _AllowAll:
+        def is_allowed(self, *a, **k):
+            return True, 999, 0
+
+    monkeypatch.setattr(ai_quota, "_limiter", _AllowAll())

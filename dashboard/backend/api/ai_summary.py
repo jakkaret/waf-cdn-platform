@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends, Body
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta, timezone
 import uuid
 from services.gemini_service import gemini_service
+from services.ai_quota import check_ai_quota
 from services.clickhouse_service import ClickHouseService
 from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
 from services.rbac import get_current_user, verify_origin_access, verify_origin_ownership
@@ -19,7 +20,7 @@ ch = ClickHouseService()
 db = DynamoDBService()
 
 class SummarizeRangeRequest(BaseModel):
-    query: Optional[str] = None  # e.g. "สรุป 3 วันล่าสุด", "เมื่อวานถึงตอนนี้"
+    query: Optional[str] = Field(None, max_length=500)  # e.g. "สรุป 3 วันล่าสุด", "เมื่อวานถึงตอนนี้"
     start_time: Optional[str] = None
     end_time: Optional[str] = None
 
@@ -58,6 +59,7 @@ async def summarize_threat_range(
     """
     Summarize WAF attacks for a given time range or natural language text query.
     """
+    check_ai_quota(current_user.get("user_id"))
     try:
         # 1. Resolve time range
         if req.query and req.query.strip():
