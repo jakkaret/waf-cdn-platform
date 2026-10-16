@@ -21,6 +21,14 @@ logger = logging.getLogger(__name__)
 INVITE_TTL_DAYS = 7
 
 
+def public_app_url() -> str:
+    """Base URL for links in invitation emails (PUBLIC_APP_URL, https only)."""
+    url = (os.getenv("PUBLIC_APP_URL") or "https://waf-it-kku.online").rstrip("/")
+    if not url.startswith("https://"):
+        raise RuntimeError("PUBLIC_APP_URL must be an https URL")
+    return url
+
+
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
