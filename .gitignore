@@ -49,7 +49,10 @@ old/
 .agents/
 .claude/
 .codex/
-.github/
+# Local AI tool files under .github stay ignored; CI and Dependabot config is tracked.
+.github/*
+!.github/workflows/
+!.github/dependabot.yml
 
 # AI tool scratch files
 .aider*

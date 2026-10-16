@@ -1,0 +1,9 @@
+# Audit H01/H02: actions in .github/workflows are pinned by commit SHA, so
+# Dependabot proposes the updates (new SHA + tag comment) for review.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
