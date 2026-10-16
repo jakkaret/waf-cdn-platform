@@ -185,7 +185,28 @@ class AuthService:
         _invalidate_alert_recipients()
 
     def revoke_sessions(self, user_id: str) -> None:
+        """Every device: bumps token_version (voids all tokens) and marks the
+        account's session rows revoked."""
         self._pg.bump_token_version(user_id)
+        self._pg.revoke_all_sessions(user_id)
+
+    def start_session(self, user: Dict, user_agent: str = "", ip: str = "") -> str:
+        """Sign-in on one device: a session row plus a JWT naming it (sid)."""
+        sid = self._pg.create_session(user["user_id"], ACCESS_TOKEN_EXPIRE_MINUTES * 60, user_agent, ip)
+        return self.create_access_token({
+            "sub": user["user_id"],
+            "role": user["role"],
+            "email": user.get("email", ""),
+            "sid": sid,
+        })
+
+    def end_session(self, payload: Dict) -> None:
+        """Logout on this device only. A token from before per-device
+        sessions (no sid) falls back to signing out everywhere."""
+        if payload.get("sid"):
+            self._pg.revoke_session(payload["sid"], payload.get("sub", ""))
+        elif payload.get("sub"):
+            self._pg.bump_token_version(payload["sub"])
 
     def delete_user(self, user_id: str) -> int:
         """Delete the account; origins it still owns are archived in the same

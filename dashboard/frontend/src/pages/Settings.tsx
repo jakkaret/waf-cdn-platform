@@ -4,6 +4,7 @@ import { settingsApi, SystemSettings } from '../api/settings'
 import { systemApi } from '../api/system'
 import { threatIntelApi, TrendingPattern } from '../api/threatIntel'
 import { authApi } from '../api/auth'
+import { api } from '../api/axios'
 import { useAuthStore } from '../store/authStore'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
@@ -33,7 +34,7 @@ import {
 } from 'lucide-react'
 
 export const Settings: React.FC = () => {
-  const { user, updateUser } = useAuthStore()
+  const { user, updateUser, logout } = useAuthStore()
   const isAdmin = user?.role === 'admin'
   const queryClient = useQueryClient()
 
@@ -165,6 +166,20 @@ export const Settings: React.FC = () => {
               onClick={() => { window.location.href = '/api/auth/google?link=true' }}
             >
               Link Google account
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                // Logout signs out this device only; this ends every session.
+                try {
+                  await api.post('/auth/logout-all')
+                } finally {
+                  logout()
+                  window.location.href = '/login'
+                }
+              }}
+            >
+              Sign out of all devices
             </Button>
             {isAdmin && (
               <Button

@@ -52,14 +52,22 @@ def expire_unverified_domains(days: int = UNVERIFIED_DOMAIN_DAYS) -> int:
     return PgStore().delete_stale_unverified_domains(days)
 
 
+def purge_old_sessions(days: int = 7) -> int:
+    """Session rows are kept a week past expiry, then dropped."""
+    from services.pg_store import PgUserRepository
+    return PgUserRepository().purge_old_sessions(days)
+
+
 async def retention_worker():
     while True:
         try:
             results = await asyncio.to_thread(run_database_retention)
             removed = await asyncio.to_thread(expire_ip_bans)
             stale = await asyncio.to_thread(expire_unverified_domains)
+            old_sessions = await asyncio.to_thread(purge_old_sessions)
             deleted = {t: n for t, n in results if n} | ({"ip_rules": removed} if removed else {})
             deleted |= {"unverified_domains": stale} if stale else {}
+            deleted |= {"user_sessions": old_sessions} if old_sessions else {}
             if deleted:
                 logger.info("retention: deleted %s", deleted)
         except Exception as exc:

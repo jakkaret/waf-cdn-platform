@@ -36,6 +36,13 @@ def _set_session_cookies(response, token: str) -> None:
                         samesite="lax", secure=secure, max_age=SESSION_MAX_AGE, path="/")
 
 
+def _client_info(request: Request) -> tuple:
+    """(user agent, client IP) recorded on a new session row."""
+    ua = request.headers.get("user-agent", "")
+    ip = (request.headers.get("x-real-ip") or (request.client.host if request.client else "") or "")
+    return ua, ip
+
+
 def _clear_session_cookies(response) -> None:
     for k in ("access_token", CSRF_COOKIE_NAME):
         response.delete_cookie(k, path="/", samesite="lax", secure=_cookie_secure())
@@ -97,11 +104,7 @@ async def register(request: Request, req: RegisterRequest, response: Response):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    token = auth_service.create_access_token({
-        "sub": user["user_id"],
-        "role": user["role"],
-        "email": user["email"],
-    })
+    token = auth_service.start_session(user, *_client_info(request))
 
     _set_session_cookies(response, token)
 
@@ -123,11 +126,7 @@ async def login(request: Request, req: LoginRequest, response: Response):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    token = auth_service.create_access_token({
-        "sub": user["user_id"],
-        "role": user["role"],
-        "email": user["email"],
-    })
+    token = auth_service.start_session(user, *_client_info(request))
 
     _set_session_cookies(response, token)
 
@@ -144,12 +143,22 @@ async def logout(request: Request, response: Response,
     # Revoke the session server-side too (H28/H31): a copied token must not
     # outlive the logout. Logging out without a valid session still clears cookies.
     try:
-        user = get_current_user(request, credentials)  # cookie or Bearer header
-        auth_service.revoke_sessions(user["user_id"])
+        get_current_user(request, credentials)  # cookie or Bearer header; must be valid
+        token = credentials.credentials if credentials else request.cookies.get("access_token")
+        auth_service.end_session(auth_service.decode_token(token) or {})  # this device only
     except HTTPException:
         pass
     _clear_session_cookies(response)
     return {"message": "Logged out"}
+
+
+@router.post("/logout-all")
+async def logout_all(request: Request, response: Response,
+                     current_user: dict = Depends(get_current_user)):
+    """Sign out on every device of this account (all sessions and tokens)."""
+    auth_service.revoke_sessions(current_user["user_id"])
+    _clear_session_cookies(response)
+    return {"message": "Signed out on all devices"}
 
 
 # Google OAuth
@@ -199,11 +208,7 @@ async def google_callback(request: Request, code: str = "", state: str = ""):
     except GoogleLoginRejected as exc:
         return _google_error(str(exc))
 
-    token = auth_service.create_access_token({
-        "sub": user["user_id"],
-        "role": user["role"],
-        "email": user["email"],
-    })
+    token = auth_service.start_session(user, *_client_info(request))
 
     # [S2 FIX] ห้ามแนบ JWT token ใน URL query param
     # เพราะถูกบันทึกใน browser history, server access logs, และ Referrer header
@@ -221,7 +226,7 @@ async def google_callback(request: Request, code: str = "", state: str = ""):
 # Telegram Login Widget
 
 @router.post("/telegram")
-async def telegram_login(req: TelegramLoginRequest, response: Response):
+async def telegram_login(request: Request, req: TelegramLoginRequest, response: Response):
     data = req.dict()
     
     if not auth_service.verify_telegram_login(data):
@@ -229,11 +234,7 @@ async def telegram_login(req: TelegramLoginRequest, response: Response):
 
     user = auth_service.login_or_register_telegram(req.dict())
 
-    token = auth_service.create_access_token({
-        "sub": user["user_id"],
-        "role": user["role"],
-        "email": user.get("email", ""),
-    })
+    token = auth_service.start_session(user, *_client_info(request))
 
     _set_session_cookies(response, token)
 
