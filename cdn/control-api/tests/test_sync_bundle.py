@@ -17,6 +17,7 @@ def _load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("CONTROL_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("CUSTOM_RULES_DIR", str(rules))
     monkeypatch.setenv("EDGE_ALLOWED_IPS", "testclient")
+    monkeypatch.setenv("BUNDLE_SIGNING_KEY", "bundle-key-for-tests-0123456789abcdef")  # P4.1: required
     import main
     return importlib.reload(main), rules
 

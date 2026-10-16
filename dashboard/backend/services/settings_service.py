@@ -70,7 +70,9 @@ OVERRIDE_FILE = Path(__file__).resolve().parent.parent.parent.parent / "modsecur
 
 
 def render_modsecurity_override(settings: Dict[str, Any]) -> str:
-    engine_val = "On" if settings.get("waf_mode") == "blocking" else "DetectionOnly"
+    # Fail closed (P4.5): only an explicit "detection_only" stops blocking;
+    # anything else, a typo included, keeps the engine On.
+    engine_val = "DetectionOnly" if settings.get("waf_mode") == "detection_only" else "On"
     paranoia = settings.get("paranoia_level", 1)
     inbound = settings.get("inbound_anomaly_threshold", 10)
     outbound = settings.get("outbound_anomaly_threshold", 10)
@@ -164,6 +166,11 @@ class SettingsService:
 
     def _apply_modsecurity_settings(self, settings: Dict[str, Any]):
         """Write modsecurity-override.conf to dynamically update SecRuleEngine and CRS thresholds."""
+        from services.rule_manager import RULES_LOCK
+        with RULES_LOCK:  # P4.3: one lock for every rule writer
+            self._apply_override_locked(settings)
+
+    def _apply_override_locked(self, settings: Dict[str, Any]):
         previous = OVERRIDE_FILE.read_text(encoding="utf-8") if OVERRIDE_FILE.exists() else None
         try:
             OVERRIDE_FILE.write_text(render_modsecurity_override(settings), encoding="utf-8")

@@ -61,7 +61,7 @@ _ID = re.compile(r"\bid:(\d+)")
 _ORIGIN_ID_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _HOST_OK = re.compile(r"^[a-z0-9.-]{1,253}$")
 
-_lock = threading.Lock()
+from services.rule_manager import RULES_LOCK as _lock  # P4.3: one lock for all rule writers
 
 
 class ManagedRulesetError(ValueError):

@@ -198,10 +198,13 @@ class TestRuleIDBoundaryChallenges:
         rm.reload_nginx = lambda: None
 
         assert victim.exists()
-        # Exploit path traversal via delete_rule
-        deleted = rm.delete_rule("../victim")
-        assert deleted is True, "delete_rule allowed path traversal outside rules_dir"
-        assert not victim.exists(), "victim.conf was deleted outside rules_dir"
+        # Fixed in P4.3 (H60): a path in the rule id is refused, and the rules
+        # API only deletes custom-<number>.
+        with pytest.raises(ValueError):
+            rm.delete_rule("../victim")
+        with pytest.raises(ValueError):
+            rm.delete_custom_rule("../victim")
+        assert victim.exists(), "victim.conf outside rules_dir must survive"
 
 
 # ==============================================================================

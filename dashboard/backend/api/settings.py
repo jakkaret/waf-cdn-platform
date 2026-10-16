@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Literal, Optional
 from services.settings_service import SettingsService, mask_settings
 from services.rbac import require_viewer_or_above, require_admin
 from services import audit_log
@@ -21,16 +21,19 @@ _SECRET_FIELDS = {"telegram_bot_token"}
 
 
 class SettingsUpdate(BaseModel):
-    waf_mode: Optional[str] = None
-    paranoia_level: Optional[int] = None
-    inbound_anomaly_threshold: Optional[int] = None
-    outbound_anomaly_threshold: Optional[int] = None
+    # P4.5 (H20): typed and bounded -- a typo in waf_mode used to switch the
+    # WAF to DetectionOnly silently; now it is a 422.
+    model_config = {"extra": "forbid"}
+    waf_mode: Optional[Literal["blocking", "detection_only"]] = None
+    paranoia_level: Optional[int] = Field(None, ge=1, le=4)
+    inbound_anomaly_threshold: Optional[int] = Field(None, ge=1, le=1000)
+    outbound_anomaly_threshold: Optional[int] = Field(None, ge=1, le=1000)
     auto_purge_edge_cache: Optional[bool] = None
-    real_ip_header: Optional[str] = None
+    real_ip_header: Optional[Literal["X-Forwarded-For", "X-Real-IP"]] = None
     telegram_notifications: Optional[bool] = None
-    telegram_bot_token: Optional[str] = None
-    telegram_chat_id: Optional[str] = None
-    edge_sync_interval_seconds: Optional[int] = None
+    telegram_bot_token: Optional[str] = Field(None, max_length=200)
+    telegram_chat_id: Optional[str] = Field(None, pattern=r"^-?\d{1,20}$|^$")
+    edge_sync_interval_seconds: Optional[int] = Field(None, ge=1, le=3600)
 
 
 class TestNotificationRequest(BaseModel):

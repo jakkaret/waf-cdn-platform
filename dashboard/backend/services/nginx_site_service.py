@@ -289,7 +289,9 @@ def remove_site_route(domain_name: str) -> bool:
 
 MANAGED_MARKER = "# managed-by: site-reconcile"
 
-_reconcile_lock = threading.Lock()
+# P4.3: the same lock as every rule writer -- a site file and a rule file
+# tested and rolled back at the same moment could undo each other.
+from services.rule_manager import RULES_LOCK as _reconcile_lock  # noqa: E402
 # Domains whose site file the last reconcile confirmed in the container;
 # GET /api/onboarding/progress reads it to report "route active".
 _deployed_domains: set = set()

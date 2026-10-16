@@ -2,6 +2,7 @@ import os
 import re
 import subprocess
 import logging
+import threading
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,48 @@ def escape_secrule_message(value: str) -> str:
     """
     return str(value).replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
 
+
+
+# P4.3 (H61): one lock for every writer of the WAF rule directory -- custom,
+# ML/CVE, managed, tenant and IP rules all go write -> nginx -t -> reload ->
+# rollback under it, so two changes can no longer interleave and roll each
+# other back halfway. Re-entrant: a writer may call test/reload inside it.
+RULES_LOCK = threading.RLock()
+
+# P4.3 (H60): the rules API may delete only hand-made custom rules.
+CUSTOM_RULE_ID_RE = re.compile(r"^custom-\d{1,10}$")
+
+# P4.2 (N16/H57/H58): what an ML/CVE rule may contain before it is written.
+_ML_FORBIDDEN_ACTIONS = re.compile(
+    r"(?:^|[,\s\"])(?:exec|ctl|chain|allow|pass|setenv|setuid|setsid|setrsc|proxy|redirect|"
+    r"append|prepend|xmlns|skip|skipafter|sanitise\w*|t:none,?\s*nolog)\b",
+    re.IGNORECASE,
+)
+_DIRECTIVE_RE = re.compile(r"^\s*(Sec\w+|Include\w*)\b", re.IGNORECASE | re.MULTILINE)
+_BAD_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def validate_ml_rule_text(text: str, rule_id: int) -> None:
+    """Fail closed unless `text` is exactly one SecRule with the allocated id
+    that denies, and nothing else (P4.2). ValueError says what is wrong."""
+    if _BAD_CHARS.search(text):
+        raise ValueError("rule contains control characters")
+    body = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    directives = _DIRECTIVE_RE.findall(body)
+    if len(directives) != 1 or directives[0] != "SecRule":
+        raise ValueError(f"rule must be exactly one SecRule directive, found {directives or 'none'}")
+    joined = re.sub(r"\\\n\s*", "", body).strip()
+    m = re.match(r'^SecRule\s+(\S+)\s+"((?:[^"\\]|\\.)*)"\s+"((?:[^"\\]|\\.)*)"\s*$', joined, re.DOTALL)
+    if not m:
+        raise ValueError("rule is not of the form: SecRule VARIABLES \"OPERATOR\" \"ACTIONS\"")
+    actions = m.group(3)
+    ids = re.findall(r"(?:^|,)\s*id:\s*(\d+)", actions)
+    if ids != [str(int(rule_id))]:
+        raise ValueError(f"rule id must be the allocated {rule_id}, found {ids}")
+    if _ML_FORBIDDEN_ACTIONS.search(actions):
+        raise ValueError("rule uses an action that is not allowed for generated rules")
+    if not re.search(r"(?:^|,)\s*deny\b", actions) or not re.search(r"(?:^|,)\s*phase:\s*[12]\b", actions):
+        raise ValueError("generated rules must deny in phase 1 or 2")
 
 
 _ALLOWED_NGINX_COMMANDS = {
@@ -331,6 +374,10 @@ class RuleManager:
         return True, "OK"
 
     def add_rule(self, rule_data: Dict) -> bool:
+        with RULES_LOCK:
+            return self._add_rule(rule_data)
+
+    def _add_rule(self, rule_data: Dict) -> bool:
         valid, msg = self.validate_rule(rule_data)
         if not valid:
             raise ValueError(msg)
@@ -374,6 +421,11 @@ class RuleManager:
         return True
 
     def write_ml_rule(self, rule_id: int, secrule_code: str) -> bool:
+        validate_ml_rule_text(secrule_code, rule_id)  # fail closed before anything is written
+        with RULES_LOCK:
+            return self._write_ml_rule(rule_id, secrule_code)
+
+    def _write_ml_rule(self, rule_id: int, secrule_code: str) -> bool:
         filename = f"ml-{rule_id}.conf"
         header = f"# ------------------------------------------------------------------------\n"
         header += f"# ML Auto-Generated & Approved WAF Rule (ID: {rule_id})\n"
@@ -397,18 +449,44 @@ class RuleManager:
 
         return True
 
+    def delete_custom_rule(self, rule_id: str) -> bool:
+        """The rules API: only custom-<number> (P4.3, H60). Managed, tenant,
+        ML and IP rule files are removed by their own services."""
+        rule_id = str(rule_id)
+        if rule_id.endswith(".conf"):
+            rule_id = rule_id[:-5]
+        if not CUSTOM_RULE_ID_RE.match(rule_id):
+            raise ValueError("rule id must look like custom-<number>")
+        return self.delete_rule(rule_id)
+
     def delete_rule(self, rule_id: str) -> bool:
         filename = f"{rule_id}.conf" if not rule_id.endswith(".conf") else rule_id
+        if "/" in filename or "\\" in filename or filename.startswith("."):
+            raise ValueError("invalid rule id")
         filepath = os.path.join(self.rules_dir, filename)
 
-        if os.path.exists(filepath):
+        with RULES_LOCK:
+            if not os.path.exists(filepath):
+                return False
+            with open(filepath, "r", encoding="utf-8") as f:
+                previous_text = f.read()
             os.remove(filepath)
-            self.test_nginx()
-            self.reload_nginx()
+            try:
+                self.test_nginx()
+                self.reload_nginx()
+            except Exception:
+                # P4.3: another file depended on this one (an id it removes, a
+                # data file): put it back rather than leave a config nginx refuses.
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(previous_text)
+                raise
             return True
-        return False
 
     def update_rule(self, rule_id: str, rule: dict) -> bool:
+        with RULES_LOCK:
+            return self._update_rule(rule_id, rule)
+
+    def _update_rule(self, rule_id: str, rule: dict) -> bool:
         rule["id"] = rule_id.replace("custom-", "")
         valid, msg = self.validate_rule(rule)
         if not valid:

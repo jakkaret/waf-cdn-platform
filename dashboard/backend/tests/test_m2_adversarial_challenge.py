@@ -529,11 +529,9 @@ class TestRbacBypassAttempts:
         rm.reload_nginx = lambda: None
 
         assert victim_file.exists()
-        # Exploit: pass path traversal string to delete_rule
+        # Fixed in P4.3 (H60): the traversal string is refused and nothing
+        # outside rules_dir is touched.
         traversal_id = "../victim"
-        result = rm.delete_rule(traversal_id)
-
-        # VULNERABILITY CONFIRMATION:
-        # RuleManager.delete_rule did not sanitize rule_id and removed victim.conf!
-        assert result is True
-        assert not victim_file.exists(), "CRITICAL BUG: Arbitrary file outside rules_dir was deleted via path traversal!"
+        with pytest.raises(ValueError):
+            rm.delete_rule(traversal_id)
+        assert victim_file.exists(), "file outside rules_dir must survive"

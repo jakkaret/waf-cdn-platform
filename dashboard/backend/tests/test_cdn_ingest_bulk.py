@@ -193,6 +193,8 @@ def test_ingest_endpoint_dispatches_one_alert_per_flagged_entry(monkeypatch):
     monkeypatch.setattr(
         cdn_module, "_KNOWN_EDGE_FORWARDER_IPS", {"203.0.113.9"}
     )
+    # P4.5: the region comes from the sending edge's address
+    monkeypatch.setitem(cdn_module._EDGE_REGION_BY_IP, "203.0.113.9", "th")
 
     class _FakeClient:
         host = "203.0.113.9"
