@@ -39,7 +39,7 @@ def test_prompt_sent_to_gemini_has_no_ip_or_query(monkeypatch):
         async def __aexit__(self, *a):
             return False
 
-        async def post(self, url, json):
+        async def post(self, url, json, headers=None):  # key travels in headers (H53)
             sent["prompt"] = json["contents"][0]["parts"][0]["text"]
             return _Resp()
 

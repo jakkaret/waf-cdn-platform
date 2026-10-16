@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { cdnApi } from '../api/cdn'
 import { CdnNode, CdnStats } from '../types'
 import { useAuthStore } from '../store/authStore'
@@ -34,7 +34,6 @@ import {
   RefreshCw,
   Layers,
 } from 'lucide-react'
-import toast from 'react-hot-toast'
 
 export const CDN: React.FC = () => {
   const { user } = useAuthStore()
@@ -58,13 +57,6 @@ export const CDN: React.FC = () => {
     queryKey: ['cdn-latency'],
     queryFn: () => cdnApi.getLatency('ALL', '1h'),
     refetchInterval: 8000,
-  })
-
-  const purgeMutation = useMutation({
-    mutationFn: (pattern: string) => cdnApi.purgeCache(pattern),
-    onSuccess: () => toast.success(`Edge cache purged successfully for pattern: ${purgePattern}`),
-    onError: (err: any) =>
-      toast.error(err?.response?.data?.detail || 'Failed to purge edge cache'),
   })
 
   // Safe data extraction (handles both Array and Object backend structures)
@@ -407,8 +399,12 @@ export const CDN: React.FC = () => {
               Edge Cache Invalidation & Purge
             </h3>
           </div>
-          <p className="text-[12px] text-[var(--text-secondary)] mb-3">
+          <p className="text-[12px] text-[var(--text-secondary)] mb-1">
             Evict cached HTML, static assets, and API responses instantly across all global edge nodes.
+          </p>
+          {/* Kept visible on purpose but disabled: the production edges have no purge endpoint yet (audit H13). */}
+          <p role="note" data-testid="purge-not-available" className="text-[12px] font-semibold text-amber-500 mb-3">
+            ยังใช้งานไม่ได้จริง: edge ที่ใช้งานอยู่ยังไม่มีระบบล้าง cache ปุ่มนี้จึงปิดไว้ก่อน
           </p>
 
           <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center max-w-xl">
@@ -418,16 +414,13 @@ export const CDN: React.FC = () => {
               placeholder="Path to purge (e.g. /* or /api/v1/*)"
               value={purgePattern}
               onChange={(e) => setPurgePattern(e.target.value)}
+              disabled
             />
             <Button
               variant="brand"
               icon={<Trash2 size={14} />}
-              onClick={() => {
-                if (window.confirm(`Purge edge cache for pattern: ${purgePattern}?`)) {
-                  purgeMutation.mutate(purgePattern)
-                }
-              }}
-              isLoading={purgeMutation.isPending}
+              disabled
+              title="ยังใช้งานไม่ได้จริง"
             >
               Purge Cache
             </Button>

@@ -77,25 +77,26 @@ class Gen3OnnxTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Gen3OnnxModel(self._tampered("parity_passed", "false"))
 
-    def test_api_prefers_onnx_and_falls_back_to_joblib(self):
+    def test_api_loads_gen3_from_onnx_only(self):
+        """H52: a broken ONNX never falls back to unpickling a joblib next to it."""
         import joblib
         import ml.ml_api as api
         onnx_path, joblib_path = os.path.join(self.tmp, "m.onnx"), os.path.join(self.tmp, "m.joblib")
         joblib.dump(self.wrapper, joblib_path)
         with open(onnx_path, "wb") as f:
             f.write(self.data)
-        model, err = api.load_gen3_model(joblib_path, onnx_path)
+        model, err = api.load_gen3_model(onnx_path)
         self.assertEqual((model.runtime, err), ("onnx", None))
 
         with open(onnx_path, "wb") as f:
             f.write(b"not an onnx model")
-        model, err = api.load_gen3_model(joblib_path, onnx_path)
-        self.assertEqual(model.runtime, "joblib")
-        self.assertIn("onnx:", err)
-
-        model, err = api.load_gen3_model(os.path.join(self.tmp, "none.joblib"), onnx_path)
+        model, err = api.load_gen3_model(onnx_path)
         self.assertIsNone(model)
         self.assertIn("onnx:", err)
+
+        model, err = api.load_gen3_model(os.path.join(self.tmp, "none.onnx"))
+        self.assertIsNone(model)
+        self.assertIn("missing", err)
 
     def test_fast_engine_gen3_serves_predict_fast(self):
         from fastapi.testclient import TestClient

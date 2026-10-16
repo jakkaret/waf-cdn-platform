@@ -135,3 +135,11 @@ export function describeSuggestion(s?: SuggestionSummary | null): { queued: bool
   if (s.merged) parts.push(`เพิ่มหลักฐานให้กฎที่รออนุมัติ ${s.merged} ข้อ`)
   return { queued: true, text: parts.join(' และ ') }
 }
+
+// The SecRule exactly as approve will deploy it: the backend fills every
+// {RULE_ID} (Python str.replace), so the preview must too, not only the first
+// (audit H55). split/join because the tsconfig lib is ES2020 (no replaceAll).
+export function renderSecRule(rule: Pick<MLPendingRule, 'secrule_template' | 'deployed_rule_id'>): string {
+  const id = rule.deployed_rule_id ? String(rule.deployed_rule_id) : 'PENDING_ID'
+  return (rule.secrule_template ?? '').split('{RULE_ID}').join(id)
+}

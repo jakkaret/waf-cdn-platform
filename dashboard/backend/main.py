@@ -5,6 +5,14 @@ from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
+import logging
+
+# httpx logs every request URL at INFO. No secret travels in a URL any more
+# (Gemini uses the x-goog-api-key header), but keep the client loggers quiet
+# so a future call cannot leak one into the journal (audit H53).
+for _name in ("httpx", "httpcore"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
+
 # อ่าน allowed origins จาก env (คั่นด้วย comma)
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "https://waf-it-kku.online")
 
@@ -56,12 +64,37 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 from starlette.middleware.base import BaseHTTPMiddleware
 
 
+# Content-Security-Policy for the SPA (audit H78). The bundle is Vite output
+# served from 'self' with no inline script. Styles need 'unsafe-inline' because
+# react-hot-toast and recharts inject <style> tags; fonts come from Google
+# Fonts (index.html); avatars from Google accounts are https images.
+CSP_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "img-src 'self' data: blob: https:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+
+
+def csp_header_name() -> str:
+    """DASHBOARD_CSP_REPORT_ONLY=1 sends the policy as Report-Only, for a
+    tuning pass after a policy change; otherwise it is enforced."""
+    if os.getenv("DASHBOARD_CSP_REPORT_ONLY", "").strip() == "1":
+        return "Content-Security-Policy-Report-Only"
+    return "Content-Security-Policy"
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     # Web assessment 2026-09-08 (F1): responses carried no protective headers.
-    # These four are safe for the SPA + API; a Content-Security-Policy needs a
-    # tuning pass and is deliberately not added here yet.
     async def dispatch(self, request, call_next):
         response = await call_next(request)
+        response.headers.setdefault(csp_header_name(), CSP_POLICY)
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
         )

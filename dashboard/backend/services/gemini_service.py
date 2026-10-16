@@ -14,6 +14,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 BASE_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
+
+def gemini_headers(api_key: str) -> dict:
+    """The key goes in a header, never in the URL: httpx and proxies log URLs (audit H53)."""
+    return {"x-goog-api-key": api_key}
+
 # T10: static Thai label for every ml/feature_engineering.py FEATURE_COLUMNS
 # entry, used both to compose the no-Gemini-available fallback sentence and
 # to keep the Gemini prompt's feature names understandable if it ever quotes
@@ -99,7 +104,8 @@ class GeminiService:
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 res = await client.post(
-                    f"{BASE_URL}?key={self.api_key}",
+                    BASE_URL,
+                    headers=gemini_headers(self.api_key),
                     json={
                         "contents": [{
                             "parts": [{"text": prompt}]
@@ -237,7 +243,7 @@ class GeminiService:
 
         Mirrors explain_attack's cache/HTTP/fallback shape (acceptance
         criterion 2): in-memory cache keyed on a signature honouring
-        self._cache_ttl, an httpx call to the same BASE_URL with ?key=, and
+        self._cache_ttl, an httpx call to the same BASE_URL (key in the x-goog-api-key header), and
         on any non-200 response or exception, falls through to the static
         fallback below -- never raises.
 
@@ -304,7 +310,8 @@ class GeminiService:
 
             async with httpx.AsyncClient(timeout=8.0) as client:
                 res = await client.post(
-                    f"{BASE_URL}?key={self.api_key}",
+                    BASE_URL,
+                    headers=gemini_headers(self.api_key),
                     json={
                         "contents": [{
                             "parts": [{"text": prompt}]
@@ -365,7 +372,8 @@ class GeminiService:
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 res = await client.post(
-                    f"{BASE_URL}?key={self.api_key}",
+                    BASE_URL,
+                    headers=gemini_headers(self.api_key),
                     json={
                         "contents": [{"parts": [{"text": prompt}]}],
                         "generationConfig": {
@@ -409,7 +417,8 @@ class GeminiService:
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.post(
-                    f"{BASE_URL}?key={self.api_key}",
+                    BASE_URL,
+                    headers=gemini_headers(self.api_key),
                     json={
                         "contents": [{"parts": [{"text": prompt}]}],
                         "generationConfig": {
@@ -468,7 +477,8 @@ class GeminiService:
         try:
             async with httpx.AsyncClient(timeout=25.0) as client:
                 res = await client.post(
-                    f"{BASE_URL}?key={self.api_key}",
+                    BASE_URL,
+                    headers=gemini_headers(self.api_key),
                     json={
                         "contents": [{"parts": [{"text": prompt}]}],
                         "generationConfig": {
@@ -521,7 +531,8 @@ class GeminiService:
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.post(
-                    f"{BASE_URL}?key={self.api_key}",
+                    BASE_URL,
+                    headers=gemini_headers(self.api_key),
                     json={
                         "contents": [{"parts": [{"text": prompt}]}],
                         "generationConfig": {"temperature": 0.1, "maxOutputTokens": 200},

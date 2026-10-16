@@ -22,14 +22,12 @@ check_health() {
   curl -s http://localhost:8081/healthz && echo "\nEdge SG ทำงานปกติ."
   curl -s http://localhost:8082/healthz && echo "\nEdge JP ทำงานปกติ."
   curl -s http://localhost:8086/healthz && echo "\nEdge TH ทำงานปกติ."
-  curl -s http://localhost:8090/healthz && echo "\nPurge API ทำงานปกติ."
 }
 
-# Function to test cache and purge
+# Function to test the cache (purge-api was removed, audit H13)
 test_cache_purge() {
-  echo "กำลังทดสอบ Cache และ Purge..."
+  echo "กำลังทดสอบ Cache..."
   ./scripts/smoke-test-cdn.sh
-  ./scripts/purge-cache.sh /dvwa/images/login_logo.png ALL
 }
 
 # Function to test GeoDNS routing
@@ -44,7 +42,7 @@ main_menu() {
   echo "1) เริ่ม Origin Server"
   echo "2) เริ่ม CDN Stack"
   echo "3) ตรวจสอบสถานะของบริการ"
-  echo "4) ทดสอบ Cache และ Purge"
+  echo "4) ทดสอบ Cache"
   echo "5) ทดสอบ GeoDNS Routing"
   echo "6) รันทุกขั้นตอน"
   echo "7) ออกจากโปรแกรม"

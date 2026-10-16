@@ -1,0 +1,10 @@
+# sha256 of every model file ml_api.py serves (audit H03/H52).
+# Verify: cd ml/models && sha256sum -c SHA256SUMS   (deploy/azure-ml/install.sh does)
+# Regenerate after replacing a model and commit both together.
+0a054cb7caa9155172451b0b4ae470cfcc4932fac654c14002c283a9abf9b12a  random_forest_waf.npz
+11c9ac37c1f9a386a18cdc770ba803c3e40bc7efe3c98086d638367a2536191d  isolation_forest_waf.npz
+21cc495c09d79ad21709f571db1a96d97c0a3d400e24e0b4a35a554e1d95e71e  random_forest_waf.onnx
+771badd2e1db5a170300ad60e14374e735be14b6a60b355d3acde985dc1805f2  onnx_manifest.json
+8f2ce1f56790e0c151a56c1008465929496f8a96482c1c94901d643af8e94042  eval_results.json
+5785143d9cecb5af88b96f29ebaac47debb3c360280b8bb365bb348069d65f0b  gen3/gen3_f_noopenappsec.onnx
+d5e10ce760889020e819ff82962c39a3d97392013b0b1ae6d647a1ee3e94d0f1  gen3/gen3_f_noopenappsec_model_card.json

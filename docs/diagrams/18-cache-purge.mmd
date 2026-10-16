@@ -1,10 +1,10 @@
 sequenceDiagram
   participant A as Admin
+  participant UI as หน้า CDN (ปุ่ม Purge ปิดไว้ "ยังใช้งานไม่ได้จริง")
   participant API as FastAPI POST /api/cdn/purge
-  participant P as CDN_PURGE_API_URL (ค่าเริ่มต้น localhost:8080)
   participant E as Edge caches
-  A->>API: url=/path (require_admin)
-  API->>API: ต้องมี CDN_PURGE_TOKEN
-  API->>P: POST /purge
-  Note over P,E: ไม่พบ purge endpoint ที่ edge หรือ Main - การ purge ไม่ถึง edge (PARTIAL)
+  A->>UI: เห็นส่วน purge แต่กดไม่ได้
+  A->>API: เรียกตรง (require_admin)
+  API-->>A: 501 Edge cache purge is not available yet
+  Note over API,E: cdn/purge-api ถูกลบแล้ว (audit H13, 2026-10-16) edge ยังไม่มี purge endpoint
   Note over E: cache หมดอายุตาม TTL 10 นาที / 1 ชั่วโมง

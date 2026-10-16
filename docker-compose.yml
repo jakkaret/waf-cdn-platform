@@ -15,6 +15,8 @@ services:
       - ./logs/modsecurity:/var/log/modsecurity
       - ./logs/nginx:/var/log/nginx
       - ./nginx/templates/includes/captcha_server.conf.template:/etc/nginx/templates/includes/captcha_server.conf.template:ro
+      # Copied from the image (H84) so the default server's include is reviewable here.
+      - ./nginx/templates/includes/location_common.conf.template:/etc/nginx/templates/includes/location_common.conf.template:ro
       - ./nginx/includes/otp_server.conf:/etc/nginx/includes/otp_server.conf:ro
       - ./html/403.html:/usr/share/nginx/html/403.html:ro
       - ./nginx/templates/conf/server.key:/etc/nginx/conf/server.key
@@ -26,6 +28,9 @@ services:
       ANOMALY_INBOUND: 10
       ANOMALY_OUTBOUND: 10
       TZ: Asia/Bangkok
+      # Used by includes/location_common.conf (stub_status); same as the image defaults, set here so the repo shows them (H84).
+      METRICS_ALLOW_FROM: 127.0.0.0/24
+      METRICS_DENY_FROM: all
       ML_RELAY_SECRET: "${ML_RELAY_SECRET:?set ML_RELAY_SECRET in .env}"
       DECEPTION_INTERNAL_KEY: "${DECEPTION_INTERNAL_KEY:?set DECEPTION_INTERNAL_KEY in .env}"
     extra_hosts:

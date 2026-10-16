@@ -8,6 +8,7 @@ import {
   legacyPendingCount,
   filterAndSortRules,
   generatorOf,
+  renderSecRule,
   timeAgo,
   type RuleFilters,
 } from './mlRules'
@@ -125,5 +126,17 @@ describe('legacyPendingCount', () => {
         { status: 'pending', created_by: 'cve-auto' },
       ]),
     ).toBe(2)
+  })
+})
+
+describe('renderSecRule (H55)', () => {
+  it('fills every {RULE_ID}, like the backend does on approve', () => {
+    const tpl = 'SecRule ARGS "@rx x" "id:{RULE_ID},deny,msg:\'rule {RULE_ID}\'"'
+    expect(renderSecRule({ secrule_template: tpl, deployed_rule_id: 1000501 })).toBe(
+      'SecRule ARGS "@rx x" "id:1000501,deny,msg:\'rule 1000501\'"',
+    )
+  })
+  it('uses PENDING_ID before approval', () => {
+    expect(renderSecRule({ secrule_template: 'id:{RULE_ID} {RULE_ID}' })).toBe('id:PENDING_ID PENDING_ID')
   })
 })

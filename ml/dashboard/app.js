@@ -325,13 +325,20 @@ function renderPredictionResult(res) {
 
   // Render Feature Chips
   const chipsContainer = document.getElementById("featureChips");
-  chipsContainer.innerHTML = "";
+  chipsContainer.replaceChildren();
 
   const feat = res.features;
   for (const [key, val] of Object.entries(feat)) {
     const chip = document.createElement("div");
     chip.className = "chip";
-    chip.innerHTML = `<span class="chip-key">${key}:</span><span class="chip-val">${val}</span>`;
+    // textContent, not innerHTML: feature names and values come from the API (audit H77).
+    const k = document.createElement("span");
+    k.className = "chip-key";
+    k.textContent = `${key}:`;
+    const v = document.createElement("span");
+    v.className = "chip-val";
+    v.textContent = String(val);
+    chip.append(k, v);
     chipsContainer.appendChild(chip);
   }
 }

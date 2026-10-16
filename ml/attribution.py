@@ -170,14 +170,20 @@ def build_attribution_response(rf_model, df_feat: pd.DataFrame) -> Dict[str, Any
     """
     bias, contributions = compute_forest_attribution(rf_model, df_feat)
     row = df_feat.iloc[0]
+    return format_attribution(bias, contributions, {f: row[f] for f in df_feat.columns})
 
+
+def format_attribution(bias: float, contributions: Dict[str, float], row: Dict[str, Any]) -> Dict[str, Any]:
+    """The `/predict` attribution shape from an already computed decomposition
+    (sklearn here, or ml/plain_forest.py in serving). `row` maps every feature
+    name, in model column order, to this request's value."""
     entries: List[Dict[str, Any]] = [
         {
             "feature": feature_name,
-            "value": float(row[feature_name]),
+            "value": float(value),
             "contribution": contributions[feature_name],
         }
-        for feature_name in df_feat.columns
+        for feature_name, value in row.items()
     ]
     entries.sort(key=lambda e: abs(e["contribution"]), reverse=True)
 
