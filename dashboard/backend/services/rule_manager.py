@@ -41,6 +41,9 @@ def escape_secrule_operator(value: str) -> str:
     services/tenant_rules.render). Callers surface the ValueError as a 4xx.
     """
     s = str(value)
+    if "\r" in s or "\n" in s:
+        # A line break would end or split the directive (re-audit 2026-10-17).
+        raise ValueError("operator: line breaks are not allowed")
     if s.endswith("\\") or '\\"' in s:
         raise ValueError(
             "operator: a backslash may not directly precede a double quote or end the value"
@@ -90,7 +93,14 @@ def validate_ml_rule_text(text: str, rule_id: int) -> None:
     that denies, and nothing else (P4.2). ValueError says what is wrong."""
     if _BAD_CHARS.search(text):
         raise ValueError("rule contains control characters")
-    body = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    # Validate exactly what _write_ml_rule writes (re-audit 2026-10-17): no
+    # comment lines are dropped first, and every line break must be a
+    # backslash continuation, so no line can hide from the checks below.
+    body = text.strip("\n")
+    if any(line.lstrip().startswith("#") for line in body.splitlines()):
+        raise ValueError("generated rules may not contain comment lines")
+    if re.search(r"(?<!\\)\n", body):
+        raise ValueError("every line break in a generated rule must be a backslash continuation")
     directives = _DIRECTIVE_RE.findall(body)
     if len(directives) != 1 or directives[0] != "SecRule":
         raise ValueError(f"rule must be exactly one SecRule directive, found {directives or 'none'}")

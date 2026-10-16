@@ -255,17 +255,13 @@ def test_newproxy_jwt_client_cannot_register_a_different_domain_than_its_token()
     )
 
 
-def test_newproxy_empty_target_domain_is_currently_allowed():
-    """Documents current behaviour: proxy_name/custom_domains are normally
-    always populated by a real FRP client, so this is a low-probability edge
-    case, but as written an empty target_domain short-circuits straight past
-    even the reserved-domain check. Flagged, not fixed -- proxy_name/domain
-    here originate from the tunnel agent's own local config, not attacker-
-    controlled input from an arbitrary network position.
-    """
+def test_newproxy_empty_target_domain_is_rejected():
+    """Re-audit 2026-10-17: an empty target_domain used to short-circuit to
+    allow, skipping every identity check. A proxy that names no domain is now
+    refused."""
     req = {"op": "NewProxy", "content": {"custom_domains": [], "proxy_name": ""}}
     result = _run(frp_webhook_gatekeeper(req))
-    assert result["reject"] is False
+    assert result["reject"] is True
 
 
 # ----------------------------------------------------------------- CloseProxy

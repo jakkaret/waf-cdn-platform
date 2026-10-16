@@ -529,10 +529,18 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
             requested.append(host)
         subdomain = str(content.get("subdomain") or "").strip().lower()
         proxy_name = content.get("proxy_name", "")
+        # A tunnel token authorizes one HTTP vhost, never a raw port on Main:
+        # tcp/udp/stcp/xtcp proxies would bind a listener outside the WAF chain.
+        # frps always sends proxy_type; a missing one is treated as http.
+        proxy_type = str(content.get("proxy_type") or "http").strip().lower()
+        if proxy_type not in ("http", "https"):
+            logger.warning(f"FRP Webhook: Blocked proxy '{proxy_name}' of type '{proxy_type}'")
+            return {"reject": True, "reject_reason": "Only http/https tunnels are allowed", "unchange": True}
         target_domain = requested[0] if requested else str(proxy_name).strip().lower()
 
         if not target_domain:
-            return {"reject": False, "unchange": True}
+            # Nothing to bind and no identity to check: refuse instead of allow.
+            return {"reject": True, "reject_reason": "Proxy names no domain", "unchange": True}
 
         # Check Reserved Domains -- across EVERY requested host, not just the first.
         # F-129 residual: the webhook used to read only custom_domains[0], so a
@@ -600,9 +608,15 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
                 if problem:
                     logger.warning(f"FRP Webhook: Blocked proxy '{proxy_name}' for '{target_domain}': {problem}")
                     return {"reject": True, "reject_reason": f"Tunnel token no longer valid: {problem}", "unchange": True}
-                # P3.1: the proxy name is bound to the token that opened it.
-                if owner_id:
-                    db.set_proxy_owner(proxy_name, owner_id, token_domain)
+                # P3.1: the proxy name is bound to the token that opened it. A name
+                # already recorded for another domain is not taken over: the name is
+                # chosen by the client, so a holder of any token could otherwise
+                # overwrite another tenant's proxy owner.
+                if owner_id and not db.set_proxy_owner(proxy_name, owner_id, token_domain):
+                    logger.warning(
+                        f"FRP Webhook: Blocked proxy '{proxy_name}' -- name is recorded for another domain"
+                    )
+                    return {"reject": True, "reject_reason": "Proxy name belongs to another domain", "unchange": True}
                 logger.info(f"FRP Webhook: Proxy '{proxy_name}' authorized for domain '{target_domain}' (owned by token)")
                 return {"reject": False, "unchange": True}
             logger.warning(
