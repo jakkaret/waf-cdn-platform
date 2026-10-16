@@ -1,0 +1,17 @@
+<!--
+  ClickHouse's own diagnostic logs. On Main (3.7 GB RAM) trace_log, text_log
+  and metric_log grew past 2.5 GB, and merging their parts needed more memory
+  than the server limit (~1.5 GB): the merge failed tens of thousands of times
+  (MEMORY_LIMIT_EXCEEDED), wasting CPU and starving the dashboard's
+  connections (2026-10-16). Nothing in the WAF reads these tables, so they are
+  turned off. query_log and error_log stay (small, useful for debugging).
+-->
+<clickhouse>
+    <trace_log remove="1"/>
+    <text_log remove="1"/>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <part_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    <background_schedule_pool_log remove="1"/>
+</clickhouse>
