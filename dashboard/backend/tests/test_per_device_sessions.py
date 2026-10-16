@@ -101,3 +101,74 @@ def test_old_session_rows_are_purged_a_week_after_expiry(client, register_user):
     pool.exec_("UPDATE user_sessions SET expires_at = now() - interval '8 days' WHERE session_id = %s", (sid,))
     assert PgUserRepository().purge_old_sessions(7) >= 1
     assert pool.q1("SELECT 1 AS x FROM user_sessions WHERE session_id = %s", (sid,)) is None
+
+
+# ---- signed-in devices page
+def _login_ua(client, email, ua):
+    client.cookies.clear()
+    r = client.post("/api/auth/login", json={"email": email, "password": PASSWORD}, headers={"User-Agent": ua})
+    assert r.status_code == 200, r.text
+    return r.json()["access_token"]
+
+
+def test_device_list_shows_each_session_and_marks_this_one(client, register_user, auth_header):
+    email = _account(register_user)
+    phone = _login_ua(client, email, "Mozilla/5.0 (iPhone) Safari")
+    laptop = _login_ua(client, email, "Mozilla/5.0 (Macintosh) Chrome/130")
+    client.cookies.clear()
+    r = client.get("/api/auth/sessions", headers=auth_header(laptop))
+    assert r.status_code == 200
+    rows = [s for s in r.json()["sessions"] if s["user_agent"] != "testclient"]  # registration's own session
+    assert {s["user_agent"] for s in rows} == {"Mozilla/5.0 (iPhone) Safari", "Mozilla/5.0 (Macintosh) Chrome/130"}
+    current = [s for s in rows if s["current"]]
+    assert len(current) == 1 and current[0]["session_id"] == svc.decode_token(laptop)["sid"]
+
+
+def test_signing_out_one_other_device(client, register_user, auth_header):
+    email = _account(register_user)
+    phone = _login_ua(client, email, "phone")
+    laptop = _login_ua(client, email, "laptop")
+    client.cookies.clear()
+    r = client.delete(f"/api/auth/sessions/{svc.decode_token(phone)['sid']}", headers=auth_header(laptop))
+    assert r.status_code == 200 and r.json() == {"status": "revoked", "current": False}
+    assert _me(client, phone, auth_header) == 401
+    assert _me(client, laptop, auth_header) == 200
+    client.cookies.clear()
+    left = client.get("/api/auth/sessions", headers=auth_header(laptop)).json()["sessions"]
+    assert [s["user_agent"] for s in left if s["user_agent"] != "testclient"] == ["laptop"]
+
+
+def test_signing_out_this_device_from_the_list(client, register_user, auth_header):
+    email = _account(register_user)
+    laptop = _login_ua(client, email, "laptop")
+    client.cookies.clear()
+    r = client.delete(f"/api/auth/sessions/{svc.decode_token(laptop)['sid']}", headers=auth_header(laptop))
+    assert r.status_code == 200 and r.json()["current"] is True
+    assert _me(client, laptop, auth_header) == 401
+
+
+def test_cannot_list_or_revoke_someone_elses_sessions(client, register_user, auth_header):
+    mine = _login_ua(client, _account(register_user), "mine")
+    theirs = _login_ua(client, _account(register_user), "theirs")
+    client.cookies.clear()
+    assert all(s["user_agent"] != "theirs" for s in client.get("/api/auth/sessions", headers=auth_header(mine)).json()["sessions"])
+    r = client.delete(f"/api/auth/sessions/{svc.decode_token(theirs)['sid']}", headers=auth_header(mine))
+    assert r.status_code == 404
+    assert _me(client, theirs, auth_header) == 200
+
+
+def test_revoked_and_unknown_sessions_are_404(client, register_user, auth_header):
+    email = _account(register_user)
+    a = _login_ua(client, email, "a")
+    b = _login_ua(client, email, "b")
+    client.cookies.clear()
+    sid_a = svc.decode_token(a)["sid"]
+    assert client.delete(f"/api/auth/sessions/{sid_a}", headers=auth_header(b)).status_code == 200
+    assert client.delete(f"/api/auth/sessions/{sid_a}", headers=auth_header(b)).status_code == 404
+    assert client.delete("/api/auth/sessions/not-a-uuid", headers=auth_header(b)).status_code == 404
+
+
+def test_session_endpoints_need_a_session(client):
+    client.cookies.clear()
+    assert client.get("/api/auth/sessions").status_code == 401
+    assert client.delete(f"/api/auth/sessions/{uuid.uuid4()}").status_code == 401

@@ -16,6 +16,7 @@ import Rules from './pages/Rules'
 import IPRules from './pages/IPRules'
 import RateLimiting from './pages/RateLimiting'
 import Settings from './pages/Settings'
+import Devices from './pages/Devices'
 import Alerts from './pages/Alerts'
 import Users from './pages/Users'
 import CDN from './pages/CDN'
@@ -346,6 +347,14 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 <Settings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/devices"
+            element={
+              <ProtectedRoute>
+                <Devices />
               </ProtectedRoute>
             }
           />
