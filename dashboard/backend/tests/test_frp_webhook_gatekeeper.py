@@ -23,6 +23,7 @@ import pytest
 
 from api.tunnels import frp_webhook_gatekeeper, LEGACY_STATIC_TOKEN, RESERVED_SUBDOMAINS
 from services.auth_service import AuthService
+from tests.helpers.seed import make_tunnel_owner
 
 auth_service = AuthService()
 
@@ -32,6 +33,8 @@ def _run(coro):
 
 
 def _tunnel_token(domain: str, user_id: str = "user-a", username: str = "alice") -> str:
+    # P3.2: a tunnel token only works for the owner of a verified domain.
+    user_id = make_tunnel_owner(domain, user_id=user_id)
     return auth_service.create_access_token({
         "sub": user_id, "user_id": user_id, "username": username,
         "domain": domain, "type": "tunnel_token",

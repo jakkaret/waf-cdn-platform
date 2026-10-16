@@ -316,7 +316,9 @@ def test_connect_with_the_agent_creates_one_origin_and_one_domain(client, tenant
     assert body["connection_mode"] == "agent"
     assert body["verified"] is False
     assert body["dns_instructions"]["required"] == ["cname_record"]
-    assert body["dns_instructions"]["cname_record"]["value"] == "cdn.waf-it-kku.online"
+    # P3.4: the CNAME target carries this record's own token
+    cname = body["dns_instructions"]["cname_record"]["value"]
+    assert cname.startswith("waf-token-") and cname.endswith(".cdn.waf-it-kku.online")
     [origin] = _origins()
     # The address is the domain: that is what auto-sync matches the tunnel on.
     assert (origin["label"], origin["ip"], origin["port"]) == ("shop.example.com", "shop.example.com", 3000)
@@ -394,7 +396,7 @@ def test_progress_reports_pending_dns_with_the_current_answer(client, tenant):
     [d] = p["domains"]
     assert d["dns"]["status"] == "pending"
     assert d["dns"]["current"] == {"cname": "", "a": ["203.0.113.10"]}
-    assert d["connection"]["status"] == "waiting_agent"
+    assert d["connection"]["status"] == "waiting_dns"  # P3.2: no agent token before DNS proves ownership
     assert d["ready"] is False and p["all_ready"] is False
 
 
@@ -495,7 +497,10 @@ def test_worker_skips_malformed_names_and_backs_off(monkeypatch):
     monkeypatch.setattr(worker_module, "_failures", {})
     monkeypatch.setattr(worker_module, "_reported_invalid", set())
     db = nss.db
-    seed_domain(db, {"id": uid("bad"), "domain_name": "waf_project_web.com", "dns_verified": False})
+    # P3.3: a malformed name can no longer be stored at all (CHECK in 0007),
+    # so the worker only ever sees canonical names.
+    with pytest.raises(Exception):
+        seed_domain(db, {"id": uid("bad"), "domain_name": "waf_project_web.com", "dns_verified": False})
     seed_domain(db, {"id": uid("ok"), "domain_name": "shop.example.com", "dns_verified": False})
 
     asyncio.run(worker_module.check_pending_domains(db, now=0))
@@ -529,7 +534,7 @@ def test_auto_sync_adopts_an_agent_origin_instead_of_duplicating_it(monkeypatch)
     ensure_user(uid("u1"))
     origin_service.create_origin(uid("u1"), label="shop.example.com", ip="shop.example.com", port=3000,
                                  connection_mode="agent", origin_scheme="http")
-    tunnels_module._PROXY_OWNERS["shop-example-com"] = uid("u1")
+    origin_service.db.set_proxy_owner("shop-example-com", uid("u1"), "shop.example.com")
     monkeypatch.setattr(origin_service, "verify_domain_dns", lambda d, t: False)
     proxy = {"name": "shop-example-com", "status": "online",
              "conf": {"customDomains": ["shop.example.com"], "metadatas": {"port": "3000"}}}
@@ -537,7 +542,7 @@ def test_auto_sync_adopts_an_agent_origin_instead_of_duplicating_it(monkeypatch)
     try:
         asyncio.run(origin_service.auto_sync_tunnel_origins(uid("u1")))
     finally:
-        tunnels_module._PROXY_OWNERS.pop("shop-example-com", None)
+        pass
     [origin] = origin_service.db.list_origins()
     assert origin["status"] == "active"
     assert origin["is_tunnel"] is True

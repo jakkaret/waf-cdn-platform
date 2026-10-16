@@ -1,11 +1,13 @@
 import os
 import time
+import hmac
 import httpx
 import hashlib
+import ipaddress
 import logging
 from datetime import timedelta
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Query
 from fastapi.responses import PlainTextResponse
 from typing import List, Dict, Any, Optional, Tuple
 from services.rbac import require_viewer_or_above, get_current_user
@@ -13,6 +15,8 @@ from services.tenant_service import get_user_origins_and_domains, invalidate_ten
 from services.dynamodb_service import DynamoDBService
 from services.auth_service import AuthService
 from services.dns_service import is_platform_subdomain
+from services.hostnames import HOSTNAME_RE, canonical_host, canonical_or_none
+from services.rbac import ARCHIVED_ORIGIN_STATUSES
 import services.origin_service as origin_service
 
 logger = logging.getLogger(__name__)
@@ -26,10 +30,19 @@ FRP_DASHBOARD_URL = os.getenv("FRP_DASHBOARD_URL", "http://127.0.0.1:7500/api/pr
 # (2026-09-29), so it can no longer be treated as a secret. Empty = the legacy
 # shared-token login path is disabled entirely (see _resolve_frp_identity).
 LEGACY_STATIC_TOKEN = os.getenv("FRP_AUTH_TOKEN", "")
-# A tunnel token authenticates a persistent connection (Restart=always,
-# meant to run unattended for months), not a browser login session -- see
-# the 2026-09-20 fix notes on create_tunnel_token/get_tunnel_config below.
-TUNNEL_TOKEN_DEFAULT_EXPIRE_DAYS = 365
+# A tunnel token authenticates a persistent connection (Restart=always), not a
+# browser login session -- see the 2026-09-20 fix notes on
+# create_tunnel_token/get_tunnel_config below. P3.2 (H35): it lives 1 to 90
+# days, never an unbounded caller-chosen time; the owner re-issues it.
+TUNNEL_TOKEN_DEFAULT_EXPIRE_DAYS = 90
+TUNNEL_TOKEN_MAX_EXPIRE_DAYS = 90
+# P3.1 (N1): frps calls the hook at /api/tunnels/frp-hook/<FRP_HOOK_SECRET>
+# from 127.0.0.1 (path in /etc/frp/frps.toml [[httpPlugins]]). frps has no
+# option to send a header, so the secret rides in the path. Unset = every
+# hook call is refused (fail closed).
+FRP_HOOK_SECRET = os.getenv("FRP_HOOK_SECRET", "")
+_LOOPBACK = {"127.0.0.1", "::1"}
+FRPC_IMAGE = "snowdreamtech/frpc:0.61.1@sha256:55de10291630ca31e98a07120ad73e25977354a2307731cb28b0dc42f6987c59"
 
 RESERVED_SUBDOMAINS = {
     "main.waf-it-kku.online", "waf-it-kku.online", "www.waf-it-kku.online",
@@ -90,8 +103,19 @@ if [[ ! -x /usr/local/bin/waf-agent ]]; then
     aarch64|arm64) FRP_ARCH="arm64" ;;
     *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
   esac
+  # P3.8 (H69): the release tarball is checked against its published
+  # SHA-256 (frp_sha256_checksums.txt of v0.61.1) before anything is installed.
+  case "$FRP_ARCH" in
+    amd64) FRP_SHA256="bff260b68ca7b1461182a46c4f34e9709ba32764eed30a15dd94ac97f50a2c40" ;;
+    arm64) FRP_SHA256="af6366f2b43920ebfe6235dba6060770399ed1fb18601e5818552bd46a7621f8" ;;
+  esac
   TMP_DIR="$(mktemp -d)"
-  curl -sSL "https://github.com/fatedier/frp/releases/download/v0.61.1/frp_0.61.1_linux_${FRP_ARCH}.tar.gz" -o "$TMP_DIR/frp.tar.gz"
+  curl -fsSL "https://github.com/fatedier/frp/releases/download/v0.61.1/frp_0.61.1_linux_${FRP_ARCH}.tar.gz" -o "$TMP_DIR/frp.tar.gz"
+  if ! echo "$FRP_SHA256  $TMP_DIR/frp.tar.gz" | sha256sum -c --status -; then
+    echo "frpc download failed its SHA-256 check; nothing was installed." >&2
+    rm -rf "$TMP_DIR"
+    exit 1
+  fi
   tar -xzf "$TMP_DIR/frp.tar.gz" -C "$TMP_DIR"
   install -m 755 "$TMP_DIR"/frp_0.61.1_linux_${FRP_ARCH}/frpc /usr/local/bin/waf-agent
   rm -rf "$TMP_DIR"
@@ -158,141 +182,84 @@ async def agent_bootstrap(request: Request):
     payload = auth_service.decode_token(raw) if raw else None
     if not payload or payload.get("type") != "tunnel_token" or not payload.get("domain"):
         raise HTTPException(status_code=401, detail="A valid tunnel token is required")
+    # P3.6: a token of a deleted user, or for a domain whose origin was
+    # archived or that is no longer theirs, gets nothing.
+    if tunnel_token_problem(payload):
+        raise HTTPException(status_code=401, detail="A valid tunnel token is required")
     if not LEGACY_STATIC_TOKEN:
         raise HTTPException(status_code=503, detail="Tunnel connection secret is not configured on the server")
     return PlainTextResponse(LEGACY_STATIC_TOKEN)
 
-# Fix 2026-09-07: connections using the shared legacy token pass Login (which
-# reads content["privilege_key"] at the top level) but NewProxy events for
-# that same connection carry no reusable identity at all -- a live capture
-# during a real reconnect attempt showed content["user"] == {"user": "",
-# "metas": null, "run_id": "..."} for the already-deployed dvwa/juice/bwapp
-# tunnels, because their frpc.toml only sets connection-level auth.token and
-# no per-proxy metadatas. NewProxy's identity check only looks at user/metas,
-# so it always resolved to "none" and rejected every proxy on these
-# connections -- this is what broke them when the gatekeeper was added.
-# FRP mirrors the same run_id across Login and every later NewProxy/
-# CloseProxy call on that connection, so remember which run_ids passed
-# Login via the legacy token and trust NewProxy calls that share one,
-# instead of re-deriving an identity NewProxy was never actually given.
-_LEGACY_RUN_IDS: Dict[str, float] = {}
-_LEGACY_RUN_ID_TTL = 24 * 3600  # a control connection can legitimately live for days
-
-# 2026-09-19 fix: Origin ownership used to be assigned to whoever happened to
-# view the Tunnels/Origins page first after a proxy came online (see
-# origin_service.auto_sync_tunnel_origins), not the account that actually
-# minted the tunnel token -- a first-viewer race, not real RBAC. NewProxy
-# below already decodes and verifies the domain-scoped JWT for every proxy
-# that gets this far (the "jwt" branch), so it is the one place that
-# authoritatively knows the true owner at the moment a tunnel registers.
-# Record it here; auto_sync_tunnel_origins reads it via get_proxy_owner()
-# instead of trusting its caller's own user_id.
-_PROXY_OWNERS: Dict[str, str] = {}
-
-
 def get_proxy_owner(proxy_name: str) -> Optional[str]:
-    return _PROXY_OWNERS.get(proxy_name)
-
-
-def _remember_legacy_run_id(run_id: str) -> None:
-    if not run_id:
-        return
-    now = time.time()
-    _LEGACY_RUN_IDS[run_id] = now
-    if len(_LEGACY_RUN_IDS) > 500:
-        cutoff = now - _LEGACY_RUN_ID_TTL
-        for rid, ts in list(_LEGACY_RUN_IDS.items()):
-            if ts < cutoff:
-                del _LEGACY_RUN_IDS[rid]
-
-
-def _is_legacy_run_id(run_id: str) -> bool:
-    if not run_id:
-        return False
-    ts = _LEGACY_RUN_IDS.get(run_id)
-    return ts is not None and (time.time() - ts) < _LEGACY_RUN_ID_TTL
+    """Owner of an FRP proxy, recorded by the NewProxy hook from the tunnel
+    token that opened it (P3.1: in PostgreSQL, table tunnel_proxy_owners,
+    instead of an unbounded in-memory map that a restart emptied)."""
+    try:
+        return db.get_proxy_owner(proxy_name)
+    except Exception as exc:
+        logger.warning("proxy owner lookup failed for %s: %s", proxy_name, exc)
+        return None
 
 
 class CreateTunnelTokenRequest(BaseModel):
     domain: str
     label: Optional[str] = None
-    expires_days: Optional[int] = 365
+    expires_days: int = Field(TUNNEL_TOKEN_DEFAULT_EXPIRE_DAYS, ge=1, le=TUNNEL_TOKEN_MAX_EXPIRE_DAYS)
 
 
-def _match_proxy_to_origin(proxy_name: str, origin_label: str, origin_ip: str, domain: str = "") -> bool:
-    p_name = proxy_name.lower().replace('-', '.').replace('_', '.')
-    d_name = domain.lower().replace('-', '.').replace('_', '.') if domain else ""
-    o_lbl = origin_label.lower().replace('-', '.').replace('_', '.')
-    o_ip = origin_ip.lower().replace('-', '.').replace('_', '.')
+def tunnel_domain_problem(domain_clean: str, user: Optional[dict]) -> Optional[str]:
+    """Why `user` may not hold a tunnel for `domain_clean` (None = allowed).
 
-    # 1. Exact or direct substring match on domain
-    if d_name:
-        if d_name == o_ip or d_name in o_lbl:
-            return True
-    if p_name and (p_name == o_ip or p_name in o_lbl):
-        return True
+    P3.2 (N4): a tunnel token binds one hostname, so it is issued -- and on
+    every use re-checked -- only for
+      * a domain DNS-verified by an active origin the user owns, or
+      * for an admin: any DNS-verified domain, or a platform subdomain
+        (operator-provisioned lab hosts, F-129).
+    An unverified row, someone else's domain, a domain whose origin was
+    archived and a deleted user are all refused (P3.6).
+    """
+    if not user:
+        return "the account that owns this token no longer exists"
+    if domain_clean in RESERVED_SUBDOMAINS:
+        return f"Domain '{domain_clean}' is reserved for WAF Core infrastructure."
+    is_admin = user.get("role") == "admin"
+    if is_admin and is_platform_subdomain(domain_clean):
+        return None
+    row = db.get_verified_domain(domain_clean)
+    if not row:
+        if is_platform_subdomain(domain_clean):
+            return "Subdomains of the platform domain are provisioned by the operator; register your own domain instead."
+        return "Add this domain to one of your origins and verify its DNS first."
+    origin = db.get_origin_by_id(row.get("origin_id")) or {}
+    if not origin or origin.get("status") in ARCHIVED_ORIGIN_STATUSES:
+        return "The origin of this domain is archived."
+    if not is_admin and origin.get("admin_user_id") != user.get("user_id"):
+        return "This domain is already registered by another account."
+    return None
 
-    # 2. Extract specific subdomain components (excluding common base domain tokens)
-    ignored_parts = {"online", "com", "net", "org", "local", "localhost", "waf", "kku", "it", "agent", "tunnel", "server"}
-    p_parts = [p for p in p_name.split('.') if len(p) >= 3 and p not in ignored_parts]
-    d_parts = [p for p in d_name.split('.') if len(p) >= 3 and p not in ignored_parts]
-    o_parts = [p for p in o_ip.split('.') if len(p) >= 3 and p not in ignored_parts]
 
-    check_parts = set(p_parts + d_parts)
-    for p in check_parts:
-        if p in o_parts or (f"({p}" in o_lbl or f" {p}" in o_lbl or f"-{p}" in o_lbl or f".{p}" in o_lbl):
-            return True
-    return False
+def tunnel_token_problem(payload: Dict[str, Any]) -> Optional[str]:
+    """tunnel_domain_problem() for the user and domain inside a tunnel token."""
+    user_id = payload.get("user_id") or payload.get("sub")
+    user = auth_service.get_user_by_id(user_id) if user_id else None
+    domain = canonical_or_none(payload.get("domain"))
+    if not domain:
+        return "token carries no valid domain"
+    return tunnel_domain_problem(domain, user)
 
 
 def _assert_domain_claimable(domain_clean: str, current_user: dict) -> None:
-    """Refuse to mint a tunnel token for a domain the caller does not own.
+    """Refuse to mint a tunnel token for a domain the caller may not bind."""
+    problem = tunnel_domain_problem(domain_clean, current_user)
+    if problem:
+        raise HTTPException(status_code=400 if domain_clean in RESERVED_SUBDOMAINS else 403, detail=problem)
 
-    A tunnel token is a bearer claim over one hostname: the FRP gatekeeper
-    authorizes a proxy binding purely on the `domain` inside it. Issuing one for
-    a domain registered to another account would therefore hand over that
-    account's traffic, so both issuing endpoints funnel through here.
-    """
-    if domain_clean in RESERVED_SUBDOMAINS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Domain '{domain_clean}' is reserved for WAF Core infrastructure.",
-        )
-    user_id = current_user.get("user_id")
-    is_admin = current_user.get("role") == "admin"
-    owned_by_me = False
-    owned_by_other = False
-    for d in db.list_domains():
-        if str(d.get("domain_name", "")).lower() != domain_clean:
-            continue
-        origin_id = d.get("origin_id")
-        if not origin_id:
-            continue
-        origin_rec = db.get_origin_by_id(origin_id)
-        if not origin_rec:
-            continue
-        if origin_rec.get("admin_user_id") == user_id:
-            owned_by_me = True
-        else:
-            owned_by_other = True
-    if owned_by_other and not owned_by_me and not is_admin:
-        raise HTTPException(
-            status_code=403,
-            detail="This domain is already registered by another account.",
-        )
-    # F-129 (2026-10-08): a host at or under the platform's own wildcard apex
-    # (*.waf-it-kku.online) resolves to the edge with zero tenant DNS setup, and
-    # core routes an unknown Host straight to the tunnel router. An UNREGISTERED
-    # one would therefore let any signed-up user mint a tunnel token for it, bind
-    # a proxy through frps, and serve attacker content/phishing under the
-    # platform's own domain. These subdomains are operator-provisioned (the demo
-    # origins are admin-created); a normal tenant onboards their OWN domain. So a
-    # non-admin may only claim a platform subdomain it already owns.
-    if (not is_admin) and (not owned_by_me) and is_platform_subdomain(domain_clean):
-        raise HTTPException(
-            status_code=403,
-            detail="Subdomains of the platform domain are provisioned by the operator; register your own domain instead.",
-        )
+
+def _canonical_or_422(domain: str) -> str:
+    try:
+        return canonical_host(domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.post("/token")
@@ -302,7 +269,7 @@ async def create_tunnel_token(payload: CreateTunnelTokenRequest, current_user: d
     """
     user_id = current_user.get("user_id")
     username = current_user.get("username", "user")
-    domain_clean = payload.domain.strip().lower()
+    domain_clean = _canonical_or_422(payload.domain)
 
     _assert_domain_claimable(domain_clean, current_user)
 
@@ -317,7 +284,7 @@ async def create_tunnel_token(payload: CreateTunnelTokenRequest, current_user: d
     # ~8h after being issued, silently breaking every proxy on that agent
     # with "Invalid or expired WAF Tunnel Token" until someone happened to
     # notice and re-ran the installer.
-    expires_sec = (payload.expires_days or TUNNEL_TOKEN_DEFAULT_EXPIRE_DAYS) * 86400
+    expires_sec = payload.expires_days * 86400
     token_data = {
         "sub": user_id,
         "user_id": user_id,
@@ -333,8 +300,19 @@ async def create_tunnel_token(payload: CreateTunnelTokenRequest, current_user: d
         "domain": domain_clean,
         "user_id": user_id,
         "username": username,
-        "expires_in_days": payload.expires_days or 365,
+        "expires_in_days": payload.expires_days,
     }
+
+
+def _local_address_or_422(value: str) -> str:
+    text = str(value or "").strip()
+    try:
+        return str(ipaddress.ip_address(text))
+    except ValueError:
+        pass
+    if text.lower() == "localhost" or HOSTNAME_RE.match(text.lower()):
+        return text.lower()
+    raise HTTPException(status_code=422, detail="local_ip must be an IP address or a hostname")
 
 
 @router.get("/config-generator")
@@ -344,7 +322,7 @@ async def get_tunnel_config(
         description="The domain this agent config will bind. Required: the caller must "
                     "own it, and there is no sensible default to fall back on.",
     ),
-    port: int = 3000,
+    port: int = Query(3000, ge=1, le=65535),
     local_ip: str = "127.0.0.1",
     platform: str = "linux",
     current_user: dict = Depends(get_current_user)
@@ -354,7 +332,10 @@ async def get_tunnel_config(
     """
     user_id = current_user.get("user_id")
     username = current_user.get("username", "user")
-    domain_clean = domain.strip().lower()
+    # P3.3 (H68): the domain and the local address end up inside a TOML file
+    # and a shell command, so both must be a hostname or an IP literal.
+    domain_clean = _canonical_or_422(domain)
+    local_ip = _local_address_or_422(local_ip)
     _assert_domain_claimable(domain_clean, current_user)
 
     # Generate user-specific token
@@ -432,7 +413,8 @@ async def get_tunnel_config(
         f"EOF\n"
         f"sudo docker run -d --name {safe_name} --restart=always --net=host "
         f"-v /etc/waf-agent/{safe_name}.toml:/etc/frp/frpc.toml:ro "
-        f"snowdreamtech/frpc:0.61.1 -c /etc/frp/frpc.toml"
+        # P3.8: pinned by digest, so a re-pushed tag cannot change what runs.
+        f"{FRPC_IMAGE} -c /etc/frp/frpc.toml"
     )
 
     return {
@@ -489,7 +471,19 @@ def _resolve_frp_identity(raw_token: str, priv_key: str = "", ts: int = 0) -> Tu
     return "none", None
 
 
-@router.post("/frp-hook")
+@router.post("/frp-hook/{hook_key}", include_in_schema=False)
+async def frp_hook(hook_key: str, request: Request, req: Dict[str, Any] = Body(default_factory=dict)):
+    """P3.1 (N1/H66): only frps on this host may call the gatekeeper -- the
+    caller is loopback and the path carries FRP_HOOK_SECRET. Caddy also
+    answers 404 for this path on the public hosts (nginx/Caddyfile). Anything
+    else gets the same 404 as an unknown path."""
+    peer = request.client.host if request.client else ""
+    if (not FRP_HOOK_SECRET or peer not in _LOOPBACK
+            or not hmac.compare_digest(hook_key.encode(), FRP_HOOK_SECRET.encode())):
+        raise HTTPException(status_code=404, detail="Not Found")
+    return await frp_webhook_gatekeeper(req)
+
+
 async def frp_webhook_gatekeeper(req: Dict[str, Any]):
     """
     FRP v0.61.1 HTTP Plugin Webhook Gatekeeper.
@@ -507,11 +501,14 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
 
         if kind == "legacy":
             logger.info(f"FRP Webhook: Authorized Login via Legacy System Token (IP: {content.get('client_address')})")
-            _remember_legacy_run_id(str(content.get("run_id") or "").strip())
             return {"reject": False, "unchange": True}
 
         if kind == "jwt":
             user_id = payload.get("user_id") or payload.get("sub")
+            problem = tunnel_token_problem(payload)
+            if problem:
+                logger.warning(f"FRP Webhook: Rejecting Login of user {user_id}: {problem}")
+                return {"reject": True, "reject_reason": f"Tunnel token no longer valid: {problem}", "unchange": True}
             logger.info(f"FRP Webhook: Authorized User '{payload.get('username')}' (ID: {user_id}) Login")
             return {"reject": False, "unchange": True}
 
@@ -520,7 +517,16 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
 
     elif op == "NewProxy":
         custom_domains = content.get("custom_domains") or ([content.get("domain")] if content.get("domain") else [])
-        requested = [str(c).strip().lower() for c in custom_domains if str(c).strip()]
+        # P3.3: the same canonical form as the token's domain, so "Shop.com."
+        # and "shop.com" are one name; anything that is not a hostname is refused.
+        requested = []
+        for c in custom_domains:
+            if not str(c).strip():
+                continue
+            host = canonical_or_none(c)
+            if not host:
+                return {"reject": True, "reject_reason": f"Invalid custom domain {str(c)[:80]!r}", "unchange": True}
+            requested.append(host)
         subdomain = str(content.get("subdomain") or "").strip().lower()
         proxy_name = content.get("proxy_name", "")
         target_domain = requested[0] if requested else str(proxy_name).strip().lower()
@@ -572,7 +578,7 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
             }
 
         if kind == "jwt":
-            token_domain = str(payload.get("domain") or "").strip().lower()
+            token_domain = canonical_or_none(payload.get("domain")) or ""
             # F-129 residual: a tunnel token authorizes EXACTLY one domain, so a
             # proxy may bind only that host. Reject if it requests ANY other custom
             # domain, or uses subdomain routing -- otherwise a token for one's own
@@ -588,8 +594,15 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
                 return {"reject": True, "reject_reason": "Proxy requests a domain the token is not scoped to", "unchange": True}
             if token_domain == target_domain:
                 owner_id = payload.get("user_id") or payload.get("sub")
+                # P3.2/P3.6: the token's holder must still own the verified
+                # domain on an active origin, and still exist.
+                problem = tunnel_token_problem(payload)
+                if problem:
+                    logger.warning(f"FRP Webhook: Blocked proxy '{proxy_name}' for '{target_domain}': {problem}")
+                    return {"reject": True, "reject_reason": f"Tunnel token no longer valid: {problem}", "unchange": True}
+                # P3.1: the proxy name is bound to the token that opened it.
                 if owner_id:
-                    _PROXY_OWNERS[proxy_name] = owner_id
+                    db.set_proxy_owner(proxy_name, owner_id, token_domain)
                 logger.info(f"FRP Webhook: Proxy '{proxy_name}' authorized for domain '{target_domain}' (owned by token)")
                 return {"reject": False, "unchange": True}
             logger.warning(
@@ -675,6 +688,7 @@ async def get_tunnels_status(
 
             data = res.json()
             proxies = data.get("proxies", [])
+            user_domain_set = {str(d).strip().lower().rstrip(".") for d in user_domains}
             user_tunnels = []
             active_count = 0
 
@@ -698,21 +712,22 @@ async def get_tunnels_status(
                 domain_val = custom_domains[0] if custom_domains else display_name
                 domain_lower = str(domain_val).lower()
 
+                # P3.7 (C5/C6/H71): exact matches only -- the origin whose
+                # tunnel_name is this proxy, or whose address is this host;
+                # the owner the NewProxy hook recorded. Substring matching on
+                # labels used to show one tenant another's tunnel.
                 matching_origin = next(
-                    (o for o in all_origins if _match_proxy_to_origin(display_name, o.get("label", ""), o.get("ip", ""), domain=domain_val)),
+                    (o for o in all_origins
+                     if str(o.get("tunnel_name") or "") == raw_name or str(o.get("ip") or "").lower() == domain_lower),
                     None
                 )
-
-                # Determine true owner
-                owner_id = owner_from_token or (matching_origin.get("admin_user_id") if matching_origin else None)
-                if not owner_id and is_admin:
-                    owner_id = user_id
+                owner_id = owner_from_token or get_proxy_owner(raw_name) or (
+                    matching_origin.get("admin_user_id") if matching_origin else None)
 
                 is_mine = (owner_id == user_id)
-                # Tenancy isolation filter
-                is_user_tunnel = is_mine or any(
-                    domain_lower in d or d in domain_lower for d in user_domains
-                ) or view_all
+                # Tenancy isolation filter: own proxy, or a host that is
+                # exactly one of the caller's domains.
+                is_user_tunnel = is_mine or domain_lower in user_domain_set or view_all
 
                 if not is_user_tunnel:
                     continue
@@ -785,37 +800,19 @@ async def get_tunnels_status(
 
 @router.delete("/{target_identifier}")
 async def deregister_tunnel(target_identifier: str, current_user: dict = Depends(get_current_user)):
+    """P3.7 (H73): deregister exactly one origin, named by its id. The owner
+    or an admin may; an unknown id is a 404 for everyone, admins included
+    (it used to match label/IP substrings and answer "removed" to an admin
+    for anything)."""
     user_id = current_user.get("user_id")
     user_role = current_user.get("role")
-    target_clean = target_identifier.strip().lower()
+    origin = db.get_origin_by_id(target_identifier.strip())
+    if not origin or not (origin.get("admin_user_id") == user_id or user_role == "admin"):
+        raise HTTPException(status_code=404, detail=f"Tunnel or Origin '{target_identifier}' not found under your account.")
 
-    global _TUNNELS_CACHE
     _TUNNELS_CACHE.clear()
-
-    all_origins = db.list_origins()
-    matched_origin = None
-
-    for o in all_origins:
-        o_lbl = str(o.get("label", "")).lower()
-        o_ip = str(o.get("ip", "")).lower()
-        o_id = str(o.get("id", ""))
-        if (target_clean == o_id or target_clean in o_lbl or target_clean in o_ip or
-            any(part in o_ip for part in target_clean.split('.') if len(part) >= 4)):
-            if o.get("admin_user_id") == user_id or user_role == "admin":
-                matched_origin = o
-                break
-
-    if matched_origin:
-        origin_service.delete_origin(matched_origin.get("id"))
-        return {
-            "status": "success",
-            "message": f"Tunnel '{matched_origin.get('label')}' deregistered successfully."
-        }
-
-    if user_role == "admin":
-        return {
-            "status": "success",
-            "message": f"Tunnel '{target_identifier}' removed."
-        }
-
-    raise HTTPException(status_code=404, detail=f"Tunnel or Origin '{target_identifier}' not found under your account.")
+    origin_service.delete_origin(origin.get("id"))
+    return {
+        "status": "success",
+        "message": f"Tunnel '{origin.get('label')}' deregistered successfully."
+    }

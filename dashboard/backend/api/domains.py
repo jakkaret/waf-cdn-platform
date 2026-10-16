@@ -6,12 +6,15 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 import uuid
 from datetime import datetime
-from services.rbac import get_current_user, verify_origin_ownership, verify_origin_edit_access
+from services.rbac import get_current_user, require_admin, verify_origin_ownership, verify_origin_edit_access
 from services import audit_log
 from services.txn import atomic
 from services.dynamodb_service import DynamoDBService, DuplicateDomain
 from services import shield_sync
-from services.dns_service import verify_domain_dns, is_claimable_own_wildcard_subdomain, is_platform_subdomain
+from services.dns_service import (
+    verify_domain_dns, is_claimable_own_wildcard_subdomain, is_platform_subdomain, record_cname_target,
+)
+from services.hostnames import canonical_host
 from services import nginx_site_service
 
 router = APIRouter(prefix="/api/domains", tags=["Domains"])
@@ -54,7 +57,13 @@ async def after_domain_verified(origin_id: str, domain_name: str) -> None:
 
 
 def _mark_verified(domain_id: str) -> None:
-    db.update_domain(domain_id, {"dns_verified": True, "ssl_status": "pending"})
+    """P3.5: verifying claims the name atomically; another origin's verified
+    row or tunnel host for it is a 409."""
+    from services.dynamodb_service import DomainAlreadyClaimed
+    try:
+        db.claim_verified_domain(domain_id)
+    except DomainAlreadyClaimed as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 def _refresh_managed_hostmap() -> None:
@@ -123,15 +132,8 @@ def _assert_platform_subdomain_allowed(domain_name: str, current_user: dict) -> 
 
 
 def _validate_hostname(value: str) -> str:
-    normalized = value.strip().lower()
-    if len(normalized) > 253 or not _HOSTNAME_RE.match(normalized):
-        raise ValueError(
-            "domain_name must be a valid hostname: labels of letters, digits, "
-            "and hyphens (a label may not start or end with a hyphen), each "
-            "label at most 63 characters, with at least two labels (e.g. "
-            "'example.com'), and at most 253 characters total."
-        )
-    return normalized
+    # P3.3: the one canonical form (services/hostnames.py), trailing dot dropped.
+    return canonical_host(value)
 
 
 class DomainCreate(BaseModel):
@@ -162,7 +164,8 @@ async def create_domain(payload: DomainCreate, current_user: dict = Depends(get_
     _assert_platform_subdomain_allowed(payload.domain_name, current_user)
 
     # 2. Check if domain already exists
-    assert_domain_available(payload.domain_name)
+    assert_domain_available(payload.domain_name, payload.origin_id)
+    assert_domain_quota(payload.origin_id)
 
     # 3. Create domain record
     domain_id = str(uuid.uuid4())
@@ -228,6 +231,29 @@ async def delete_domain(domain_id: str, current_user: dict = Depends(get_current
         return {"status": "success", "message": f"Domain {domain['domain_name']} deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/admin/{domain_id}/release")
+async def release_unverified_domain(domain_id: str, current_user: dict = Depends(require_admin)):
+    """P3.5: an admin frees a name held by an unverified row (a squatter, or
+    an abandoned attempt) without touching the origin that added it. A
+    verified domain is removed by its owner through the normal delete."""
+    domain = db.get_domain(domain_id)
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    if domain.get("dns_verified"):
+        raise HTTPException(status_code=400, detail="Domain is verified; its owner removes it")
+    with atomic():
+        db.delete_domain(domain_id)
+        audit_log.write_audit_event(
+            scope_id=domain["origin_id"],
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="domain.release",
+            summary=f"admin ปลดโดเมนที่ยังไม่ยืนยัน: {domain.get('domain_name')}",
+            details={"domain_id": domain_id, "domain_name": domain.get("domain_name")},
+        )
+    return {"status": "success", "message": f"Domain {domain['domain_name']} released"}
+
 
 @router.post("/{domain_id}/verify")
 async def verify_domain_now(domain_id: str, current_user: dict = Depends(get_current_user)):
@@ -410,7 +436,7 @@ def format_domain(domain_data: dict) -> dict:
         "domain_name": domain_name,
         "verification_status": "verified" if dns_verified else "pending",
         "dns_verification_token": domain_data.get("verification_token"),
-        "cname_target": os.getenv("WAF_CNAME_TARGET", "cdn.local"),
+        "cname_target": record_cname_target(domain_data.get("verification_token", "")),
         "ssl_status": ssl_status,
         "ssl_expires_at": ssl_expires_at,
         "ssl_issuer": ssl_issuer,
@@ -438,14 +464,15 @@ class DomainCreatePayload(BaseModel):
 
 def dns_instructions_for(domain_name: str, verification_token: str) -> dict:
     """The CNAME alone both routes traffic to the edge and proves control of
-    the name (services/dns_service.verify_domain_dns accepts it), so it is
-    the one record a customer has to add. The TXT record is the fallback for
-    names that cannot carry a CNAME (a zone apex) or sit behind another proxy."""
+    the name, because its target carries this record's own token
+    (<token>.<WAF_CNAME_TARGET>, P3.4), so it is the one record a customer has
+    to add. The TXT record is the fallback for names that cannot carry a CNAME
+    (a zone apex) or sit behind another proxy."""
     return {
         "cname_record": {
             "type": "CNAME",
             "name": domain_name,
-            "value": os.getenv("WAF_CNAME_TARGET", "cdn.local")
+            "value": record_cname_target(verification_token)
         },
         "txt_record": {
             "type": "TXT",
@@ -456,8 +483,24 @@ def dns_instructions_for(domain_name: str, verification_token: str) -> dict:
     }
 
 
-def domain_registered(domain_name: str) -> bool:
-    return db.get_domain_by_name(domain_name) is not None
+def domain_registered(domain_name: str, owner_id: Optional[str] = None) -> bool:
+    """Taken for good: verified by an origin, or another origin's tunnel host.
+    An unverified row reserves nothing any more (P3.5, C4/H40) -- except for
+    the account that added it, which does not get a second copy."""
+    if db.get_verified_domain(domain_name) is not None or db.tunnel_domain_origin(domain_name):
+        return True
+    return bool(owner_id) and user_holds_domain(domain_name, owner_id)
+
+
+def user_holds_domain(domain_name: str, user_id: str) -> bool:
+    """Any row (verified or not) for this name on an origin `user_id` owns."""
+    for row in db.list_domains():
+        if row.get("domain_name") != domain_name:
+            continue
+        origin = db.get_origin_by_id(row.get("origin_id")) or {}
+        if origin.get("admin_user_id") == user_id:
+            return True
+    return False
 
 
 def _save_new_domain(domain_data: dict) -> None:
@@ -474,11 +517,28 @@ def _save_new_domain(domain_data: dict) -> None:
         )
 
 
-def assert_domain_available(domain_name: str) -> None:
-    if domain_registered(domain_name):
+def assert_domain_available(domain_name: str, origin_id: Optional[str] = None,
+                            owner_id: Optional[str] = None) -> None:
+    """P3.5: a name is refused when it is verified by an origin or is a tunnel
+    host (checked across both tables), or when this origin already has it.
+    Another origin's unverified row does not block: whoever proves DNS first
+    gets the name, and the 7-day expiry clears the rest."""
+    taken = domain_registered(domain_name, owner_id)
+    if not taken and origin_id:
+        taken = any(d.get("domain_name") == domain_name for d in db.list_domains(origin_id=origin_id))
+    if taken:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Domain name {domain_name} is already registered."
+        )
+
+
+def assert_domain_quota(origin_id: str) -> None:
+    from services.origin_service import DOMAINS_QUOTA_PER_ORIGIN
+    if db.count_domains(origin_id) >= DOMAINS_QUOTA_PER_ORIGIN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"This origin already has the maximum of {DOMAINS_QUOTA_PER_ORIGIN} domains.",
         )
 
 
@@ -499,7 +559,8 @@ def create_domain_record(origin_id: str, domain_name: str, current_user: dict) -
     # platform apex — this is the path whose is_claimable_own_wildcard_subdomain
     # auto-verify made single-label platform subdomains claimable by any tenant.
     _assert_platform_subdomain_allowed(domain_name, current_user)
-    assert_domain_available(domain_name)
+    assert_domain_available(domain_name, origin_id)
+    assert_domain_quota(origin_id)
 
     domain_id = str(uuid.uuid4())
     verification_token = f"waf-token-{uuid.uuid4().hex[:16]}"

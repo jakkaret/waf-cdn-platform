@@ -58,8 +58,6 @@ def _run(coro):
 
 def setup_function(_):
     origin_service._LIVE_PROXIES_CACHE = None
-    import api.tunnels as tunnels_module
-    tunnels_module._PROXY_OWNERS.clear()
 
 
 # --------------------------------------------------- _tunnel_is_online match
@@ -180,8 +178,8 @@ def test_auto_create_reads_port_from_metadatas_when_localport_is_absent():
     this is the only reliable source auto-create has. Uses the conftest
     autouse fixture's already-patched origin_service.db (a fresh
     FakeDynamoDBService per test), same as every other test in this file."""
-    import api.tunnels as tunnels_module
-    tunnels_module._PROXY_OWNERS["alice-tunnel"] = USER_A
+    from services.dynamodb_service import DynamoDBService
+    DynamoDBService().set_proxy_owner("alice-tunnel", USER_A, "alice.example.com")  # what NewProxy records
 
     proxy = {
         "name": "alice-tunnel",

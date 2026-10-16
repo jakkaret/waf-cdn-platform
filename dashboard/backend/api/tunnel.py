@@ -120,7 +120,9 @@ async def verify_agent(req: VerifyAgentRequest):
         raise denied
 
     origin = db.get_origin_by_id(origin_id)
-    if not origin or origin.get("status") == "archived":
+    # P3.6 (H76): only an active origin's agent connects -- archived and
+    # deleted (and not-yet-active) origins are refused alike.
+    if not origin or origin.get("status") != "active":
         raise denied
 
     credential = db.get_agent_credential(origin_id) or {}

@@ -153,7 +153,7 @@ class InspectRequest(BaseModel):
 async def inspect_domain(payload: InspectRequest, current_user: dict = Depends(get_current_user)):
     from api.domains import _assert_platform_subdomain_allowed, domain_registered
     _assert_platform_subdomain_allowed(payload.domain, current_user)
-    if await asyncio.to_thread(domain_registered, payload.domain):
+    if await asyncio.to_thread(domain_registered, payload.domain, current_user.get("user_id")):
         return {"domain": payload.domain, "already_registered": True}
     _check_inspect_rate(current_user.get("user_id"))
     result = await asyncio.to_thread(site_connect.inspect_domain, payload.domain)
@@ -187,7 +187,7 @@ async def connect_site(payload: ConnectRequest, current_user: dict = Depends(get
     # Check everything that can fail on the domain *before* creating the
     # origin, so a refused domain never leaves an empty origin behind.
     _assert_platform_subdomain_allowed(domain, current_user)
-    assert_domain_available(domain)
+    assert_domain_available(domain, owner_id=user_id)
 
     if payload.mode == "direct":
         address = (payload.origin_address or "").strip().lower()
@@ -363,6 +363,10 @@ async def get_progress(origin_id: str, current_user: dict = Depends(get_current_
                 reconcile = True
         elif _proxy_online_for(name, proxies):
             conn = {"status": "connected"}
+        elif mode == "agent" and not verified:
+            # P3.2: the agent's tunnel token is issued only once DNS proves
+            # the domain is theirs, so the install step waits for that.
+            conn = {"status": "waiting_dns"}
         elif mode == "agent":
             conn = {"status": "waiting_agent"}
         else:

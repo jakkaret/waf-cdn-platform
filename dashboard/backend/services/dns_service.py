@@ -62,16 +62,31 @@ def is_claimable_own_wildcard_subdomain(domain_name: str) -> bool:
     return label not in _RESERVED_OWN_SUBDOMAIN_LABELS
 
 
+def record_cname_target(verification_token: str) -> str:
+    """P3.4 (N17/H41): the CNAME that proves control of one domain record.
+    It carries the record's own verification token, so pointing a name at the
+    platform's shared target proves nothing about who added it here.
+    *.<WAF_CNAME_TARGET> resolves to the edge like the shared target does, so
+    the one record still routes the traffic too."""
+    target = os.getenv("WAF_CNAME_TARGET", WAF_CNAME_TARGET).strip().lower().rstrip(".")
+    return f"{str(verification_token or '').strip().lower()}.{target}"
+
+
 def verify_domain_dns(domain_name: str, verification_token: str) -> bool:
     """
-    Checks if a domain's DNS is pointed to WAF Platform.
+    Checks that whoever added this domain record controls the domain's DNS.
     Returns True if:
-    1. CNAME record points to WAF_CNAME_TARGET (cdn.local)
-    2. TXT record matches 'waf-verification-token=<verification_token>'
+    1. the CNAME is exactly <verification_token>.<WAF_CNAME_TARGET>
+       (record_cname_target), compared without case or a trailing dot, or
+    2. a TXT record (on the name or _waf-challenge.<name>) carries the token.
+    A CNAME to the shared target alone no longer verifies (N17): anyone could
+    point a name there, and the first account to add it got it.
     """
+    if not verification_token:
+        return False
     # 1. Check CNAME
-    cname = resolve_cname(domain_name)
-    if cname and WAF_CNAME_TARGET in cname:
+    cname = resolve_cname(domain_name).strip().lower().rstrip(".")
+    if cname and cname == record_cname_target(verification_token):
         print(f"[DNS Service] Domain {domain_name} verified via CNAME -> {cname}")
         return True
         

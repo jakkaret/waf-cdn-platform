@@ -8,9 +8,12 @@ from api import tunnels
 
 @pytest.fixture
 def jwt_for_myshop(monkeypatch):
-    # every request in these tests presents a valid JWT scoped to myshop.com
+    # every request in these tests presents a valid JWT scoped to myshop.com,
+    # held by the owner of the verified domain (P3.2)
+    from tests.helpers.seed import make_tunnel_owner
+    owner = make_tunnel_owner("myshop.com")
     monkeypatch.setattr(tunnels, "_resolve_frp_identity",
-                        lambda *a, **k: ("jwt", {"domain": "myshop.com", "user_id": "u1"}))
+                        lambda *a, **k: ("jwt", {"domain": "myshop.com", "user_id": owner}))
 
 
 def _newproxy(custom_domains, subdomain=""):

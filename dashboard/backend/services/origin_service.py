@@ -10,6 +10,7 @@ from typing import List, Dict, Optional, Any, Set, Tuple
 from datetime import datetime
 from services.dynamodb_service import DynamoDBService
 from services.dns_service import is_claimable_own_wildcard_subdomain, verify_domain_dns
+from services.hostnames import canonical_or_none
 from services.tenant_service import invalidate_tenant_cache
 from services.auth_service import AuthService
 
@@ -186,7 +187,31 @@ def validate_ip(ip: str) -> bool:
             or addr.is_multicast or addr.is_reserved or addr.is_unspecified
         )
     domain_pattern = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
-    return bool(domain_pattern.match(ip_str))
+    if not domain_pattern.match(ip_str):
+        return False
+    # P3.8 (H38): a name is held to the same rule as a literal -- one that is
+    # internal by convention, or resolves to an internal address now, is
+    # refused (unless that address is allowlisted). A name that does not
+    # resolve yet (a tunnel host before its DNS exists) is accepted.
+    host = ip_str.lower().rstrip(".")
+    if host.endswith(_INTERNAL_NAME_SUFFIXES):
+        return False
+    for resolved in _resolve_addresses(host):
+        if not validate_ip(resolved):
+            return False
+    return True
+
+
+_INTERNAL_NAME_SUFFIXES = (".internal", ".local", ".localhost", ".lan", ".home.arpa", ".localdomain")
+
+
+def _resolve_addresses(host: str) -> List[str]:
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except (OSError, UnicodeError):
+        return []
+    return sorted({info[4][0].split("%", 1)[0] for info in infos})
 
 
 CONNECTION_MODES = ("direct", "agent")
@@ -403,7 +428,9 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
         # separate full origins scans within the same
         # GET /api/origins request (this function runs first, so its scan
         # populates the cache the other call then reuses for free).
-        all_origins_global = _scan_all_origins()
+        # A copy: new origins are appended below for de-duplication, and the
+        # scan result is a cache shared by the whole process (P3.7).
+        all_origins_global = [dict(o) for o in _scan_all_origins()]
     except Exception:
         # Fail closed on this specific check: if we can't verify global
         # ownership, do not auto-create anything this cycle rather than
@@ -422,7 +449,8 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
         conf = p.get("conf") or {}
         raw_name = p.get("name", "")
         custom_domains = conf.get("customDomains") or conf.get("custom_domains") or []
-        domain_val = str(custom_domains[0] if custom_domains else raw_name).strip().lower()
+        # P3.3: one canonical spelling; a proxy without a valid host is skipped.
+        domain_val = canonical_or_none(custom_domains[0] if custom_domains else "")
         if not domain_val:
             continue
 
@@ -436,41 +464,27 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
             or conf.get("localPort") or conf.get("local_port") or 80
         )
 
-        # 2026-09-19 fix: ownership used to default to `user_id` -- whoever
-        # is CALLING this function (i.e. whoever has the Tunnels/Origins page
-        # open right now), a first-viewer race, not real RBAC. The FRP
-        # webhook gatekeeper (api/tunnels.py, NewProxy) already verifies each
-        # proxy's domain-scoped JWT and is the only place that authoritatively
-        # knows who minted it; it records that into _PROXY_OWNERS. Deferred
-        # import: origin_service is imported by api.tunnels itself, so a
-        # module-level import here would be circular.
+        # The owner is the account whose tunnel token opened this proxy,
+        # recorded by the NewProxy hook (api/tunnels.py, PostgreSQL since
+        # P3.1) -- never whoever is viewing the page. Deferred import:
+        # origin_service is imported by api.tunnels itself.
         from api.tunnels import get_proxy_owner
         true_owner_id = get_proxy_owner(raw_name)
         if not true_owner_id:
-            # NewProxy hasn't fired since this process started (e.g. a proxy
-            # that was already connected before a backend restart) -- do not
-            # fall back to the caller's id, that is exactly the bug being
-            # fixed. It will be picked up correctly on the tunnel's next
-            # reconnect, which re-fires NewProxy.
-            logger.warning(f"Skipping auto-create for tunnel '{raw_name}': true owner not yet known (awaiting next reconnect)")
+            logger.warning(f"Skipping auto-create for tunnel '{raw_name}': owner not recorded (awaiting next reconnect)")
             continue
 
-        # Check if already exists -- scanned GLOBALLY, not scoped to the
-        # calling user. A dedup check scoped to the caller's own origins
-        # (the previous shape of this check) only prevents a user from
-        # duplicating their OWN origin; it does nothing when the viewer is
-        # someone other than true_owner_id, which is routine now that
-        # ownership no longer depends on who's looking -- that produced
-        # duplicate origin rows every time a non-owner viewed the page.
+        # P3.7 (C5/C6): exact matches only, scanned globally -- the origin
+        # this proxy already runs as (tunnel_name), the origin that verified
+        # this host, or the connect flow's agent origin that stores the host
+        # as its address. Substring matching on labels let one tenant's
+        # proxy land on (or skip) another tenant's origin.
+        verified = db.get_verified_domain(domain_val)
         matched_origin = None
         for o in all_origins_global:
-            o_lbl = str(o.get("label", "")).lower()
-            o_ip = str(o.get("ip", "")).lower()
-            o_tunnel = str(o.get("tunnel_name", "")).lower()
-
-            if (domain_val in o_lbl or domain_val in o_ip or domain_val == o_ip or
-                raw_name.lower() in o_tunnel or raw_name.lower() in o_lbl or
-                raw_name.lower() in o_ip):
+            if (str(o.get("tunnel_name") or "") == raw_name
+                    or (verified and str(o.get("id")) == verified.get("origin_id"))
+                    or str(o.get("ip") or "").strip().lower() == domain_val):
                 matched_origin = o
                 break
 
@@ -483,11 +497,11 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
                 # reassign it here; that decision needs a human.
                 logger.warning(f"Tunnel '{raw_name}' has origin owned by {existing_owner} but its JWT says {true_owner_id}; leaving ownership unchanged")
                 continue
-            if matched_origin.get("status") == "archived":
-                db.update_origin(matched_origin.get("id"), {"status": "active", "updated_at": datetime.now().isoformat() + "Z"})
-                need_cache_invalidation = True
-                owners_to_invalidate.add(true_owner_id)
-            elif matched_origin.get("connection_mode") == "agent" and (
+            if matched_origin.get("status") in ("archived", "deleted"):
+                # P3.6 (H32): an origin its owner archived stays archived
+                # while its tunnel is still online; it is restored on purpose.
+                continue
+            if matched_origin.get("connection_mode") == "agent" and (
                 matched_origin.get("status") == "pending" or not matched_origin.get("is_tunnel")
             ):
                 # An origin made by the connect flow for an agent stores the
@@ -504,6 +518,11 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
                 matched_origin.update(update)
                 need_cache_invalidation = True
                 owners_to_invalidate.add(true_owner_id)
+            continue
+
+        # P3.6 (H74): a new origin counts against the owner's quota.
+        if get_quota_info(true_owner_id)["origins"]["at_limit"]:
+            logger.warning(f"Skipping auto-create for tunnel '{raw_name}': owner {true_owner_id} is at the origin quota")
             continue
 
         # Create new origin for this tunnel
