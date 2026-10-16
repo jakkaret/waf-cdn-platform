@@ -1,5 +1,5 @@
+import json
 import os
-import time
 import uuid
 import redis
 import logging
@@ -12,11 +12,18 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
 
 
+# control-api enforces the rules (cdn/control-api/rate_limit.py, P2.6) and
+# reads them from here; it counts each rule per client IP in
+# rate:limit:<rule id>:<ip> (a plain counter with the window as its TTL).
+RULES_KEY = "waf:ratelimit:rules"
+KEY_PREFIX = "rate:limit:"
+_PUBLISHED_FIELDS = ("id", "name", "path_pattern", "method", "limit_count", "window_seconds", "enabled")
+
+
 class RateLimitService:
     """Rate-limit rule definitions in waf.rate_limit_rules (the three default
     rules are seeded by migration 0002); request counters stay in Redis. No
-    I/O at construction: built at import time in api/rate_limits.py and
-    api/limiter.py."""
+    I/O at construction: built at import time in api/rate_limits.py."""
 
     def __init__(self):
         from services.pg_store import PgRateLimitRepository
@@ -30,65 +37,84 @@ class RateLimitService:
     def list_rules(self) -> List[Dict]:
         return self._pg.list()
 
+    def publish_rules(self) -> None:
+        """Hand the enabled rules to control-api. Called after every change
+        and by services/shield_sync.py's worker, so a Redis restart is
+        repaired within a minute."""
+        rules = [{k: rule.get(k) for k in _PUBLISHED_FIELDS} for rule in self._pg.list() if rule.get("enabled")]
+        self.redis_client.set(RULES_KEY, json.dumps(rules, separators=(",", ":")))
+
+    def _publish_quietly(self) -> None:
+        try:
+            self.publish_rules()
+        except Exception as exc:
+            logger.warning("rate-limit rules not published (shield sync retries): %s", exc)
+
     def add_rule(self, name: str, path_pattern: str, limit_count: int, window_seconds: int,
                  method: str = "ALL", burst: int = 0, action: str = "429") -> Dict:
         rule_id = f"rule_{uuid.uuid4().hex[:8]}"
         self._pg.add(rule_id, name.strip(), path_pattern.strip(), method, limit_count, window_seconds,
                      burst, action)
+        self._publish_quietly()
         return {"id": rule_id, "name": name, "path_pattern": path_pattern, "limit_count": limit_count,
                 "window_seconds": window_seconds, "enabled": 1}
 
     def update_rule(self, rule_id: str, data: Dict) -> Optional[Dict]:
-        return self._pg.update(rule_id, data)
+        updated = self._pg.update(rule_id, data)
+        self._publish_quietly()
+        return updated
 
     def delete_rule(self, rule_id: str) -> bool:
-        return self._pg.delete(rule_id)
+        deleted = self._pg.delete(rule_id)
+        self._publish_quietly()
+        return deleted
+
+    def _counter_keys(self):
+        """(key, rule id, ip) for control-api's request counters. Other users
+        of the rate:limit: prefix (per-user quotas in api/onboarding.py and
+        api/ml.py, sorted sets) are not client buckets and are skipped."""
+        for key in self.redis_client.scan_iter(match=f"{KEY_PREFIX}rule_*", count=500):
+            rule_id, _, ip = key[len(KEY_PREFIX):].partition(":")
+            if ip:
+                yield key, rule_id, ip
 
     def get_throttled_clients(self) -> List[Dict]:
-        """Scan Redis for active rate-limited clients in the sliding window."""
+        """Client IPs counted by a rule in its current window, busiest first."""
         if not self.redis_client:
             return []
-
-        throttled = []
-        now_ms = int(time.time() * 1000)
+        limits = {}
         try:
-            # Look for keys like rate:limit:*
-            keys = self.redis_client.keys("rate:limit:*")
-            for key in keys[:50]:  # Limit to 50 active records
-                ip = key.replace("rate:limit:", "")
-                count = self.redis_client.zcard(key)
+            limits = {r["id"]: int(r.get("limit_count") or 0) for r in self._pg.list()}
+        except Exception as e:
+            logger.warning(f"rate-limit rules unavailable for the throttled view: {e}")
+        throttled = []
+        try:
+            for key, rule_id, ip in self._counter_keys():
+                count = int(self.redis_client.get(key) or 0)
                 ttl = self.redis_client.ttl(key)
-
-                # Get oldest and newest entry
-                entries = self.redis_client.zrange(key, 0, -1, withscores=True)
-                if entries:
-                    first_ts = int(entries[0][1])
-                    last_ts = int(entries[-1][1])
-                    elapsed_s = max(1, (last_ts - first_ts) // 1000)
-                else:
-                    elapsed_s = 1
-
+                limit = limits.get(rule_id, 0)
                 throttled.append({
                     "ip": ip,
+                    "rule_id": rule_id,
                     "request_count": count,
                     "ttl_seconds": max(0, ttl),
-                    "status": "throttled" if count >= 10 else "active",
-                    "window_sample": f"{elapsed_s}s"
+                    "status": "throttled" if limit and count > limit else "active",
+                    "window_sample": f"{max(0, ttl)}s left",
                 })
-            # Sort by highest request count
+                if len(throttled) >= 200:
+                    break
             throttled.sort(key=lambda x: x["request_count"], reverse=True)
         except Exception as e:
             logger.warning(f"Error fetching throttled clients from Redis: {e}")
-
-        return throttled
+        return throttled[:50]
 
     def reset_client_limit(self, ip: str) -> bool:
         if not self.redis_client:
             return False
+        ip = ip.strip()
         try:
-            key = f"rate:limit:{ip.strip()}"
-            deleted = self.redis_client.delete(key)
-            return deleted > 0
+            keys = [key for key, _rule, key_ip in self._counter_keys() if key_ip == ip]
+            return bool(keys) and self.redis_client.delete(*keys) > 0
         except Exception as e:
             logger.error(f"Error resetting client rate limit in Redis: {e}")
             return False

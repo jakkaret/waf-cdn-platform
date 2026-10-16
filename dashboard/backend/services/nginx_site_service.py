@@ -89,6 +89,7 @@ def _deception_locations() -> str:
     }}
     location @deception_static {{
         default_type text/plain;
+        add_header Cache-Control "no-store" always;
         return 200 "root:x:0:0:root:/root:/bin/bash\\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\\n";
     }}
 """
@@ -149,8 +150,15 @@ server {{
     modsecurity on;
     modsecurity_transaction_id "$request_id";
 
-    # Static Assets bypass rate limiting
+    # Static-looking paths go through the shield too (P2.1, H85); the rate
+    # limiter in control-api skips real static assets on its own.
     location ~* \\.(?:css|js|jpg|jpeg|png|gif|ico|svg|webp|woff|woff2|ttf|json|map)$ {{
+        auth_request /internal-shield-check;
+        auth_request_set $retry_after $upstream_http_retry_after;
+        auth_request_set $shield_type $upstream_http_x_shield_type;
+        auth_request_set $shield_protected $upstream_http_x_shield_protected;
+        more_set_headers "Cache-Control: $waf_cache_control";
+
         proxy_pass {upstream_target};
         proxy_set_header Host {host_header};
 {ssl_directives}
@@ -167,6 +175,8 @@ server {{
         auth_request /internal-shield-check;
         auth_request_set $retry_after $upstream_http_retry_after;
         auth_request_set $shield_type $upstream_http_x_shield_type;
+        auth_request_set $shield_protected $upstream_http_x_shield_protected;
+        more_set_headers "Cache-Control: $waf_cache_control";
 
         proxy_pass {upstream_target};
         proxy_set_header Host {host_header};
@@ -180,28 +190,6 @@ server {{
         proxy_buffering off;
     }}
 
-    location = /internal-rate-limit {{
-        internal;
-        proxy_method GET;
-        proxy_pass http://host.docker.internal:8000/api/limiter/check;
-        proxy_pass_request_body off;
-        proxy_set_header Content-Length "";
-        proxy_set_header X-Original-URI $request_uri;
-        # $waf_client_ip: real visitor IP, header trusted only from our own
-        # proxies (geo in nginx/templates/conf.d/default.conf.template). The
-        # limiter keys on the first X-Forwarded-For entry, so send only that.
-        proxy_set_header X-Real-IP $waf_client_ip;
-        proxy_set_header X-Forwarded-For $waf_client_ip;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header Host $host;
-    }}
-
-    error_page 401 =429 @rate_limit_exceeded;
-    location @rate_limit_exceeded {{
-        add_header Retry-After $retry_after always;
-        add_header Content-Type text/plain always;
-        return 429 "Too Many Requests. Rate limit exceeded. Please try again later.";
-    }}
 {_deception_locations()}
     error_page 403 /403.html;
     location = /403.html {{ root /usr/share/nginx/html; internal; }}

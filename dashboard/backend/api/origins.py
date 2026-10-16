@@ -12,7 +12,7 @@ from services.otp_config import (
     get_origin_config as get_otp_origin_config,
     save_origin_config as save_otp_origin_config,
 )
-from services import audit_log, invite_service
+from services import audit_log, invite_service, shield_sync
 from services.txn import atomic
 from services.cve_feed import DEFAULT_WINDOW_DAYS, fetch_recent_cves, match_cves_to_origins, select_search_terms
 
@@ -358,6 +358,8 @@ def _refresh_managed_hostmap() -> None:
 async def delete_origin(origin_id: str, origin: dict = Depends(verify_origin_ownership)):
     success = origin_service.delete_origin(origin_id)
     if success:
+        # P2.2: an archived origin's hosts lose their CAPTCHA/OTP keys.
+        await asyncio.to_thread(shield_sync.reconcile_quietly, origin_service.db)
         _refresh_managed_hostmap()
         return {"status": "success", "message": "Origin deleted successfully"}
     raise HTTPException(status_code=500, detail="Failed to delete origin")
@@ -371,6 +373,7 @@ async def restore_origin(origin_id: str, current_user: dict = Depends(get_curren
         raise HTTPException(status_code=400, detail="Cannot restore. Active origin quota exceeded.")
     success = origin_service.restore_origin(origin_id)
     if success:
+        await asyncio.to_thread(shield_sync.reconcile_quietly, origin_service.db)
         _refresh_managed_hostmap()
         return {"status": "success", "message": "Origin restored successfully"}
     raise HTTPException(status_code=500, detail="Failed to restore origin")
@@ -543,6 +546,8 @@ async def update_captcha_config(
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save CAPTCHA configuration: {exc}")
+    # Every verified host of the origin (tunnel hosts too) gets the new settings.
+    await asyncio.to_thread(shield_sync.reconcile_quietly, origin_service.db)
     return {"origin_id": origin.get("id"), "captcha_shield": config}
 
 @router.get("/{origin_id}/otp")
@@ -569,4 +574,5 @@ async def update_otp_config(
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save OTP configuration: {exc}")
+    await asyncio.to_thread(shield_sync.reconcile_quietly, origin_service.db)
     return {"origin_id": origin.get("id"), "otp_shield": config}

@@ -56,8 +56,6 @@ location = /internal-ml-capture {
 
 location = /internal-captcha-check {
     internal;
-    auth_request /internal-rate-limit;
-    auth_request_set $retry_after $upstream_http_retry_after;
     proxy_method GET;
     proxy_pass http://control-api:8070/api/captcha/access;
     proxy_pass_request_body off;
@@ -87,6 +85,9 @@ location ^~ /cdn-cgi/ {
     # /cdn-cgi/challenge route pick captcha vs OTP HTML. Empty on any other
     # /cdn-cgi/ hit (direct API calls), which is fine, unused there.
     proxy_set_header X-Shield-Type $shield_type;
+    # Retry-After of a rate-limited request, for the 429 the challenge route
+    # answers (empty, so not sent, on any other /cdn-cgi/ request).
+    proxy_set_header X-Retry-After $retry_after;
     proxy_http_version 1.1;
     proxy_read_timeout 10s;
     proxy_buffering off;

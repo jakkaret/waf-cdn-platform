@@ -124,6 +124,24 @@ async def captcha_challenge_route(request: Request):
     # shield_access response header via auth_request_set); default to
     # captcha for direct/manual hits that carry no such header.
     shield_type = request.headers.get("x-shield-type")
+    if shield_type == "ratelimit":
+        # P2.6: over a rate-limit rule. nginx forwards the Retry-After the
+        # shield check computed on X-Retry-After.
+        retry_after = request.headers.get("x-retry-after", "")
+        return Response(
+            status_code=429,
+            content="Too Many Requests. Rate limit exceeded. Please try again later.",
+            media_type="text/plain",
+            headers={"Retry-After": retry_after if retry_after.isdigit() else "60", "Cache-Control": "no-store"},
+        )
+    if shield_type == "unavailable":
+        # H83: a protected path while the shield's store is down.
+        return Response(
+            status_code=503,
+            content="Service temporarily unavailable. Please try again shortly.",
+            media_type="text/plain",
+            headers={"Retry-After": "30", "Cache-Control": "no-store"},
+        )
     if shield_type == "otp":
         return await issue_challenge_page(request)
     if shield_type == "ml":

@@ -85,15 +85,21 @@ def save_origin_config(origin_id: str, config: dict, domains: list[str]) -> dict
     result = dict(DEFAULT_CONFIG)
     result.update(config)
     result.update({"origin_id": origin_id, "updated_at": datetime.now(timezone.utc).isoformat()})
+    keep = {domain.strip().lower().rstrip(".") for domain in domains} - {""}
     try:
         pipe = client.pipeline(transaction=True)
         pipe.set(_key_origin(origin_id), json.dumps(result, separators=(",", ":")))
-        for domain in domains:
-            domain_value = domain.strip().lower().rstrip(".")
-            if domain_value:
-                domain_config = dict(result)
-                domain_config["domain"] = domain_value
-                pipe.set(_key_domain(domain_value), json.dumps(domain_config, separators=(",", ":")))
+        for domain_value in keep:
+            domain_config = dict(result)
+            domain_config["domain"] = domain_value
+            pipe.set(_key_domain(domain_value), json.dumps(domain_config, separators=(",", ":")))
+        # H36/H37: a host that is no longer this origin's keeps no copy of
+        # its settings.
+        for key in client.scan_iter(match=_key_domain("*"), count=500):
+            if key[len(_key_domain("")):] in keep:
+                continue
+            if (_read(client, key) or {}).get("origin_id") == origin_id:
+                pipe.delete(key)
         pipe.execute()
     except Exception as exc:
         raise RuntimeError("OTP configuration store is unavailable") from exc

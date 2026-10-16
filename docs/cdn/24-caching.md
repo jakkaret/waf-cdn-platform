@@ -11,15 +11,28 @@ status: PARTIAL
 
 | หัวข้อ | Dynamic (`location /`) | Static (`.css .js .png ...`) |
 |---|---|---|
-| Cache key | `$host\|$request_method\|$uri$is_args$args` | เหมือนกัน |
+| Cache key | `$scheme\|$host\|$request_method\|$uri$is_args$args` (http กับ https แยก cache กัน) | เหมือนกัน |
 | เก็บ status | 200, 301, 302 | 200, 301, 302 |
 | TTL | 10 นาที | 1 ชั่วโมง |
-| `Cache-Control` ที่ edge ใส่ให้ client | `public, max-age=600, must-revalidate` | `public, max-age=3600, immutable` |
+| `Cache-Control` ที่ edge ส่งให้ client | `public, max-age=600, must-revalidate` เฉพาะ 2xx/3xx ที่ cache ได้และ origin ไม่ได้ส่ง `Cache-Control` มา นอกนั้นส่งค่าของ origin ต่อ | `public, max-age=3600, immutable` เงื่อนไขเดียวกัน |
 | Stale | `proxy_cache_use_stale error timeout ... updating 5xx`, background update, lock | เหมือนกัน |
 
-**ไม่ cache (`$skip_cache = 1`)** เมื่อ: method ไม่ใช่ GET/HEAD, มี `Authorization`, cookie มี `PHPSESSID`/`security=`/`waf_clearance`/`waf_otp_clearance`, client ส่ง `Cache-Control: no-cache|no-store`, หรือ **มี query string**
+**ไม่ cache (`$skip_cache = 1`)** เมื่อ: method ไม่ใช่ GET/HEAD, มี `Authorization`, **มี Cookie ใด ๆ**, client ส่ง `Cache-Control: no-cache|no-store`, หรือ **มี query string**
 
-nginx ยังเคารพ `Cache-Control: no-store/private` จาก upstream (ไม่ได้ตั้ง `proxy_ignore_headers`)
+nginx ยังเคารพ `Cache-Control: no-store/private` และ `Set-Cookie` จาก upstream (ไม่ได้ตั้ง `proxy_ignore_headers`) Main ตอบ `Cache-Control: private, no-store` ให้ทุก path ที่ CAPTCHA/OTP ป้องกัน (`$waf_cache_control` ใน `nginx/templates/conf.d/default.conf.template`) และหน้า deception ตอบ `no-store` เสมอ จึงไม่มีหน้าหลัง shield หรือหน้าหลอกถูกเก็บใน cache
+
+(Security audit run 1, P2.3: H14 H15 H16 N2 N3)
+
+### สิ่งที่ cache HIT ข้ามไป (H17)
+
+request ที่ edge ตอบจาก cache (`X-Cache-Status: HIT`) **ไม่ถึง Main** จึงไม่ผ่าน:
+
+- rate limit ของ Main (กฎในหน้า Rate limits ของ dashboard, control-api) — มีแค่ `limit_req` ของ edge เอง
+- ML shadow/enforcement และ telemetry ของ Main
+- CAPTCHA/OTP shield (ไม่เป็นปัญหา: path ที่ shield ป้องกันเป็น `no-store` จึงไม่มีทาง HIT)
+- access log ของ Main (มีแค่ log ของ edge)
+
+ModSecurity ของ edge ยังตรวจ request ทุกตัวก่อนตอบจาก cache ดังนั้นการบล็อกด้วยกฎ WAF และ IP blocklist ยังมีผลกับ HIT
 
 ## 24.2 Cache hit / miss
 

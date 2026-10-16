@@ -226,7 +226,9 @@ def render_rules_file(catalog: dict) -> str:
 
 
 def _host_regex(hosts: List[str]) -> str:
-    return "^(?:" + "|".join(re.escape(h) for h in sorted(hosts)) + ")(?::[0-9]+)?$"
+    # H59: match every spelling nginx routes to the same server block -- any
+    # case (t:lowercase on the rule), a trailing dot, a port.
+    return "^(?:" + "|".join(re.escape(h) for h in sorted(hosts)) + r")\.?(?::[0-9]+)?$"
 
 
 def _removals(catalog: dict, version: int) -> List[int]:

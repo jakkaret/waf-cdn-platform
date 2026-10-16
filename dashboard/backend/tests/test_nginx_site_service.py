@@ -15,7 +15,18 @@ def test_generated_config_uses_the_real_client_ip_everywhere():
     assert "server_name shop.example.com;" in text
     assert "proxy_pass http://203.0.113.10:8080;" in text
     assert "X-Real-IP $remote_addr" not in text
-    assert "proxy_set_header X-Forwarded-For $waf_client_ip;" in text  # rate limiter
+    assert "proxy_set_header X-Real-IP $waf_client_ip;" in text
+
+
+def test_generated_config_puts_every_proxied_location_behind_the_shield():
+    """P2.1 (H85) and P2.3: the static-file location is checked too, both mark
+    shield-protected responses no-store, and the dead nested rate-limit hook
+    (R1) is gone."""
+    text = nss.generate_site_nginx_config("shop.example.com", ORIGIN)
+    assert text.count("proxy_pass http://203.0.113.10:8080;") == 2
+    assert text.count("auth_request /internal-shield-check;") == 2
+    assert text.count('more_set_headers "Cache-Control: $waf_cache_control";') == 2
+    assert "internal-rate-limit" not in text and "limiter/check" not in text
 
 
 @pytest.mark.parametrize("domain", [

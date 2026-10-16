@@ -26,7 +26,6 @@ from fastapi import FastAPI, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from api import rules
-from api import limiter as limiter_api
 from api import logs as logs_api
 from api import auth
 from api import cdn
@@ -225,7 +224,8 @@ async def system_info(current_user: dict = Depends(require_viewer_or_above)):
 # API Routers
 app.include_router(auth.router)
 app.include_router(rules.router)
-app.include_router(limiter_api.router)
+# /api/limiter/check is gone (P2.6): the rate limit runs in control-api
+# (cdn/control-api/rate_limit.py) inside the shield check nginx makes.
 app.include_router(logs_api.router)
 app.include_router(alerts.router)
 app.include_router(cdn.router)
@@ -375,6 +375,13 @@ async def startup_event():
     if not hasattr(app.state, "site_route_task"):
         from services.nginx_site_service import site_route_worker
         app.state.site_route_task = asyncio.create_task(site_route_worker())
+    # CAPTCHA/OTP keys, the shield host map and the rate-limit rules in Redis,
+    # rebuilt from the database every minute (P2.2, P2.6): a key left by a
+    # removed domain is swept and a Redis restart is repaired.
+    if not hasattr(app.state, "shield_sync_task"):
+        from services.shield_sync import shield_sync_worker
+        from services.dynamodb_service import DynamoDBService
+        app.state.shield_sync_task = asyncio.create_task(shield_sync_worker(DynamoDBService()))
 
 
 @app.on_event("shutdown")

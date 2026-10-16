@@ -19,6 +19,7 @@ http {
         '{ "time_local":"$time_local", '
         '"request_id":"$request_id", '
         '"remote_addr":"$remote_addr", '
+        '"realip_remote_addr":"$realip_remote_addr", '
         '"remote_user":"$remote_user", '
         '"request":"$request", '
         '"host":"$host", '

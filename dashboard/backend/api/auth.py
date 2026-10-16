@@ -1,3 +1,4 @@
+import asyncio
 import os
 from fastapi import APIRouter, HTTPException, Depends, Response, Request, status
 from fastapi.responses import RedirectResponse, JSONResponse
@@ -285,6 +286,10 @@ async def delete_user(
         from services.tenant_service import invalidate_tenant_cache
         invalidate_tenant_cache()
         _invalidate_origins_caches()
+        # P2.2: the archived origins' hosts lose their CAPTCHA/OTP keys.
+        from services import shield_sync
+        from services.dynamodb_service import DynamoDBService
+        await asyncio.to_thread(shield_sync.reconcile_quietly, DynamoDBService())
     return {"message": "User deleted", "archived_origins": archived}
 
 
