@@ -152,6 +152,37 @@ async def logout(request: Request, response: Response,
     return {"message": "Logged out"}
 
 
+def _token_sid(request: Request, credentials) -> str:
+    token = credentials.credentials if credentials else request.cookies.get("access_token")
+    return (auth_service.decode_token(token or "") or {}).get("sid") or ""
+
+
+@router.get("/sessions")
+async def list_my_sessions(request: Request,
+                           credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+                           current_user: dict = Depends(get_current_user)):
+    """Devices signed in to this account, newest activity first."""
+    current = _token_sid(request, credentials)
+    sessions = auth_service._pg.list_sessions(current_user["user_id"])
+    for s in sessions:
+        s["current"] = s["session_id"] == current
+    return {"sessions": sessions}
+
+
+@router.delete("/sessions/{session_id}")
+async def revoke_my_session(session_id: str, request: Request, response: Response,
+                            credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+                            current_user: dict = Depends(get_current_user)):
+    """Sign one device out. Only the account's own sessions can be revoked;
+    anything else is 404, the same as a session that does not exist."""
+    if not auth_service._pg.revoke_session(session_id, current_user["user_id"]):
+        raise HTTPException(status_code=404, detail="Session not found")
+    current = session_id == _token_sid(request, credentials)
+    if current:
+        _clear_session_cookies(response)
+    return {"status": "revoked", "current": current}
+
+
 @router.post("/logout-all")
 async def logout_all(request: Request, response: Response,
                      current_user: dict = Depends(get_current_user)):

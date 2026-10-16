@@ -944,6 +944,21 @@ class PgUserRepository:
         return pool.exec_("UPDATE user_sessions SET revoked_at = now() "
                           "WHERE session_id = %s AND user_id = %s AND revoked_at IS NULL", (sid, uid)) > 0
 
+    def list_sessions(self, user_id: str) -> List[Dict]:
+        """The account's signed-in devices: sessions not revoked or expired."""
+        uid = as_uuid(user_id)
+        if uid is None:
+            return []
+        return [
+            {"session_id": str(r["session_id"]), "created_at": r["created_at"].isoformat(),
+             "last_seen_at": r["last_seen_at"].isoformat(), "expires_at": r["expires_at"].isoformat(),
+             "user_agent": r["user_agent"], "ip": r["ip"]}
+            for r in pool.q(
+                "SELECT session_id, created_at, last_seen_at, expires_at, user_agent, ip FROM user_sessions "
+                "WHERE user_id = %s AND revoked_at IS NULL AND expires_at > now() ORDER BY last_seen_at DESC",
+                (uid,))
+        ]
+
     def revoke_all_sessions(self, user_id: str) -> int:
         uid = as_uuid(user_id)
         if uid is None:
