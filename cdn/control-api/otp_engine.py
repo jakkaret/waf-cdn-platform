@@ -24,7 +24,6 @@ import hmac
 import ipaddress
 import json
 import logging
-import os
 import re
 import secrets
 import time
@@ -40,9 +39,14 @@ from captcha_engine import _redis, normalize_host, client_ip, subnet_identity, u
 from captcha_engine import access_decision as captcha_access_decision
 from captcha_engine import _new_challenge
 from captcha_engine import _challenge_html as _captcha_challenge_html
+from captcha_engine import (
+    has_clearance, last_known_config, max_cookie_expiry, owned_config, remember_config, required_secret,
+)
 from ml_policy import ml_access_decision
 from email_sender import send_otp_email
 from captcha_engine import get_config as captcha_get_config
+from shield_paths import is_protected
+import rate_limit
 import shield_events
 
 logger = logging.getLogger(__name__)
@@ -57,12 +61,7 @@ CODE_TTL_RANGE = (60, 1800)
 CLEARANCE_TTL_RANGE = (900, 30 * 86400)
 MAX_VERIFY_ATTEMPTS = 5
 REQUEST_RATE_LIMIT_PER_10MIN = 3
-HMAC_SECRET = (
-    os.getenv("OTP_HMAC_SECRET")
-    or os.getenv("CAPTCHA_HMAC_SECRET")
-    or os.getenv("CONTROL_TOKEN")
-    or secrets.token_hex(32)
-)
+HMAC_SECRET = required_secret("OTP_HMAC_SECRET")
 
 
 class OtpRequestPayload(BaseModel):
@@ -122,28 +121,20 @@ def _session_key(sid: str) -> str:
 
 
 def get_config(host: str, client=None) -> tuple[dict, object | None]:
+    # Same ownership check and last-known fallback as captcha_engine.get_config.
+    host = normalize_host(host)
     client = client if client is not None else _redis()
     if client is None:
-        return _default_config(host), None
+        return last_known_config("otp", host, _default_config(host)), None
     try:
         raw = client.get(_config_key(host))
-        if not raw:
-            return _default_config(host), client
-        value = json.loads(raw)
-        if not isinstance(value, dict):
-            return _default_config(host), client
-        result = _default_config(host)
-        result.update(value)
-        return result, client
+        value = json.loads(raw) if raw else None
+        result = owned_config(client, host, value, _default_config(host))
     except Exception as exc:
         logger.warning("otp config read failed for %s: %s", host, exc)
-        return _default_config(host), None
-
-
-def _matches_path(path: str, patterns: list[str]) -> bool:
-    import fnmatch
-
-    return any(fnmatch.fnmatchcase(path, str(pattern)) for pattern in patterns)
+        return last_known_config("otp", host, _default_config(host)), None
+    remember_config("otp", host, result)
+    return result, client
 
 
 def _is_bypassed(address: str, bypass_ips: list[str]) -> bool:
@@ -181,6 +172,9 @@ def _cookie_valid(request: Request, host: str, config: dict | None = None, clien
         return False
     if not expiry.isdigit() or int(expiry) <= int(time.time()):
         return False
+    # N6: never longer than the configured clearance, whatever the cookie says.
+    if int(expiry) > max_cookie_expiry(config or _default_config(host), CLEARANCE_TTL_RANGE):
+        return False
     if normalize_host(cookie_host) != host:
         return False
     message = "\x1f".join([subnet_identity(client_ip(request)), user_agent(request), host, expiry, sid])
@@ -210,17 +204,20 @@ def access_decision(request: Request) -> str:
     if original_method == "OPTIONS":
         return "allow"
     host = normalize_host(request.headers.get("x-original-host") or request.headers.get("host", ""))
-    path = urlsplit(request.headers.get("x-original-uri", "/")).path or "/"
     config, client = get_config(host)
-    if client is None or not config.get("enabled"):
+    if not config.get("enabled"):
         return "allow"
-    if not _matches_path(path, config.get("login_paths", DEFAULT_PATHS)):
-        return "allow"
-    if _matches_path(path, config.get("exclude_paths") or []):
+    if not is_protected(request.headers.get("x-original-uri", "/"),
+                        config.get("login_paths", DEFAULT_PATHS), config.get("exclude_paths")):
         return "allow"
     if _is_bypassed(client_ip(request), config.get("bypass_ips", [])):
         return "allow"
-    return "allow" if _cookie_valid(request, host, config, client) else "challenge"
+    if _cookie_valid(request, host, config, client):
+        return "allow"
+    if client is None:
+        # H83, see captcha_engine.access_decision.
+        return "allow" if config.get("mode") == "log_only" else "unavailable"
+    return "challenge"
 
 
 async def otp_access(request: Request) -> Response:
@@ -285,11 +282,34 @@ async def shield_access(request: Request) -> Response:
     # a response header (X-Shield-Type), and nginx forwards that header
     # (via auth_request_set + proxy_set_header) to the single challenge-page
     # route, which reads it and renders the right page.
+    #
+    # P2.6: the request rate limit comes first (see rate_limit.py for why it
+    # lives here). Over the limit -> 401 tagged "ratelimit", which the
+    # challenge route turns into a 429 with Retry-After.
+    allowed, retry_after = rate_limit.check(
+        _redis(), request.headers.get("x-original-method", request.method),
+        request.headers.get("x-original-uri", "/"), client_ip(request),
+    )
+    if not allowed:
+        return Response(
+            status_code=401,
+            headers={"X-Shield-Type": "ratelimit", "Retry-After": str(retry_after), "Cache-Control": "no-store"},
+        )
+    protected = False
     for kind, decide in (("captcha", captcha_access_decision), ("otp", access_decision)):
-        if decide(request) == "challenge":
+        decision = decide(request)
+        if decision == "unavailable":
+            # H83: an enforcing gate whose Redis is down -> 503 page, not the site.
+            return Response(
+                status_code=401,
+                headers={"X-Shield-Type": "unavailable", "Cache-Control": "no-store"},
+            )
+        if decision == "challenge":
             denied = _deny(request, kind)
             if denied is not None:
                 return denied
+        if decision != "allow" or _protects(request, kind):
+            protected = True
     # Gen3 roadmap 1.3: third branch, ML-driven. No-op ("pass" always,
     # immediately, no HTTP call) unless a human has enabled enforcement in
     # Settings -- see ml_policy.py's module docstring. "block" reuses 403,
@@ -307,12 +327,28 @@ async def shield_access(request: Request) -> Response:
             status_code=403,
             headers={"X-Shield-Type": "ml-block", "Cache-Control": "no-store"},
         )
-    if ml_decision == "challenge":
+    # H10: a visitor who already solved the challenge (waf_clearance) is not
+    # sent back to it on every flagged request.
+    if ml_decision == "challenge" and not has_clearance(request):
         return Response(
             status_code=401,
             headers={"X-Shield-Type": "ml", "Cache-Control": "no-store"},
         )
-    return Response(status_code=204)
+    # P2.3: the response to a path a gate protects is never stored by the
+    # edge or any shared cache; nginx turns this header into
+    # Cache-Control: private, no-store.
+    return Response(status_code=204, headers={"X-Shield-Protected": "1"} if protected else {})
+
+
+def _protects(request: Request, kind: str) -> bool:
+    """Whether the gate covers this request's path (enabled and matching),
+    whether or not this visitor has passed it."""
+    host = normalize_host(request.headers.get("x-original-host") or request.headers.get("host", ""))
+    config, _ = (captcha_get_config if kind == "captcha" else get_config)(host)
+    if not config.get("enabled") or (kind == "captcha" and config.get("engine", "native") != "native"):
+        return False
+    return is_protected(request.headers.get("x-original-uri", "/"),
+                        config.get("login_paths", DEFAULT_PATHS), config.get("exclude_paths"))
 
 
 async def issue_ml_challenge(request: Request) -> Response:

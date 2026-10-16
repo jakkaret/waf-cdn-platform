@@ -1,222 +1,120 @@
 """
-Scenario: dd614ac merged api/limiter.py's dynamic per-path rate-limit rules
-and static-asset bypass with no accompanying tests.
+Rate limiting after P2.6 (security audit run 1, R1).
 
-Real Redis and the real rate_limits.db sqlite file are never touched here --
-api.limiter.rate_limiter and api.limiter.rule_service are replaced with
-controllable fakes, since (a) this dev/test environment has no Redis
-reachable (confirmed throughout this session's other test files) and (b)
-RateLimitService's DB_PATH is a fixed real project path
-(dashboard/backend/data/rate_limits.db), not something a test should write
-real rows into.
+The dashboard's /api/limiter/check was never run by nginx (an auth_request
+inside another auth_request's subrequest), so the rules set on the dashboard
+had no effect. The limit now runs in control-api (cdn/control-api/
+rate_limit.py, tested in cdn/control-api/tests/test_shield_phase2.py:
+matching, per-rule buckets, static assets, fail-open, 429). The dashboard
+keeps the rules in PostgreSQL and publishes them to Redis for control-api.
 
-Findings derived from reading services/rate_limiter.py and
-services/rate_limit_service.py, encoded as tests below:
-  - RedisRateLimiter.is_allowed() fails OPEN on any Redis error (its own
-    comment: "Fail-open: allow request if Redis fails") -- tested as
-    documented behaviour, not something to silently "fix" to fail-closed,
-    since that tradeoff (availability vs strict enforcement) is a real
-    design choice already made explicit in the code.
-  - The rate-limit key is `f"rate:limit:{ip}"` -- IP only. There is no
-    tenant, origin, or user dimension in the key at all, so two different
-    tenants' traffic from behind the same IP (e.g. NAT, shared office
-    network) share one bucket, and a rule's path_pattern is the only way
-    to scope limits at all (by URL shape, not identity).
-  - The `burst` and `action` ("temp_ban") columns exist in the rate_rules
-    schema and are returned by list_rules(), but check_rate_limit() never
-    reads either one -- rules can only ever produce a plain 401, and the
-    configured burst allowance has zero effect on the sliding window.
+These tests cover the dashboard side: the old endpoint is gone, the rules are
+published on every change, and the admin views read control-api's counters.
 """
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from api import limiter as limiter_module  # noqa: E402
-from api.limiter import is_static_asset  # noqa: E402
+
+@pytest.fixture()
+def rl_client(app):
+    from api import rate_limits
+    app.include_router(rate_limits.router)
+    return TestClient(app)
 
 
-@pytest.fixture
-def app_client(monkeypatch):
-    fake_rate_limiter = MagicMock()
-    fake_rule_service = MagicMock()
-    monkeypatch.setattr(limiter_module, "rate_limiter", fake_rate_limiter)
-    monkeypatch.setattr(limiter_module, "rule_service", fake_rule_service)
-
-    app = FastAPI()
-    app.include_router(limiter_module.router)
-    client = TestClient(app)
-    return client, fake_rate_limiter, fake_rule_service
+@pytest.fixture()
+def admin_user(rl_client, register_user, auth_header):
+    body = register_user(email="first-admin@example.com", username="first_admin")  # first user = admin
+    return {"headers": auth_header(body["access_token"])}
 
 
-# --------------------------------------------------------------- static asset
-
-@pytest.mark.parametrize("path", [
-    "/assets/index-abc123.js",
-    "/static/logo.png",
-    "/styles.css",
-    "/favicon.ico",
-    "/app.js",
-    "/photo.jpeg?v=2",
-])
-def test_is_static_asset_recognizes_static_paths(path):
-    assert is_static_asset(path) is True
+def _published():
+    import redis
+    raw = redis.Redis().get("waf:ratelimit:rules")
+    return json.loads(raw) if raw else None
 
 
-@pytest.mark.parametrize("path", [
-    "/api/auth/login",
-    "/api/origins",
-    "/",
-    "/dashboard",
-])
-def test_is_static_asset_does_not_flag_dynamic_paths(path):
-    assert is_static_asset(path) is False
+def test_old_limiter_endpoint_is_gone():
+    from main import app as main_app
+    client = TestClient(main_app)  # no `with`: startup workers stay off
+    headers = {"X-Original-URI": "/api/auth/login"}
+    assert client.get("/api/limiter/check", headers=headers).status_code == 404
+    # Only the SPA's GET catch-all is left on that path, so other methods get 405.
+    assert client.post("/api/limiter/check", headers=headers).status_code == 405
 
 
-def test_static_asset_bypasses_rate_limiter_entirely(app_client):
-    client, fake_rate_limiter, fake_rule_service = app_client
-    resp = client.get("/api/limiter/check", headers={"X-Original-URI": "/assets/index-abc.js"})
-    assert resp.status_code == 200
-    assert resp.json()["type"] == "static_asset"
-    fake_rate_limiter.is_allowed.assert_not_called()
+def test_rules_are_published_for_control_api():
+    from services.rate_limit_service import RateLimitService
+    service = RateLimitService()
+    service.publish_rules()
+    published = {r["id"]: r for r in _published()}
+    # migration 0002's three seeded rules, enabled
+    assert {"rule_auth_protect", "rule_global_api", "rule_edge_flood"} <= set(published)
+    assert published["rule_auth_protect"] == {
+        "id": "rule_auth_protect", "name": "Authentication Brute-Force Guard", "path_pattern": "/api/auth/*",
+        "method": "POST", "limit_count": 10, "window_seconds": 60, "enabled": 1,
+    }
 
 
-# ------------------------------------------------------------- normal request
+def test_every_rule_change_is_published(rl_client, admin_user):
+    client = rl_client
+    created = client.post("/api/rate-limits/rules", headers=admin_user["headers"], json={
+        "name": "login", "path_pattern": "/login", "method": "POST", "limit_count": 5, "window_seconds": 60,
+    }).json()["rule"]
+    assert created["id"] in {r["id"] for r in _published()}
 
-def test_normal_request_under_limit_is_allowed(app_client):
-    client, fake_rate_limiter, fake_rule_service = app_client
-    fake_rule_service.list_rules.return_value = []
-    fake_rate_limiter.is_allowed.return_value = (True, 5, 0)
+    client.put(f"/api/rate-limits/rules/{created['id']}", headers=admin_user["headers"], json={"enabled": 0})
+    assert created["id"] not in {r["id"] for r in _published()}  # disabled rules are not enforced
 
-    resp = client.get("/api/limiter/check", headers={"X-Original-URI": "/api/origins"})
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "allowed"
-    assert resp.headers["X-RateLimit-Limit"] == "100"  # module default when no rule matches
+    client.put(f"/api/rate-limits/rules/{created['id']}", headers=admin_user["headers"], json={"enabled": 1, "limit_count": 7})
+    assert {r["id"]: r for r in _published()}[created["id"]]["limit_count"] == 7
 
-
-# --------------------------------------------------------- threshold exceeded
-
-def test_threshold_exceeded_returns_401_with_retry_after(app_client):
-    client, fake_rate_limiter, fake_rule_service = app_client
-    fake_rule_service.list_rules.return_value = []
-    fake_rate_limiter.is_allowed.return_value = (False, 100, 7)
-
-    resp = client.get("/api/limiter/check", headers={"X-Original-URI": "/api/origins"})
-    assert resp.status_code == 401
-    assert resp.headers["Retry-After"] == "7"
+    client.delete(f"/api/rate-limits/rules/{created['id']}", headers=admin_user["headers"])
+    assert created["id"] not in {r["id"] for r in _published()}
 
 
-def test_rule_specific_limit_is_applied_when_path_matches(app_client):
-    """Derived from actual matching logic: exact path match wins; the rule's
-    limit_count/window_seconds are passed straight to is_allowed()."""
-    client, fake_rate_limiter, fake_rule_service = app_client
-    fake_rule_service.list_rules.return_value = [
-        {"enabled": 1, "method": "ALL", "path_pattern": "/api/auth/*", "limit_count": 10, "window_seconds": 60},
-    ]
-    fake_rate_limiter.is_allowed.return_value = (True, 1, 0)
+def test_throttled_view_and_reset_read_control_apis_counters(rl_client, admin_user):
+    client = rl_client
+    import redis
+    r = redis.Redis()
+    r.set("rate:limit:rule_auth_protect:198.51.100.7", 12, ex=40)
+    r.set("rate:limit:rule_edge_flood:198.51.100.7", 3, ex=1)
+    r.set("rate:limit:rule_edge_flood:2001:db8::1", 1, ex=1)
+    r.zadd("rate:limit:ml-suggest:user-1", {"x": 1})  # a per-user quota, not a client bucket
 
-    client.get("/api/limiter/check", headers={"X-Original-URI": "/api/auth/login"})
+    clients = client.get("/api/rate-limits/throttled", headers=admin_user["headers"]).json()["throttled_clients"]
+    by_key = {(c["rule_id"], c["ip"]): c for c in clients}
+    assert set(by_key) == {("rule_auth_protect", "198.51.100.7"), ("rule_edge_flood", "198.51.100.7"),
+                           ("rule_edge_flood", "2001:db8::1")}
+    assert by_key[("rule_auth_protect", "198.51.100.7")]["status"] == "throttled"  # 12 > 10
+    assert by_key[("rule_edge_flood", "198.51.100.7")]["status"] == "active"
 
-    fake_rate_limiter.is_allowed.assert_called_once()
-    _, kwargs = fake_rate_limiter.is_allowed.call_args
-    assert kwargs["limit"] == 10
-    assert kwargs["window_seconds"] == 60
-
-
-def test_disabled_rule_is_not_applied(app_client):
-    client, fake_rate_limiter, fake_rule_service = app_client
-    fake_rule_service.list_rules.return_value = [
-        {"enabled": 0, "method": "ALL", "path_pattern": "/api/auth/*", "limit_count": 1, "window_seconds": 1},
-    ]
-    fake_rate_limiter.is_allowed.return_value = (True, 1, 0)
-
-    client.get("/api/limiter/check", headers={"X-Original-URI": "/api/auth/login"})
-
-    _, kwargs = fake_rate_limiter.is_allowed.call_args
-    assert kwargs["limit"] == 100  # falls back to the module default, disabled rule ignored
-
-
-# ----------------------------------------------------------- burst (unused)
-
-def test_burst_field_has_no_effect_on_the_applied_limit():
-    """Documents a real gap: `burst` exists in the rate_rules schema and is
-    returned by list_rules(), but check_rate_limit() never reads
-    rule.get("burst") anywhere -- a rule configured with a generous burst
-    allowance behaves identically to one with burst=0. This is a config
-    field with zero runtime effect, not a working burst-allowance feature.
-    """
-    import inspect
-    source = inspect.getsource(limiter_module.check_rate_limit)
-    assert "burst" not in source, (
-        "expected 'burst' to be unused in check_rate_limit's body per the "
-        "current implementation -- if this now fails, the burst field has "
-        "been wired up and this test (and the finding it documents) is "
-        "stale and should be rewritten to test the real behaviour instead"
-    )
-
-
-# --------------------------------------------------------- reset/expiry
-
-def test_reset_expiry_is_the_sliding_window_itself_not_a_separate_mechanism():
-    """RedisRateLimiter has no separate "reset" API surfaced through
-    check_rate_limit -- the only expiry mechanism is the sliding window's
-    own ZREMRANGEBYSCORE eviction inside the Lua script (verified by
-    reading services/rate_limiter.py). RateLimitService.reset_client_limit()
-    exists as an *admin* operation (a separate DELETE on the Redis key) but
-    is not reachable from this endpoint at all -- confirms there is no
-    per-request "expiry" concept beyond the window boundary itself.
-    """
-    import inspect
-    limiter_source = inspect.getsource(limiter_module)
-    assert "reset_client_limit" not in limiter_source
-
-
-# ----------------------------------------------- per-tenant/origin isolation
-
-def test_rate_limit_key_has_no_tenant_or_origin_dimension():
-    """Derived directly from services/rate_limiter.py: the Redis key is
-    f"rate:limit:{ip}" -- IP only. Two different tenants/origins sharing a
-    client IP (NAT, shared office network, or two origins fronted by the
-    same reverse proxy) share the exact same rate-limit bucket. This is a
-    real architectural gap for "per-tenant/per-origin isolation", not a
-    hypothesis -- confirmed by reading the key-construction code directly.
-    """
-    import inspect
-    from services import rate_limiter as rate_limiter_service_module
-    source = inspect.getsource(rate_limiter_service_module.RedisRateLimiter.is_allowed)
-    assert 'f"rate:limit:{ip}"' in source, (
-        "the rate-limit key format changed -- if it now includes a tenant/"
-        "origin component, this test (and the finding it documents) is "
-        "stale and should be rewritten to test the real per-tenant "
-        "isolation behaviour instead"
-    )
+    resp = client.post("/api/rate-limits/reset-client", headers=admin_user["headers"], json={"ip": "198.51.100.7"})
+    assert resp.json()["status"] == "success"
+    assert not r.exists("rate:limit:rule_auth_protect:198.51.100.7", "rate:limit:rule_edge_flood:198.51.100.7")
+    assert r.exists("rate:limit:rule_edge_flood:2001:db8::1", "rate:limit:ml-suggest:user-1") == 2
 
 
 # --------------------------------------------------------------- fail-safe
 
 def test_redis_failure_fails_open_by_design():
-    """RedisRateLimiter.is_allowed() catches any exception and returns
-    (True, 0, 0) -- i.e. FAILS OPEN, per its own comment. Tested directly
-    against the real class (not a fake) since this is the actual documented
-    behaviour to lock in, not something to fake around. No real Redis
-    connection is made: redis-py's client is lazy, and the injected
-    script_runner below raises before any socket I/O would occur.
-    """
+    """RedisRateLimiter (still used for the per-user quotas in api/onboarding.py
+    and api/ml.py) fails OPEN on a Redis error unless the caller asks for
+    fail_open=False. No real Redis connection is made."""
     from services.rate_limiter import RedisRateLimiter
 
     rl = RedisRateLimiter.__new__(RedisRateLimiter)  # skip __init__'s real redis.Redis(...) construction
     rl.redis_client = MagicMock()
     rl.script_runner = MagicMock(side_effect=Exception("connection refused"))
 
-    is_allowed, current_count, retry_after = rl.is_allowed(ip="1.2.3.4", limit=10, window_seconds=60)
-
-    assert is_allowed is True, "expected fail-OPEN on a Redis error, per the code's own documented design"
-    assert current_count == 0
-    assert retry_after == 0
+    assert rl.is_allowed(ip="1.2.3.4", limit=10, window_seconds=60) == (True, 0, 0)
+    assert rl.is_allowed(ip="1.2.3.4", limit=10, window_seconds=60, fail_open=False)[0] is False

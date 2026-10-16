@@ -117,7 +117,17 @@ MERGE_TIMEOUT = 5
 _EDGE_IP_TO_NODE = {
     "45.154.26.91": "edge-th",
     "57.158.25.236": "edge-asia",
+    "10.88.0.2": "edge-th",
+    "10.88.0.3": "edge-asia",
 }
+
+
+def peer_addr(data: dict) -> str:
+    """The address that connected to nginx. Since P2.5 nginx replaces
+    $remote_addr with the visitor's address (realip) for requests from our
+    edges and logs the connecting address as realip_remote_addr; older lines
+    have only remote_addr, which was the connecting address then."""
+    return str(data.get("realip_remote_addr") or data.get("remote_addr") or "").strip()
 
 
 def normalize_access(data):
@@ -146,8 +156,7 @@ def normalize_access(data):
     # through edge-asia must not be mislabeled as edge-th. Anything not a
     # known edge IP (e.g. direct/dev traffic) still defaults to "edge-th",
     # matching this path's original, narrower assumption.
-    remote_addr = str(data.get("remote_addr", "")).strip()
-    edge_node = _EDGE_IP_TO_NODE.get(remote_addr, "edge-th")
+    edge_node = _EDGE_IP_TO_NODE.get(peer_addr(data), "edge-th")
 
     return {
         "request_id": data.get("request_id"),
@@ -369,9 +378,7 @@ async def process_access_log():
     async for line in tail_file(ACCESS_LOG):
         try:
             raw = json.loads(line)
-            remote_ip = str(raw.get("remote_addr", "")).strip()
-            
-            if remote_ip in KNOWN_EDGE_IPS:
+            if peer_addr(raw) in KNOWN_EDGE_IPS:
                 continue
 
             data = normalize_access(raw)

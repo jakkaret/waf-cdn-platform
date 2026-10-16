@@ -87,7 +87,13 @@ services:
       - "127.0.0.1:6379:6379"
     environment:
       REDIS_PASSWORD: "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"
-    command: ["sh", "-c", "exec docker-entrypoint.sh redis-server --requirepass \"$$REDIS_PASSWORD\""]
+    # appendonly + a named volume (P2.2/H83): the shield's CAPTCHA/OTP
+    # settings live only here, and a recreated container without a volume lost
+    # them all (2026-10-15). services/shield_sync.py also rebuilds the
+    # per-domain keys, the host map and the rate-limit rules every minute.
+    command: ["sh", "-c", "exec docker-entrypoint.sh redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes"]
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
     networks:
       - waf-net
@@ -128,6 +134,13 @@ services:
       # shared secret of the dashboard ML relay (F-019), same value nginx gets
       ML_RELAY_SECRET: "${ML_RELAY_SECRET:?set ML_RELAY_SECRET in .env}"
       REDIS_URL: "redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0"
+      # N6: the CAPTCHA and OTP clearance cookies are signed with keys of their
+      # own (no fallback to CONTROL_TOKEN); the service refuses to start without
+      # them. Rotating one signs every visitor out of that gate.
+      CAPTCHA_HMAC_SECRET: "${CAPTCHA_HMAC_SECRET:?set CAPTCHA_HMAC_SECRET in .env}"
+      OTP_HMAC_SECRET: "${OTP_HMAC_SECRET:?set OTP_HMAC_SECRET in .env}"
+      # P2.5: only the WAF's nginx may tell control-api the visitor's address.
+      SHIELD_TRUSTED_PROXIES: "waf-nginx"
       # OTP Shield email delivery -- unset by default (see
       # cdn/control-api/email_sender.py: send_otp_email() fails loud and
       # logs, rather than pretending an email went out, until real SMTP
@@ -198,6 +211,7 @@ services:
       - pg-net
 
 volumes:
+  redis_data:
   caddy_data:
   caddy_config:
   clickhouse_data:

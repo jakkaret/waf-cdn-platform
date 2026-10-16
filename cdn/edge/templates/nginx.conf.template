@@ -29,6 +29,20 @@ http {
         '"upstream_response_time":"$upstream_response_time",'
         '"http_user_agent":"$http_user_agent"}';
 
+    # --- Cache-Control sent to visitors (P2.3, H14) ---
+    # "$status|$skip_cache|origin's Cache-Control". Only a 2xx/3xx answer to a
+    # cacheable request (no cookie, no Authorization...) that the origin sent
+    # without Cache-Control is marked public; everything else keeps the
+    # origin's header, so private/no-store from Main survives the edge.
+    map "$status|$skip_cache|$upstream_http_cache_control" $edge_cache_control_dynamic {
+        default                 $upstream_http_cache_control;
+        "~^[23][0-9][0-9]\|0\|$" "public, max-age=600, must-revalidate";
+    }
+    map "$status|$skip_cache|$upstream_http_cache_control" $edge_cache_control_static {
+        default                 $upstream_http_cache_control;
+        "~^[23][0-9][0-9]\|0\|$" "public, max-age=3600, immutable";
+    }
+
     # --- Rate Limiting Zone (per-IP) ---
     limit_req_zone $binary_remote_addr zone=edge_ratelimit:20m rate=${RATE_LIMIT_RPS}r/s;
     limit_req_status 429;

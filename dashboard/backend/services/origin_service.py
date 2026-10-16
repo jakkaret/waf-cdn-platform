@@ -345,6 +345,8 @@ def discard_new_origin(origin_id: str, admin_user_id: str) -> None:
     db.hard_delete_origin(origin_id)
     invalidate_tenant_cache(admin_user_id)
     _invalidate_origins_caches()
+    from services import shield_sync
+    shield_sync.reconcile_quietly(db)
 
 
 def restore_origin(origin_id: str) -> bool:

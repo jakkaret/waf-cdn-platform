@@ -719,7 +719,7 @@ def test_review7_auto_verified_domains_take_the_one_post_verify_path(client, reg
     async def _after(origin_id, name):
         calls.append(name)
     monkeypatch.setattr(domains_module, "after_domain_verified", _after)
-    monkeypatch.setattr(domains_module, "sync_domain_config", lambda *a: synced.append(a))
+    monkeypatch.setattr(domains_module.shield_sync, "reconcile_quietly", lambda *a: synced.append(a))
 
     r = client.post("/api/onboarding/connect", headers=h,
                     json={"domain": "mine.waf-it-kku.online", "mode": "agent", "port": 3000})

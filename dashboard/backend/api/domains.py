@@ -10,7 +10,7 @@ from services.rbac import get_current_user, verify_origin_ownership, verify_orig
 from services import audit_log
 from services.txn import atomic
 from services.dynamodb_service import DynamoDBService, DuplicateDomain
-from services.captcha_config import sync_domain_config
+from services import shield_sync
 from services.dns_service import verify_domain_dns, is_claimable_own_wildcard_subdomain, is_platform_subdomain
 from services import nginx_site_service
 
@@ -45,11 +45,9 @@ async def after_domain_verified(origin_id: str, domain_name: str) -> None:
     The two verify endpoints and services/dns_verification_worker.py each did
     a different subset (the worker did none of it, and the /api/origins/...
     endpoint skipped the TLS allow-list refresh)."""
-    try:
-        await asyncio.to_thread(sync_domain_config, origin_id, domain_name)
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning("captcha config sync for %s failed: %s", domain_name, exc)
+    # P2.2 (C1): CAPTCHA and OTP both follow the new domain (only CAPTCHA
+    # did), and the shield host map learns its owner.
+    await asyncio.to_thread(shield_sync.reconcile_quietly, db)
     invalidate_ssl_allowed_snapshot()
     _refresh_managed_hostmap()
     schedule_site_reconcile()
@@ -222,6 +220,8 @@ async def delete_domain(domain_id: str, current_user: dict = Depends(get_current
                 summary=f"ลบโดเมน: {domain.get('domain_name', domain_id)}",
                 details={"domain_id": domain_id, "domain_name": domain.get("domain_name")},
             )
+        # P2.2 (H39/N11): the removed host keeps no CAPTCHA/OTP key.
+        await asyncio.to_thread(shield_sync.reconcile_quietly, db)
         invalidate_ssl_allowed_snapshot()
         _refresh_managed_hostmap()
         schedule_site_reconcile()
@@ -591,6 +591,8 @@ async def delete_domain_under_origin(origin_id: str, domain_id: str, current_use
                 summary=f"ลบโดเมน: {domain.get('domain_name', domain_id)}",
                 details={"domain_id": domain_id, "domain_name": domain.get("domain_name")},
             )
+        # P2.2 (H39/N11): the removed host keeps no CAPTCHA/OTP key.
+        await asyncio.to_thread(shield_sync.reconcile_quietly, db)
         invalidate_ssl_allowed_snapshot()
         _refresh_managed_hostmap()
         schedule_site_reconcile()

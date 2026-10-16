@@ -5,24 +5,49 @@ import json
 import logging
 import os
 import secrets
+import socket
 import time
 import uuid
 from http.cookies import SimpleCookie
-from urllib.parse import urlsplit
 
 import redis
 from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from shield_paths import is_protected
+
 logger = logging.getLogger(__name__)
 COOKIE_NAME = "waf_clearance"
 DEFAULT_PATHS = ["/login*", "/admin*", "/wp-login.php", "/administrator*", "/user/login*"]
 CHALLENGE_TTL = 60
 DEFAULT_CLEARANCE_TTL = 3600
+CLEARANCE_TTL_RANGE = (900, 43200)
+# A cookie's expiry may run past now + the configured clearance by at most
+# this much (clock differences between workers), never more.
+EXPIRY_SKEW_SECONDS = 60
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-HMAC_SECRET = os.getenv("CAPTCHA_HMAC_SECRET") or os.getenv("CONTROL_TOKEN") or secrets.token_hex(32)
+# host -> origin_id of the verified hosts, written by the dashboard
+# (dashboard/backend/services/shield_sync.py). A per-domain config only
+# counts while its origin_id is the host's current owner here.
+HOSTMAP_KEY = "waf:shield:hostmap"
 _redis_client = None
+
+
+def required_secret(name: str) -> str:
+    """N6: the clearance cookies are signed with a key of their own, set in
+    the environment. No fallback to CONTROL_TOKEN (shared with other jobs) and
+    none to a random per-process key (every worker would reject the others'
+    cookies): without the key the service does not start."""
+    value = os.getenv(name, "")
+    if len(value) < 32:
+        raise RuntimeError(f"{name} must be set to a random value of at least 32 characters")
+    if value == os.getenv("CONTROL_TOKEN", ""):
+        raise RuntimeError(f"{name} must not be the same value as CONTROL_TOKEN")
+    return value
+
+
+HMAC_SECRET = required_secret("CAPTCHA_HMAC_SECRET")
 
 
 class ChallengeVerifyRequest(BaseModel):
@@ -54,13 +79,58 @@ def normalize_host(value: str) -> str:
     return host[:253]
 
 
+# P2.5 (H18/H19): the X-Original-IP / X-Real-IP headers are believed only
+# from the WAF's own nginx, which sets them from the visitor's real address.
+# Anyone else reaching this service (an edge pulling the rule bundle, a host
+# process) is identified by its own address.
+_TRUSTED_PROXIES = [
+    item.strip()
+    for item in os.getenv("SHIELD_TRUSTED_PROXIES", "waf-nginx").split(",")
+    if item.strip()
+]
+_TRUSTED_CACHE_SECONDS = 30
+_trusted_cache = {"at": None, "nets": [], "names": set()}
+
+
+def _trusted_networks() -> tuple:
+    now = time.monotonic()
+    if _trusted_cache["at"] is not None and now - _trusted_cache["at"] < _TRUSTED_CACHE_SECONDS:
+        return _trusted_cache["nets"], _trusted_cache["names"]
+    nets, names = [], set()
+    for item in _TRUSTED_PROXIES:
+        try:
+            nets.append(ipaddress.ip_network(item, strict=False))
+            continue
+        except ValueError:
+            names.add(item)
+        try:
+            # A container name: resolved through Docker's DNS, so a recreated
+            # waf-nginx with a new address is picked up within the cache time.
+            for info in socket.getaddrinfo(item, None):
+                nets.append(ipaddress.ip_network(info[4][0], strict=False))
+        except OSError:
+            pass
+    _trusted_cache.update(at=now, nets=nets, names=names)
+    return nets, names
+
+
+def _from_trusted_proxy(peer: str) -> bool:
+    nets, names = _trusted_networks()
+    if peer in names:
+        return True
+    try:
+        address = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    return any(address in net for net in nets)
+
+
 def client_ip(request: Request) -> str:
-    raw = (
-        request.headers.get("x-original-ip")
-        or request.headers.get("x-real-ip")
-        or (request.client.host if request.client else "")
-        or "0.0.0.0"
-    ).split(",", 1)[0].strip()
+    peer = request.client.host if request.client else ""
+    raw = peer
+    if _from_trusted_proxy(peer):
+        raw = request.headers.get("x-original-ip") or request.headers.get("x-real-ip") or peer
+    raw = (raw or "0.0.0.0").split(",", 1)[0].strip()
     try:
         return str(ipaddress.ip_address(raw))
     except ValueError:
@@ -111,29 +181,63 @@ def _default_config(host: str = "") -> dict:
     }
 
 
+# H83: the last enabled config seen per (gate, host), used while Redis cannot
+# be read so a protected path is not left open. Only enabled configs are
+# kept, and the size is capped: the Host header is chosen by the client.
+_LAST_KNOWN_MAX = 5000
+_last_known: dict = {}
+
+
+def remember_config(kind: str, host: str, config: dict) -> None:
+    key = (kind, host)
+    if not config.get("enabled"):
+        _last_known.pop(key, None)
+        return
+    if key not in _last_known and len(_last_known) >= _LAST_KNOWN_MAX:
+        _last_known.pop(next(iter(_last_known)))
+    _last_known[key] = dict(config)
+
+
+def last_known_config(kind: str, host: str, default: dict) -> dict:
+    return dict(_last_known.get((kind, host)) or default)
+
+
+def owned_config(client, host: str, value, default: dict) -> dict:
+    """C1/H39/N11: a stored per-domain config applies only while its origin
+    is the host's current owner in the dashboard's host map. A key left
+    behind by a removed domain or origin falls back to the default (off), so
+    whoever adds the domain next does not inherit the previous owner's
+    settings."""
+    result = dict(default)
+    if not isinstance(value, dict):
+        return result
+    origin_id = str(value.get("origin_id") or "")
+    owner = client.hget(HOSTMAP_KEY, normalize_host(host))
+    if not origin_id or owner != origin_id:
+        return result
+    result.update(value)
+    return result
+
+
 def get_config(host: str, client=None) -> tuple[dict, object | None]:
+    host = normalize_host(host)
     client = client if client is not None else _redis()
     if client is None:
-        return _default_config(host), None
+        return last_known_config("captcha", host, _default_config(host)), None
     try:
         raw = client.get(_config_key(host))
-        if not raw:
-            return _default_config(host), client
-        value = json.loads(raw)
-        if not isinstance(value, dict):
-            return _default_config(host), client
-        result = _default_config(host)
-        result.update(value)
-        return result, client
+        value = json.loads(raw) if raw else None
+        result = owned_config(client, host, value, _default_config(host))
     except Exception as exc:
         logger.warning("captcha config read failed for %s: %s", host, exc)
-        return _default_config(host), None
+        return last_known_config("captcha", host, _default_config(host)), None
+    remember_config("captcha", host, result)
+    return result, client
 
 
-def _matches_path(path: str, patterns: list[str]) -> bool:
-    import fnmatch
-
-    return any(fnmatch.fnmatchcase(path, str(pattern)) for pattern in patterns)
+def max_cookie_expiry(config: dict, ttl_range: tuple) -> int:
+    ttl = max(ttl_range[0], min(ttl_range[1], int(config.get("clearance_ttl", DEFAULT_CLEARANCE_TTL))))
+    return int(time.time()) + ttl + EXPIRY_SKEW_SECONDS
 
 
 def _is_bypassed(address: str, bypass_ips: list[str]) -> bool:
@@ -150,7 +254,7 @@ def _is_bypassed(address: str, bypass_ips: list[str]) -> bool:
     return False
 
 
-def _cookie_valid(request: Request, host: str) -> bool:
+def _cookie_valid(request: Request, host: str, config: dict | None = None) -> bool:
     jar = SimpleCookie()
     try:
         jar.load(request.headers.get("cookie", ""))
@@ -168,6 +272,10 @@ def _cookie_valid(request: Request, host: str) -> bool:
         return False
     if not expiry.isdigit() or int(expiry) <= int(time.time()):
         return False
+    # N6: the expiry is signed, but a cookie claiming to last longer than the
+    # configured clearance is refused all the same.
+    if int(expiry) > max_cookie_expiry(config or _default_config(host), CLEARANCE_TTL_RANGE):
+        return False
     if normalize_host(cookie_host) != host:
         return False
     message = "\x1f".join([subnet_identity(client_ip(request)), user_agent(request), host, expiry])
@@ -175,6 +283,14 @@ def _cookie_valid(request: Request, host: str) -> bool:
         HMAC_SECRET.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
     ).hexdigest()
     return hmac.compare_digest(signature, expected)
+
+
+def has_clearance(request: Request) -> bool:
+    """A valid CAPTCHA clearance cookie for the request's host, whatever the
+    host's CAPTCHA setting (the ML challenge issues the same cookie)."""
+    host = normalize_host(request.headers.get("x-original-host") or request.headers.get("host", ""))
+    config, _ = get_config(host)
+    return _cookie_valid(request, host, config)
 
 
 def access_decision(request: Request) -> str:
@@ -189,17 +305,22 @@ def access_decision(request: Request) -> str:
     if original_method == "OPTIONS":
         return "allow"
     host = normalize_host(request.headers.get("x-original-host") or request.headers.get("host", ""))
-    path = urlsplit(request.headers.get("x-original-uri", "/")).path or "/"
     config, client = get_config(host)
-    if client is None or not config.get("enabled") or config.get("engine", "native") != "native":
+    if not config.get("enabled") or config.get("engine", "native") != "native":
         return "allow"
-    if not _matches_path(path, config.get("login_paths", DEFAULT_PATHS)):
-        return "allow"
-    if _matches_path(path, config.get("exclude_paths") or []):
+    if not is_protected(request.headers.get("x-original-uri", "/"),
+                        config.get("login_paths", DEFAULT_PATHS), config.get("exclude_paths")):
         return "allow"
     if _is_bypassed(client_ip(request), config.get("bypass_ips", [])):
         return "allow"
-    return "allow" if _cookie_valid(request, host) else "challenge"
+    if _cookie_valid(request, host, config):
+        return "allow"
+    if client is None:
+        # H83: Redis is down, so no challenge can be issued or recorded. A
+        # log-only gate lets the request through as it always does; an
+        # enforcing one answers "unavailable" instead of opening the path.
+        return "allow" if config.get("mode") == "log_only" else "unavailable"
+    return "challenge"
 
 
 async def captcha_access(request: Request) -> Response:
@@ -332,7 +453,7 @@ async def verify_challenge(request: Request, payload: ChallengeVerifyRequest) ->
     if not digest.startswith("0" * difficulty):
         return JSONResponse({"success": False, "error": "invalid proof"}, status_code=400)
     config, _ = get_config(host, client)
-    ttl = max(900, min(43200, int(config.get("clearance_ttl", DEFAULT_CLEARANCE_TTL))))
+    ttl = max(CLEARANCE_TTL_RANGE[0], min(CLEARANCE_TTL_RANGE[1], int(config.get("clearance_ttl", DEFAULT_CLEARANCE_TTL))))
     expiry = int(time.time()) + ttl
     message = "\x1f".join([subnet_identity(address), user_agent(request), host, str(expiry)])
     signature = hmac.new(

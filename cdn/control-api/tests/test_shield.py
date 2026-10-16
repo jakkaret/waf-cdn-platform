@@ -16,12 +16,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import captcha_engine  # noqa: E402
 import otp_engine  # noqa: E402
+import rate_limit  # noqa: E402
 import shield_events  # noqa: E402
 
 
 class FakeRedis:
     def __init__(self):
-        self.kv, self.lists = {}, {}
+        self.kv, self.lists, self.hashes, self.ttls = {}, {}, {}, {}
 
     def ping(self):
         return True
@@ -29,8 +30,19 @@ class FakeRedis:
     def get(self, k):
         return self.kv.get(k)
 
-    def set(self, k, v):
+    def set(self, k, v, ex=None, nx=False):
+        if nx and k in self.kv:
+            return None
         self.kv[k] = v
+        if ex:
+            self.ttls[k] = ex
+        return True
+
+    def hget(self, k, field):
+        return self.hashes.get(k, {}).get(field)
+
+    def hset(self, k, field, value):
+        self.hashes.setdefault(k, {})[field] = value
 
     def setex(self, k, _ttl, v):
         self.kv[k] = v
@@ -38,8 +50,8 @@ class FakeRedis:
     def delete(self, k):
         self.kv.pop(k, None)
 
-    def ttl(self, _k):
-        return 300
+    def ttl(self, k):
+        return self.ttls.get(k, 300)
 
     def incr(self, k):
         self.kv[k] = int(self.kv.get(k, 0)) + 1
@@ -54,7 +66,7 @@ class FakeRedis:
     def ltrim(self, k, start, end):
         self.lists[k] = self.lists.get(k, [])[start:end + 1]
 
-    def pipeline(self):
+    def pipeline(self, transaction=True):
         return _Pipe(self)
 
 
@@ -62,15 +74,11 @@ class _Pipe:
     def __init__(self, r):
         self.r, self.ops = r, []
 
-    def lpush(self, *a):
-        self.ops.append(("lpush", a))
-
-    def ltrim(self, *a):
-        self.ops.append(("ltrim", a))
+    def __getattr__(self, name):
+        return lambda *a, **kw: self.ops.append((name, a, kw))
 
     def execute(self):
-        for name, args in self.ops:
-            getattr(self.r, name)(*args)
+        return [getattr(self.r, name)(*args, **kw) for name, args, kw in self.ops]
 
 
 HOST = "shop.example.com"
@@ -82,6 +90,8 @@ def redis_(monkeypatch):
     r = FakeRedis()
     for module in (captcha_engine, otp_engine):
         monkeypatch.setattr(module, "_redis", lambda r=r: r)
+    monkeypatch.setattr(captcha_engine, "_last_known", {})
+    monkeypatch.setitem(rate_limit._cache, "at", -1e9)
 
     async def no_ml(_request):
         return "pass"
@@ -119,6 +129,7 @@ def client():
 def enable(r, kind, **extra):
     key = f"waf:{kind}:domain:{HOST}"
     r.set(key, json.dumps({"enabled": True, "origin_id": ORIGIN, "login_paths": ["/login*"], **extra}))
+    r.hset(captcha_engine.HOSTMAP_KEY, HOST, ORIGIN)
 
 
 def check(client, method, path="/login", cookie=""):
@@ -239,10 +250,10 @@ def test_captcha_cookie_for_a_dotted_host_validates(redis_, monkeypatch):
     sig = hmac.new(captcha_engine.HMAC_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
     headers = [(b"cookie", f"{captcha_engine.COOKIE_NAME}={expiry}.{HOST}.{sig}".encode()),
                (b"x-original-ip", b"198.51.100.7"), (b"x-original-user-agent", ua.encode())]
-    request = StarletteRequest({"type": "http", "headers": headers, "method": "GET", "path": "/"})
+    request = StarletteRequest({"type": "http", "headers": headers, "method": "GET", "path": "/", "client": ("testclient", 1)})
     assert captcha_engine._cookie_valid(request, HOST)
     tampered = [(b"cookie", f"{captcha_engine.COOKIE_NAME}={expiry}.evil.example.com.{sig}".encode())] + headers[1:]
-    assert not captcha_engine._cookie_valid(StarletteRequest({"type": "http", "headers": tampered, "method": "GET", "path": "/"}), HOST)
+    assert not captcha_engine._cookie_valid(StarletteRequest({"type": "http", "headers": tampered, "method": "GET", "path": "/", "client": ("testclient", 1)}), HOST)
 
 
 # ------------------------------------------------ exclusions and log-only

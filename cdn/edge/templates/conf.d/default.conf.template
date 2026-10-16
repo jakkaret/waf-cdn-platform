@@ -81,12 +81,15 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
+        # P2.3 (H15/N2): any cookie may make the page personal, whatever its
+        # name, so a request carrying one is never served from or stored in
+        # the cache.
+        if ($http_cookie != "") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
         proxy_cache edge_cache;
-        proxy_cache_key "$host|$request_method|$uri$is_args$args";
+        proxy_cache_key "$scheme|$host|$request_method|$uri$is_args$args";
         proxy_cache_valid 200 301 302 10m;
         proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
         proxy_cache_background_update on;
@@ -98,7 +101,10 @@ server {
 
         add_header X-Cache-Status $upstream_cache_status always;
         add_header X-Edge-Region ${EDGE_REGION} always;
-        add_header Cache-Control "public, max-age=600, must-revalidate" always;
+        # P2.3 (H14): "public" only on a 2xx/3xx the origin sent no
+        # Cache-Control for, and never for a request that skipped the cache;
+        # otherwise the origin's own value (private/no-store included) stays.
+        more_set_headers "Cache-Control: $edge_cache_control_dynamic";
 
         proxy_pass http://website_origin;
         proxy_http_version 1.1;
@@ -121,12 +127,15 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
+        # P2.3 (H15/N2): any cookie may make the page personal, whatever its
+        # name, so a request carrying one is never served from or stored in
+        # the cache.
+        if ($http_cookie != "") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
         proxy_cache edge_cache;
-        proxy_cache_key "$host|$request_method|$uri$is_args$args";
+        proxy_cache_key "$scheme|$host|$request_method|$uri$is_args$args";
         proxy_cache_valid 200 301 302 1h;
         proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
         proxy_cache_background_update on;
@@ -138,7 +147,7 @@ server {
 
         add_header X-Cache-Status $upstream_cache_status always;
         add_header X-Edge-Region ${EDGE_REGION} always;
-        add_header Cache-Control "public, max-age=3600, immutable" always;
+        more_set_headers "Cache-Control: $edge_cache_control_static";
         add_header X-Content-Type-Options "nosniff" always;
 
         proxy_pass http://website_origin;
@@ -225,12 +234,15 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
+        # P2.3 (H15/N2): any cookie may make the page personal, whatever its
+        # name, so a request carrying one is never served from or stored in
+        # the cache.
+        if ($http_cookie != "") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
         proxy_cache edge_cache;
-        proxy_cache_key "$host|$request_method|$uri$is_args$args";
+        proxy_cache_key "$scheme|$host|$request_method|$uri$is_args$args";
         proxy_cache_valid 200 301 302 10m;
         proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
         proxy_cache_background_update on;
@@ -242,7 +254,10 @@ server {
 
         add_header X-Cache-Status $upstream_cache_status always;
         add_header X-Edge-Region ${EDGE_REGION} always;
-        add_header Cache-Control "public, max-age=600, must-revalidate" always;
+        # P2.3 (H14): "public" only on a 2xx/3xx the origin sent no
+        # Cache-Control for, and never for a request that skipped the cache;
+        # otherwise the origin's own value (private/no-store included) stays.
+        more_set_headers "Cache-Control: $edge_cache_control_dynamic";
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
         proxy_pass http://website_origin;
@@ -266,12 +281,15 @@ server {
 
         if ($request_method !~ ^(GET|HEAD)$) { set $skip_cache 1; }
         if ($http_authorization != "") { set $skip_cache 1; }
-        if ($http_cookie ~* "PHPSESSID|security=|waf_clearance|waf_otp_clearance") { set $skip_cache 1; }
+        # P2.3 (H15/N2): any cookie may make the page personal, whatever its
+        # name, so a request carrying one is never served from or stored in
+        # the cache.
+        if ($http_cookie != "") { set $skip_cache 1; }
         if ($http_cache_control ~* "no-cache|no-store") { set $skip_cache 1; }
         if ($args != "") { set $skip_cache 1; }
 
         proxy_cache edge_cache;
-        proxy_cache_key "$host|$request_method|$uri$is_args$args";
+        proxy_cache_key "$scheme|$host|$request_method|$uri$is_args$args";
         proxy_cache_valid 200 301 302 1h;
         proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
         proxy_cache_background_update on;
@@ -283,7 +301,7 @@ server {
 
         add_header X-Cache-Status $upstream_cache_status always;
         add_header X-Edge-Region ${EDGE_REGION} always;
-        add_header Cache-Control "public, max-age=3600, immutable" always;
+        more_set_headers "Cache-Control: $edge_cache_control_static";
         add_header X-Content-Type-Options "nosniff" always;
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
