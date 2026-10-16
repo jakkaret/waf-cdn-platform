@@ -913,6 +913,48 @@ class PgUserRepository:
                     "count(*) FILTER (WHERE role = 'admin') AS a FROM users")
         return f"{r['n']}:{r['v']}:{r['a']}"
 
+    # ---- per-device sessions (0008)
+    def create_session(self, user_id: str, ttl_seconds: int, user_agent: str = "", ip: str = "") -> str:
+        row = pool.q1(
+            "INSERT INTO user_sessions (user_id, expires_at, user_agent, ip) "
+            "VALUES (%s, now() + make_interval(secs => %s), %s, %s) RETURNING session_id",
+            (as_uuid(user_id), int(ttl_seconds), (user_agent or "")[:300], (ip or "")[:64]))
+        return str(row["session_id"])
+
+    def session_active(self, session_id: str, user_id: str) -> bool:
+        """True while the session belongs to user_id, is not revoked and has
+        not expired. Refreshes last_seen_at at most once a minute."""
+        sid, uid = as_uuid(session_id), as_uuid(user_id)
+        if sid is None or uid is None:
+            return False
+        row = pool.q1(
+            "SELECT (last_seen_at < now() - interval '1 minute') AS stale FROM user_sessions "
+            "WHERE session_id = %s AND user_id = %s AND revoked_at IS NULL AND expires_at > now()",
+            (sid, uid))
+        if not row:
+            return False
+        if row["stale"]:
+            pool.exec_("UPDATE user_sessions SET last_seen_at = now() WHERE session_id = %s", (sid,))
+        return True
+
+    def revoke_session(self, session_id: str, user_id: str) -> bool:
+        sid, uid = as_uuid(session_id), as_uuid(user_id)
+        if sid is None or uid is None:
+            return False
+        return pool.exec_("UPDATE user_sessions SET revoked_at = now() "
+                          "WHERE session_id = %s AND user_id = %s AND revoked_at IS NULL", (sid, uid)) > 0
+
+    def revoke_all_sessions(self, user_id: str) -> int:
+        uid = as_uuid(user_id)
+        if uid is None:
+            return 0
+        return pool.exec_("UPDATE user_sessions SET revoked_at = now() "
+                          "WHERE user_id = %s AND revoked_at IS NULL", (uid,))
+
+    def purge_old_sessions(self, days: int = 7) -> int:
+        return pool.exec_("DELETE FROM user_sessions WHERE expires_at < now() - make_interval(days => %s)",
+                          (int(days),))
+
     def bump_token_version(self, user_id: str) -> None:
         """Revoke every session token issued to this user so far (H28/H31)."""
         uid = as_uuid(user_id)

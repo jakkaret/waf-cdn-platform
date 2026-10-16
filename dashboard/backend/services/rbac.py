@@ -53,8 +53,19 @@ def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
-    # Logout and role changes bump token_version; older tokens are revoked.
+    # "Sign out everywhere", role and password changes bump token_version;
+    # tokens issued before that are void on every device.
     if int(payload.get("tv", 0)) != int(user.get("token_version") or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    # Per-device session: logout on this device revokes only this one.
+    # Tokens from before per-device sessions carry no sid and expire on
+    # their own within the 60-minute token lifetime.
+    sid = payload.get("sid")
+    if sid and not auth_service._pg.session_active(sid, user_id):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session revoked",
