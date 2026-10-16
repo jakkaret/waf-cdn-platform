@@ -68,7 +68,8 @@ def test_all_tables_and_view_exist(db):
     tables = {r[0] for r in c.execute(
         "SELECT table_name FROM information_schema.tables "
         "WHERE table_schema='waf' AND table_type='BASE TABLE'")}
-    assert len(tables - {"schema_migrations"}) == 19
+    assert len(tables - {"schema_migrations"}) == 20  # 0006 added origin_invites
+    assert "origin_invites" in tables
     assert "schema_migrations" in tables
     views = {r[0] for r in c.execute(
         "SELECT table_name FROM information_schema.views WHERE table_schema='waf'")}

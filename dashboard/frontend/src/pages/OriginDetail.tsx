@@ -364,7 +364,9 @@ export const OriginDetail: React.FC = () => {
   const addViewerMutation = useMutation({
     mutationFn: (email: string) => addOriginViewer(id!, email),
     onSuccess: (res) => {
-      toast.success(`${res.data.viewer.username || res.data.viewer.email} can now view this origin`)
+      toast.success(res.data.email_sent
+        ? `Invitation sent to ${res.data.email}. They get view access after opening the link.`
+        : `Invitation created for ${res.data.email}, but the email could not be sent.`)
       setViewerEmailInput('')
       queryClient.invalidateQueries({ queryKey: ['origin-viewers', id] })
     },
@@ -394,7 +396,9 @@ export const OriginDetail: React.FC = () => {
   const addEditorMutation = useMutation({
     mutationFn: (email: string) => addOriginEditor(id!, email),
     onSuccess: (res) => {
-      toast.success(`${res.data.editor.username || res.data.editor.email} can now edit this origin`)
+      toast.success(res.data.email_sent
+        ? `Invitation sent to ${res.data.email}. They get edit access after opening the link.`
+        : `Invitation created for ${res.data.email}, but the email could not be sent.`)
       setEditorEmailInput('')
       queryClient.invalidateQueries({ queryKey: ['origin-editors', id] })
     },

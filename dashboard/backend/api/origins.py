@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 import asyncio
 import ipaddress
 import re
@@ -12,7 +12,7 @@ from services.otp_config import (
     get_origin_config as get_otp_origin_config,
     save_origin_config as save_otp_origin_config,
 )
-from services import audit_log
+from services import audit_log, invite_service
 from services.txn import atomic
 from services.cve_feed import DEFAULT_WINDOW_DAYS, fetch_recent_cves, match_cves_to_origins, select_search_terms
 
@@ -379,35 +379,43 @@ async def restore_origin(origin_id: str, current_user: dict = Depends(get_curren
 async def get_origin_viewers(origin: dict = Depends(verify_origin_ownership)):
     return {"viewers": origin_service.list_origin_viewers(origin.get("id"))}
 
-@router.post("/{origin_id}/viewers")
-async def add_origin_viewer(
-    payload: OriginViewerGrant,
-    origin: dict = Depends(verify_origin_ownership),
-    current_user: dict = Depends(get_current_user),
-):
-    # Reuse origin_service's own AuthService instance rather than
-    # constructing a fresh one per request.
-    target = origin_service.auth_service.get_user_by_email(payload.email.strip().lower())
-    if not target:
-        raise HTTPException(status_code=404, detail="No account found with that email")
-    target_id = target.get("user_id")
-    if target_id == origin.get("admin_user_id"):
-        raise HTTPException(status_code=400, detail="You already own this origin")
+def _invite_member(request: Request, origin: dict, current_user: dict, email: str, role: str) -> dict:
+    """N9/H64: share by invitation. The link goes to the mailbox; access is
+    granted only when a signed-in user opens it (api/invites.py). The response
+    is the same whether or not the address has an account."""
+    email = email.strip().lower()
+    if "@" not in email or len(email) > 254:
+        raise HTTPException(status_code=400, detail="Enter a valid email address")
+    if email == (current_user.get("email") or "").strip().lower():
+        raise HTTPException(status_code=400, detail="You already have access to this origin")
     with atomic():
-        success = origin_service.db.add_origin_viewer(origin.get("id"), target_id)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to add viewer")
+        token = invite_service.create_invite(origin.get("id"), email, role, current_user["user_id"])
         audit_log.write_audit_event(
             scope_id=origin.get("id"),
             actor_user_id=current_user.get("user_id"),
             actor_username=current_user.get("username", ""),
-            action="viewer.grant",
-            summary=f"เพิ่ม viewer: {target.get('email', target_id)}",
-            details={"viewer_user_id": target_id, "email": target.get("email", "")},
+            action=f"{role}.invite",
+            summary=f"เชิญ {role}: {email}",
+            details={"email": email},
         )
-    from services.tenant_service import invalidate_tenant_cache
-    invalidate_tenant_cache(target_id)
-    return {"status": "success", "viewer": {"user_id": target_id, "username": target.get("username", ""), "email": target.get("email", "")}}
+    link = f"{str(request.base_url).rstrip('/')}/invites/accept?token={token}"
+    sent = invite_service.send_invite_email(email, origin.get("name") or origin.get("label") or origin.get("id"), role, link)
+    return {"status": "invited", "email": email, "role": role, "email_sent": sent}
+
+
+@router.get("/{origin_id}/invites")
+async def list_origin_invites(origin: dict = Depends(verify_origin_ownership)):
+    return {"invites": invite_service.pending_invites(origin.get("id"))}
+
+
+@router.post("/{origin_id}/viewers")
+async def add_origin_viewer(
+    request: Request,
+    payload: OriginViewerGrant,
+    origin: dict = Depends(verify_origin_ownership),
+    current_user: dict = Depends(get_current_user),
+):
+    return _invite_member(request, origin, current_user, payload.email, "viewer")
 
 @router.delete("/{origin_id}/viewers/{viewer_user_id}")
 async def remove_origin_viewer(
@@ -443,31 +451,12 @@ async def get_origin_editors(origin: dict = Depends(verify_origin_ownership)):
 
 @router.post("/{origin_id}/editors")
 async def add_origin_editor(
+    request: Request,
     payload: OriginViewerGrant,
     origin: dict = Depends(verify_origin_ownership),
     current_user: dict = Depends(get_current_user),
 ):
-    target = origin_service.auth_service.get_user_by_email(payload.email.strip().lower())
-    if not target:
-        raise HTTPException(status_code=404, detail="No account found with that email")
-    target_id = target.get("user_id")
-    if target_id == origin.get("admin_user_id"):
-        raise HTTPException(status_code=400, detail="You already own this origin")
-    with atomic():
-        success = origin_service.db.add_origin_editor(origin.get("id"), target_id)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to add editor")
-        audit_log.write_audit_event(
-            scope_id=origin.get("id"),
-            actor_user_id=current_user.get("user_id"),
-            actor_username=current_user.get("username", ""),
-            action="editor.grant",
-            summary=f"เพิ่ม editor: {target.get('email', target_id)}",
-            details={"editor_user_id": target_id, "email": target.get("email", "")},
-        )
-    from services.tenant_service import invalidate_tenant_cache
-    invalidate_tenant_cache(target_id)
-    return {"status": "success", "editor": {"user_id": target_id, "username": target.get("username", ""), "email": target.get("email", "")}}
+    return _invite_member(request, origin, current_user, payload.email, "editor")
 
 @router.delete("/{origin_id}/editors/{editor_user_id}")
 async def remove_origin_editor(

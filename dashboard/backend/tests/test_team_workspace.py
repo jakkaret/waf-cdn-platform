@@ -164,7 +164,7 @@ def test_audit_log_endpoint_is_readable_by_owner_and_editor_but_not_a_stranger(
     assert resp.status_code == 200, resp.text
     events = resp.json()["events"]
     assert any(e["action"] == "origin.update" for e in events)
-    assert any(e["action"] == "editor.grant" for e in events)
+    assert any(e["action"] == "editor.invite" for e in events)
 
     resp = client.get(f"/api/origins/{origin_id}/audit-log", headers=editor_h)
     assert resp.status_code == 200, resp.text

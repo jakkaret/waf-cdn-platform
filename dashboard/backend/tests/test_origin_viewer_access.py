@@ -58,7 +58,9 @@ def test_owner_grants_viewer_access_by_email(client: TestClient, register_user, 
         headers=owner_headers,
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["viewer"]["email"] == "viewer3@example.com"
+    # N9/H64: an invitation is emailed; the mailbox owner accepting it (the
+    # fake mailbox in conftest does this) is what grants access.
+    assert resp.json() == {"status": "invited", "email": "viewer3@example.com", "role": "viewer", "email_sent": True}
 
     # Viewer now sees it in their own list and can read it directly.
     listed = client.get("/api/origins", headers=viewer_headers).json()["origins"]
@@ -90,7 +92,7 @@ def test_viewer_cannot_write_only_read(client: TestClient, register_user, auth_h
     assert resp.status_code == 403
 
 
-def test_granting_a_nonexistent_email_is_rejected(client: TestClient, register_user, auth_header):
+def test_inviting_an_unregistered_email_is_pending_and_reveals_nothing(client: TestClient, register_user, auth_header):
     owner = register_user(email="owner5@example.com", username="owner5")
     owner_headers = auth_header(owner["access_token"])
     origin = _create_origin(client, owner_headers, ip="203.0.113.5")
@@ -100,7 +102,13 @@ def test_granting_a_nonexistent_email_is_rejected(client: TestClient, register_u
         json={"email": "nobody-registered@example.com"},
         headers=owner_headers,
     )
-    assert resp.status_code == 404
+    # N9/H64: same reply whether or not the address has an account (no
+    # enumeration), and nobody gets access until the emailed link is used.
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "invited"
+    assert client.get(f"/api/origins/{origin['id']}/viewers", headers=owner_headers).json()["viewers"] == []
+    pending = client.get(f"/api/origins/{origin['id']}/invites", headers=owner_headers).json()["invites"]
+    assert [(p["email"], p["role"]) for p in pending] == [("nobody-registered@example.com", "viewer")]
 
 
 def test_granting_yourself_the_owner_is_rejected(client: TestClient, register_user, auth_header):

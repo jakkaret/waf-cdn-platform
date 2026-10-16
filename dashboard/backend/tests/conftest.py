@@ -77,6 +77,7 @@ pg_harness.ensure_database()
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "pg: needs a real PostgreSQL (TEST_DATABASE_URL)")
+    config.addinivalue_line("markers", "no_auto_accept: invitations stay pending until the test accepts them")
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -179,6 +180,8 @@ def app() -> FastAPI:
     test_app.include_router(origins_module.router)
     test_app.include_router(rules_module.router)
     test_app.include_router(ai_summary_module.router)
+    from api import invites as invites_module
+    test_app.include_router(invites_module.router)
     return test_app
 
 
@@ -228,3 +231,30 @@ def auth_header():
         return {"Authorization": f"Bearer {token}"}
 
     return _header
+
+
+@pytest.fixture(autouse=True)
+def invite_mailbox(request, monkeypatch):
+    """Origin sharing is by emailed invitation (N9/H64). This fake mailbox
+    records every invitation instead of sending it. Unless a test is marked
+    no_auto_accept, the person who owns that address (an account registered
+    with it) "clicks the link" at once, so tests about other features can set
+    up a viewer/editor in one call as before."""
+    from services import auth_service as auth_mod
+    from services import invite_service
+
+    sent = []
+
+    def fake_send(to_addr, origin_label, role, link):
+        token = link.split("token=", 1)[1]
+        sent.append({"to": to_addr, "role": role, "link": link, "token": token})
+        if request.node.get_closest_marker("no_auto_accept") is None:
+            user = auth_mod.AuthService().get_user_by_email(to_addr)
+            if user:
+                invite_service.accept_invite(token, user["user_id"])
+                from services.tenant_service import invalidate_tenant_cache
+                invalidate_tenant_cache(user["user_id"])
+        return True
+
+    monkeypatch.setattr(invite_service, "send_invite_email", fake_send)
+    return sent
