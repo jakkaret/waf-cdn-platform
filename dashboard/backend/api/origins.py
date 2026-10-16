@@ -410,6 +410,26 @@ async def list_origin_invites(origin: dict = Depends(verify_origin_ownership)):
     return {"invites": invite_service.pending_invites(origin.get("id"))}
 
 
+@router.delete("/{origin_id}/invites/{invite_id}")
+async def cancel_origin_invite(
+    invite_id: str,
+    origin: dict = Depends(verify_origin_ownership),
+    current_user: dict = Depends(get_current_user),
+):
+    with atomic():
+        if not invite_service.cancel_invite(origin.get("id"), invite_id):
+            raise HTTPException(status_code=404, detail="Invitation not found")
+        audit_log.write_audit_event(
+            scope_id=origin.get("id"),
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action="invite.cancel",
+            summary=f"ยกเลิกคำเชิญ {invite_id}",
+            details={"invite_id": invite_id},
+        )
+    return {"status": "cancelled"}
+
+
 @router.post("/{origin_id}/viewers")
 async def add_origin_viewer(
     request: Request,
@@ -427,6 +447,9 @@ async def remove_origin_viewer(
 ):
     with atomic():
         success = origin_service.db.remove_origin_viewer(origin.get("id"), viewer_user_id)
+        member = origin_service.auth_service.get_user_by_id(viewer_user_id)
+        if member:  # a link still pending for this person must not restore access
+            invite_service.cancel_invites_for(origin.get("id"), member.get("email", ""), "viewer")
         if not success:
             raise HTTPException(status_code=500, detail="Failed to remove viewer")
         audit_log.write_audit_event(
@@ -472,6 +495,9 @@ async def remove_origin_editor(
         raise HTTPException(status_code=400, detail="The origin's creator cannot be removed")
     with atomic():
         success = origin_service.db.remove_origin_editor(origin.get("id"), editor_user_id)
+        member = origin_service.auth_service.get_user_by_id(editor_user_id)
+        if member:  # a link still pending for this person must not restore access
+            invite_service.cancel_invites_for(origin.get("id"), member.get("email", ""), "editor")
         if not success:
             raise HTTPException(status_code=500, detail="Failed to remove editor")
         audit_log.write_audit_event(
