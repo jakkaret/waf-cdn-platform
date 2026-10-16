@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from './store/authStore'
 import { useThemeStore } from './store/themeStore'
 import { AppLayout } from './components/layout/AppLayout'
@@ -40,17 +40,11 @@ import AiFirewallLlm from './pages/concepts/AiFirewallLlm'
 import DeceptionLayer from './pages/concepts/DeceptionLayer'
 import QuantumSafeTls from './pages/concepts/QuantumSafeTls'
 import UnifiedRiskScore from './pages/concepts/UnifiedRiskScore'
+import { queryClient } from './lib/queryClient'
+import { authApi } from './api/auth'
 import ThresholdProposals from './pages/ThresholdProposals'
 import BolaRules from './pages/BolaRules'
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
-  },
-})
 
 const ProtectedRoute = ({
   children,
@@ -59,8 +53,11 @@ const ProtectedRoute = ({
   children: React.ReactNode
   requireAdmin?: boolean
 }) => {
-  const { isAuthenticated, user } = useAuthStore()
+  const { isAuthenticated, user, sessionChecked } = useAuthStore()
 
+  // The user is kept only per tab (sessionStorage), so a new tab asks the
+  // server (/api/auth/me) before deciding the visitor is signed out.
+  if (!isAuthenticated && !sessionChecked) return null
   if (!isAuthenticated) return <Navigate to="/login" replace />
   if (requireAdmin && user?.role !== 'admin') return <Navigate to="/" replace />
 
@@ -76,6 +73,16 @@ const PublicOnlyRoute = ({ children }: { children: React.ReactNode }) => {
 
 export const App: React.FC = () => {
   const { theme } = useThemeStore()
+
+  // Confirm the session with the server on load (H79): a stale or revoked
+  // session clears the store through the 401 interceptor.
+  useEffect(() => {
+    authApi
+      .getMe()
+      .then((me) => useAuthStore.getState().setAuth(me))
+      .catch(() => {})
+      .finally(() => useAuthStore.getState().setSessionChecked())
+  }, [])
 
   useEffect(() => {
     if (typeof document !== 'undefined') {

@@ -482,7 +482,9 @@ def _resolve_frp_identity(raw_token: str, priv_key: str = "", ts: int = 0) -> Tu
                 return "legacy", None
     if raw_token:
         payload = auth_service.decode_token(raw_token)
-        if payload:
+        # Only a tunnel token opens a tunnel; a dashboard session JWT is
+        # signed with the same key but must not (H65).
+        if payload and payload.get("type") == "tunnel_token" and payload.get("domain"):
             return "jwt", payload
     return "none", None
 

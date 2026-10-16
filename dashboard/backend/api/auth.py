@@ -4,7 +4,8 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from typing import Literal, Optional
 from services.auth_service import AuthService, GoogleLoginRejected
-from services.rbac import get_current_user, require_admin
+from services.rbac import bearer_scheme, get_current_user, require_admin
+from fastapi.security import HTTPAuthorizationCredentials
 from services.rate_limiter import limiter
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -137,7 +138,15 @@ async def login(request: Request, req: LoginRequest, response: Response):
 
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response,
+                 credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme)):
+    # Revoke the session server-side too (H28/H31): a copied token must not
+    # outlive the logout. Logging out without a valid session still clears cookies.
+    try:
+        user = get_current_user(request, credentials)  # cookie or Bearer header
+        auth_service.revoke_sessions(user["user_id"])
+    except HTTPException:
+        pass
     _clear_session_cookies(response)
     return {"message": "Logged out"}
 
