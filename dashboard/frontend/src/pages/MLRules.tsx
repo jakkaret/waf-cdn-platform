@@ -382,11 +382,14 @@ export const MLRules: React.FC = () => {
                 <ul className="m-0 space-y-1 pl-0 list-none">
                   {(rule.examples && rule.examples.length > 0
                     ? rule.examples
-                    : [{ url: rule.source_url, method: rule.source_method, seen_at: rule.created_at }]
+                    : [{ url: rule.source_url, method: rule.source_method, seen_at: rule.created_at, requested_by: undefined as string | undefined }]
                   ).map((ex, i) => (
                     <li key={`${ex.seen_at}-${i}`} className="flex items-baseline gap-2 text-[12px]">
                       <span className="shrink-0 font-mono text-[var(--text-muted)]">{ex.method || 'GET'}</span>
                       <span className="min-w-0 truncate font-mono text-[var(--text-primary)]" title={ex.url}>{ex.url || '/'}</span>
+                      {ex.requested_by && (
+                        <span className="shrink-0 text-[var(--text-secondary)]" title="ผู้ที่กดขอให้เสนอกฎนี้">ขอโดย {ex.requested_by}</span>
+                      )}
                       <span className="ml-auto shrink-0 text-[var(--text-muted)]">{timeAgo(ex.seen_at)}</span>
                     </li>
                   ))}

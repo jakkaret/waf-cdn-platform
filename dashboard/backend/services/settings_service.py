@@ -47,13 +47,24 @@ DEFAULT_SETTINGS = {
 _SECRET_KEY_MARKERS = ("token", "password", "secret", "api_key", "apikey", "private_key")
 
 
-def mask_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+# Settings accepted and shown, but not wired to anything yet (H26). The API
+# reports them so the UI can label them instead of implying they take effect.
+NOT_IMPLEMENTED_SETTINGS = ("real_ip_header", "edge_sync_interval_seconds", "auto_purge_edge_cache")
+
+# Admin-only values: shown to admins, reported only as <key>_set to others (H22).
+ADMIN_ONLY_SETTINGS = ("telegram_chat_id",)
+
+
+def mask_settings(settings: Dict[str, Any], is_admin: bool = True) -> Dict[str, Any]:
     """Client-safe copy of a settings dict: every secret-looking key is removed
     and replaced by <key>_set (bool) and, for the Telegram token, a
     <key>_masked hint showing only the last 4 chars (F-123)."""
-    out: Dict[str, Any] = {}
+    out: Dict[str, Any] = {"not_implemented": list(NOT_IMPLEMENTED_SETTINGS)}
     for k, v in settings.items():
         if k.endswith("_masked") or k.endswith("_set"):
+            continue
+        if k in ADMIN_ONLY_SETTINGS and not is_admin:
+            out[f"{k}_set"] = bool(v)
             continue
         if any(m in k.lower() for m in _SECRET_KEY_MARKERS):
             out[f"{k}_set"] = bool(v)

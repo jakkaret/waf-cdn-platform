@@ -371,7 +371,7 @@ async def cdn_purge(
 @router.get("/logs")
 async def cdn_logs(
     region: Optional[str] = Query("ALL", description="Filter by region (SG, JP, TH, or ALL)"),
-    limit: int = Query(50, description="Max logs to return"),
+    limit: int = Query(50, ge=1, le=1000, description="Max logs to return (1-1000, H47)"),
     current_user: dict = Depends(require_viewer_or_above)
 ):
     user_id = current_user.get("user_id")

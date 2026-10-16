@@ -28,8 +28,6 @@ services:
       TZ: Asia/Bangkok
       ML_RELAY_SECRET: "${ML_RELAY_SECRET:?set ML_RELAY_SECRET in .env}"
       DECEPTION_INTERNAL_KEY: "${DECEPTION_INTERNAL_KEY:?set DECEPTION_INTERNAL_KEY in .env}"
-    depends_on:
-      - dvwa
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -43,19 +41,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    networks:
-      - waf-net
-
-  dvwa:
-    image: sagikazarmark/dvwa
-    container_name: dvwa
-    entrypoint: [ "/bin/sh", "-c", "rm -f /var/run/apache2/apache2.pid && exec /run.sh" ]
-    environment:
-      - MYSQL_HOSTNAME=dvwa-db
-      - MYSQL_DATABASE=dvwa
-      - MYSQL_USERNAME=dvwa
-      - MYSQL_PASSWORD=dvwa
-    restart: unless-stopped
     networks:
       - waf-net
 

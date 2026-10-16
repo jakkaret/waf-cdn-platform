@@ -16,11 +16,18 @@ def _default_generator(created_by: str) -> str:
 
 
 def _example(rule_data: Dict[str, Any], seen_at: str) -> Dict[str, Any]:
-    return {
+    example = {
         "url": str(rule_data.get("source_url", ""))[:200],
         "method": rule_data.get("source_method", "GET"),
         "seen_at": seen_at,
     }
+    # H50: a proposal a signed-in user asked for (POST /api/ml/predict-and-
+    # suggest, open to viewers) names that user, so the approval queue shows
+    # who is behind each request instead of an anonymous "ml-auto".
+    if rule_data.get("requested_by"):
+        example["requested_by"] = str(rule_data["requested_by"])[:80]
+        example["requested_by_id"] = str(rule_data.get("requested_by_id") or "")[:64]
+    return example
 
 
 def with_defaults(item: Dict[str, Any]) -> Dict[str, Any]:

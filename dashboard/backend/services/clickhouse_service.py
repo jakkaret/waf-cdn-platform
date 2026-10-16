@@ -1,4 +1,5 @@
 import os
+import re
 import clickhouse_connect
 from dotenv import find_dotenv, load_dotenv
 from clickhouse_connect.driver.exceptions import ClickHouseError
@@ -58,6 +59,23 @@ def escape_like_value(value: str) -> str:
     instead of breaking out of the string.
     """
     return str(value).replace("\\", "\\\\").replace("'", "\\'")
+
+
+def status_code_filter(value) -> "int | None":
+    """A status filter that is exactly three ASCII digits (100-599), else None.
+    str.isdigit() also accepts e.g. superscript digits, which int() then
+    rejects with a 500 (H48)."""
+    s = str(value or "")
+    return int(s) if re.fullmatch(r"[1-5][0-9]{2}", s) else None
+
+
+# Stored when a request carried no Host header, so a log row never has an
+# empty host that a tenant filter could be tempted to guess about (N18).
+UNKNOWN_HOST = "-"
+
+
+def stored_host(value) -> str:
+    return normalize_host(value) or UNKNOWN_HOST
 
 
 def normalize_host(value) -> str:
@@ -352,7 +370,7 @@ class ClickHouseService:
             str(data.get('request_id') or ''),
             data.get('http_referer') or '',
             int(data.get('body_bytes_sent') or 0),
-            normalize_host(data.get('host')),
+            stored_host(data.get('host')),
             str(data.get('cache_status') or ''),
         ]
 
@@ -409,7 +427,7 @@ class ClickHouseService:
                     str(data.get('request_id') or ''),
                     data.get('http_referer') or '',
                     int(data.get('body_bytes_sent') or 0),
-                    normalize_host(data.get('host')),
+                    stored_host(data.get('host')),
                     str(data.get('cache_status') or ''),
                 ]
                 self.client.insert(table_name, [row], column_names=self.ACCESS_LOG_COLUMNS)
@@ -476,8 +494,8 @@ class ClickHouseService:
                 w.append("(status_code = 403 OR status_code = 429)")
             elif status_filter == "ALLOWED":
                 w.append("status_code >= 200 AND status_code < 300")
-            elif str(status_filter).isdigit():
-                w.append(f"status_code = {int(status_filter)}")
+            elif status_code_filter(status_filter) is not None:
+                w.append(f"status_code = {status_code_filter(status_filter)}")
         if method_filter and method_filter != "ALL":
             w.append(f"method = '{escape_like_value(method_filter)}'")
         if severity_filter and severity_filter != "ALL":
@@ -603,8 +621,8 @@ class ClickHouseService:
                 where_clauses.append("(status_code = 403 OR status_code = 429)")
             elif status_filter == "ALLOWED":
                 where_clauses.append("status_code >= 200 AND status_code < 300")
-            elif status_filter.isdigit():
-                where_clauses.append(f"status_code = {int(status_filter)}")
+            elif status_code_filter(status_filter) is not None:
+                where_clauses.append(f"status_code = {status_code_filter(status_filter)}")
                 
         if method_filter and method_filter != "ALL":
             escaped_m = escape_like_value(method_filter)

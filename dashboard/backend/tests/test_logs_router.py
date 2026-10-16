@@ -275,10 +275,8 @@ def test_owned_origin_is_filtered_on_the_host_column_not_url_keywords(
     assert resp.status_code == 200
     clause = spy.call_args.kwargs["origin_clause"]
     assert "host = 'juiceshop.example.com'" in clause
-    # URL-keyword guessing survives only for legacy rows with no host value.
-    legacy = clause.split("host = 'juiceshop.example.com'", 1)[1]
-    assert "%juice%" not in clause.split("host = ''", 1)[0]
-    assert "host = '' AND" in legacy
+    # No URL-keyword guessing at all any more (N18/H44).
+    assert "%juice%" not in clause and "LIKE" not in clause and "host = ''" not in clause
 
 
 def test_logs_answer_503_when_clickhouse_is_down_instead_of_a_legacy_buffer(

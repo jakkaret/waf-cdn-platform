@@ -191,34 +191,6 @@ async def summarize_threat_range(
         raise HTTPException(status_code=500, detail="Failed to summarize the requested range")
 
 
-def _alert_belongs_to_tenant(alert: Dict[str, Any], domain_keywords: List[str]) -> bool:
-    """Real cross-tenant leak fixed 2026-09-22: waf_alerts' user_id has
-    always been a hardcoded "default-user" placeholder (confirmed in
-    services/telegram_listener.py, the real writer), never a usable owner
-    -- filtering on it would hide every alert from every user, not scope
-    them correctly. The real signal is the alert's captured domain (Host
-    header, stored as "domain" as of this fix) matched against the
-    tenant's registered domains/IPs, same substring-both-directions match
-    already used for CVE matching (services/cve_feed.py) and ClickHouse
-    scoping (tenant_service.build_domain_pattern_sql). An alert with no
-    domain captured (rows written before this fix) matches nothing --
-    fail closed, never open, matching build_tenant_origin_filter's own
-    convention elsewhere in this file."""
-    alert_domain = str(alert.get("domain", "")).strip().lower()
-    alert_ip = str(alert.get("ip", "")).strip().lower()
-    if not alert_domain and not alert_ip:
-        return False
-    for kw in domain_keywords:
-        kw = str(kw).strip().lower()
-        if not kw:
-            continue
-        if alert_domain and (kw in alert_domain or alert_domain in kw):
-            return True
-        if alert_ip and kw == alert_ip:
-            return True
-    return False
-
-
 def _visible_alerts_for_user(current_user: dict, max_items: int = 2000) -> List[Dict[str, Any]]:
     """Admin sees every alert (same "is_admin -> no filter" branch
     summarize_range already uses); everyone else sees only alerts matching
@@ -233,33 +205,11 @@ def _visible_alerts_for_user(current_user: dict, max_items: int = 2000) -> List[
         return []
     visible_origin_ids = {str(o) for o in origin_ids if o}
 
-    # Post-migration (waf_alerts_v2, keyed origin_id + alert_id) this is a
-    # handful of indexed queries rather than a scan of every tenant's rows.
-    items = db.get_alerts_for_origins(sorted(visible_origin_ids), max_items=max_items)
-    # Rows written before the alert carried an origin_id are not reachable
-    # by partition key, so they still need the older domain match. Scanning
-    # for them is confined to this legacy tail and disappears once those
-    # rows age out.
-    legacy_items = [a for a in db.get_all_alerts(max_items=max_items) if not a.get("origin_id")]
-
-    visible = []
-    for alert in items + legacy_items:
-        alert_origin_id = str(alert.get("origin_id") or "")
-        if alert_origin_id:
-            # Exact attribution, resolved once at write time against
-            # waf_domains' domain_name-index. Includes origins shared via a
-            # viewer/editor grant, because origin_ids comes from
-            # get_origins_visible_to_user, not just owned origins.
-            if alert_origin_id in visible_origin_ids:
-                visible.append(alert)
-            continue
-        # Alerts written before origin_id existed keep the older,
-        # deliberately loose domain match. It cannot be tightened
-        # retroactively (the Host was all that was captured), so it decays
-        # out as those rows age rather than being made stricter in place.
-        if _alert_belongs_to_tenant(alert, user_domains):
-            visible.append(alert)
-    return visible
+    # Every alert carries the origin_id resolved at write time; only those
+    # count. The old domain-substring guess for alerts without one (H45) is
+    # gone: it could match another tenant's host, and no such rows remain.
+    return [a for a in db.get_alerts_for_origins(sorted(visible_origin_ids), max_items=max_items)
+            if str(a.get("origin_id") or "") in visible_origin_ids]
 
 
 @router.get("/notifications/feed")
@@ -389,7 +339,8 @@ def _build_origin_scope_sql(origin: Dict[str, Any]) -> str:
     return f"({' OR '.join(clauses)})" if clauses else "1=0"
 
 
-def build_incident_timeline(origin: Dict[str, Any], start_dt: datetime, end_dt: datetime) -> Dict[str, Any]:
+def build_incident_timeline(origin: Dict[str, Any], start_dt: datetime, end_dt: datetime,
+                            include_global: bool = False) -> Dict[str, Any]:
     """Pure assembly, no Gemini call: real traffic/alert stats for this one
     origin correlated against the real audit trail (both this origin's own
     events AND global system-settings/rule events) in the same window,
@@ -447,7 +398,10 @@ def build_incident_timeline(origin: Dict[str, Any], start_dt: datetime, end_dt: 
     start_utc = start_dt if start_dt.tzinfo else start_dt.replace(tzinfo=timezone.utc)
     end_utc = end_dt if end_dt.tzinfo else end_dt.replace(tzinfo=timezone.utc)
     origin_events = audit_log.get_audit_log(origin_id, start=start_utc, end=end_utc, limit=200)
-    global_events = audit_log.get_audit_log("global", start=start_utc, end=end_utc, limit=200)
+    # System-wide events (settings, rule approvals, CVE scans, other tenants'
+    # admin actions) are for platform admins only (C3/H46).
+    global_events = (audit_log.get_audit_log("global", start=start_utc, end=end_utc, limit=200)
+                     if include_global else [])
     for e in origin_events:
         e["scope"] = "origin"
     for e in global_events:
@@ -482,7 +436,8 @@ async def create_postmortem(
     if start_dt > end_dt:
         raise HTTPException(status_code=422, detail="start_time must not be after end_time")
 
-    timeline = build_incident_timeline(origin, start_dt, end_dt)
+    timeline = build_incident_timeline(origin, start_dt, end_dt,
+                                       include_global=_is_platform_admin(current_user))
 
     narrative_result: Dict[str, Any] = {"narrative": None, "degraded": False}
     try:
@@ -547,10 +502,31 @@ async def list_postmortems(
     return {"postmortems": summaries}
 
 
+def _is_platform_admin(user: Dict[str, Any]) -> bool:
+    return (user or {}).get("role") == "admin"
+
+
+def _redact_for(item: Dict[str, Any], user: Dict[str, Any]) -> Dict[str, Any]:
+    """A report built by a platform admin can hold system-wide events. Anyone
+    else sees only this origin's events, and not the AI narrative either,
+    since it may describe the system-wide ones (C3/H46)."""
+    if _is_platform_admin(user):
+        return item
+    events = item.get("audit_events") or []
+    if not any(e.get("scope") == "global" for e in events):
+        return item
+    out = dict(item)
+    out["audit_events"] = [e for e in events if e.get("scope") != "global"]
+    out["ai_narrative"] = None
+    out["ai_narrative_hidden"] = True
+    return out
+
+
 @router.get("/postmortems/{origin_id}/{postmortem_id}")
 async def get_postmortem(
     postmortem_id: str,
     origin: dict = Depends(verify_origin_access),
+    current_user: dict = Depends(get_current_user),
 ):
     try:
         item = db.get_postmortem(postmortem_id)
@@ -559,4 +535,4 @@ async def get_postmortem(
         raise HTTPException(status_code=500, detail="Failed to load postmortem report")
     if not item or item.get("origin_id") != origin.get("id"):
         raise HTTPException(status_code=404, detail="Postmortem not found")
-    return {"postmortem": item}
+    return {"postmortem": _redact_for(item, current_user)}

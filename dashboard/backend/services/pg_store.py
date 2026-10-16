@@ -905,6 +905,14 @@ class PgUserRepository:
         pool.exec_("INSERT INTO user_identities (provider, provider_user_id, user_id) "
                    "VALUES (%s, %s, %s)", (provider, str(provider_user_id), as_uuid(user_id)))
 
+    def recipients_fingerprint(self) -> str:
+        """Changes whenever a user is added or removed, or a role changes
+        (role changes bump token_version). Lets processes that cache alert
+        recipients notice changes made by another process at once."""
+        r = pool.q1("SELECT count(*) AS n, coalesce(sum(token_version), 0) AS v, "
+                    "count(*) FILTER (WHERE role = 'admin') AS a FROM users")
+        return f"{r['n']}:{r['v']}:{r['a']}"
+
     def bump_token_version(self, user_id: str) -> None:
         """Revoke every session token issued to this user so far (H28/H31)."""
         uid = as_uuid(user_id)

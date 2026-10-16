@@ -7,7 +7,7 @@ export interface SystemStatusData {
   }
   services: Record<string, {
     status: 'online' | 'offline'
-    port: number
+    port?: number // admins only (H24)
     desc: string
   }>
   cdn_nodes: Array<{
@@ -21,7 +21,7 @@ export interface SystemStatusData {
     status: 'running' | 'stopped'
     desc: string
   }>
-  system: {
+  system?: {  // admins only (H24)
     disk_total_gb: number
     disk_used_gb: number
     disk_free_gb: number

@@ -80,12 +80,13 @@ def test_unattributable_alert_is_not_shown_to_a_guessed_owner(visible):
     assert visible(alerts, origin_ids=["o-mine"], user_domains=["mine.example.com"]) == []
 
 
-def test_legacy_alert_without_origin_id_still_matches_by_domain(visible):
-    # Rows written before origin_id existed. The Host was all that was
-    # captured, so the old match is the only thing available for them.
+def test_alert_without_origin_id_is_never_shown_to_a_tenant(visible):
+    # H45 (2026-10-16): the domain-substring guess for alerts without an
+    # origin_id is gone -- it could hand one tenant another's alerts. Only
+    # the origin_id resolved at write time counts.
     alerts = [{"alert_id": "a-old", "domain": "mine.example.com"}]
     got = visible(alerts, origin_ids=["o-mine"], user_domains=["mine.example.com"])
-    assert [a["alert_id"] for a in got] == ["a-old"]
+    assert got == []
 
 
 def test_admin_still_sees_everything(visible):

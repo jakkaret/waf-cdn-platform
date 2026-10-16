@@ -393,7 +393,7 @@ export const Settings: React.FC = () => {
                     onChange={(e) => setForm({ ...form, real_ip_header: e.target.value })}
                   />
                   <span className="text-[10.5px] text-[var(--text-muted)] font-mono mt-1 block">
-                    Header used by Nginx to identify original client IP behind proxies or CDN nodes.
+                    Not applied yet: saved here, but nginx does not read this setting.
                   </span>
                 </div>
               </div>
@@ -510,7 +510,7 @@ export const Settings: React.FC = () => {
                       Automatic Edge Cache Purge on Origin Rule Update
                     </span>
                     <span className="text-[11.5px] text-[var(--text-muted)] leading-relaxed block mt-0.5">
-                      Instantly flush cached assets across all edge nodes whenever WAF rules or origin mappings change.
+                      Not applied yet: saved here, but no cache purge runs when rules change.
                     </span>
                   </div>
                 </label>
@@ -528,7 +528,7 @@ export const Settings: React.FC = () => {
                     onChange={(e) => setForm({ ...form, edge_sync_interval_seconds: parseInt(e.target.value, 10) || 5 })}
                   />
                   <span className="text-[10.5px] text-[var(--text-muted)] font-mono mt-1 block">
-                    Interval for edge nodes daemon (99-rulesync.sh) to pull bundles from Control API.
+                    Not applied yet: the edges use SYNC_INTERVAL_SEC from their own compose file.
                   </span>
                 </div>
               </div>

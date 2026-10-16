@@ -384,8 +384,10 @@ async def delete_origin(origin_id: str, origin: dict = Depends(verify_origin_own
 @router.post("/{origin_id}/restore")
 async def restore_origin(origin_id: str, current_user: dict = Depends(get_current_user)):
     # The whole point of restore is to act on an archived origin.
-    verify_origin_ownership(origin_id, current_user, allow_archived=True)
-    quota = origin_service.get_quota_info(current_user.get("user_id"))
+    origin = verify_origin_ownership(origin_id, current_user, allow_archived=True)
+    # H33/H43: the restored origin counts against its owner's quota, not
+    # against whoever (an editor) pressed restore.
+    quota = origin_service.get_quota_info(origin.get("admin_user_id") or current_user.get("user_id"))
     if quota["origins"]["at_limit"]:
         raise HTTPException(status_code=400, detail="Cannot restore. Active origin quota exceeded.")
     success = origin_service.restore_origin(origin_id)

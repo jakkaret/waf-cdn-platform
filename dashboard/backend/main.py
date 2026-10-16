@@ -191,6 +191,15 @@ async def system_status(current_user: dict = Depends(require_viewer_or_above)):
     gb = 1024 ** 3
     load1, load5, load15 = os.getloadavg()
 
+    if current_user.get("role") != "admin":
+        # H24: viewers get up/down only -- no internal ports, error text,
+        # disk or load figures.
+        return {
+            "db": {"status": db_status, "detail": ""},
+            "services": {k: {"status": v["status"], "desc": v.get("desc", "")} for k, v in services.items()},
+            "cdn_nodes": cdn_nodes,
+            "workers": workers,
+        }
     return {
         "db": {"status": db_status, "detail": db_detail},
         "services": services,

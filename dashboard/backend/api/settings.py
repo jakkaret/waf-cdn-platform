@@ -46,9 +46,9 @@ async def get_settings(
 ):
     try:
         settings = service.get_settings()
-        return {"settings": mask_settings(settings)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"settings": mask_settings(settings, is_admin=current_user.get("role") == "admin")}
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to load settings")
 
 
 @router.post("/")

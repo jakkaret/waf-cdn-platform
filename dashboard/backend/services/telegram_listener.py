@@ -24,13 +24,25 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOTTOKEN")
 
 _user_cache: list = []
 _user_cache_ts: float = 0.0
+_user_cache_fp: str = ""
 USER_CACHE_TTL = 60
 
 
+def _recipients_fingerprint() -> str:
+    try:
+        from services.rbac import auth_service
+        return auth_service._pg.recipients_fingerprint()
+    except Exception:
+        return ""
+
+
 def _get_telegram_users() -> list:
-    global _user_cache, _user_cache_ts
+    """Recipients, cached up to 60 s -- but never past a role change or a
+    deleted account, even one made by another process (H25/H34)."""
+    global _user_cache, _user_cache_ts, _user_cache_fp
     now = time.monotonic()
-    if now - _user_cache_ts < USER_CACHE_TTL and _user_cache:
+    fp = _recipients_fingerprint()
+    if now - _user_cache_ts < USER_CACHE_TTL and _user_cache and fp and fp == _user_cache_fp:
         return _user_cache
 
     try:
@@ -38,6 +50,7 @@ def _get_telegram_users() -> list:
         result = auth_service.list_telegram_recipients()
         _user_cache = result
         _user_cache_ts = now
+        _user_cache_fp = fp
         logger.debug("Refreshed telegram user cache: %d users", len(_user_cache))
     except Exception as e:
         logger.error("Failed to refresh telegram user cache: %s", e)
