@@ -9,8 +9,9 @@ CH=$(sed -n 's/^CLICKHOUSE_PASSWORD=//p' .env)
 q(){ curl -s -u "default:$CH" "http://127.0.0.1:8123/" --data-binary "$1"; }
 LOG=$(docker inspect waf-nginx -f '{{range .Mounts}}{{if eq .Destination "/var/log/nginx"}}{{.Source}}{{end}}{{end}}')/access.json
 # the attack probe is blocked by the edge's own ModSecurity, so only the benign one reaches Main
-chk "Main access.json: benign probe arrived from $T" '[ "$(grep "$TAG" "$LOG" | grep -c "\"remote_addr\":\"$T\"")" -ge 1 ]'
-chk "Main access.json: none from public $E" '! grep "$TAG" "$LOG" | grep -q "\"remote_addr\":\"$E\""'
+# Since P2.5 Main runs realip: remote_addr is the visitor, realip_remote_addr the edge.
+chk "Main access.json: benign probe arrived from $T" '[ "$(grep "$TAG" "$LOG" | grep -c "\"realip_remote_addr\":\"$T\"")" -ge 1 ]'
+chk "Main access.json: none from public $E" '! grep "$TAG" "$LOG" | grep -qE "\"(realip_)?remote_addr\":\"$E\""'
 n=0; for _ in $(seq 1 15); do n=$(q "SELECT count() FROM access_logs WHERE timestamp > now() - 900 AND position(url, '$TAG') > 0"); [ "${n:-0}" -ge 2 ] && break; sleep 2; done
 chk "ClickHouse got both probes from the edge forwarder ($n)" '[ "${n:-0}" -ge 2 ]'
 sleep 5; n=$(q "SELECT count() FROM access_logs WHERE timestamp > now() - 900 AND position(url, '$TAG') > 0")
