@@ -27,6 +27,11 @@ class MaskPreviewRequest(BaseModel):
     text: str = Field(..., max_length=8192, description="Unstructured text to preview PII masking")
 
 
+# P5.5 (H48): ALL/BLOCKED/ALLOWED or exactly three ASCII digits 100-599;
+# anything else is a 422 instead of a 500 or a silently dropped filter.
+STATUS_FILTER_PATTERN = r"^(ALL|BLOCKED|ALLOWED|[1-5][0-9]{2})$"
+
+
 def _tenant_clause(current_user: dict, requested_origin: Optional[str]) -> str:
     """ClickHouse WHERE fragment for what this user may see; "1=0" means
     nothing (no origins, or an origin they do not own)."""
@@ -41,7 +46,7 @@ async def get_logs(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=1000),
     search: str = Query("", max_length=256, description="Search by IP, URL, Rule ID, Token"),
-    status: str = Query("ALL", description="Status code or ALL/BLOCKED/ALLOWED"),
+    status: str = Query("ALL", pattern=STATUS_FILTER_PATTERN, description="Status code or ALL/BLOCKED/ALLOWED"),
     severity: str = Query("ALL", description="Severity filter"),
     method: str = Query("ALL", description="HTTP method"),
     origin: Optional[str] = Query("ALL", description="Filter by web origin or ALL"),
@@ -75,7 +80,7 @@ async def get_logs(
 async def stream_logs(
     limit: int = Query(50, ge=1, le=200),
     search: str = Query("", max_length=256),
-    status: str = Query("ALL"),
+    status: str = Query("ALL", pattern=STATUS_FILTER_PATTERN),
     severity: str = Query("ALL"),
     method: str = Query("ALL"),
     origin: Optional[str] = Query("ALL"),
@@ -102,7 +107,7 @@ async def stream_logs(
 async def logs_histogram(
     bucket_seconds: int = Query(3600, ge=10, le=86400),
     search: str = Query("", max_length=256),
-    status: str = Query("ALL"),
+    status: str = Query("ALL", pattern=STATUS_FILTER_PATTERN),
     severity: str = Query("ALL"),
     method: str = Query("ALL"),
     origin: Optional[str] = Query("ALL"),
