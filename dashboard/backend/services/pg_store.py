@@ -748,6 +748,7 @@ class PgStore:
 _USER_SELECT = (
     "SELECT u.user_id, u.email, u.username, u.role, u.password_hash, u.auth_provider, "
     "u.avatar_url, u.telegram_chat_id, u.share_threat_intel, u.created_at, u.last_login, "
+    "u.token_version, "
     "i.provider_user_id AS provider_id "
     "FROM users u LEFT JOIN user_identities i "
     "ON i.user_id = u.user_id AND i.provider = u.auth_provider "
@@ -772,6 +773,7 @@ class PgUserRepository:
             "password_hash": row["password_hash"] or "",
             "auth_provider": row["auth_provider"],
             "share_threat_intel": bool(row["share_threat_intel"]),
+            "token_version": int(row.get("token_version") or 0),
             "created_at": iso_z_us(row["created_at"]),
             "last_login": iso_z_us(row["last_login"]),
         }
@@ -825,6 +827,12 @@ class PgUserRepository:
         user, raises UniqueConflict."""
         pool.exec_("INSERT INTO user_identities (provider, provider_user_id, user_id) "
                    "VALUES (%s, %s, %s)", (provider, str(provider_user_id), as_uuid(user_id)))
+
+    def bump_token_version(self, user_id: str) -> None:
+        """Revoke every session token issued to this user so far (H28/H31)."""
+        uid = as_uuid(user_id)
+        if uid is not None:
+            pool.exec_("UPDATE users SET token_version = token_version + 1 WHERE user_id = %s", (uid,))
 
     def touch_login(self, user_id: str) -> None:
         uid = as_uuid(user_id)

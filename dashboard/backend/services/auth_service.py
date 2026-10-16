@@ -4,7 +4,7 @@ import hmac
 import hashlib
 import base64
 import secrets
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 import logging
 from typing import Optional, Dict, Tuple
 from datetime import datetime, timedelta, timezone
@@ -35,7 +35,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES") or "60")  # em
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://178.104.53.123:8000/api/auth/google/callback")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "https://waf-it-kku.online/api/auth/google/callback")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
@@ -78,6 +78,11 @@ class AuthService:
 
     def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
         to_encode = data.copy()
+        # A dashboard session carries the user's token_version (H28/H31);
+        # typed tokens (tunnel tokens) are revoked by other means.
+        if to_encode.get("sub") and "type" not in to_encode and "tv" not in to_encode:
+            user = self.get_user_by_id(str(to_encode["sub"]))
+            to_encode["tv"] = int((user or {}).get("token_version") or 0)
         expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
         to_encode.update({"exp": expire})
         return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -164,6 +169,11 @@ class AuthService:
             raise ValueError("Invalid role")
         if not self._pg.set_field(user_id, "role", role):
             raise ValueError("User not found")
+        # Sessions issued under the old role must not keep it.
+        self.revoke_sessions(user_id)
+
+    def revoke_sessions(self, user_id: str) -> None:
+        self._pg.bump_token_version(user_id)
 
     def delete_user(self, user_id: str) -> int:
         """Delete the account; origins it still owns are archived in the same
@@ -202,6 +212,10 @@ class AuthService:
 
     def start_google_flow(self, link: bool = False) -> Tuple[str, str]:
         """Returns (auth_url, signed_flow_cookie)."""
+        # The authorization code must never travel over plain http (H30).
+        parsed = urlparse(GOOGLE_REDIRECT_URI)
+        if parsed.scheme != "https" and parsed.hostname not in ("localhost", "127.0.0.1"):
+            raise RuntimeError("GOOGLE_REDIRECT_URI must be an https URL")
         state = secrets.token_urlsafe(32)
         verifier = secrets.token_urlsafe(64)
         nonce = secrets.token_urlsafe(24)

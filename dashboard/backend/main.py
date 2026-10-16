@@ -6,8 +6,19 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 # อ่าน allowed origins จาก env (คั่นด้วย comma)
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://178.104.53.123:5173,http://178.104.53.123:3000,http://178.104.53.123:8000,http://178.104.53.123,http://waf-main-dashboard.duckdns.org,https://waf-main-dashboard.duckdns.org")
-ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "https://waf-it-kku.online")
+
+
+def _credentialed_origin_ok(origin: str) -> bool:
+    """CORS here allows credentials, so only https origins (plus local dev on
+    localhost) may be listed; a plain-http origin would ride the session over
+    an unencrypted page (H29)."""
+    from urllib.parse import urlparse
+    u = urlparse(origin)
+    return u.scheme == "https" or (u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1"))
+
+
+ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip() and _credentialed_origin_ok(o.strip())]
 
 from services.clickhouse_service import ClickHouseService
 from fastapi.responses import FileResponse, PlainTextResponse

@@ -53,6 +53,14 @@ def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
+    # Logout and role changes bump token_version; older tokens are revoked.
+    if int(payload.get("tv", 0)) != int(user.get("token_version") or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return user
 
 
