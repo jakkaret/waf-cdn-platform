@@ -80,11 +80,16 @@ def cancel_invite(origin_id: str, invite_id: str) -> bool:
         (origin_id, invite_id)) > 0
 
 
-def cancel_invites_for(origin_id: str, email: str, role: str) -> int:
-    """Revoking a member also voids any link still pending for that address."""
+def cancel_invites_for(origin_id: str, user_id: str, role: str) -> int:
+    """Revoking a member voids every link still pending for them: links to the
+    account's own address, and links to any address this user accepted an
+    invitation of before (a link is proof of a mailbox, not of an account)."""
     return pool.exec_(
-        "DELETE FROM origin_invites WHERE origin_id = %s AND email = %s AND role = %s AND accepted_at IS NULL",
-        (origin_id, (email or "").strip().lower(), role))
+        "DELETE FROM origin_invites p WHERE p.origin_id = %s AND p.role = %s AND p.accepted_at IS NULL "
+        "AND (p.email = (SELECT lower(email) FROM users WHERE user_id = %s) "
+        "     OR p.email IN (SELECT a.email FROM origin_invites a "
+        "                    WHERE a.origin_id = %s AND a.accepted_by = %s))",
+        (origin_id, role, user_id, origin_id, user_id))
 
 
 def pending_invites(origin_id: str) -> list:

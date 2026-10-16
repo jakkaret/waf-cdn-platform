@@ -118,3 +118,15 @@ def test_owner_can_cancel_a_pending_invite(client, setup, invite_mailbox):
     inv = client.get(f"/api/origins/{origin_id}/invites", headers=h["owner"]).json()["invites"][0]
     assert client.delete(f"/api/origins/{origin_id}/invites/{inv['invite_id']}", headers=h["owner"]).status_code == 200
     assert client.post("/api/invites/accept", json={"token": invite_mailbox[0]["token"]}, headers=h["real"]).status_code == 404
+
+
+def test_removing_a_member_cancels_pending_links_to_the_address_they_used(client, setup, invite_mailbox):
+    # realperson accepted a link sent to victim@example.com; a second link to the
+    # same address is still pending. Removing realperson must void it too.
+    h, origin_id = setup
+    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"}, headers=h["owner"])
+    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"}, headers=h["owner"])
+    assert client.post("/api/invites/accept", json={"token": invite_mailbox[0]["token"]}, headers=h["real"]).status_code == 200
+    real_id = client.get("/api/auth/me", headers=h["real"]).json()["user_id"]
+    client.delete(f"/api/origins/{origin_id}/viewers/{real_id}", headers=h["owner"])
+    assert client.post("/api/invites/accept", json={"token": invite_mailbox[1]["token"]}, headers=h["real"]).status_code == 404

@@ -447,9 +447,8 @@ async def remove_origin_viewer(
 ):
     with atomic():
         success = origin_service.db.remove_origin_viewer(origin.get("id"), viewer_user_id)
-        member = origin_service.auth_service.get_user_by_id(viewer_user_id)
-        if member:  # a link still pending for this person must not restore access
-            invite_service.cancel_invites_for(origin.get("id"), member.get("email", ""), "viewer")
+        # a link still pending for this person must not restore access
+        invite_service.cancel_invites_for(origin.get("id"), viewer_user_id, "viewer")
         if not success:
             raise HTTPException(status_code=500, detail="Failed to remove viewer")
         audit_log.write_audit_event(
@@ -495,9 +494,8 @@ async def remove_origin_editor(
         raise HTTPException(status_code=400, detail="The origin's creator cannot be removed")
     with atomic():
         success = origin_service.db.remove_origin_editor(origin.get("id"), editor_user_id)
-        member = origin_service.auth_service.get_user_by_id(editor_user_id)
-        if member:  # a link still pending for this person must not restore access
-            invite_service.cancel_invites_for(origin.get("id"), member.get("email", ""), "editor")
+        # a link still pending for this person must not restore access
+        invite_service.cancel_invites_for(origin.get("id"), editor_user_id, "editor")
         if not success:
             raise HTTPException(status_code=500, detail="Failed to remove editor")
         audit_log.write_audit_event(
