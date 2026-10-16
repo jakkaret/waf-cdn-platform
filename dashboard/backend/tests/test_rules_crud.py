@@ -57,5 +57,8 @@ def test_delete_unknown_rule_returns_404(client: TestClient, register_user, auth
     fix is authorized and in place.
     """
     admin = register_user(email="rule-admin2@example.com", username="rule_admin2")
-    resp = client.delete("/api/rules/custom-does-not-exist", headers=auth_header(admin["access_token"]))
+    resp = client.delete("/api/rules/custom-999999", headers=auth_header(admin["access_token"]))
     assert resp.status_code == 404
+    # P4.3 (H60): a name that is not custom-<number> is refused outright.
+    for bad in ("custom-does-not-exist", "managed-10-rules", "ml-1000500", "tenant-x-2000000", "..%2Fvictim"):
+        assert client.delete(f"/api/rules/{bad}", headers=auth_header(admin["access_token"])).status_code in (400, 404)

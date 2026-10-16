@@ -194,12 +194,14 @@ async def create_rule(rule: RuleCreate, current_user: dict = Depends(require_adm
 @router.delete("/{rule_id}")
 async def delete_rule(rule_id: str, current_user: dict = Depends(require_admin)):
     try:
-        success = rule_manager.delete_rule(rule_id)
+        success = rule_manager.delete_custom_rule(rule_id)
         if success:
             return {"message": "Rule deleted"}
         raise HTTPException(status_code=404, detail="Rule not found")
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

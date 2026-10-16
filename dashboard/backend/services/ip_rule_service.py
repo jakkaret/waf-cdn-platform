@@ -48,8 +48,10 @@ class IPRuleService:
     def _reload_nginx(self) -> bool:
         """Reload nginx; returns whether the change is live. An invalid config is
         logged as an error instead of being silently skipped (F-037)."""
+        from services.rule_manager import RULES_LOCK
         try:
-            self.rule_manager.reload_nginx()
+            with RULES_LOCK:  # P4.3: one lock for every rule writer
+                self.rule_manager.reload_nginx()
             return True
         except NginxConfigError as e:
             logger.error(f"IP rules saved but NOT applied: nginx -t failed: {e}")
@@ -61,8 +63,10 @@ class IPRuleService:
         """Re-generate global_blocklist.txt, global_whitelist.txt and the corresponding ModSec .conf files."""
         # Expiry stays here (not in run_retention()): an expired ban has to
         # leave the rendered ModSecurity files too.
+        from services.rule_manager import RULES_LOCK
         self._pg.delete_expired()
-        changed = self._write_files(self._pg.ips("block"), self._pg.ips("allow"))
+        with RULES_LOCK:  # P4.3: one lock for every rule writer
+            changed = self._write_files(self._pg.ips("block"), self._pg.ips("allow"))
         self._synced = True
         return changed
 

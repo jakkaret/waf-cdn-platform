@@ -18,13 +18,30 @@ from services.cve_feed import DEFAULT_WINDOW_DAYS, fetch_recent_cves, match_cves
 
 router = APIRouter(prefix="/api/origins", tags=["Origins"])
 
+def _clean_label(value):
+    """P4.2 (H57): an origin label is shown in generated rule messages, so a
+    line break or other control character is refused when it is set."""
+    if value is None:
+        return value
+    if re.search(r"[\x00-\x1f\x7f]", value):
+        raise ValueError("label must not contain control characters")
+    value = value.strip()
+    if not value or len(value) > 120:
+        raise ValueError("label must be 1-120 characters")
+    return value
+
+
 class OriginCreate(BaseModel):
     label: str
     ip: str
     port: int = Field(ge=1, le=65535)
 
+    _label_ok = field_validator("label")(classmethod(lambda cls, v: _clean_label(v)))
+
 class OriginUpdate(BaseModel):
     label: Optional[str] = None
+
+    _label_ok = field_validator("label")(classmethod(lambda cls, v: _clean_label(v)))
     ip: Optional[str] = None
     port: Optional[int] = Field(None, ge=1, le=65535)
     # CVE Auto-Patch (2026-09-22): self-declared, admin-set -- no real

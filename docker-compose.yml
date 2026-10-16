@@ -141,6 +141,8 @@ services:
       OTP_HMAC_SECRET: "${OTP_HMAC_SECRET:?set OTP_HMAC_SECRET in .env}"
       # P2.5: only the WAF's nginx may tell control-api the visitor's address.
       SHIELD_TRUSTED_PROXIES: "waf-nginx"
+      # P4.1: signs the rule bundle; the edges hold the same value.
+      BUNDLE_SIGNING_KEY: "${BUNDLE_SIGNING_KEY:?set BUNDLE_SIGNING_KEY in .env}"
       # OTP Shield email delivery -- unset by default (see
       # cdn/control-api/email_sender.py: send_otp_email() fails loud and
       # logs, rather than pretending an email went out, until real SMTP

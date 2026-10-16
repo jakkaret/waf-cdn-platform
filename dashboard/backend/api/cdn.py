@@ -436,6 +436,23 @@ class CdnLogIngestPayload(BaseModel):
     logs: List[Dict[str, Any]]
 
 
+# P4.5 (H23): the region a batch is stored under comes from which edge sent
+# it, not from the payload. A forwarder that names another region is refused.
+_EDGE_REGION_BY_IP = {
+    REGIONS_META["TH"]["ip"]: "th", "10.88.0.2": "th",
+    REGIONS_META["ASIA"]["ip"]: "asia", "10.88.0.3": "asia",
+}
+
+
+def ingest_region(client_host: str, claimed: str) -> Optional[str]:
+    """The sender's region, or None when the claimed one does not match it."""
+    expected = _EDGE_REGION_BY_IP.get(client_host)
+    claimed = str(claimed or "").strip().lower()
+    if claimed.startswith("edge-"):
+        claimed = claimed[5:]
+    return expected if expected and claimed == expected else None
+
+
 def _store_cdn_log_batch(entries: list, region: str) -> Tuple[int, list]:
     """Runs as ONE unit in a single worker thread (see below) -- ch.save_log/
     _db.save_log were synchronous (the DynamoDB client, clickhouse-connect) and measured
@@ -523,8 +540,11 @@ async def ingest_cdn_logs(payload: CdnLogIngestPayload, request: _Request):
     if client_host not in _KNOWN_EDGE_FORWARDER_IPS:
         raise HTTPException(status_code=404, detail="Not found")
 
+    region = ingest_region(client_host, payload.region)
+    if region is None:
+        raise HTTPException(status_code=403, detail="region does not match the sending edge")
     entries = [e for e in payload.logs if isinstance(e, dict)]
-    stored, flagged = await asyncio.to_thread(_store_cdn_log_batch, entries, payload.region)
+    stored, flagged = await asyncio.to_thread(_store_cdn_log_batch, entries, region)
 
     # Fire-and-forget, same pattern log_forward.py uses: the response to
     # the edge forwarder must not wait on a Gemini call or a DynamoDB write.

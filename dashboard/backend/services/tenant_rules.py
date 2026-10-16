@@ -58,7 +58,7 @@ TEMPLATES = {"auto", "path_traversal", "sqli"}
 _CONTROL = re.compile(r"[\r\n\x00]")
 _ORIGIN_ID_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _FILE = re.compile(r"^tenant-([A-Za-z0-9_-]{1,64})-(\d+)\.conf$")
-_lock = threading.Lock()
+from services.rule_manager import RULES_LOCK as _lock  # P4.3: one lock for all rule writers
 
 
 class TenantRuleError(ValueError):

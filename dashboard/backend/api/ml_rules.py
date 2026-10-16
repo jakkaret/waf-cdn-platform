@@ -9,7 +9,7 @@ from services import audit_log, rule_backtest
 from services.txn import atomic
 from services.cve_feed import DEFAULT_WINDOW_DAYS, fetch_recent_cves, match_cves_to_origins, select_search_terms
 from services.gemini_service import gemini_service
-from services.rule_manager import escape_secrule_string
+from services.rule_manager import escape_secrule_message, escape_secrule_operator
 
 router = APIRouter(prefix="/api/ml-rules", tags=["ml-rules"])
 rule_service = MLRuleService()
@@ -239,10 +239,18 @@ async def run_cve_scan(
             skipped_no_valid_pattern += 1
             continue
 
-        safe_pattern = escape_secrule_string(pattern, '"')
-        safe_msg = escape_secrule_string(
-            f"CVE Auto-Patch: {match['cve_id']} (origin: {match['origin_label']})", "'",
-        )
+        # P4.2 (H57/H54): an operator keeps its backslashes (libmodsecurity
+        # does not unescape them, so doubling made \s match a literal "\s");
+        # one that cannot be quoted safely is skipped. The msg is escaped for
+        # both its own single quotes and the action list's double quotes, and
+        # control characters from the origin label are dropped.
+        try:
+            safe_pattern = escape_secrule_operator(pattern)
+        except ValueError:
+            skipped_no_valid_pattern += 1
+            continue
+        label = re.sub(r"[\x00-\x1f\x7f]", "", str(match.get("origin_label", "")))[:100]
+        safe_msg = escape_secrule_message(f"CVE Auto-Patch: {match['cve_id']} (origin: {label})")
         secrule_template = (
             f"SecRule REQUEST_URI|REQUEST_BODY|REQUEST_HEADERS \"@rx {safe_pattern}\" \\\n"
             f"    \"id:{{RULE_ID}},\\\n"

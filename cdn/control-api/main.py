@@ -1,8 +1,13 @@
 import gzip
+import hashlib
+import hmac
 import io
+import ipaddress
+import json
 import os
 import sqlite3
 import tarfile
+import threading
 import time
 from pathlib import Path
 
@@ -62,12 +67,14 @@ CONTROL_TOKEN = os.getenv("CONTROL_TOKEN", "")
 # 10.88.0.2/10.88.0.3 are the same edges over WireGuard (2026-10-15,
 # deploy/wireguard/README.md); dashboard/backend/services/edge_tunnel.py
 # holds the same pair.
+#
+# P4.4 (H07): only the edges' WireGuard addresses. The public IPs no longer
+# reach this port at all (close-public-path.sh), and loopback / the docker
+# gateways let any process on Main, or any container, read the full rule
+# bundle and blocklist.
 _EDGE_ALLOWED_IPS = {
     ip.strip()
-    for ip in os.getenv(
-        "EDGE_ALLOWED_IPS",
-        "45.154.26.91,57.158.25.236,10.88.0.2,10.88.0.3,127.0.0.1,::1,172.17.0.1,172.18.0.1",
-    ).split(",")
+    for ip in os.getenv("EDGE_ALLOWED_IPS", "10.88.0.2,10.88.0.3").split(",")
     if ip.strip()
 }
 
@@ -95,8 +102,65 @@ class BlockRequest(BaseModel):
 
 
 def _require_token(token: str):
-    if not CONTROL_TOKEN or token != CONTROL_TOKEN:
+    # P4.4 (H08): constant-time comparison.
+    if not CONTROL_TOKEN or not hmac.compare_digest(str(token).encode(), CONTROL_TOKEN.encode()):
         raise HTTPException(status_code=401, detail="Invalid control token")
+
+
+def canonical_ip(value: str) -> str:
+    """P4.4 (H06): an IP address or CIDR network, in canonical text; anything
+    else is a ValueError. One malformed line in global_blocklist.txt makes
+    @ipMatchFromFile fail nginx -t on every edge, which then stopped taking
+    any rule update at all."""
+    text = str(value or "").strip()
+    if "/" in text:
+        return str(ipaddress.ip_network(text, strict=False))
+    return str(ipaddress.ip_address(text))
+
+
+def _valid_ips(values) -> list:
+    out = []
+    for value in values:
+        try:
+            ip = canonical_ip(value)
+        except ValueError:
+            continue
+        if ip not in out:
+            out.append(ip)
+    return out
+
+
+# ------------------------------------------------------------------ P4.1
+# The bundle carries a version that only goes up and an HMAC over
+# "<version>:<sha256 of the body>" with BUNDLE_SIGNING_KEY, shared with the
+# edges. An edge applies a bundle only when the signature checks and the
+# version is newer than the one it runs (cdn/edge/entrypoint.d/99-rulesync.sh),
+# so neither a tampered nor a replayed older bundle is taken.
+BUNDLE_SIGNING_KEY = os.getenv("BUNDLE_SIGNING_KEY", "")
+_BUNDLE_STATE = DATA_DIR / "bundle_state.json"
+_bundle_lock = threading.Lock()
+
+
+def _bundle_version(body_sha: str) -> int:
+    """The version for this bundle content: unchanged content keeps its
+    version, new content gets the next number. Persisted in the data volume."""
+    with _bundle_lock:
+        try:
+            state = json.loads(_BUNDLE_STATE.read_text())
+        except (OSError, ValueError):
+            state = {"version": 0, "sha": ""}
+        if state.get("sha") != body_sha:
+            state = {"version": int(state.get("version", 0)) + 1, "sha": body_sha}
+            tmp = _BUNDLE_STATE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(state))
+            tmp.replace(_BUNDLE_STATE)
+        return int(state["version"])
+
+
+def bundle_signature(version: int, body: bytes, key: str = None) -> str:
+    key = BUNDLE_SIGNING_KEY if key is None else key
+    message = f"{version}:{hashlib.sha256(body).hexdigest()}".encode()
+    return hmac.new(key.encode(), message, hashlib.sha256).hexdigest()
 
 
 def _block_rule_content() -> str:
@@ -191,9 +255,10 @@ def get_blocklist(request: Request) -> dict:
 @app.post("/api/blocklist")
 def add_block(req: BlockRequest, x_control_token: str = Header(default="")) -> dict:
     _require_token(x_control_token)
-    ip = req.ip.strip()
-    if not ip:
-        raise HTTPException(status_code=400, detail="ip is required")
+    try:
+        ip = canonical_ip(req.ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ip must be an IP address or CIDR network")
 
     conn = db()
     try:
@@ -214,7 +279,11 @@ def remove_block(ip: str, x_control_token: str = Header(default="")) -> dict:
 
     conn = db()
     try:
-        conn.execute("DELETE FROM blocklist WHERE ip = ?", (ip.strip(),))
+        try:
+            ip = canonical_ip(ip)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="ip must be an IP address or CIDR network")
+        conn.execute("DELETE FROM blocklist WHERE ip = ?", (ip,))
         conn.commit()
     finally:
         conn.close()
@@ -231,11 +300,16 @@ def get_bundle(request: Request) -> Response:
         # 1. Add all .conf and .txt files from RULES_DIR
         if RULES_DIR.exists():
             for p in sorted(RULES_DIR.glob("*")):
+                # The blocklist file is added below, validated and merged.
+                if p.name == "global_blocklist.txt":
+                    continue
                 if p.is_file() and (p.suffix in [".conf", ".txt", ".data"] or p.name.endswith(".conf") or p.name.endswith(".txt")):
                     data = p.read_bytes()
                     info = tarfile.TarInfo(name=p.name)
                     info.size = len(data)
-                    info.mtime = int(p.stat().st_mtime)
+                    # Content only: a rewrite with the same text must not
+                    # look like a new bundle (and a new version) to the edges.
+                    info.mtime = 0
                     tar.addfile(info, io.BytesIO(data))
 
         # 2. If global_blocklist.txt exists in control.db but not in RULES_DIR, merge
@@ -249,7 +323,9 @@ def get_bundle(request: Request) -> Response:
         if bl_file.exists():
             file_ips = [line.strip() for line in bl_file.read_text(encoding="utf-8").splitlines() if line.strip()]
 
-        all_ips = list(dict.fromkeys(file_ips + db_ips))
+        # Malformed lines (a typo, an old unvalidated row) are dropped
+        # instead of breaking nginx -t on every edge (P4.4).
+        all_ips = _valid_ips(file_ips + db_ips)
         if all_ips:
             bl_bytes = ("\n".join(all_ips) + "\n").encode("utf-8")
             bl_info = tarfile.TarInfo(name="global_blocklist.txt")
@@ -267,4 +343,12 @@ def get_bundle(request: Request) -> Response:
     # the bundle's sha256 changes, so a timestamp here (gzip header, synthetic
     # entries) made every edge reload every SYNC_INTERVAL_SEC.
     gz = gzip.compress(tar_buf.getvalue(), mtime=0)
-    return Response(content=gz, media_type="application/gzip")
+    if not BUNDLE_SIGNING_KEY:
+        # Fail closed: an unsigned bundle would be refused by every edge anyway.
+        raise HTTPException(status_code=503, detail="Bundle signing key is not configured")
+    version = _bundle_version(hashlib.sha256(gz).hexdigest())
+    return Response(content=gz, media_type="application/gzip", headers={
+        "X-Bundle-Version": str(version),
+        "X-Bundle-Signature": bundle_signature(version, gz),
+        "Cache-Control": "no-store",
+    })
