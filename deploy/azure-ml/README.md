@@ -75,7 +75,7 @@ git clone https://github.com/jakkaret/waf-cdn-platform.git ~/waf-cdn-platform
 sudo REF=<commit sha หรือ tag ที่ตรวจแล้ว> bash ~/waf-cdn-platform/deploy/azure-ml/install.sh
 ```
 
-ต้องระบุ `REF` ทุกครั้ง (audit H03) เครื่องจะรันโค้ดของ commit นั้นเท่านั้น ไม่ดึงตาม branch `main`
+ต้องระบุ `REF` ทุกครั้ง (audit H03) เป็น commit sha เต็ม 40 ตัวหรือ tag เท่านั้น (ชื่อ branch หรือ sha แบบสั้นถูกปฏิเสธ) เครื่องจะรันโค้ดของ commit นั้นเท่านั้น
 
 `install.sh` ทำสิ่งต่อไปนี้ (รันซ้ำได้ ใช้ตอนอัปเดตโค้ดด้วย):
 

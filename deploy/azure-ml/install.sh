@@ -38,13 +38,21 @@ id wafml >/dev/null 2>&1 || useradd --system --home-dir "$APP_DIR" --shell /usr/
 echo "[3/7] code: $REPO_URL @ $REF -> $APP_DIR"
 [ -d "$APP_DIR/.git" ] || git clone -q --no-checkout "$REPO_URL" "$APP_DIR"
 git -C "$APP_DIR" fetch -q --tags origin
-git -C "$APP_DIR" checkout -q --detach "$REF^{commit}"
-case "$REF" in
-  # A full sha must be exactly what is checked out (no prefix tricks).
-  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*)
-    [ "${#REF}" -ne 40 ] || [ "$(git -C "$APP_DIR" rev-parse HEAD)" = "$REF" ] \
-      || { echo "checked out $(git -C "$APP_DIR" rev-parse HEAD), expected $REF" >&2; exit 1; } ;;
-esac
+# REF check start
+# Only a full commit sha or a tag (H03). A branch name (even the local "main"
+# a fresh clone creates) deploys whatever it points at, and a short sha can
+# become ambiguous later.
+if printf '%s' "$REF" | grep -Eq '^[0-9a-f]{40}$'; then
+  COMMIT="$REF"
+elif git -C "$APP_DIR" rev-parse -q --verify "refs/tags/$REF^{commit}" >/dev/null; then
+  COMMIT="$(git -C "$APP_DIR" rev-parse "refs/tags/$REF^{commit}")"
+else
+  echo "REF must be a full 40-character commit sha or a tag, got: $REF" >&2; exit 1
+fi
+# REF check end
+git -C "$APP_DIR" checkout -q --detach "$COMMIT"
+[ "$(git -C "$APP_DIR" rev-parse HEAD)" = "$COMMIT" ] \
+  || { echo "checked out $(git -C "$APP_DIR" rev-parse HEAD), expected $COMMIT" >&2; exit 1; }
 git -C "$APP_DIR" log -1 --format='      commit %H %s'
 
 echo "[4/7] Python venv (ml/requirements-serve.txt; libinjection builds from source, ~1-2 min)"
