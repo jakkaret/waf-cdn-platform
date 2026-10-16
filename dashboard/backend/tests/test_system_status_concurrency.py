@@ -33,7 +33,7 @@ def status_app(monkeypatch):
     monkeypatch.setattr(main, "_port_open", slow_port_open)
     monkeypatch.setattr(main, "_db_ping", slow_db_status)
     monkeypatch.setattr(cdn_mod, "cdn_nodes", fake_nodes)
-    main.app.dependency_overrides[require_viewer_or_above] = lambda: {"username": "t", "role": "viewer"}
+    main.app.dependency_overrides[require_viewer_or_above] = lambda: {"username": "t", "role": "admin"}  # full shape; viewer shape: test_p5_tenant_isolation.py
     yield main.app
     main.app.dependency_overrides.pop(require_viewer_or_above, None)
 

@@ -54,16 +54,21 @@ def test_exact_host_match_is_preferred():
     assert "host = 'dvwa.waf-it-kku.online'" in sql
 
 
-def test_legacy_keyword_guess_only_applies_to_hostless_rows():
-    # The '.php' sweep is what leaked across tenants. It may still appear
-    # (old rows need it) but never without the host = '' guard in front.
+def test_no_keyword_guess_at_all():
+    # N18/H44/H49: the URL-keyword fallback for hostless rows is gone; a
+    # tenant filter is exact host equality and nothing else.
     sql = build_domain_pattern_sql("dvwa.waf-it-kku.online")
-    assert "%.php%" in sql, "legacy fallback should still cover pre-column rows"
-    php_clause = sql.split("%.php%")[0]
-    assert "host = ''" in php_clause, (
-        "the keyword guess must be gated on host = '' -- ungated, it matches "
-        "every tenant's PHP traffic, which is the leak this fix exists for"
-    )
+    assert sql == "(host = 'dvwa.waf-it-kku.online')"
+    for leak in ("%.php%", "LIKE", "host = ''", "client_ip"):
+        assert leak not in sql
+
+
+def test_missing_host_is_stored_as_a_sentinel_not_empty():
+    from services.clickhouse_service import UNKNOWN_HOST, stored_host
+    assert stored_host("") == UNKNOWN_HOST == "-"
+    assert stored_host(None) == "-"
+    assert stored_host("Shop.Example.com:8080") == "shop.example.com"
+    assert build_domain_pattern_sql("-") == "(host = '-')"  # never matches a real domain
 
 
 def test_host_value_is_escaped_into_the_literal():

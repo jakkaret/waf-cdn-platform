@@ -51,6 +51,16 @@ ph = PasswordHasher(
 )
 
 
+def _invalidate_alert_recipients() -> None:
+    """Telegram recipients are cached for 60 s; drop the cache when a role or
+    an account changes so alerts follow the new permissions at once."""
+    try:
+        from services.telegram_listener import invalidate_user_cache
+        invalidate_user_cache()
+    except Exception as exc:  # never block a role change on the alert cache
+        logger.warning("could not invalidate the alert recipient cache: %s", exc)
+
+
 class GoogleLoginRejected(Exception):
     """Google sign-in refused; str(exc) is a short code for the login page."""
 
@@ -169,8 +179,10 @@ class AuthService:
             raise ValueError("Invalid role")
         if not self._pg.set_field(user_id, "role", role):
             raise ValueError("User not found")
-        # Sessions issued under the old role must not keep it.
+        # Sessions issued under the old role must not keep it, and a demoted
+        # admin must stop receiving every tenant's alerts now (H25/H34).
         self.revoke_sessions(user_id)
+        _invalidate_alert_recipients()
 
     def revoke_sessions(self, user_id: str) -> None:
         self._pg.bump_token_version(user_id)
@@ -178,7 +190,9 @@ class AuthService:
     def delete_user(self, user_id: str) -> int:
         """Delete the account; origins it still owns are archived in the same
         transaction. Returns how many were archived."""
-        return self._pg.delete(user_id)
+        archived = self._pg.delete(user_id)
+        _invalidate_alert_recipients()
+        return archived
 
     def set_threat_intel_opt_in(self, user_id: str, enabled: bool) -> None:
         """services/threat_intel.py reads this field fresh (never cached) on

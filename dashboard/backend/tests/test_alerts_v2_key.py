@@ -77,8 +77,10 @@ def test_admin_still_gets_every_partition(db, monkeypatch):
     db.get_alerts_for_origins.assert_not_called()
 
 
-def test_pre_migration_rows_without_origin_id_still_resolve_by_domain(db, monkeypatch):
+def test_rows_without_origin_id_are_not_guessed_by_domain(db, monkeypatch):
+    # H45: no domain-substring fallback any more, and no full-table scan.
     _scope(monkeypatch, ["o-mine"], ["mine.example.com"])
+    db.get_alerts_for_origins.return_value = []
     db.get_all_alerts.return_value = [
         {"alert_id": "a-legacy", "domain": "mine.example.com"},
         {"alert_id": "a-other-legacy", "domain": "someone-else.example.com"},
@@ -86,7 +88,8 @@ def test_pre_migration_rows_without_origin_id_still_resolve_by_domain(db, monkey
 
     got = ai_summary_module._visible_alerts_for_user({"user_id": "u-1", "role": "viewer"})
 
-    assert [a["alert_id"] for a in got] == ["a-legacy"]
+    assert got == []
+    db.get_all_alerts.assert_not_called()
 
 
 def test_mark_read_uses_the_new_composite_key(db, monkeypatch):

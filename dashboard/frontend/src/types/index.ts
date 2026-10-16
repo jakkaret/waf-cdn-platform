@@ -305,7 +305,7 @@ export interface MLPendingRule {
   detector?: string
   dedup_key?: string
   hit_count?: number
-  examples?: { url: string; method: string; seen_at: string }[]
+  examples?: { url: string; method: string; seen_at: string; requested_by?: string }[]
   last_seen_at?: string
   backtest?: MLRuleBacktest
   cve_id?: string

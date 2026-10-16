@@ -268,6 +268,9 @@ async def predict_and_suggest(req: PredictRequest, current_user: dict = Depends(
                 from services.ml_rule_service import MLRuleService
                 rule_service = MLRuleService()
                 for rule_data in rules:
+                    rule_data = {**rule_data,
+                                 "requested_by": current_user.get("username") or current_user.get("email", ""),
+                                 "requested_by_id": current_user.get("user_id", "")}
                     existing = rule_service.find_pending_by_dedup_key(rule_data.get("dedup_key", ""))
                     if existing:
                         suggested.append(rule_service.record_hit(existing, rule_data))

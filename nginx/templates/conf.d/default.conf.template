@@ -47,10 +47,6 @@ map $shield_protected $waf_cache_control {
     default $upstream_http_cache_control;
 }
 
-upstream dvwa_backend {
-    server dvwa:80;
-}
-
 upstream frp_tunnel_router {
     server 172.18.0.1:8085;
 }

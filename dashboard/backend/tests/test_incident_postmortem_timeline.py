@@ -59,7 +59,7 @@ def test_timeline_correlates_a_global_settings_change_with_an_origin_scoped_aler
     query_spy.side_effect = [count_result, type_result, bucket_result]
     monkeypatch.setattr(ai_summary_module.ch, "client", MagicMock(query=query_spy))
 
-    timeline = build_incident_timeline(_origin(), start, end)
+    timeline = build_incident_timeline(_origin(), start, end, include_global=True)  # platform admin's view (C3/H46)
 
     assert timeline["stats"]["total_requests"] == 840
     assert timeline["stats"]["total_alerts"] == 820
@@ -110,7 +110,7 @@ def test_timeline_excludes_audit_events_outside_the_requested_window():
         now=datetime(2026, 9, 22, 5, 0, 0, tzinfo=timezone.utc),
     )
 
-    timeline = build_incident_timeline(_origin(), start, end)
+    timeline = build_incident_timeline(_origin(), start, end, include_global=True)  # platform admin's view (C3/H46)
 
     summaries = [e["summary"] for e in timeline["audit_events"]]
     assert summaries == ["inside window"]
@@ -127,3 +127,18 @@ def test_timeline_is_empty_and_zeroed_when_clickhouse_is_not_connected(monkeypat
     assert timeline["stats"]["total_alerts"] == 0
     assert timeline["hourly_buckets"] == []
     assert timeline["audit_events"] == []
+
+
+
+def test_timeline_omits_global_events_unless_asked_for():
+    # C3/H46: tenants' timelines never carry system-wide audit events.
+    start = datetime(2026, 9, 22, 3, 0, 0)
+    end = datetime(2026, 9, 22, 4, 0, 0)
+    audit_log_module.write_audit_event(
+        scope_id="global", actor_user_id="u", actor_username="a",
+        action="settings.update", summary="system change",
+        now=datetime(2026, 9, 22, 3, 30, 0, tzinfo=timezone.utc),
+    )
+    assert build_incident_timeline(_origin(), start, end)["audit_events"] == []
+    with_global = build_incident_timeline(_origin(), start, end, include_global=True)["audit_events"]
+    assert [e["summary"] for e in with_global] == ["system change"]

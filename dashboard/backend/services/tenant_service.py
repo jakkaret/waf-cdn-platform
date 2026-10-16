@@ -31,42 +31,19 @@ def invalidate_tenant_cache(user_id: Optional[str] = None):
 # already called correctly for the *domain list* -- only the log queries
 # themselves were unscoped).
 def build_domain_pattern_sql(domain_or_ip: str) -> str:
-    """Build a ClickHouse SQL fragment matching one domain/IP's traffic.
+    """ClickHouse SQL fragment matching one domain's traffic: exact equality
+    on access_logs.host, nothing else.
 
-    Two-tier since 2026-09-22. access_logs.host now carries the real Host
-    header (see clickhouse_service.normalize_host), so a row that has one
-    is matched by exact equality -- the only form of tenant attribution
-    here that is actually correct. Rows written before that column existed
-    have host = '' and can only be matched the old way: by guessing the
-    origin from URL keywords, which is wrong in both directions (two
-    tenants both running DVWA are indistinguishable, and '%.php%' sweeps in
-    any PHP traffic in the table). That guess is now confined to
-    host = '' rows, so it decays out of the results on its own as the
-    retention window rolls over.
+    Until 2026-10-16 rows with host = '' were matched by guessing the origin
+    from URL keywords ('%.php%' for anything DVWA-like, '%<domain>%' in the
+    URL or client IP), which could hand one tenant another tenant's traffic
+    (N18/H44/H49). Production held no such rows, writers now store "-" for a
+    missing Host (clickhouse_service.UNKNOWN_HOST), and the guess is gone.
     """
     clean = str(domain_or_ip).strip().lower()
     if not clean or clean == "all":
         return ""
-    exact = f"host = '{escape_like_value(clean)}'"
-    legacy = _build_legacy_keyword_sql(clean)
-    if not legacy:
-        return f"({exact})"
-    return f"({exact} OR (host = '' AND {legacy}))"
-
-
-def _build_legacy_keyword_sql(clean: str) -> str:
-    """Pre-host-column origin guess. Only ever applied to host = '' rows."""
-    if "juice" in clean or "3000" in clean:
-        return "(url LIKE '%juice%' OR url LIKE '%rest%' OR url LIKE '%socket.io%' OR url LIKE '%assets/public%' OR url LIKE '%main.js%' OR url LIKE '%polyfills.js%' OR url LIKE '%scripts.js%')"
-    elif "dvwa" in clean or "8080" in clean or ".php" in clean:
-        return "(url LIKE '%dvwa%' OR url LIKE '%.php%' OR url LIKE '%vulnerabilities%')"
-    elif "vampi" in clean or "5000" in clean:
-        return "(url LIKE '%vampi%' OR url LIKE '%/api/v1/%')"
-    elif "bwapp" in clean:
-        return "(url LIKE '%bwapp%' OR url LIKE '%bWAPP%')"
-    else:
-        escaped = escape_like_value(clean)
-        return f"(url LIKE '%{escaped}%' OR client_ip LIKE '%{escaped}%')"
+    return f"(host = '{escape_like_value(clean)}')"
 
 
 def _normalize_origin_key(value: str) -> str:
