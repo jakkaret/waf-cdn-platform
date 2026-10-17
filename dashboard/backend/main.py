@@ -281,6 +281,7 @@ from api import shield_events as shield_events_api
 from api import tenant_rules as tenant_rules_api
 from api import managed_rules as managed_rules_api
 from api import invites as invites_api
+from api import support as support_api
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
@@ -303,6 +304,7 @@ app.include_router(shield_events_api.router)
 app.include_router(tenant_rules_api.router)
 app.include_router(managed_rules_api.router)
 app.include_router(invites_api.router)
+app.include_router(support_api.router)
 
 # Error Handlers
 from fastapi import Request

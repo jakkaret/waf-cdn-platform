@@ -165,9 +165,29 @@ def verify_origin_access(
     viewer_ids = origin.get("viewer_user_ids") or set()
     editor_ids = origin.get("editor_user_ids") or set()
     if origin.get("admin_user_id") != user_id and user_id not in viewer_ids and user_id not in editor_ids:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. You do not have access to this origin.")
+        if not _support_grant_allows(origin_id, current_user, "read"):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. You do not have access to this origin.")
 
     return origin
+
+
+def _support_grant_allows(origin_id: str, current_user: dict, kind: str) -> bool:
+    """Platform support staff (role admin) may use an origin while its admin
+    has an active support grant open for it (docs/tickets/support-access.md):
+    any level for reads, "editor" for edits. Never used by
+    verify_origin_ownership. Each use is logged; if the log cannot be written
+    the access is refused."""
+    if current_user.get("role") != "admin":
+        return False
+    from services import support_service
+    grant = support_service.active_grant(origin_id)
+    if not grant or (kind == "edit" and grant.get("level") != "editor"):
+        return False
+    try:
+        support_service.log_use(grant["grant_id"], origin_id, current_user.get("user_id"), kind)
+    except Exception:
+        return False
+    return True
 
 
 def verify_origin_edit_access(
@@ -188,7 +208,7 @@ def verify_origin_edit_access(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Origin not found")
 
     user_id = current_user.get("user_id")
-    if not is_origin_admin(origin, user_id):
+    if not is_origin_admin(origin, user_id) and not _support_grant_allows(origin_id, current_user, "edit"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. You do not have edit access to this origin.")
 
     return origin

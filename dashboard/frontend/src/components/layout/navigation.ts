@@ -5,6 +5,7 @@ import {
   FlaskConical,
   Globe,
   LayoutDashboard,
+  LifeBuoy,
   ListFilter,
   Server,
   Settings,
@@ -98,6 +99,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Administration',
     entries: [
       { kind: 'link', id: 'users', label: 'Access control', path: '/users', icon: Users, access: 'operator', keywords: ['users', 'roles'] },
+      { kind: 'link', id: 'support', label: 'Support tickets', path: '/support', icon: LifeBuoy, access: 'member', keywords: ['help', 'ticket'] },
       { kind: 'link', id: 'settings', label: 'System settings', path: '/settings', icon: Settings, access: 'member' },
       { kind: 'link', id: 'concepts', label: 'Concepts', path: '/concepts', icon: FlaskConical, access: 'operator', badge: 'Preview' },
     ],

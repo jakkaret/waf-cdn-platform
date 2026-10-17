@@ -64,25 +64,76 @@ def is_origin_owned(requested: str, user_domains: List[str]) -> bool:
     return bool(req) and any(req == _normalize_origin_key(d) for d in user_domains or [])
 
 
+# Platform admins (the support team) see a tenant's logs, analytics and
+# alerts only while that tenant's origin has an active support grant
+# (docs/tickets/support-access.md). Traffic that belongs to no tenant (the
+# platform's own hosts, unknown Host "-") stays visible to them.
+_ADMIN_SCOPE_CACHE: Dict[str, Tuple[float, tuple]] = {}
+
+
+def admin_log_scope() -> Tuple[set, set, set, set]:
+    """(tenant_hosts, granted_hosts, tenant_origin_ids, granted_origin_ids).
+    tenant_hosts covers every origin in any status, verified or not, so a
+    host never counts as "nobody's" just because its owner has not verified
+    it yet. Raises if the store is unreachable; callers fail closed."""
+    now = time.time()
+    hit = _ADMIN_SCOPE_CACHE.get("v")
+    if hit and now - hit[0] < CACHE_TTL:
+        return hit[1]
+    from db import pool
+    rows = pool.q("SELECT lower(rtrim(hostname, '.')) AS host, origin_id::text AS origin_id FROM origin_hostnames")
+    origin_ids = {r["origin_id"] for r in pool.q("SELECT id::text AS origin_id FROM origins")}
+    granted_ids = {r["origin_id"] for r in pool.q(
+        "SELECT DISTINCT origin_id::text AS origin_id FROM support_grants "
+        "WHERE revoked_at IS NULL AND expires_at > now()")}
+    tenant_hosts = {r["host"] for r in rows if r["host"]}
+    granted_hosts = {r["host"] for r in rows if r["host"] and r["origin_id"] in granted_ids}
+    val = (tenant_hosts, granted_hosts, origin_ids, granted_ids)
+    _ADMIN_SCOPE_CACHE["v"] = (now, val)
+    return val
+
+
+def invalidate_admin_scope_cache() -> None:
+    _ADMIN_SCOPE_CACHE.clear()
+
+
+def _admin_filter(origin: Optional[str]) -> str:
+    try:
+        tenant_hosts, granted_hosts, _ids, _gids = admin_log_scope()
+    except Exception as exc:
+        logger.warning("admin log scope unavailable, failing closed: %s", exc)
+        return "1=0"
+    blocked = sorted(tenant_hosts - granted_hosts)
+    if origin and str(origin).strip().upper() not in ["ALL", ""]:
+        req = _normalize_origin_key(origin)
+        if req in blocked:
+            return "1=0"  # a tenant's host with no active support grant
+        return build_domain_pattern_sql(req)
+    if not blocked:
+        return ""
+    hosts = ", ".join(f"'{escape_like_value(h)}'" for h in blocked)
+    return f"(host NOT IN ({hosts}))"
+
+
 def build_tenant_origin_filter(origin: Optional[str], user_domains: List[str], is_admin: bool) -> str:
     """Build a strictly isolated ClickHouse SQL WHERE filter for the current
     tenant/user. Returns "1=0" (matches nothing) rather than "" (matches
-    everything) whenever scoping can't be established for a non-admin --
-    fail closed, never open."""
+    everything) whenever scoping can't be established -- fail closed, never
+    open. A platform admin sees non-tenant traffic plus the tenants that
+    currently grant support access (_admin_filter)."""
+    if is_admin:
+        return _admin_filter(origin)
+
     # 1. If a specific origin was requested
     if origin and str(origin).strip().upper() not in ["ALL", ""]:
         req_clean = str(origin).strip()
         # Also covers a user with no domains at all: that used to skip the
         # check entirely and query whatever origin was asked for.
-        if not is_admin and not is_origin_owned(req_clean, user_domains):
+        if not is_origin_owned(req_clean, user_domains):
             return "1=0"  # Forbidden / not this user's domain
         # Same normalisation as the ownership check and as access_logs.host
         # (normalize_host drops the root-label dot).
         return build_domain_pattern_sql(_normalize_origin_key(req_clean))
-
-    # 2. "ALL" (or no origin specified)
-    if is_admin:
-        return ""  # Admins may see everything when no specific origin is named
 
     # 3. Standard tenant users: strictly their own registered domains/origins
     if not user_domains:

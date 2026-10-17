@@ -139,17 +139,30 @@ def test_a_user_cannot_mark_a_specific_alert_belonging_to_another_tenant(client,
     assert all_alerts["alert-b3-1"]["read"] is False
 
 
-def test_admin_sees_and_can_mark_every_tenants_alerts(client, register_user, auth_header):
+def test_admin_sees_a_tenants_alerts_only_under_a_support_grant(client, register_user, auth_header):
+    """docs/tickets/support-access.md: the support team (platform admins) sees
+    a tenant's alerts only while that tenant grants support access."""
+    from db import pool
+    from services.tenant_service import invalidate_admin_scope_cache
     admin = register_user(email="admin4@example.com", username="admin4")  # first user = admin
     user_b = register_user(email="tenant-b4@example.com", username="tenant_b4")
-    _create_origin_with_domain(client, user_b["access_token"], auth_header, "origin-b4", "tenant-b4.example.com")
+    origin_b = _create_origin_with_domain(client, user_b["access_token"], auth_header, "origin-b4", "tenant-b4.example.com")
 
     _seed_alert("alert-b4-1", "tenant-b4.example.com")
+    invalidate_admin_scope_cache()
 
     resp = client.get("/api/ai/notifications/feed", headers=auth_header(admin["access_token"]))
     assert resp.status_code == 200, resp.text
-    assert "alert-b4-1" in [n["alert_id"] for n in resp.json()["notifications"]]
+    assert "alert-b4-1" not in [n["alert_id"] for n in resp.json()["notifications"]]
 
+    origin_id = origin_b["id"] if isinstance(origin_b, dict) else origin_b
+    t = pool.q1("INSERT INTO support_tickets (origin_id, subject) VALUES (%s, 's') RETURNING ticket_id", (origin_id,))
+    pool.exec_("INSERT INTO support_grants (ticket_id, origin_id, level, expires_at) "
+               "VALUES (%s, %s, 'viewer', now() + interval '1 hour')", (t["ticket_id"], origin_id))
+    invalidate_admin_scope_cache()
+
+    resp = client.get("/api/ai/notifications/feed", headers=auth_header(admin["access_token"]))
+    assert "alert-b4-1" in [n["alert_id"] for n in resp.json()["notifications"]]
     resp = client.post("/api/ai/notifications/mark-read", json={}, headers=auth_header(admin["access_token"]))
     assert resp.status_code == 200, resp.text
     all_alerts = {a["alert_id"]: a for a in ai_summary_module.db.get_all_alerts(max_items=2000)}

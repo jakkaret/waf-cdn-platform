@@ -194,13 +194,20 @@ async def summarize_threat_range(
 
 
 def _visible_alerts_for_user(current_user: dict, max_items: int = 2000) -> List[Dict[str, Any]]:
-    """Admin sees every alert (same "is_admin -> no filter" branch
-    summarize_range already uses); everyone else sees only alerts matching
-    their own registered origins' domains/IPs."""
+    """Admin sees unattributed alerts plus those of origins under an active
+    support grant; everyone else sees only alerts of their own origins."""
     if current_user.get("role") == "admin":
-        # Admins see every partition including UNATTRIBUTED, so a scan is
-        # still the right shape for them.
-        return db.get_all_alerts(max_items=max_items)
+        # Admins (the support team) see unattributed alerts and those of
+        # origins under an active support grant, nothing else of a tenant's
+        # (docs/tickets/support-access.md). Fail closed if the scope is unknown.
+        from services.tenant_service import admin_log_scope
+        try:
+            _hosts, _granted_hosts, tenant_ids, granted_ids = admin_log_scope()
+        except Exception:
+            return []
+        return [a for a in db.get_all_alerts(max_items=max_items)
+                if str(a.get("origin_id") or "") not in tenant_ids
+                or str(a.get("origin_id")) in granted_ids]
 
     origin_ids, _active_origins, user_domains = get_user_origins_and_domains(current_user.get("user_id"))
     if not origin_ids and not user_domains:
