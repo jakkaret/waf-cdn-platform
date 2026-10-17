@@ -41,6 +41,8 @@ def test_viewer_never_sees_the_tunnel_token_hash(full_client, register_user, aut
     _admin, _owner, viewer, h, origin_id = _setup(full_client, register_user, auth_header, creator="admin")
     assert full_client.post(f"/api/origins/{origin_id}/viewers", json={"email": "p3-viewer@example.com"},
                             headers=h["admin"]).status_code == 200
+    from tests.helpers.seed import make_domain
+    make_domain({"id": origin_id}, "p3-tunnel.example.org")  # tunnel hosts must be verified on the origin
     issued = full_client.post("/api/tunnel/issue-token",
                               json={"origin_id": origin_id, "domains": ["p3-tunnel.example.org"]},
                               headers=h["admin"])
@@ -57,16 +59,29 @@ def test_viewer_never_sees_the_tunnel_token_hash(full_client, register_user, aut
     assert ok.status_code == 200, ok.text
 
 
-def test_a_tunnel_host_claimed_by_another_origin_is_a_409(full_client, register_user, auth_header):
+def test_a_tunnel_host_of_another_origin_is_refused(full_client, register_user, auth_header):
+    """Re-audit 2026-10-17: a tunnel host must be verified on the same origin,
+    so a host verified on origin A can never be claimed through origin B."""
+    from tests.helpers.seed import make_domain
     _admin, _owner, _viewer, h, origin_a = _setup(full_client, register_user, auth_header, creator="admin")
     origin_b = full_client.post("/api/origins", json={"label": "P3b", "ip": "203.0.113.71", "port": 80},
                                 headers=h["admin"]).json()["id"]
+    make_domain({"id": origin_a}, "p3-same.example.org")
     first = full_client.post("/api/tunnel/issue-token",
                              json={"origin_id": origin_a, "domains": ["p3-same.example.org"]}, headers=h["admin"])
     assert first.status_code == 200, first.text
     second = full_client.post("/api/tunnel/issue-token",
                               json={"origin_id": origin_b, "domains": ["p3-same.example.org"]}, headers=h["admin"])
-    assert second.status_code == 409
+    assert second.status_code == 422
+
+
+def test_a_free_text_tunnel_host_is_refused(full_client, register_user, auth_header):
+    """An admin who owns an origin cannot claim an arbitrary (customer) host as
+    a tunnel domain: that used to put the host into their log/tunnel scope."""
+    _admin, _owner, _viewer, h, origin_a = _setup(full_client, register_user, auth_header, creator="admin")
+    r = full_client.post("/api/tunnel/issue-token",
+                         json={"origin_id": origin_a, "domains": ["someone-elses-shop.example.com"]}, headers=h["admin"])
+    assert r.status_code == 422
 
 
 def test_deleting_an_origin_owner_archives_their_origins(full_client, register_user, auth_header):
