@@ -179,12 +179,12 @@ def test_unprotected_path_is_not_gated(client, redis_):
 
 def _request_code(client, email="alice@gmail.com"):
     return client.post("/cdn-cgi/otp/request", json={"host": HOST, "email": email},
-                       headers={"User-Agent": "pytest"})
+                       headers={"User-Agent": "pytest", "Host": HOST})
 
 
 def _verify(client, challenge_id, code):
     return client.post("/cdn-cgi/otp/verify", json={"challenge_id": challenge_id, "code": code, "host": HOST},
-                       headers={"User-Agent": "pytest"})
+                       headers={"User-Agent": "pytest", "Host": HOST})
 
 
 def test_full_flow_then_post_passes_with_cookie(client, redis_, sent):
@@ -415,3 +415,14 @@ def test_qa_recipients_go_to_the_capture_server_only(monkeypatch):
     # a lookalike domain is not a QA domain
     assert email_sender.send_otp_email("x@qa.waf-it-kku.online.evil.com", "123456", 300)
     assert used[0] == ("smtp.real", 587)
+
+
+def test_otp_body_host_must_match_request_host(client, redis_, sent):
+    """Re-audit 2026-10-17: one site's page cannot drive another site's OTP."""
+    r = client.post("/cdn-cgi/otp/request", json={"host": HOST, "email": "alice@gmail.com"},
+                    headers={"User-Agent": "pytest", "Host": "other-site.example"})
+    assert r.status_code == 400 and r.json()["error"] == "host mismatch"
+    assert sent == []
+    r = client.post("/cdn-cgi/otp/verify", json={"challenge_id": "x", "code": "123456", "host": HOST},
+                    headers={"User-Agent": "pytest", "Host": "other-site.example"})
+    assert r.status_code == 400
