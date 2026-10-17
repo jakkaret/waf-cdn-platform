@@ -91,7 +91,7 @@ if [[ -z "$LEGACY_TOKEN" ]]; then
   echo "Could not fetch agent credentials: is the tunnel token valid and unexpired? Regenerate it from the dashboard." >&2
   exit 1
 fi
-PROXY_NAME="$(echo "$DOMAIN" | tr '.' '-')"
+PROXY_NAME="$DOMAIN"
 
 mkdir -p /etc/waf-agent
 
@@ -190,12 +190,20 @@ async def agent_bootstrap(request: Request):
         raise HTTPException(status_code=503, detail="Tunnel connection secret is not configured on the server")
     return PlainTextResponse(LEGACY_STATIC_TOKEN)
 
-def _proxy_name_matches_domain(proxy_name: str, domain: str) -> bool:
-    """True when `proxy_name` is `domain` with dots as dashes, optionally
-    prefixed by frps with "<user>." (the dashed form itself has no dots)."""
+def _proxy_name_matches_domain(proxy_name: str, domain: str, user: str = "") -> bool:
+    """True when `proxy_name` is exactly `domain` (what config-generator and
+    install-agent.sh write), or exactly "<user>.<domain>" when frps prefixes
+    the connection's login user. Exact equality, no lossy transform: the old
+    dots-to-dashes name mapped my-shop.com and my.shop.com to one string, so
+    a lookalike domain could take the other's name first (re-audit 2026-10-17)."""
     name = str(proxy_name or "").strip().lower()
-    dashed = str(domain or "").strip().lower().replace(".", "-")
-    return bool(dashed) and (name == dashed or name.endswith("." + dashed))
+    dom = str(domain or "").strip().lower().rstrip(".")
+    if not dom:
+        return False
+    if name == dom:
+        return True
+    user = str(user or "").strip()
+    return bool(user) and name == f"{user}.{dom}".lower()
 
 
 def get_proxy_owner(proxy_name: str) -> Optional[str]:
@@ -391,7 +399,7 @@ async def get_tunnel_config(
         f'auth.method = "token"\n'
         f'auth.token = "{LEGACY_STATIC_TOKEN}"\n\n'
         f'[[proxies]]\n'
-        f'name = "{domain_clean.replace(".", "-")}"\n'
+        f'name = "{domain_clean}"\n'
         f'type = "http"\n'
         f'localIP = "{local_ip}"\n'
         f'localPort = {port}\n'
@@ -616,17 +624,17 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
                 if problem:
                     logger.warning(f"FRP Webhook: Blocked proxy '{proxy_name}' for '{target_domain}': {problem}")
                     return {"reject": True, "reject_reason": f"Tunnel token no longer valid: {problem}", "unchange": True}
-                # The name itself must be this domain's (what config-generator and
-                # install-agent.sh write: the domain with dots as dashes, which frps
-                # may prefix with "<user>."). Otherwise a token for any domain could
+                # The name itself must be this domain (what config-generator and
+                # install-agent.sh write), optionally "<login user>." + domain. Otherwise a token for any domain could
                 # register another tenant's predictable name first and lock the real
                 # owner's tunnel out (squatting), because the binding below refuses a
                 # name already recorded for another domain.
-                if not _proxy_name_matches_domain(proxy_name, token_domain):
+                login_user = str((content.get("user") or {}).get("user") or "")
+                if not _proxy_name_matches_domain(proxy_name, token_domain, login_user):
                     logger.warning(
                         f"FRP Webhook: Blocked proxy '{proxy_name}' -- name is not derived from '{token_domain}'"
                     )
-                    return {"reject": True, "reject_reason": "Proxy name must be the domain with dots as dashes", "unchange": True}
+                    return {"reject": True, "reject_reason": "Proxy name must be the tunnel domain", "unchange": True}
                 # P3.1: the proxy name is bound to the token that opened it. A name
                 # already recorded for another domain is not taken over: the name is
                 # chosen by the client, so a holder of any token could otherwise

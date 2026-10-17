@@ -202,7 +202,7 @@ def test_newproxy_legacy_login_with_per_proxy_domain_token_is_accepted():
         "op": "NewProxy",
         "content": {
             "custom_domains": ["dvwa.waf-it-kku.online"],
-            "proxy_name": "dvwa-waf-it-kku-online",
+            "proxy_name": "dvwa.waf-it-kku.online",
             "metas": {"token": token},
             "user": {"user": LEGACY_STATIC_TOKEN, "metas": {}},
         },
@@ -217,7 +217,7 @@ def test_newproxy_jwt_client_may_register_the_domain_its_token_was_issued_for():
         "op": "NewProxy",
         "content": {
             "custom_domains": ["alice.example.com"],
-            "proxy_name": "alice-example-com",
+            "proxy_name": "alice.example.com",
             "user": {"user": token, "metas": {"token": token}},
         },
     }

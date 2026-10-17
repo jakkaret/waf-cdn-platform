@@ -219,8 +219,10 @@ def _tunnel_is_online(tunnel_name: str, online_names: set) -> bool:
     """
     if not tunnel_name:
         return False
+    # Suffix only on a "." boundary (the "<user>." prefix): a bare endswith let
+    # another tenant's "myshop.com" mark "shop.com" connected (re-audit 2026-10-17).
     return any(
-        tunnel_name == n or n.endswith(tunnel_name) or tunnel_name.endswith(n)
+        tunnel_name == n or n.endswith("." + tunnel_name) or tunnel_name.endswith("." + n)
         for n in online_names
     )
 
