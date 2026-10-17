@@ -217,7 +217,7 @@ def test_newproxy_jwt_client_may_register_the_domain_its_token_was_issued_for():
         "op": "NewProxy",
         "content": {
             "custom_domains": ["alice.example.com"],
-            "proxy_name": "alice-tunnel",
+            "proxy_name": "alice-example-com",
             "user": {"user": token, "metas": {"token": token}},
         },
     }

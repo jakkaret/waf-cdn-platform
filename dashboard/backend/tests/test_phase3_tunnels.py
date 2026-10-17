@@ -31,7 +31,9 @@ def _token(user_id, domain, days=1):
         expires_delta=timedelta(days=days))
 
 
-def _newproxy(token, domain, name="p1"):
+def _newproxy(token, domain, name=None):
+    # Real frpc proxy name: the domain with dots as dashes (config-generator).
+    name = name if name is not None else str(domain).strip().lower().rstrip(".").replace(".", "-")
     return {"op": "NewProxy", "content": {"proxy_name": name, "custom_domains": [domain], "metas": {"token": token}}}
 
 

@@ -5,14 +5,14 @@ import time
 import os
 import uuid
 
-# Caddy (a container on waf-net) and waf-nginx reach the backend from
-# 172.16.0.0/12, so request.client.host is the proxy for every visitor and a
+# Caddy and waf-nginx (containers on waf-net, 172.18.0.0/16; ufw allows :8000
+# only from there) reach the backend, so request.client.host is the proxy and a
 # per-IP limit becomes one global bucket: a few bad logins a minute locked
 # everyone out (re-audit 2026-10-17). X-Real-IP is trusted only from these
 # proxies; Caddy overwrites it with the real peer (nginx/Caddyfile header_up).
 _TRUSTED_PROXIES = [
     ipaddress.ip_network(c.strip())
-    for c in os.getenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128,172.16.0.0/12").split(",")
+    for c in os.getenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128,172.18.0.0/16").split(",")
     if c.strip()
 ]
 
