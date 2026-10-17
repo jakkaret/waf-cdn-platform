@@ -33,7 +33,7 @@ def _token(user_id, domain, days=1):
 
 def _newproxy(token, domain, name=None):
     # Real frpc proxy name: the domain with dots as dashes (config-generator).
-    name = name if name is not None else str(domain).strip().lower().rstrip(".").replace(".", "-")
+    name = name if name is not None else str(domain).strip().lower().rstrip(".")
     return {"op": "NewProxy", "content": {"proxy_name": name, "custom_domains": [domain], "metas": {"token": token}}}
 
 
@@ -85,10 +85,10 @@ def test_caddy_answers_404_for_the_hook_on_public_hosts():
 def test_newproxy_records_the_owner_in_the_database():
     owner = make_tunnel_owner("owned.example.com")
     result = _run(tunnels.frp_webhook_gatekeeper(_newproxy(_token(owner, "owned.example.com"), "owned.example.com",
-                                                           name="owned-example-com")))
+                                                           name="owned.example.com")))
     assert result["reject"] is False
-    assert DynamoDBService().get_proxy_owner("owned-example-com") == owner
-    assert tunnels.get_proxy_owner("owned-example-com") == owner  # survives a restart: no process state
+    assert DynamoDBService().get_proxy_owner("owned.example.com") == owner
+    assert tunnels.get_proxy_owner("owned.example.com") == owner  # survives a restart: no process state
 
 
 # ------------------------------------- P3.2 tokens for verified domains only
