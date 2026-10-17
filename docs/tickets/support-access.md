@@ -27,6 +27,7 @@
    - traffic ที่ไม่ใช่ของ tenant ไหน (โดเมนของแพลตฟอร์มเอง, Host ที่ไม่รู้จัก "-") admin ยังเห็นตามปกติ
    - ตัวกรองกลาง: `tenant_service.build_tenant_origin_filter` (admin → `_admin_filter`) ใช้กับ logs, analytics, copilot, ai summary, cdn stats/logs
    - alert: `ai_summary._visible_alerts_for_user` ใช้กับ feed และหน้า Alerts
+   - หน้าสถานะ tunnel (`/api/tunnels/status?scope=all`): ซ่อน tunnel ของ tenant (เป้าหมายภายใน, traffic) ที่ไม่มี grant
    - ถ้าตรวจขอบเขตไม่ได้ (DB ล่ม) จะ fail closed คือ admin ไม่เห็นข้อมูลของ tenant เลย
    - ข้อยกเว้นที่ตั้งใจไว้: งานปรับกฎ WAF ของแพลตฟอร์มยังดู traffic ทุก origin เพราะกฎมีผลกับทุก origin
      - rule backtest คืนแค่จำนวนครั้งที่ตรงและตัวอย่าง path (ไม่มี host หรือ query)

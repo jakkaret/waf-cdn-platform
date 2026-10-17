@@ -383,3 +383,38 @@ def test_install_script_pins_both_architectures_and_the_docker_image():
     assert "bff260b68ca7b1461182a46c4f34e9709ba32764eed30a15dd94ac97f50a2c40" in script  # amd64
     assert "af6366f2b43920ebfe6235dba6060770399ed1fb18601e5818552bd46a7621f8" in script  # arm64
     assert tunnels.FRPC_IMAGE.startswith("snowdreamtech/frpc:0.61.1@sha256:")
+
+
+def test_admin_scope_all_sees_tenant_tunnels_only_under_support_grant(app, register_user, auth_header, monkeypatch):
+    """docs/tickets/support-access.md: the support team (platform admins) sees a
+    tenant's tunnels (internal target, traffic) only while that tenant grants
+    support access, even with scope=all."""
+    from db import pool
+    from services.tenant_service import invalidate_admin_scope_cache
+    monkeypatch.setenv("FRP_ADMIN_USER", "a")
+    monkeypatch.setenv("FRP_ADMIN_PASS", "b")
+    monkeypatch.setattr(origin_service, "auto_sync_tunnel_origins", AsyncMock(return_value=[]))
+    app.include_router(tunnels.router)
+    client = TestClient(app)
+    admin = register_user(email="sa-admin@example.com", username="sa_admin")  # first user = admin
+    tenant = register_user(email="sa-tenant@example.com", username="sa_tenant")
+    host = "tenant-tunnel.example.com"
+    origin = make_origin({"user_id": tenant["user"]["user_id"]}, label=f"Tunnel ({host})", ip=host)
+    make_domain(origin, host)
+    DynamoDBService().set_proxy_owner(host, tenant["user"]["user_id"], host)
+    proxies = [{"name": host, "status": "online", "conf": {"customDomains": [host], "localIP": "10.0.0.9"}}]
+    h = auth_header(admin["access_token"])
+
+    def seen():
+        tunnels._TUNNELS_CACHE.clear()
+        invalidate_admin_scope_cache()
+        with patch("api.tunnels.httpx.AsyncClient", return_value=_frp(proxies)):
+            return [t["domain"] for t in client.get("/api/tunnels/status?scope=all", headers=h).json()["tunnels"]]
+
+    assert seen() == []
+    t = pool.q1("INSERT INTO support_tickets (origin_id, subject) VALUES (%s, 's') RETURNING ticket_id", (origin["id"],))
+    pool.exec_("INSERT INTO support_grants (ticket_id, origin_id, level, expires_at) "
+               "VALUES (%s, %s, 'viewer', now() + interval '1 hour')", (t["ticket_id"], origin["id"]))
+    assert seen() == [host]
+    pool.exec_("UPDATE support_grants SET revoked_at = now() WHERE ticket_id = %s", (t["ticket_id"],))
+    assert seen() == []
