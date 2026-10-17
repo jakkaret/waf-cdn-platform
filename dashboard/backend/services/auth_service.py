@@ -39,10 +39,10 @@ GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "https://waf-it-kku.onlin
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# [S3 FIX] Domain ที่ได้รับ role admin อัตโนมัติเมื่อ login ผ่าน Google
-# ตั้งค่าใน .env: ADMIN_EMAIL_DOMAIN=yourdomain.com
-# ถ้าไม่กำหนด: ไม่มี domain ใดที่ auto-promote เป็น admin
-ADMIN_EMAIL_DOMAIN = os.getenv("ADMIN_EMAIL_DOMAIN", "")
+# Google sign-in never grants admin (re-audit 2026-10-17): the old
+# ADMIN_EMAIL_DOMAIN rule promoted every verified address on a domain, so a
+# shared domain (e.g. a university) would make all its users platform admins.
+# Admins come only from scripts/seed_admin.py or an existing admin.
 
 ph = PasswordHasher(
     time_cost=3,
@@ -355,9 +355,7 @@ class AuthService:
         return self.create_user(
             email=email,
             username=name,
-            # [S3 FIX] ใช้ ADMIN_EMAIL_DOMAIN จาก env แทน hardcode
-            # ถ้าไม่กำหนด env หรือ domain ไม่ตรง → role เป็น viewer เสมอ
-            role="admin" if (ADMIN_EMAIL_DOMAIN and email.endswith(f"@{ADMIN_EMAIL_DOMAIN}")) else "viewer",
+            role="viewer",
             auth_provider="google",
             provider_id=provider_id,
             avatar_url=avatar,
