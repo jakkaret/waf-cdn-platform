@@ -283,7 +283,9 @@ def normalize_modsec(data):
         # attack that never triggers a ModSecurity rule (e.g. a raw nginx
         # rate-limit 429) has no host to attribute here and is silently
         # skipped by that module rather than guessed at.
-        "host": headers.get("Host") or headers.get("host") or headers.get("X-Forwarded-Host"),
+        # Host only: X-Forwarded-Host is set by the visitor, and this column
+        # decides which tenant sees the row (re-audit 2026-10-17).
+        "host": headers.get("Host") or headers.get("host"),
 
         "raw": data,
     }

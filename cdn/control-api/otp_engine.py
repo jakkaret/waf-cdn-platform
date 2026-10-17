@@ -391,6 +391,11 @@ async def request_code(request: Request, payload: OtpRequestPayload) -> Response
         return JSONResponse({"success": False, "error": "OTP service unavailable"}, status_code=503)
 
     host = normalize_host(payload.host)
+    # Same binding as captcha verify: the body may only name the site the
+    # request arrived on, so one site's page cannot drive another site's OTP
+    # (and its allowlist mail) (re-audit 2026-10-17).
+    if not host or host != normalize_host(request.headers.get("host", "")):
+        return JSONResponse({"success": False, "error": "host mismatch"}, status_code=400)
     config, _ = get_config(host, client)
     if not config.get("enabled"):
         return JSONResponse({"success": False, "error": "OTP not enabled for this site"}, status_code=404)
@@ -448,6 +453,8 @@ async def verify_code(request: Request, payload: OtpVerifyPayload) -> Response:
         return JSONResponse({"success": False, "error": "verification unavailable"}, status_code=503)
 
     host = normalize_host(payload.host)
+    if not host or host != normalize_host(request.headers.get("host", "")):
+        return JSONResponse({"success": False, "error": "host mismatch"}, status_code=400)
     address = client_ip(request)
     key = f"waf:otp:challenge:{payload.challenge_id}"
     config, _ = get_config(host, client)

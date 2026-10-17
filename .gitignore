@@ -78,6 +78,9 @@ docs/site/.vitepress/cache/
 modsecurity/custom-rules/managed-*.conf
 modsecurity/custom-rules/tenant-*.conf
 dashboard/backend/data/managed_ruleset.json
+# Runtime settings written by the dashboard (and by tests); holds secrets
+# such as the Telegram bot token on Main. Never tracked, never deployed.
+dashboard/backend/data/system_settings.json
 
 # Mode A site configs written at runtime by services/nginx_site_service.py;
 # they carry DECEPTION_INTERNAL_KEY.

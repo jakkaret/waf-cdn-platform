@@ -317,6 +317,27 @@ async def not_found_handler(request: Request, exc):
         content={"error": "Resource not found"}
     )
 
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exception_handlers import http_exception_handler as _default_http_exception_handler
+import logging as _logging
+import uuid as _uuid
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error_handler(request: Request, exc: StarletteHTTPException):
+    """Routes raise HTTPException(500, detail=str(e)) in many places; FastAPI's
+    own handler would echo that text (DB/ClickHouse errors, hosts, queries).
+    500s get a generic body with a reference id and the detail is logged
+    (re-audit 2026-10-17). Every other status keeps its deliberate message."""
+    if exc.status_code == 500:
+        ref = _uuid.uuid4().hex[:12]
+        _logging.getLogger("waf.errors").error("500 ref=%s %s %s: %s", ref, request.method, request.url.path, exc.detail)
+        return JSONResponse(status_code=500, content={"error": "Internal server error", "ref": ref})
+    if exc.status_code == 404 and exc.detail == "Not Found":
+        return JSONResponse(status_code=404, content={"error": "Resource not found"})
+    return await _default_http_exception_handler(request, exc)
+
+
 @app.exception_handler(500)
 async def internal_error_handler(request: Request, exc):
     # Log the detail server-side; never echo internal exception text to clients.
