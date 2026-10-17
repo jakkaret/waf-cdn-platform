@@ -18,7 +18,7 @@ def jwt_for_myshop(monkeypatch):
 
 def _newproxy(custom_domains, subdomain=""):
     return {"op": "NewProxy", "content": {
-        "proxy_name": "p1",
+        "proxy_name": "myshop-com",
         "custom_domains": custom_domains,
         "subdomain": subdomain,
         "metas": {"token": "x"},

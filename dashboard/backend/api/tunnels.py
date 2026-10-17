@@ -190,6 +190,14 @@ async def agent_bootstrap(request: Request):
         raise HTTPException(status_code=503, detail="Tunnel connection secret is not configured on the server")
     return PlainTextResponse(LEGACY_STATIC_TOKEN)
 
+def _proxy_name_matches_domain(proxy_name: str, domain: str) -> bool:
+    """True when `proxy_name` is `domain` with dots as dashes, optionally
+    prefixed by frps with "<user>." (the dashed form itself has no dots)."""
+    name = str(proxy_name or "").strip().lower()
+    dashed = str(domain or "").strip().lower().replace(".", "-")
+    return bool(dashed) and (name == dashed or name.endswith("." + dashed))
+
+
 def get_proxy_owner(proxy_name: str) -> Optional[str]:
     """Owner of an FRP proxy, recorded by the NewProxy hook from the tunnel
     token that opened it (P3.1: in PostgreSQL, table tunnel_proxy_owners,
@@ -608,6 +616,17 @@ async def frp_webhook_gatekeeper(req: Dict[str, Any]):
                 if problem:
                     logger.warning(f"FRP Webhook: Blocked proxy '{proxy_name}' for '{target_domain}': {problem}")
                     return {"reject": True, "reject_reason": f"Tunnel token no longer valid: {problem}", "unchange": True}
+                # The name itself must be this domain's (what config-generator and
+                # install-agent.sh write: the domain with dots as dashes, which frps
+                # may prefix with "<user>."). Otherwise a token for any domain could
+                # register another tenant's predictable name first and lock the real
+                # owner's tunnel out (squatting), because the binding below refuses a
+                # name already recorded for another domain.
+                if not _proxy_name_matches_domain(proxy_name, token_domain):
+                    logger.warning(
+                        f"FRP Webhook: Blocked proxy '{proxy_name}' -- name is not derived from '{token_domain}'"
+                    )
+                    return {"reject": True, "reject_reason": "Proxy name must be the domain with dots as dashes", "unchange": True}
                 # P3.1: the proxy name is bound to the token that opened it. A name
                 # already recorded for another domain is not taken over: the name is
                 # chosen by the client, so a holder of any token could otherwise

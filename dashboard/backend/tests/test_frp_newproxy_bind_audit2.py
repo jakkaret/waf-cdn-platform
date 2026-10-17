@@ -30,7 +30,7 @@ async def test_non_http_proxy_rejected(monkeypatch, ptype):
 @pytest.mark.asyncio
 async def test_http_proxy_still_allowed(monkeypatch):
     _jwt(monkeypatch, "myshop.com", make_tunnel_owner("myshop.com"))
-    r = await tunnels.frp_webhook_gatekeeper(_newproxy("p1", ["myshop.com"], "http"))
+    r = await tunnels.frp_webhook_gatekeeper(_newproxy("myshop-com", ["myshop.com"], "http"))
     assert r["reject"] is False
 
 
@@ -50,6 +50,26 @@ async def test_other_tenant_cannot_take_over_proxy_name(monkeypatch):
     r = await tunnels.frp_webhook_gatekeeper(_newproxy("T.victim-com", ["attacker.com"]))
     assert r["reject"] is True
     assert DynamoDBService().get_proxy_owner("T.victim-com") == str(victim)
+
+
+@pytest.mark.asyncio
+async def test_other_tenant_cannot_squat_victims_name_first(monkeypatch):
+    """The name must be derived from the token's own domain, so an attacker
+    cannot register the victim's predictable name before the victim connects."""
+    victim = make_tunnel_owner("victim2.com")
+    attacker = make_tunnel_owner("attacker2.com")
+    _jwt(monkeypatch, "attacker2.com", attacker)
+    r = await tunnels.frp_webhook_gatekeeper(_newproxy("T.victim2-com", ["attacker2.com"]))
+    assert r["reject"] is True
+    assert DynamoDBService().get_proxy_owner("T.victim2-com") is None
+    _jwt(monkeypatch, "victim2.com", victim)
+    assert (await tunnels.frp_webhook_gatekeeper(_newproxy("T.victim2-com", ["victim2.com"])))["reject"] is False
+
+
+@pytest.mark.parametrize("name,ok", [("shop-example", True), ("tok.shop-example", True),
+                                     ("p1", False), ("shop-example.evil", False), ("xshop-example", False)])
+def test_proxy_name_matches_domain(name, ok):
+    assert tunnels._proxy_name_matches_domain(name, "shop.example") is ok
 
 
 def test_same_domain_refreshes_owner():
