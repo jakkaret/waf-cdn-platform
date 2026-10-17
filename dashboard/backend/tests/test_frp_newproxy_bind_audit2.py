@@ -12,7 +12,10 @@ def _jwt(monkeypatch, domain, owner):
                         lambda *a, **k: ("jwt", {"domain": domain, "user_id": owner}))
 
 
-def _newproxy(name, domains, ptype=None, user="T"):
+TOK = tunnels.LEGACY_STATIC_TOKEN
+
+
+def _newproxy(name, domains, ptype=None, user=TOK):
     c = {"proxy_name": name, "custom_domains": domains, "metas": {"token": "x"}, "user": {"user": user}}
     if ptype is not None:
         c["proxy_type"] = ptype
@@ -45,11 +48,11 @@ async def test_other_tenant_cannot_take_over_proxy_name(monkeypatch):
     victim = make_tunnel_owner("victim.com")
     attacker = make_tunnel_owner("attacker.com")
     _jwt(monkeypatch, "victim.com", victim)
-    assert (await tunnels.frp_webhook_gatekeeper(_newproxy("T.victim.com", ["victim.com"])))["reject"] is False
+    assert (await tunnels.frp_webhook_gatekeeper(_newproxy(TOK + ".victim.com", ["victim.com"])))["reject"] is False
     _jwt(monkeypatch, "attacker.com", attacker)
-    r = await tunnels.frp_webhook_gatekeeper(_newproxy("T.victim.com", ["attacker.com"]))
+    r = await tunnels.frp_webhook_gatekeeper(_newproxy(TOK + ".victim.com", ["attacker.com"]))
     assert r["reject"] is True
-    assert DynamoDBService().get_proxy_owner("T.victim.com") == str(victim)
+    assert DynamoDBService().get_proxy_owner(TOK + ".victim.com") == str(victim)
 
 
 @pytest.mark.asyncio
@@ -59,20 +62,22 @@ async def test_other_tenant_cannot_squat_victims_name_first(monkeypatch):
     victim = make_tunnel_owner("victim2.com")
     attacker = make_tunnel_owner("attacker2.com")
     _jwt(monkeypatch, "attacker2.com", attacker)
-    r = await tunnels.frp_webhook_gatekeeper(_newproxy("T.victim2.com", ["attacker2.com"]))
+    r = await tunnels.frp_webhook_gatekeeper(_newproxy(TOK + ".victim2.com", ["attacker2.com"]))
     assert r["reject"] is True
-    assert DynamoDBService().get_proxy_owner("T.victim2.com") is None
+    assert DynamoDBService().get_proxy_owner(TOK + ".victim2.com") is None
     _jwt(monkeypatch, "victim2.com", victim)
-    assert (await tunnels.frp_webhook_gatekeeper(_newproxy("T.victim2.com", ["victim2.com"])))["reject"] is False
+    assert (await tunnels.frp_webhook_gatekeeper(_newproxy(TOK + ".victim2.com", ["victim2.com"])))["reject"] is False
 
 
 @pytest.mark.parametrize("name,user,ok", [
     ("shop.example", "", True), ("tok.shop.example", "tok", True),
     ("tok.shop.example", "", False),            # prefix only when it is the login user
+    ("x.shop.example", "x", False),             # a client-chosen user is never a prefix
     ("x.shop.example", "tok", False),           # another subdomain is not this domain
     ("shop-example", "", False),                # old lossy dashed form refused
     ("p1", "", False), ("shop.example.evil", "", False), ("myshop.example", "", False)])
-def test_proxy_name_matches_domain(name, user, ok):
+def test_proxy_name_matches_domain(monkeypatch, name, user, ok):
+    monkeypatch.setattr(tunnels, "LEGACY_STATIC_TOKEN", "tok")
     assert tunnels._proxy_name_matches_domain(name, "shop.example", user) is ok
 
 
@@ -82,9 +87,9 @@ async def test_lookalike_domain_cannot_take_the_name(monkeypatch):
     a = make_tunnel_owner("my.shop.com")
     b = make_tunnel_owner("my-shop.com")
     _jwt(monkeypatch, "my-shop.com", b)
-    assert (await tunnels.frp_webhook_gatekeeper(_newproxy("T.my-shop.com", ["my-shop.com"])))["reject"] is False
+    assert (await tunnels.frp_webhook_gatekeeper(_newproxy(TOK + ".my-shop.com", ["my-shop.com"])))["reject"] is False
     _jwt(monkeypatch, "my.shop.com", a)
-    assert (await tunnels.frp_webhook_gatekeeper(_newproxy("T.my.shop.com", ["my.shop.com"])))["reject"] is False
+    assert (await tunnels.frp_webhook_gatekeeper(_newproxy(TOK + ".my.shop.com", ["my.shop.com"])))["reject"] is False
 
 
 def test_same_domain_refreshes_owner():
@@ -94,3 +99,16 @@ def test_same_domain_refreshes_owner():
     assert db.set_proxy_owner("n1", a, "shop.example") is True
     assert db.set_proxy_owner("n1", a, "other.example") is False
     assert db.get_proxy_owner("n1") == str(a)
+
+
+@pytest.mark.asyncio
+async def test_chosen_user_prefix_cannot_claim_a_subdomain_name(monkeypatch):
+    """Owner of shop.com sets frpc user = "x" to claim the bare name of x.shop.com."""
+    sub_owner = make_tunnel_owner("x.shop.com")
+    parent_owner = make_tunnel_owner("shop.com")
+    _jwt(monkeypatch, "shop.com", parent_owner)
+    r = await tunnels.frp_webhook_gatekeeper(_newproxy("x.shop.com", ["shop.com"], user="x"))
+    assert r["reject"] is True
+    assert DynamoDBService().get_proxy_owner("x.shop.com") is None
+    _jwt(monkeypatch, "x.shop.com", sub_owner)
+    assert (await tunnels.frp_webhook_gatekeeper(_newproxy("x.shop.com", ["x.shop.com"])))["reject"] is False
