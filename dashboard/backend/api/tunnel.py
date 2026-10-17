@@ -26,6 +26,8 @@ from pydantic import BaseModel
 
 from services.dynamodb_service import DomainAlreadyClaimed, DynamoDBService
 from services.rbac import get_current_user, require_admin, verify_origin_ownership
+from services.hostnames import canonical_or_none
+from services.dns_service import is_platform_subdomain
 
 router = APIRouter(prefix="/api/tunnel", tags=["Private Tunnel"])
 db = DynamoDBService()
@@ -68,6 +70,25 @@ def _normalise_domains(domains) -> List[str]:
     return seen
 
 
+def _claimable_or_422(domain: str, origin_id: str) -> str:
+    """A tunnel host must be provably this origin's (re-audit 2026-10-17):
+    tunnel_domains feed log scope, the TLS allow-list and routing, so a free
+    text host let the caller claim another tenant's site. Allowed: a domain
+    DNS-verified on this same origin, or a platform subdomain that no other
+    origin holds."""
+    from db import pool
+    host = canonical_or_none(domain)
+    if not host:
+        raise HTTPException(status_code=422, detail=f"Not a hostname: {str(domain)[:80]!r}")
+    rows = pool.q("SELECT origin_id::text AS origin_id, dns_verified FROM domains WHERE domain_name = %s", (host,))
+    if any(r["origin_id"] == str(origin_id) and r["dns_verified"] for r in rows):
+        return host
+    if is_platform_subdomain(host) and not any(r["origin_id"] != str(origin_id) for r in rows):
+        return host
+    raise HTTPException(status_code=422,
+                        detail=f"{host} must be a domain verified on this origin (or an unclaimed platform subdomain)")
+
+
 @router.post("/issue-token")
 async def issue_agent_token(
     req: IssueTokenRequest,
@@ -79,6 +100,7 @@ async def issue_agent_token(
         raise HTTPException(status_code=422, detail="At least one domain is required")
 
     origin = verify_origin_ownership(req.origin_id, current_user)
+    domains = [_claimable_or_422(d, req.origin_id) for d in domains]
 
     secret = secrets.token_hex(32)
     token = f"{TOKEN_PREFIX}_{req.origin_id}_{secret}"
