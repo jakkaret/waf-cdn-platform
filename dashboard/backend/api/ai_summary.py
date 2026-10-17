@@ -7,7 +7,7 @@ from services.gemini_service import gemini_service
 from services.ai_quota import check_ai_quota
 from services.clickhouse_service import ClickHouseService
 from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
-from services.rbac import get_current_user, verify_origin_access, verify_origin_ownership
+from services.rbac import get_current_user, verify_origin_access, verify_origin_edit_access, verify_origin_ownership
 from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter, build_domain_pattern_sql
 from services import audit_log
 import logging
@@ -437,7 +437,9 @@ class PostmortemCreateRequest(BaseModel):
 async def create_postmortem(
     origin_id: str,
     req: PostmortemCreateRequest,
-    origin: dict = Depends(verify_origin_ownership),
+    # Owner or Editor (2026-10-17 role split): an incident report is
+    # day-to-day work, not team or lifecycle management.
+    origin: dict = Depends(verify_origin_edit_access),
     current_user: dict = Depends(get_current_user),
 ):
     start_dt = _parse_time_bound(req.start_time, "start_time")

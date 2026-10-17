@@ -126,6 +126,9 @@ const SupportTicket: React.FC = () => {
           <section className="dash-card p-5 grid gap-3">
             <h3 className="m-0 text-[13px] font-bold">Support access</h3>
             <p className="m-0 text-[12.5px] text-[var(--text-secondary)]">{grantSummary(grants)}</p>
+            {!can_grant && isOpen && !staff && (
+              <p className="m-0 text-[11.5px] text-[var(--text-muted)]">Only the origin's Owner can grant support access.</p>
+            )}
             {can_grant && isOpen && (
               <div className="grid gap-2">
                 <label className="grid gap-1 text-[12px] text-[var(--text-secondary)]">

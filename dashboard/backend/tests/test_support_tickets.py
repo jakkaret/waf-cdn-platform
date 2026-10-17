@@ -157,3 +157,19 @@ def test_admin_scope_follows_real_grants(sc, people):
     assert ts.build_tenant_origin_filter("shop-scope.example", [], True) == "(host = 'shop-scope.example')"
     sc.post(f"/api/support/tickets/{tid}/close", headers=people["owner"]["h"])
     assert ts.build_tenant_origin_filter("shop-scope.example", [], True) == "1=0"
+
+
+def test_editor_opens_ticket_but_only_owner_grants(sc, people):
+    """Owner > Editor > Viewer (2026-10-17): an editor works the ticket, but who
+    may enter the origin is the owner's call."""
+    pool.exec_("INSERT INTO origin_members (origin_id, user_id, role) VALUES (%s, %s, 'editor')",
+               (people["origin"], people["other"]["id"]))
+    ed = people["other"]["h"]
+    r = sc.post("/api/support/tickets", headers=ed, json={"origin_id": people["origin"], "subject": "s", "message": "m"})
+    assert r.status_code == 201
+    tid = r.json()["ticket_id"]
+    detail = sc.get(f"/api/support/tickets/{tid}", headers=ed).json()
+    assert detail["can_grant"] is False
+    g = sc.post(f"/api/support/tickets/{tid}/grant", headers=ed, json={"level": "viewer", "hours": 1})
+    assert g.status_code == 403 and "owner" in g.json()["detail"].lower()
+    assert _grant(sc, people, tid).status_code == 201

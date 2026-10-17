@@ -103,7 +103,7 @@ const Support: React.FC = () => {
         {tickets.isError && <p className="p-5 text-[13px] text-[var(--text-muted)]">Could not load tickets.</p>}
         {!tickets.isLoading && !tickets.isError && list.length === 0 && (
           <p className="p-5 text-[13px] text-[var(--text-muted)]">
-            {myOrigins.length === 0 && !staff ? 'Only an admin of an origin can open a ticket.' : 'No tickets yet.'}
+            {myOrigins.length === 0 && !staff ? 'Only the Owner or an Editor of an origin can open a ticket.' : 'No tickets yet.'}
           </p>
         )}
         {list.length > 0 && (

@@ -129,7 +129,7 @@ def test_role_change_by_another_process_is_noticed(register_user):
 
 
 # ---- P5.4 H33/H43: restoring counts against the owner's quota
-def test_editor_cannot_restore_past_the_owners_quota(client, register_user, auth_header, monkeypatch):
+def test_restore_is_owner_only_and_checks_the_owners_quota(client, register_user, auth_header, monkeypatch):
     import services.origin_service as os_mod
     monkeypatch.setattr(os_mod, "ORIGINS_QUOTA_DEFAULT", 1)
     tag = uuid.uuid4().hex[:6]
@@ -140,7 +140,8 @@ def test_editor_cannot_restore_past_the_owners_quota(client, register_user, auth
     assert client.post(f"/api/origins/{first}/editors", json={"email": editor["user"]["email"]}, headers=oh).status_code == 200
     assert client.delete(f"/api/origins/{first}", headers=oh).status_code == 200      # archive
     _origin(client, oh, ip="203.0.113.152")                                          # owner now at limit
-    r = client.post(f"/api/origins/{first}/restore", headers=eh)
+    assert client.post(f"/api/origins/{first}/restore", headers=eh).status_code == 403  # editors never restore
+    r = client.post(f"/api/origins/{first}/restore", headers=oh)
     assert r.status_code == 400 and "quota" in r.text.lower()
 
 

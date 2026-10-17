@@ -6,6 +6,7 @@ import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Users as UsersIcon, Shield, Trash2, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { PLATFORM_ROLE_LABEL } from '../lib/roles'
 
 export const Users: React.FC = () => {
   const queryClient = useQueryClient()
@@ -113,8 +114,8 @@ export const Users: React.FC = () => {
                           })
                         }
                       >
-                        <option value="viewer">Standard User</option>
-                        <option value="admin">Platform Operator</option>
+                        <option value="viewer">{PLATFORM_ROLE_LABEL.viewer}</option>
+                        <option value="admin">{PLATFORM_ROLE_LABEL.admin}</option>
                       </select>
                     </td>
                     <td className="text-right">

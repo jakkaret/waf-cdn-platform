@@ -89,16 +89,16 @@ def test_archived_origin_voids_pending_link(client, setup, invite_mailbox):
     assert client.post("/api/invites/accept", json={"token": invite_mailbox[0]["token"]}, headers=h["real"]).status_code == 404
 
 
-def test_revoked_inviter_voids_their_pending_links(client, register_user, auth_header, setup, invite_mailbox):
+def test_an_editor_cannot_send_invitations(client, register_user, auth_header, setup, invite_mailbox):
+    """2026-10-17 role split: only the Owner manages the team, so an editor's
+    invitation is refused before any mail is sent."""
     h, origin_id = setup
-    # the owner makes realperson an editor; the editor invites someone; then the
-    # editor is removed -> the editor's pending invitation must stop working
     client.post(f"/api/origins/{origin_id}/editors", json={"email": "real-person@example.com"}, headers=h["owner"])
     client.post("/api/invites/accept", json={"token": invite_mailbox[0]["token"]}, headers=h["real"])
-    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"}, headers=h["real"])
-    real_id = client.get("/api/auth/me", headers=h["real"]).json()["user_id"]
-    assert client.delete(f"/api/origins/{origin_id}/editors/{real_id}", headers=h["owner"]).status_code == 200
-    assert client.post("/api/invites/accept", json={"token": invite_mailbox[1]["token"]}, headers=h["squatter"]).status_code == 404
+    sent = len(invite_mailbox)
+    r = client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"}, headers=h["real"])
+    assert r.status_code == 403
+    assert len(invite_mailbox) == sent
 
 
 def test_removing_a_member_cancels_their_pending_link(client, setup, invite_mailbox):
