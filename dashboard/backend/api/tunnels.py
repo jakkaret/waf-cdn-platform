@@ -202,8 +202,13 @@ def _proxy_name_matches_domain(proxy_name: str, domain: str, user: str = "") -> 
         return False
     if name == dom:
         return True
+    # The prefix is accepted only for the platform's own frps user (every
+    # generated config sets user = FRP_AUTH_TOKEN). `user` is chosen by the
+    # client, so any other value would let "x" + token domain "shop.com" claim
+    # the name "x.shop.com" that belongs to the owner of x.shop.com.
     user = str(user or "").strip()
-    return bool(user) and name == f"{user}.{dom}".lower()
+    return bool(user) and bool(LEGACY_STATIC_TOKEN) and hmac.compare_digest(user, LEGACY_STATIC_TOKEN) \
+        and name == f"{user}.{dom}".lower()
 
 
 def get_proxy_owner(proxy_name: str) -> Optional[str]:
