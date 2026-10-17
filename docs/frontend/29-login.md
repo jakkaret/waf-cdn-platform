@@ -26,7 +26,7 @@ status: VERIFIED
 
 - ผู้ใช้ **คนแรก** ของระบบได้ role `admin` อัตโนมัติ
 - ผู้ใช้คนถัดไปได้ `viewer` เสมอ แม้ร้องขอ `admin`
-- ผู้ใช้ Google OAuth ได้ `admin` เมื่ออีเมลอยู่ในโดเมน `ADMIN_EMAIL_DOMAIN` (ถ้าตั้งไว้) นอกนั้นได้ `viewer`
+- ผู้ใช้ Google OAuth ได้ `viewer` เสมอ admin สร้างได้จาก `scripts/seed_admin.py` หรือให้ admin คนเดิมเปลี่ยน role ในหน้า Users เท่านั้น
 - admin เปลี่ยน role ได้ที่ `/users`
 
 ## แหล่งอ้างอิง (Evidence)
