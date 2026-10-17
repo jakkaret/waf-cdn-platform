@@ -181,8 +181,18 @@ def test_alert_shape_and_unattributed_alerts_stay_admin_only(app, register_user,
     assert alerts["ALT-own"]["timestamp"].endswith("Z")
     visible = ai_summary_module._visible_alerts_for_user({"user_id": viewer["user"]["user_id"], "role": "viewer"})
     assert [a["alert_id"] for a in visible] == ["ALT-own"]
-    admin_view = ai_summary_module._visible_alerts_for_user({"user_id": admin["user"]["user_id"], "role": "admin"})
-    assert {a["alert_id"] for a in admin_view} == {"ALT-own", "ALT-none"}
+    # Support access (docs/tickets/support-access.md): a platform admin sees
+    # unattributed alerts, and a tenant's only under an active support grant.
+    from services.tenant_service import invalidate_admin_scope_cache
+    admin_ctx = {"user_id": admin["user"]["user_id"], "role": "admin"}
+    invalidate_admin_scope_cache()
+    assert {a["alert_id"] for a in ai_summary_module._visible_alerts_for_user(admin_ctx)} == {"ALT-none"}
+    from db import pool
+    t = pool.q1("INSERT INTO support_tickets (origin_id, subject) VALUES (%s, 's') RETURNING ticket_id", (origin_id,))
+    pool.exec_("INSERT INTO support_grants (ticket_id, origin_id, level, expires_at) "
+               "VALUES (%s, %s, 'viewer', now() + interval '1 hour')", (t["ticket_id"], origin_id))
+    invalidate_admin_scope_cache()
+    assert {a["alert_id"] for a in ai_summary_module._visible_alerts_for_user(admin_ctx)} == {"ALT-own", "ALT-none"}
 
 
 def test_audit_uptime_and_postmortem_shapes():

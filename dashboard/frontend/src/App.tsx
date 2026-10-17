@@ -17,6 +17,8 @@ import IPRules from './pages/IPRules'
 import RateLimiting from './pages/RateLimiting'
 import Settings from './pages/Settings'
 import Devices from './pages/Devices'
+import Support from './pages/Support'
+import SupportTicket from './pages/SupportTicket'
 import Alerts from './pages/Alerts'
 import Users from './pages/Users'
 import CDN from './pages/CDN'
@@ -355,6 +357,22 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 <Devices />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/support"
+            element={
+              <ProtectedRoute>
+                <Support />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/support/:id"
+            element={
+              <ProtectedRoute>
+                <SupportTicket />
               </ProtectedRoute>
             }
           />

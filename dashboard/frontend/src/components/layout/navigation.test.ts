@@ -19,7 +19,7 @@ describe('NAV_SECTIONS', () => {
       [
         '/', '/logs', '/origins', '/rules', '/bola', '/ip-rules', '/rate-limits', '/ml-rules',
         '/ml-analyst', '/threshold-proposals', '/alerts', '/cdn', '/tunnels', '/users',
-        '/settings', '/concepts',
+        '/settings', '/concepts', '/support',
       ].sort(),
     )
   })
@@ -31,7 +31,7 @@ describe('NAV_SECTIONS', () => {
 
 describe('visibleSections', () => {
   it('shows everything to an operator', () => {
-    expect(paths(visibleSections(NAV_SECTIONS, true))).toHaveLength(16)
+    expect(paths(visibleSections(NAV_SECTIONS, true))).toHaveLength(17)
   })
 
   it('hides operator-only pages from a regular user', () => {
@@ -39,7 +39,8 @@ describe('visibleSections', () => {
     expect(visible).not.toContain('/ml-rules')
     expect(visible).not.toContain('/users')
     expect(visible).not.toContain('/concepts')
-    expect(visible).toHaveLength(13)
+    expect(visible).toContain('/support') // every member can reach support
+    expect(visible).toHaveLength(14)
   })
 
   it('drops a group whose children are all hidden', () => {

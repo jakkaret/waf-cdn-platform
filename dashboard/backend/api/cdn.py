@@ -228,15 +228,16 @@ async def cdn_stats(current_user: dict = Depends(require_viewer_or_above)):
         return _empty_cdn_stats()
 
     where_clauses = ["timestamp >= now() - INTERVAL 24 HOUR"]
-    if not is_admin:
-        # Same tenant filter as logs/analytics (host = registered domain).
-        # This used to be url LIKE '%domain%': the URL has no host in it, so a
-        # tenant's own traffic barely matched, while any other tenant's request
-        # whose path or query happened to contain the string was counted, and
-        # a tenant with origins but no domain list got the unfiltered totals.
-        origin_clause = build_tenant_origin_filter("ALL", user_domains, is_admin)
-        if origin_clause == "1=0":
-            return _empty_cdn_stats()
+    # Admins too: they see a tenant only under an active support grant.
+    # Same tenant filter as logs/analytics (host = registered domain).
+    # This used to be url LIKE '%domain%': the URL has no host in it, so a
+    # tenant's own traffic barely matched, while any other tenant's request
+    # whose path or query happened to contain the string was counted, and
+    # a tenant with origins but no domain list got the unfiltered totals.
+    origin_clause = build_tenant_origin_filter("ALL", user_domains, is_admin)
+    if origin_clause == "1=0":
+        return _empty_cdn_stats()
+    if origin_clause:
         where_clauses.append(origin_clause)
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}"
@@ -373,14 +374,15 @@ async def cdn_logs(
     # tenant's CDN rows regardless. access_logs.host now carries the real
     # domain, so the same tenant filter the rest of the dashboard uses
     # applies here too.
-    origin_clause = ""
+    user_domains = []
     if not is_admin:
         origin_ids, active_origins, user_domains = get_user_origins_and_domains(user_id)
         if not active_origins and not user_domains:
             return {"logs": []}
-        origin_clause = build_tenant_origin_filter("ALL", user_domains, is_admin)
-        if origin_clause == "1=0":
-            return {"logs": []}
+    # Admins too: they see a tenant only under an active support grant.
+    origin_clause = build_tenant_origin_filter("ALL", user_domains, is_admin)
+    if origin_clause == "1=0":
+        return {"logs": []}
 
     logs = ch.get_cdn_logs(limit=limit, region=region or "ALL", origin_clause=origin_clause)
     return {"logs": logs}
