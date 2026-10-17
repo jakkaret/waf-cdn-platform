@@ -7,7 +7,8 @@
 
 ## สำหรับเจ้าของ origin (ลูกค้า)
 
-ต้องเป็น **admin ของ origin นั้น** คือคนที่สร้าง origin หรือคนที่ได้รับเชิญเป็น editor ถ้าเป็นแค่ viewer จะเปิด ticket ไม่ได้
+- **เปิด ticket และคุยใน ticket:** ต้องเป็น **Owner** หรือ **Editor** ของ origin นั้น (Viewer เปิดไม่ได้)
+- **ให้หรือถอนสิทธิ์ทีม support:** ต้องเป็น **Owner** เท่านั้น เพราะเป็นการตัดสินว่าใครเข้า origin ได้
 
 ### 1. เปิด ticket
 1. เมนูซ้าย → **Administration → Support tickets**
@@ -78,6 +79,23 @@
 
 ---
 
+## role ในระบบ
+
+**role ของแพลตฟอร์ม** (คุณเป็นใครในระบบ)
+| ชื่อที่แสดง | ค่าในฐานข้อมูล | ทำอะไรได้ |
+|---|---|---|
+| **Support** | `admin` | ดูแลระบบ: กฎ WAF รวม, IP, rate limit, ผู้ใช้ และตอบ ticket · เข้า origin, log และ alert ของลูกค้าได้เฉพาะตอนที่ได้สิทธิ์จาก ticket |
+| **User** | `viewer` | ลูกค้า: สมัครแล้วได้ role นี้ สร้าง origin ของตัวเองได้ |
+
+**role ใน origin แต่ละตัว** (Owner > Editor > Viewer)
+| role | ได้มาอย่างไร | ทำอะไรได้ |
+|---|---|---|
+| **Owner** | คนที่สร้าง origin | ทุกอย่าง: แก้ตั้งค่า, ลบหรือกู้ origin, เชิญหรือลบสมาชิก, ออก credential tunnel, ให้สิทธิ์ทีม support · ถูกลบออกไม่ได้ |
+| **Editor** | Owner เชิญทางอีเมล | แก้ตั้งค่า โดเมน shield และกฎ WAF ของ origin, สร้าง postmortem, เปิด ticket · ลบ origin, เชิญคน, ออก credential และให้สิทธิ์ support **ไม่ได้** |
+| **Viewer** | Owner เชิญทางอีเมล | ดูได้อย่างเดียว |
+
+สิทธิ์จาก ticket ทำให้ Support ทำได้เหมือน Viewer หรือ Editor ใน origin นั้นแบบชั่วคราว ไม่มีทางได้สิทธิ์ระดับ Owner
+
 ## วิธีกำหนด admin (ทีม support)
 
 สมัครทุกช่องทาง (ฟอร์มสมัคร, Google, Telegram) ได้ role **viewer** เสมอ การให้ role admin ทำได้ 2 ทาง
@@ -104,6 +122,17 @@ cd /root/waf_project/dashboard/backend
 3. คนที่ถูกเปลี่ยน role จะถูกออกจากระบบทุกเครื่อง และต้องล็อกอินใหม่
 
 ---
+
+## ก่อนเปิดให้ลูกค้าจริงใช้
+
+- role **Support** (`admin`) ต้องเป็นของพนักงาน support ตัวจริงเท่านั้น เพราะ Support เห็น ticket ทุกใบ และเข้า origin ของลูกค้าได้เมื่อได้รับสิทธิ์
+- บัญชีทดสอบต้องเป็น **User** (17 ต.ค. ลด `wafadmin@example.com` เป็น User แล้ว)
+- ชุดทดสอบบน prod (`/root/stage-p0/run_gates.sh`) ยกบัญชีทดสอบเป็น admin เฉพาะระหว่างรัน และลดกลับเองเมื่อจบ แม้เทสจะล้มกลางทางก็ตาม
+- เช็กรายชื่อ admin ได้จากหน้า **Administration → Access control** หรือรันบนเซิร์ฟเวอร์:
+  ```
+  cd /root/waf_project/dashboard/backend
+  .venv/bin/python -c "import sys; sys.path.insert(0,'.'); from dotenv import load_dotenv; load_dotenv('/root/waf_project/.env'); from db import pool; [print(r['email']) for r in pool.q(\"SELECT email FROM users WHERE role='admin'\")]"
+  ```
 
 ## คำถามที่พบบ่อย
 

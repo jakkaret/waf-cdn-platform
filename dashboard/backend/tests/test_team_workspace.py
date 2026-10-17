@@ -80,7 +80,7 @@ def test_an_editor_can_update_the_origin_but_a_viewer_cannot(
     assert resp.status_code == 403
 
 
-def test_an_origin_admin_can_delete_the_origin(client, register_user, auth_header):
+def test_only_the_owner_can_delete_the_origin(client, register_user, auth_header):
     owner = register_user(email="ws-owner2@example.com", username="ws_owner2")
     editor = register_user(email="ws-editor2@example.com", username="ws_editor2")
     owner_h = auth_header(owner["access_token"])
@@ -89,11 +89,11 @@ def test_an_origin_admin_can_delete_the_origin(client, register_user, auth_heade
     origin_id = _create_origin(client, owner["access_token"], auth_header)
     client.post(f"/api/origins/{origin_id}/editors", json={"email": "ws-editor2@example.com"}, headers=owner_h)
 
-    resp = client.delete(f"/api/origins/{origin_id}", headers=editor_h)
-    assert resp.status_code == 200
+    assert client.delete(f"/api/origins/{origin_id}", headers=editor_h).status_code == 403
+    assert client.delete(f"/api/origins/{origin_id}", headers=owner_h).status_code == 200
 
 
-def test_an_origin_admin_can_manage_the_team_but_not_remove_the_creator(client, register_user, auth_header):
+def test_only_the_owner_manages_the_team_and_the_creator_stays(client, register_user, auth_header):
     owner = register_user(email="ws-owner3@example.com", username="ws_owner3")
     editor = register_user(email="ws-editor3@example.com", username="ws_editor3")
     owner_h = auth_header(owner["access_token"])
@@ -103,14 +103,13 @@ def test_an_origin_admin_can_manage_the_team_but_not_remove_the_creator(client, 
     client.post(f"/api/origins/{origin_id}/editors", json={"email": "ws-editor3@example.com"}, headers=owner_h)
 
     register_user(email="someone-else@example.com", username="someone_else")
-    resp = client.post(f"/api/origins/{origin_id}/viewers", json={"email": "someone-else@example.com"}, headers=editor_h)
-    assert resp.status_code == 200
-
-    resp = client.post(f"/api/origins/{origin_id}/editors", json={"email": "someone-else@example.com"}, headers=editor_h)
-    assert resp.status_code == 200
-
-    resp = client.delete(f"/api/origins/{origin_id}/editors/{owner['user']['user_id']}", headers=editor_h)
-    assert resp.status_code == 400
+    # an editor cannot invite or remove anyone
+    assert client.post(f"/api/origins/{origin_id}/viewers", json={"email": "someone-else@example.com"}, headers=editor_h).status_code == 403
+    assert client.post(f"/api/origins/{origin_id}/editors", json={"email": "someone-else@example.com"}, headers=editor_h).status_code == 403
+    assert client.delete(f"/api/origins/{origin_id}/editors/{owner['user']['user_id']}", headers=editor_h).status_code == 403
+    # the owner can, and the creator can never be removed
+    assert client.post(f"/api/origins/{origin_id}/viewers", json={"email": "someone-else@example.com"}, headers=owner_h).status_code == 200
+    assert client.delete(f"/api/origins/{origin_id}/editors/{owner['user']['user_id']}", headers=owner_h).status_code == 400
 
 
 def test_an_editor_can_add_and_delete_a_domain(client, register_user, auth_header):

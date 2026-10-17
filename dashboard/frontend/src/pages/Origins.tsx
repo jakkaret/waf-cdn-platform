@@ -28,6 +28,8 @@ import {
   AlertTriangle,
   RefreshCw,
 } from 'lucide-react'
+import { useAuthStore } from '../store/authStore'
+import { originRoleOf } from '../lib/roles'
 
 export const Origins: React.FC = () => {
   const navigate = useNavigate()
@@ -35,6 +37,7 @@ export const Origins: React.FC = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'pending' | 'error' | 'archived'>('all')
+  const currentUser = useAuthStore((st) => st.user)
   const [originToDelete, setOriginToDelete] = useState<Origin | null>(null)
   const [originToRestore, setOriginToRestore] = useState<Origin | null>(null)
   const [isRefreshingStatus, setIsRefreshingStatus] = useState(false)
@@ -293,7 +296,7 @@ export const Origins: React.FC = () => {
                     <ArrowRight size={13} />
                   </span>
 
-                  {isArchived ? (
+                  {originRoleOf(origin, currentUser?.user_id) !== 'owner' ? null : isArchived ? (
                     <button
                       onClick={(e) => {
                         e.stopPropagation()

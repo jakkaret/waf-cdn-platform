@@ -8,10 +8,10 @@
 
 ## สิ่งที่ทำ
 1. **Ticket**
-   - admin ของ origin เปิด ticket ผูกกับ origin นั้น และคุยกับทีม support ในข้อความของ ticket
+   - Owner หรือ Editor ของ origin เปิด ticket ผูกกับ origin นั้น และคุยกับทีม support ในข้อความของ ticket
    - ปิด ticket ได้ทั้งสองฝั่ง
 2. **Support grant**
-   - เจ้าของ (admin ของ origin) กดอนุญาตให้ทีม support (คือ admin ของแพลตฟอร์ม) เข้า origin นั้นได้ชั่วคราว
+   - Owner ของ origin กดอนุญาตให้ทีม support (คือ admin ของแพลตฟอร์ม) เข้า origin นั้นได้ชั่วคราว
    - สิทธิ์ผูกกับบัญชีพนักงานจริงของแต่ละคน ไม่มีการสร้างบัญชีใหม่
    - ระดับ `viewer` (ค่าเริ่มต้น) ดูอย่างเดียว
    - ระดับ `editor` แก้ไขได้ ต้องติ๊กยืนยันเพิ่ม
@@ -43,14 +43,14 @@
 ## API (`/api/support`)
 | method | path | ใครเรียกได้ |
 |---|---|---|
-| GET | `/origins` | ผู้ใช้ (ได้รายชื่อ origin ที่ตัวเองเป็น admin) |
-| POST | `/tickets` | admin ของ origin นั้น |
-| GET | `/tickets` | ผู้ใช้เห็น ticket ของ origin ที่ตัวเองเป็น admin, admin แพลตฟอร์มเห็นทั้งหมด |
-| GET | `/tickets/{id}` | เจ้าของ ticket (admin ของ origin) หรือ admin แพลตฟอร์ม |
+| GET | `/origins` | ผู้ใช้ (ได้รายชื่อ origin ที่ตัวเองเป็น Owner หรือ Editor) |
+| POST | `/tickets` | Owner หรือ Editor ของ origin นั้น |
+| GET | `/tickets` | ผู้ใช้เห็น ticket ของ origin ที่ตัวเองเป็น Owner หรือ Editor, admin แพลตฟอร์มเห็นทั้งหมด |
+| GET | `/tickets/{id}` | Owner หรือ Editor ของ origin หรือ admin แพลตฟอร์ม |
 | POST | `/tickets/{id}/messages` | เหมือนข้างบน (ticket ต้องยังเปิด) |
 | POST | `/tickets/{id}/close` | เหมือนข้างบน (ถอน grant ที่ยังใช้อยู่ด้วย) |
-| POST | `/tickets/{id}/grant` | admin ของ origin เท่านั้น |
-| DELETE | `/tickets/{id}/grant` | admin ของ origin เท่านั้น |
+| POST | `/tickets/{id}/grant` | Owner ของ origin เท่านั้น |
+| DELETE | `/tickets/{id}/grant` | Owner ของ origin เท่านั้น |
 
 ## การตรวจสิทธิ์ (services/rbac.py)
 - `verify_origin_access` (อ่าน): ผ่านสำหรับ admin แพลตฟอร์มที่ origin มี grant ใช้งานอยู่ (ระดับใดก็ได้)

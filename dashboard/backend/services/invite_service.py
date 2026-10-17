@@ -51,16 +51,15 @@ def accept_invite(token: str, user_id: str) -> Optional[Tuple[str, str]]:
     the token is unknown, expired or already used. One use per invitation."""
     with pool.transaction():
         # The invitation is only as good as its source: the origin must still
-        # be live and the inviter must still administer it (owner or editor).
-        # Archiving the origin or revoking the inviter voids pending links.
+        # be live and the inviter must still be its Owner (only the Owner
+        # manages the team). Archiving the origin voids pending links.
         row = pool.q1(
             "UPDATE origin_invites i SET accepted_at = now(), accepted_by = %s "
             "FROM origins o "
             "WHERE i.token_hash = %s AND i.accepted_at IS NULL AND i.expires_at > now() "
             "AND o.id = i.origin_id AND o.status NOT IN ('archived', 'deleted') "
             "AND i.invited_by IS NOT NULL "
-            "AND (o.admin_user_id = i.invited_by OR EXISTS (SELECT 1 FROM origin_members m "
-            "     WHERE m.origin_id = o.id AND m.user_id = i.invited_by AND m.role = 'editor')) "
+            "AND o.admin_user_id = i.invited_by "
             "RETURNING i.origin_id, i.role, i.invited_by",
             (user_id, _hash(token or "")),
         )

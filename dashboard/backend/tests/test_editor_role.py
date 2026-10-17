@@ -111,13 +111,15 @@ def test_owner_passes_ownership_check(fake_get_origin):
     assert result["id"] == "origin-1"
 
 
-def test_an_editor_is_an_origin_admin(fake_get_origin):
-    """2026-09-28: origins have exactly two roles, Admin and Viewer. A user in
-    editor_user_ids is an Admin and passes the admin check (it used to be
-    creator-only)."""
+def test_an_editor_edits_but_is_not_the_owner(fake_get_origin):
+    """2026-10-17 role split (Owner > Editor > Viewer): an editor passes the
+    edit check but not the owner check (delete/restore, team, tunnel credentials)."""
     fake_get_origin(_origin(admin="u1", editors=["u3"]))
-    result = rbac_module.verify_origin_ownership("origin-1", current_user={"user_id": "u3"})
-    assert result["id"] == "origin-1"
+    assert rbac_module.verify_origin_edit_access("origin-1", current_user={"user_id": "u3"})["id"] == "origin-1"
+    with pytest.raises(Exception) as exc:
+        rbac_module.verify_origin_ownership("origin-1", current_user={"user_id": "u3"})
+    assert getattr(exc.value, "status_code", None) == 403
+    assert rbac_module.verify_origin_ownership("origin-1", current_user={"user_id": "u1"})["id"] == "origin-1"
 
 
 def test_a_stranger_is_refused_the_admin_check(fake_get_origin):

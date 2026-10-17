@@ -121,22 +121,27 @@ def verify_origin_ownership(
     if not origin or (not allow_archived and origin.get("status") in ARCHIVED_ORIGIN_STATUSES):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Origin not found")
     
-    if not is_origin_admin(origin, current_user.get("user_id")):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. You are not an admin of this origin.")
+    if not is_origin_owner(origin, current_user.get("user_id")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. Only the owner of this origin can do that.")
 
     return origin
 
 
-# Origin roles (2026-09-28): exactly two, "Admin" and "Viewer".
-#   Admin  = the origin's creator (admin_user_id) or anyone in editor_user_ids
-#            (the stored field keeps its old name; no data migration). Every
-#            Admin has the same rights: settings, domains, shield, tunnels,
-#            team management, per-origin WAF rules, delete/restore.
+# Origin roles (2026-10-17): Owner > Editor > Viewer.
+#   Owner  = the origin's creator (admin_user_id). Everything, including
+#            delete/restore, team management (invite/remove members), tunnel
+#            credentials and granting support access. Never removable.
+#   Editor = editor_user_ids. Day-to-day changes: settings, domains, shield,
+#            per-origin WAF rules, postmortems, support tickets.
 #   Viewer = viewer_user_ids, read-only.
-# The creator can never be removed, so an origin always keeps an Admin.
-# verify_origin_ownership keeps its name for the existing call sites; it now
-# means "is an Admin of this origin".
+# verify_origin_ownership = Owner only; verify_origin_edit_access = Owner or
+# Editor (is_origin_admin); verify_origin_access = any member.
+def is_origin_owner(origin: dict, user_id: Optional[str]) -> bool:
+    return bool(origin) and bool(user_id) and origin.get("admin_user_id") == user_id
+
+
 def is_origin_admin(origin: dict, user_id: Optional[str]) -> bool:
+    """Owner or Editor: may make day-to-day changes to the origin."""
     if not origin or not user_id:
         return False
     return origin.get("admin_user_id") == user_id or user_id in (origin.get("editor_user_ids") or set())

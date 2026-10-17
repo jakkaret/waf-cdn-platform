@@ -1,10 +1,10 @@
 """Support tickets and time-limited support access (docs/tickets/support-access.md).
 
 Who may do what:
-- open a ticket, grant or revoke support access: an Admin of that origin
-  (creator or editor, rbac.is_origin_admin);
-- read, reply, close: that origin's Admins, or platform support staff
-  (platform role "admin");
+- open, read, reply, close a ticket: that origin's Owner or Editors
+  (rbac.is_origin_admin), or platform support staff (platform role "admin");
+- grant or revoke support access: the origin's Owner only (rbac.is_origin_owner),
+  like any other decision about who may use the origin;
 - support staff use an origin only through a grant, enforced in
   services/rbac.py, never through these routes.
 """
@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from services import support_service
 from services.dynamodb_service import DynamoDBService
-from services.rbac import ARCHIVED_ORIGIN_STATUSES, get_current_user, is_origin_admin
+from services.rbac import ARCHIVED_ORIGIN_STATUSES, get_current_user, is_origin_admin, is_origin_owner
 from services.support_service import SupportError
 
 router = APIRouter(prefix="/api/support", tags=["Support"])
@@ -62,9 +62,10 @@ def _ticket_for(ticket_id: str, user: dict, owner_only: bool = False) -> tuple:
     origin = DynamoDBService().get_origin_by_id(ticket["origin_id"])
     owner = bool(origin) and is_origin_admin(origin, user.get("user_id"))
     if owner_only:
-        if not owner:
-            raise HTTPException(status_code=403 if _is_staff(user) else 404,
-                                detail="Only an admin of this origin can do that" if _is_staff(user) else "Ticket not found")
+        if not (origin and is_origin_owner(origin, user.get("user_id"))):
+            can_see = owner or _is_staff(user)  # an Editor or support sees the ticket: say why
+            raise HTTPException(status_code=403 if can_see else 404,
+                                detail="Only the owner of this origin can do that" if can_see else "Ticket not found")
     elif not owner and not _is_staff(user):
         raise HTTPException(status_code=404, detail="Ticket not found")
     return ticket, origin
@@ -111,7 +112,7 @@ def ticket_detail(ticket_id: str, current_user: dict = Depends(get_current_user)
         "messages": support_service.messages(ticket_id),
         "grants": support_service.grants(ticket_id),
         "access_log": support_service.access_log(ticket_id),
-        "can_grant": bool(origin) and is_origin_admin(origin, current_user.get("user_id")),
+        "can_grant": bool(origin) and is_origin_owner(origin, current_user.get("user_id")),
         "staff": _is_staff(current_user),
     }
 

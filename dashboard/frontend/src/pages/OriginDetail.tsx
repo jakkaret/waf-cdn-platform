@@ -58,6 +58,7 @@ import {
   Bug,
   ExternalLink,
 } from 'lucide-react'
+import { ORIGIN_ROLE_LABEL, canEditOrigin, canManageOrigin, originRoleOf } from '../lib/roles'
 
 const cveSeverityClass = (sev: string): string => {
   switch (sev) {
@@ -348,16 +349,16 @@ export const OriginDetail: React.FC = () => {
   const domains = domainsData?.data?.domains || []
   const verifiedDomainCount = domains.filter((d: Domain) => d.verification_status === 'verified').length
 
-  const isOwner = !!origin && !!currentUser && origin.admin_user_id === currentUser.user_id
-  // Origin "Admin": the creator or anyone granted Admin (stored as editor_user_ids).
-  // The backend gives every Admin the same rights, so the UI gates on this,
-  // not on isOwner (creator only).
-  const isAdmin = isOwner || (!!origin && !!currentUser && (origin.editor_user_ids ?? []).includes(currentUser.user_id))
+  // Owner > Editor > Viewer (lib/roles). isAdmin = may edit (Owner or Editor);
+  // isOwner = may manage the team, delete/restore and issue tunnel credentials.
+  const myOriginRole = originRoleOf(origin, currentUser?.user_id)
+  const isOwner = canManageOrigin(myOriginRole)
+  const isAdmin = canEditOrigin(myOriginRole)
 
   const { data: viewersData, isLoading: viewersLoading } = useQuery({
     queryKey: ['origin-viewers', id],
     queryFn: () => getOriginViewers(id!),
-    enabled: !!id && isAdmin,
+    enabled: !!id && isOwner,
   })
   const viewers = viewersData?.data?.viewers || []
 
@@ -389,7 +390,7 @@ export const OriginDetail: React.FC = () => {
   const { data: editorsData, isLoading: editorsLoading } = useQuery({
     queryKey: ['origin-editors', id],
     queryFn: () => getOriginEditors(id!),
-    enabled: !!id && isAdmin,
+    enabled: !!id && isOwner,
   })
   const editors = editorsData?.data?.editors || []
 
@@ -540,6 +541,9 @@ export const OriginDetail: React.FC = () => {
               <h1 className="text-[20px] font-bold text-[var(--text-primary)] font-mono m-0">
                 {origin.label}
               </h1>
+              {myOriginRole && (
+                <Badge color="info">You: {ORIGIN_ROLE_LABEL[myOriginRole]}</Badge>
+              )}
               <Badge
                 color={
                   origin.status === 'active'
@@ -560,7 +564,8 @@ export const OriginDetail: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2.5">
-          {origin.status === 'archived' ? (
+          {/* Archive / restore / cancel are Owner-only (lib/roles). */}
+          {!isOwner ? null : origin.status === 'archived' ? (
             <Button
               variant="brand"
               onClick={() => setIsRestoreModalOpen(true)}
@@ -1347,7 +1352,7 @@ export const OriginDetail: React.FC = () => {
 
         {activeTab === 'team' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {isAdmin && (
+            {isOwner && (
               <div className="dash-card p-5 space-y-4">
                 <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
                   <Users size={14} /> Viewer Access
@@ -1405,7 +1410,7 @@ export const OriginDetail: React.FC = () => {
               </div>
             )}
 
-            {isAdmin && (
+            {isOwner && (
               <div className="dash-card p-5 space-y-4">
                 <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
                   <Users size={14} /> Admin Access

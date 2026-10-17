@@ -130,7 +130,7 @@ export const Register: React.FC = () => {
             <div className="grid max-w-lg grid-cols-3 gap-3.5">
               {[
                 { icon: ShieldCheck, label: 'Bootstrap', value: 'First admin' },
-                { icon: UsersRound, label: 'Default role', value: 'Viewer' },
+                { icon: UsersRound, label: 'Default role', value: 'User' },
                 { icon: KeyRound, label: 'Password', value: 'Argon2 hash' },
               ].map((item) => {
                 const Icon = item.icon
