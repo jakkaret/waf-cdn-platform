@@ -87,7 +87,14 @@ def admin_log_scope() -> Tuple[set, set, set, set]:
         "SELECT DISTINCT origin_id::text AS origin_id FROM support_grants "
         "WHERE revoked_at IS NULL AND expires_at > now()")}
     tenant_hosts = {r["host"] for r in rows if r["host"]}
-    granted_hosts = {r["host"] for r in rows if r["host"] and r["origin_id"] in granted_ids}
+    # A host counts as granted only when EVERY origin it maps to is granted:
+    # the same host can sit on several origins (an unverified BYO row is
+    # enough), so one tenant's grant must not open another tenant's host.
+    owners: Dict[str, set] = {}
+    for r in rows:
+        if r["host"]:
+            owners.setdefault(r["host"], set()).add(r["origin_id"])
+    granted_hosts = {h for h, ids in owners.items() if ids and ids <= granted_ids}
     val = (tenant_hosts, granted_hosts, origin_ids, granted_ids)
     _ADMIN_SCOPE_CACHE["v"] = (now, val)
     return val

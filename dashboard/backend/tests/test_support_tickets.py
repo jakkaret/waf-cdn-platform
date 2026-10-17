@@ -173,3 +173,18 @@ def test_editor_opens_ticket_but_only_owner_grants(sc, people):
     g = sc.post(f"/api/support/tickets/{tid}/grant", headers=ed, json={"level": "viewer", "hours": 1})
     assert g.status_code == 403 and "owner" in g.json()["detail"].lower()
     assert _grant(sc, people, tid).status_code == 201
+
+
+def test_one_tenants_grant_never_opens_another_tenants_host(sc, people):
+    """A granting tenant that also lists another tenant's host (an unverified
+    BYO row is enough) must not make that host visible to support."""
+    from services import tenant_service as ts
+    pool.exec_("INSERT INTO domains (domain_name, origin_id, dns_verified, verification_token) VALUES (%s, %s, true, 't')",
+               ("victim-host.example", people["other_origin"]))
+    pool.exec_("INSERT INTO domains (domain_name, origin_id, dns_verified, verification_token) VALUES (%s, %s, false, 't2')",
+               ("victim-host.example", people["origin"]))
+    tid = _open(sc, people).json()["ticket_id"]
+    _grant(sc, people, tid)  # only the owner's origin is granted
+    ts.invalidate_admin_scope_cache()
+    assert ts.build_tenant_origin_filter("victim-host.example", [], True) == "1=0"
+    assert "'victim-host.example'" in ts.build_tenant_origin_filter("ALL", [], True)
