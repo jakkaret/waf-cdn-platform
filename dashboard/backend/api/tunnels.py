@@ -703,12 +703,12 @@ async def get_tunnels_status(
     # traffic) only while that tenant grants support access. Unknown scope
     # fails closed to the admin's own tunnels.
     blocked_hosts, blocked_origin_ids = set(), set()
-    granted_hosts, granted_origin_ids, staff_ids = set(), set(), set()
+    granted_hosts, staff_ids = set(), set()
     if view_all:
         try:
             from services.tenant_service import admin_log_scope
-            t_hosts, granted_hosts, t_ids, granted_origin_ids = admin_log_scope()
-            blocked_hosts, blocked_origin_ids = t_hosts - granted_hosts, t_ids - granted_origin_ids
+            t_hosts, granted_hosts, t_ids, granted_ids = admin_log_scope()
+            blocked_hosts, blocked_origin_ids = t_hosts - granted_hosts, t_ids - granted_ids
             staff_ids = {u.get("user_id") for u in auth_service.list_users() if u.get("role") == "admin"}
         except Exception as exc:
             logger.warning("admin tunnel scope unavailable, showing own tunnels only: %s", exc)
@@ -790,12 +790,14 @@ async def get_tunnels_status(
                 # exactly one of the caller's domains.
                 own = is_mine or domain_lower in user_domain_set
                 host_key = domain_lower.rstrip(".")
-                granted = host_key in granted_hosts or (
-                    matching_origin is not None and str(matching_origin.get("id")) in granted_origin_ids)
-                tenant_hidden = view_all and not own and not granted and (
+                # Hidden unless every claim on it is granted: its host (a host
+                # is granted only when all origins holding it are), the origin
+                # it matched, and a User owner. matching_origin can come from
+                # a tenant-typed ip, so it can hide but never unhide.
+                tenant_hidden = view_all and not own and (
                     host_key in blocked_hosts
                     or (matching_origin is not None and str(matching_origin.get("id")) in blocked_origin_ids)
-                    or (owner_id is not None and owner_id not in staff_ids)  # a User's tunnel
+                    or (owner_id is not None and owner_id not in staff_ids and host_key not in granted_hosts)
                 )
                 is_user_tunnel = own or (view_all and not tenant_hidden)
 

@@ -418,3 +418,30 @@ def test_admin_scope_all_sees_tenant_tunnels_only_under_support_grant(app, regis
     assert seen() == [host]
     pool.exec_("UPDATE support_grants SET revoked_at = now() WHERE ticket_id = %s", (t["ticket_id"],))
     assert seen() == []
+
+
+def test_granting_tenant_cannot_unhide_another_tenants_tunnel_via_origin_ip(app, register_user, auth_header, monkeypatch):
+    from db import pool
+    from services.tenant_service import invalidate_admin_scope_cache
+    monkeypatch.setenv("FRP_ADMIN_USER", "a")
+    monkeypatch.setenv("FRP_ADMIN_PASS", "b")
+    monkeypatch.setattr(origin_service, "auto_sync_tunnel_origins", AsyncMock(return_value=[]))
+    app.include_router(tunnels.router)
+    client = TestClient(app)
+    admin = register_user(email="ip-admin@example.com", username="ip_admin")
+    victim = register_user(email="ip-victim@example.com", username="ip_victim")
+    granter = register_user(email="ip-granter@example.com", username="ip_granter")
+    host = "victim-tunnel.example.com"
+    v_origin = make_origin({"user_id": victim["user"]["user_id"]}, label="v", ip="203.0.113.10")
+    make_domain(v_origin, host)
+    DynamoDBService().set_proxy_owner(host, victim["user"]["user_id"], host)
+    g_origin = make_origin({"user_id": granter["user"]["user_id"]}, label="g", ip=host)  # typed victim host as ip
+    t = pool.q1("INSERT INTO support_tickets (origin_id, subject) VALUES (%s, 's') RETURNING ticket_id", (g_origin["id"],))
+    pool.exec_("INSERT INTO support_grants (ticket_id, origin_id, level, expires_at) "
+               "VALUES (%s, %s, 'viewer', now() + interval '1 hour')", (t["ticket_id"], g_origin["id"]))
+    tunnels._TUNNELS_CACHE.clear()
+    invalidate_admin_scope_cache()
+    proxies = [{"name": host, "status": "online", "conf": {"customDomains": [host]}}]
+    with patch("api.tunnels.httpx.AsyncClient", return_value=_frp(proxies)):
+        seen = client.get("/api/tunnels/status?scope=all", headers=auth_header(admin["access_token"])).json()
+    assert [x["domain"] for x in seen["tunnels"]] == []
