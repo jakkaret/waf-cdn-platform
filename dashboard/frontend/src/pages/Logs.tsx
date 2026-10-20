@@ -24,6 +24,7 @@ import {
 import { WafLog } from '../types'
 import toast from 'react-hot-toast'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
+import { confidenceLabel, LogExplanation, toLogExplanation } from '../lib/logExplanation'
 
 // Helper function to format timestamp to Thailand Timezone (Asia/Bangkok • UTC+7)
 export const formatThaiDateTime = (rawDate?: string | number | Date | null): string => {
@@ -80,7 +81,7 @@ export const Logs: React.FC = () => {
   const [selectedLog, setSelectedLog] = useState<WafLog | null>(null)
   const [copiedText, setCopiedText] = useState<string | null>(null)
   
-  const [explanation, setExplanation] = useState<string | null>(null)
+  const [explanation, setExplanation] = useState<LogExplanation | null>(null)
   const [isExplaining, setIsExplaining] = useState(false)
   const [maskedPayload, setMaskedPayload] = useState<string | null>(null)
   const [isMasking, setIsMasking] = useState(false)
@@ -138,7 +139,7 @@ export const Logs: React.FC = () => {
     try {
       setIsExplaining(true)
       const res = await logsApi.explainLog(logId)
-      setExplanation(res.explanation || res.analysis || JSON.stringify(res))
+      setExplanation(toLogExplanation(res))
     } catch (err) {
       toast.error('Failed to generate explanation')
     } finally {
@@ -567,7 +568,14 @@ export const Logs: React.FC = () => {
               {explanation && (
                 <div className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-500/30 space-y-2 text-[12px]">
                   <span className="text-[10.5px] text-indigo-400 uppercase font-bold">AI Explanation</span>
-                  <p className="text-[var(--text-primary)] m-0 leading-relaxed whitespace-pre-wrap">{explanation}</p>
+                  <p className="text-[var(--text-primary)] m-0 leading-relaxed whitespace-pre-wrap font-semibold">{explanation.summary}</p>
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 m-0">
+                    {explanation.category && (<><dt className="text-[var(--text-muted)]">Category</dt><dd className="m-0 text-[var(--text-primary)]">{explanation.category}</dd></>)}
+                    {explanation.matchedToken && (<><dt className="text-[var(--text-muted)]">Matched token</dt><dd className="m-0 font-mono break-all text-[var(--text-primary)]">{explanation.matchedToken}</dd></>)}
+                    {explanation.rootCause && explanation.rootCause !== explanation.summary && (<><dt className="text-[var(--text-muted)]">Root cause</dt><dd className="m-0 text-[var(--text-primary)]">{explanation.rootCause}</dd></>)}
+                    {explanation.remediation && (<><dt className="text-[var(--text-muted)]">Remediation</dt><dd className="m-0 text-[var(--text-primary)]">{explanation.remediation}</dd></>)}
+                    {explanation.confidence !== undefined && (<><dt className="text-[var(--text-muted)]">Confidence</dt><dd className="m-0 text-[var(--text-primary)]">{confidenceLabel(explanation.confidence)}</dd></>)}
+                  </dl>
                 </div>
               )}
 
