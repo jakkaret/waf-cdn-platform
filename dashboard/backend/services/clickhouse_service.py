@@ -468,6 +468,23 @@ class ClickHouseService:
                 "severities": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"]
             }
 
+    def get_traffic_sample_for_simulation(self, time_range_hours: int = 24, limit: int = 2000) -> list:
+        """Most recent requests for the blast-radius replay
+        (services/blast_radius_service.py), with the fields it inspects.
+        blast_radius_service called this method but it did not exist: the
+        AttributeError was logged and every simulation ran on synthetic
+        traffic only."""
+        if not self.connected:
+            return []
+        rows = self.client.query(
+            "SELECT url, method, status_code, client_ip, user_agent, alert, attack_type, host "
+            "FROM access_logs WHERE timestamp >= now() - INTERVAL {hours:UInt32} HOUR "
+            "ORDER BY timestamp DESC LIMIT {limit:UInt32}",
+            parameters={"hours": max(1, int(time_range_hours)), "limit": max(1, int(limit))},
+        ).result_rows
+        cols = ("url", "method", "status", "ip", "user_agent", "alert", "attack_type", "host")
+        return [dict(zip(cols, row)) for row in rows]
+
     _UUID_RE = __import__("re").compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
     def _log_filter_clauses(self, search="", status_filter="ALL", severity_filter="ALL",
