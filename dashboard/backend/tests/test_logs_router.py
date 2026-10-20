@@ -190,6 +190,40 @@ def test_explain_by_id_passes_log_id_as_a_bound_parameter_not_string_interpolati
     )
 
 
+def test_explain_by_id_selects_only_columns_access_logs_has(
+    client: TestClient, register_user, auth_header, monkeypatch
+):
+    """The query named five columns access_logs never had (matched_token,
+    root_cause_explanation, ...), so ClickHouse rejected it every time and
+    every log got the same placeholder explanation."""
+    import re
+    from services.clickhouse_service import ClickHouseService
+
+    svc = ClickHouseService()
+    svc.connected = True
+    svc.client = MagicMock()
+    svc.init_db()
+    create_sql = next(c.args[0] for c in svc.client.command.call_args_list
+                      if "CREATE TABLE IF NOT EXISTS access_logs" in c.args[0])
+    table_columns = set(re.findall(r"^\s*(\w+)\s+(?:UUID|DateTime|String|UInt\d+|Float\d+)", create_sql, re.M))
+
+    monkeypatch.setattr(logs_module.ch, "connected", True)
+    fake_result = MagicMock()
+    fake_result.result_rows = [("log-1", "/?id=1' OR '1'='1", "GET", 403, "942100", "SQL Injection")]
+    query_spy = MagicMock(return_value=fake_result)
+    monkeypatch.setattr(logs_module.ch, "client", MagicMock(query=query_spy))
+    admin = register_user(email="logs-explain-cols@example.com", username="logs_explain_cols")
+
+    body = client.get("/api/logs/explain/log-1", headers=auth_header(admin["access_token"])).json()
+
+    select_list = query_spy.call_args[0][0].split(" FROM ")[0][len("SELECT "):]
+    selected = {re.sub(r"^toString\((\w+)\)$", r"\1", part.strip().split(" as ")[0]) for part in select_list.split(",")}
+    assert selected <= table_columns, f"not in access_logs: {sorted(selected - table_columns)}"
+    exp = body["explanation"]
+    assert exp["category"] == "SQL Injection (SQLi)"
+    assert exp["root_cause_explanation"] != "Analyzed from live event buffer"
+
+
 # ---------------------------------------------------------------- PII masking
 
 def test_mask_preview_masks_pii_and_returns_zk_hash(client: TestClient, register_user, auth_header):

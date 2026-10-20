@@ -205,10 +205,15 @@ async def explain_log_by_id(
     scope_sql = f" AND {scope}" if scope else ""
     if ch.connected and scope != "1=0":
         try:
-            query = "SELECT toString(id) as log_id, url, method, status_code as status, rule_id, attack_type, matched_token, root_cause_explanation, remediation_hint, confidence_score, category FROM access_logs WHERE toString(id) = {log_id:String}" + scope_sql + " LIMIT 1"
+            # Only columns access_logs has (services/clickhouse_service.py).
+            # The query also named matched_token, root_cause_explanation,
+            # remediation_hint, confidence_score and category, which the table
+            # never had, so it always failed and every log got the fixed text
+            # below. explain_event() works those out from the request itself.
+            query = "SELECT toString(id) as log_id, url, method, status_code as status, rule_id, attack_type FROM access_logs WHERE toString(id) = {log_id:String}" + scope_sql + " LIMIT 1"
             rows = ch.client.query(query, parameters={"log_id": log_id}).result_rows
             if rows:
-                cols = ['log_id', 'url', 'method', 'status', 'rule_id', 'attack_type', 'matched_token', 'root_cause_explanation', 'remediation_hint', 'confidence_score', 'category']
+                cols = ['log_id', 'url', 'method', 'status', 'rule_id', 'attack_type']
                 log_data = dict(zip(cols, rows[0]))
                 exp = explainability_service.explain_event(log_data)
                 mitigation = explainability_service.generate_mitigation_candidate(log_data)
