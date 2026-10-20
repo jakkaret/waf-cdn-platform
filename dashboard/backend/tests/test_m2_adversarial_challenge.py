@@ -251,17 +251,17 @@ class TestRepoCustomRulesIngestion:
         assert "single quote in argument" in gap_rule["message"]
 
     def test_repo_override_conf_handled(self):
-        """TC-ADV-REPO-03: Check parsing of 00-modsecurity-override.conf (non-SecRule SecAction file)."""
+        """TC-ADV-REPO-03: 00-modsecurity-override.conf (the SecAction file the
+        System settings page writes) is read without error and is not listed
+        as a rule -- it used to show as one with every field "N/A"."""
         real_rules_dir = Path(__file__).resolve().parent.parent.parent.parent / "modsecurity" / "custom-rules"
         rm = RuleManager.__new__(RuleManager)
         rm.rules_dir = str(real_rules_dir)
 
+        assert (real_rules_dir / "00-modsecurity-override.conf").exists()
         rules = {r["id"]: r for r in rm.list_rules()}
-        assert "00-modsecurity-override" in rules
-        override = rules["00-modsecurity-override"]
-        assert override["variable"] == "N/A"
-        assert override["operator"] == "N/A"
-        assert override["message"] == "N/A"
+        assert "00-modsecurity-override" not in rules
+        assert "custom-910000-detection-gaps" in rules
 
 
 # ==============================================================================
