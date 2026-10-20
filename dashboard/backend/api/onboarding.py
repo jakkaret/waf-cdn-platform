@@ -289,15 +289,23 @@ async def _check_pending(d: dict) -> tuple:
     return ok, current
 
 
-def _proxy_online_for(domain: str, proxies: list) -> bool:
+def _online_proxy_name(domain: str, proxies: list) -> Optional[str]:
+    """Name of an online FRP proxy serving `domain` (as frps reports it), or
+    None. Agents name their proxy after the domain ("shop.example.com", FRP
+    may prefix it with the client's user) and older ones used the dashed form
+    ("shop-example-com"), so the live name is the only reliable record."""
     for p in proxies:
         if p.get("status") != "online":
             continue
         conf = p.get("conf") or {}
         names = conf.get("customDomains") or conf.get("custom_domains") or []
         if domain in [str(n).strip().lower() for n in names]:
-            return True
-    return False
+            return str(p.get("name") or domain)
+    return None
+
+
+def _proxy_online_for(domain: str, proxies: list) -> bool:
+    return _online_proxy_name(domain, proxies) is not None
 
 
 def _can_edit(origin_id: str, current_user: dict) -> bool:
@@ -415,7 +423,8 @@ async def get_progress(origin_id: str, current_user: dict = Depends(get_current_
         update = {
             "status": "active",
             "is_tunnel": True,
-            "tunnel_name": connected_agent[0]["domain_name"].replace(".", "-"),
+            "tunnel_name": _online_proxy_name(connected_agent[0]["domain_name"], proxies)
+                           or connected_agent[0]["domain_name"],
             "updated_at": datetime.now().isoformat() + "Z",
         }
         await asyncio.to_thread(origin_service.db.update_origin, origin_id, update)
