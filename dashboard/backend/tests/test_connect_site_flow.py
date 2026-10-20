@@ -549,6 +549,40 @@ def test_auto_sync_adopts_an_agent_origin_instead_of_duplicating_it(monkeypatch)
     assert origin["tunnel_name"] == "shop-example-com"
 
 
+def test_progress_records_the_live_name_of_a_current_agent(client, tenant, monkeypatch):
+    # Current agents name their proxy after the domain (frps may prefix the
+    # client's user). The connect flow stored "shop-example-com" instead,
+    # which never matched, so the origin read as disconnected while online.
+    origin_id = _connect(client, tenant)
+    live = "tok.shop.example.com"
+    proxies = [{"name": live, "status": "online", "conf": {"customDomains": ["shop.example.com"]}}]
+    monkeypatch.setattr(origin_service, "get_live_proxies", AsyncMock(return_value=proxies))
+    p = client.get(f"/api/onboarding/progress/{origin_id}", headers=tenant["headers"]).json()
+    assert p["origin_status"] == "active"
+    [origin] = _origins()
+    assert origin["tunnel_name"] == live
+    assert origins_module._tunnel_is_online(origin["tunnel_name"], {live}) is True
+
+
+def test_auto_sync_renames_a_dashed_tunnel_name_to_the_live_proxy(monkeypatch):
+    # Origins activated before that fix keep the dashed name; opening the
+    # Origins list (auto-sync) moves them to the live proxy name.
+    ensure_user(uid("u1"))
+    made = origin_service.create_origin(uid("u1"), label="shop.example.com", ip="shop.example.com", port=3000,
+                                        connection_mode="agent", origin_scheme="http")
+    origin_service.db.update_origin(made["id"], {"status": "active", "is_tunnel": True, "tunnel_name": "shop-example-com"})
+    live = "tok.shop.example.com"
+    origin_service.db.set_proxy_owner(live, uid("u1"), "shop.example.com")
+    monkeypatch.setattr(origin_service, "verify_domain_dns", lambda d, t: False)
+    proxy = {"name": live, "status": "online",
+             "conf": {"customDomains": ["shop.example.com"], "metadatas": {"port": "3000"}}}
+    monkeypatch.setattr(origin_service, "get_live_proxies", AsyncMock(return_value=[proxy]))
+    asyncio.run(origin_service.auto_sync_tunnel_origins(uid("u1")))
+    [origin] = origin_service.db.list_origins()
+    assert origin["tunnel_name"] == live
+    assert origins_module._tunnel_is_online(origin["tunnel_name"], {live}) is True
+
+
 # --------------------------------------------------------------- review fixes
 # Code review of this branch (2026-10-10) findings 1-9.
 

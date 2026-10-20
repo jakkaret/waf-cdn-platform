@@ -518,6 +518,18 @@ async def auto_sync_tunnel_origins(user_id: str, user_role: str = "user") -> Lis
                 matched_origin.update(update)
                 need_cache_invalidation = True
                 owners_to_invalidate.add(true_owner_id)
+            elif (matched_origin.get("connection_mode") == "agent" and matched_origin.get("is_tunnel")
+                  and str(matched_origin.get("tunnel_name") or "") == domain_val.replace(".", "-")
+                  and str(matched_origin.get("tunnel_name") or "") != raw_name):
+                # The connect flow used to store the domain with "-" for "."
+                # as tunnel_name, which never matched the live proxy of a
+                # current agent (named after the domain), so the origin read
+                # as disconnected while its tunnel was online.
+                update = {"tunnel_name": raw_name, "updated_at": datetime.now().isoformat() + "Z"}
+                db.update_origin(matched_origin.get("id"), update)
+                matched_origin.update(update)
+                need_cache_invalidation = True
+                owners_to_invalidate.add(true_owner_id)
             continue
 
         # P3.6 (H74): a new origin counts against the owner's quota.
