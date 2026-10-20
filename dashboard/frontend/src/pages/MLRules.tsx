@@ -37,6 +37,11 @@ import {
 } from '../lib/mlRules'
 
 const PAGE_SIZE = 15
+// One empty list for "no data yet". `= []` in the destructuring made a new
+// array on every render, so the prune effect below set state on every
+// render while the query was loading or failing (a non-operator gets 403):
+// "Maximum update depth exceeded".
+const NO_RULES: MLPendingRule[] = []
 
 type StatusTab = RuleFilters['status']
 
@@ -91,7 +96,7 @@ export const MLRules: React.FC = () => {
   const [busy, setBusy] = useState(false)
   const [confirmLegacy, setConfirmLegacy] = useState(false)
 
-  const { data: rules = [], isLoading, isFetching, isError, refetch } = useQuery({
+  const { data: rules = NO_RULES, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: ['ml-rules'],
     queryFn: () => mlRulesApi.listRules(),
     refetchInterval: 10000,
