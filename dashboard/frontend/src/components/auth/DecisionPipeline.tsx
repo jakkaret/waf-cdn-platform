@@ -1,5 +1,6 @@
 import React from 'react'
 import { Globe, ShieldCheck, XCircle, CheckCircle2 } from 'lucide-react'
+import { CRS_VERSION } from '../../lib/crsVersion'
 
 // The auth screens' hero visual: what actually happens to a request before it
 // reaches an origin. Real architecture, not a decorative illustration — every
@@ -13,7 +14,7 @@ export const DecisionPipeline: React.FC = () => {
           <span className="status-ping-dot bg-[var(--success)]" />
         </span>
         <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-          ModSecurity CRS 3.3 · always on
+          ModSecurity CRS {CRS_VERSION} · always on
         </span>
       </div>
 

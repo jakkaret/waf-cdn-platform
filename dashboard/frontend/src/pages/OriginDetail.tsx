@@ -12,6 +12,7 @@ import { getOriginAuditLog } from '../api/origin_audit_log'
 import { createPostmortem, getPostmortems, getPostmortem } from '../api/postmortems'
 import { useAuthStore } from '../store/authStore'
 import { tunnelConnectivityBadge } from '../lib/tunnelStatus'
+import { CRS_VERSION } from '../lib/crsVersion'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { LoadingSpinner } from '../components/ui/LoadingSpinner'
@@ -663,7 +664,7 @@ export const OriginDetail: React.FC = () => {
                 )}
                 <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
                   <span className="text-[var(--text-muted)]">ModSecurity WAF</span>
-                  <Badge color="success">ENABLED (CRS 3.3)</Badge>
+                  <Badge color="success">ENABLED (CRS {CRS_VERSION})</Badge>
                 </div>
                 <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
                   <span className="text-[var(--text-muted)]">SSL / TLS Termination</span>
