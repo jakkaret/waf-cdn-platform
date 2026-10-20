@@ -15,6 +15,31 @@ export interface SystemSettings {
   edge_sync_interval_seconds: number
 }
 
+// POST /api/settings/ accepts only these fields (SettingsUpdate, extra="forbid").
+// GET also returns read-only ones (not_implemented, telegram_bot_token_set,
+// telegram_bot_token_masked, ml_*), and the Settings page posts back the
+// object it loaded, so every save was refused with a 422.
+const EDITABLE_SETTINGS = [
+  'waf_mode',
+  'paranoia_level',
+  'inbound_anomaly_threshold',
+  'outbound_anomaly_threshold',
+  'auto_purge_edge_cache',
+  'real_ip_header',
+  'telegram_notifications',
+  'telegram_bot_token',
+  'telegram_chat_id',
+  'edge_sync_interval_seconds',
+] as const
+
+export const editableSettings = (data: Partial<SystemSettings>): Partial<SystemSettings> => {
+  const out: Partial<SystemSettings> = {}
+  for (const key of EDITABLE_SETTINGS) {
+    if (data[key] !== undefined) Object.assign(out, { [key]: data[key] })
+  }
+  return out
+}
+
 export const settingsApi = {
   getSettings: async (): Promise<SystemSettings> => {
     const res = await api.get<{ settings: SystemSettings }>('/settings/')
@@ -22,7 +47,7 @@ export const settingsApi = {
   },
 
   updateSettings: async (data: Partial<SystemSettings>): Promise<SystemSettings> => {
-    const res = await api.post<{ status: string; settings: SystemSettings }>('/settings/', data)
+    const res = await api.post<{ status: string; settings: SystemSettings }>('/settings/', editableSettings(data))
     return res.data.settings
   },
 
