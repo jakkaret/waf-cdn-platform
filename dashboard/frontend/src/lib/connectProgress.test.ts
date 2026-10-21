@@ -28,6 +28,21 @@ describe('dnsCheck', () => {
   it('is done once verified', () => {
     expect(dnsCheck({ ...base, dns: { ...base.dns, status: 'verified' } }).state).toBe('done')
   })
+  it('names the nameserver that gave a fresh answer', () => {
+    const v = dnsCheck({ ...base, dns: { ...base.dns, current: {
+      cname: 'old.vercel-dns-017.com', a: [], via: 'authoritative', nameserver: 'byte.dns-parking.com' } } })
+    expect(v.detail).toContain('old.vercel-dns-017.com')
+    expect(v.detail).toContain('byte.dns-parking.com')
+  })
+  it('warns that a resolver answer may be an old cached one', () => {
+    const v = dnsCheck({ ...base, dns: { ...base.dns, current: { cname: 'old.example.net', a: [], via: 'resolver' } } })
+    expect(v.detail).toContain('TTL')
+  })
+  it('says a matching record is being confirmed instead of waiting', () => {
+    const v = dnsCheck({ ...base, dns: { ...base.dns, current: { cname: '', a: [], via: 'authoritative', txt_ok: true } } })
+    expect(v.state).toBe('waiting')
+    expect(v.detail).toContain('TXT ถูกต้องแล้ว')
+  })
 })
 
 describe('connectionCheck', () => {

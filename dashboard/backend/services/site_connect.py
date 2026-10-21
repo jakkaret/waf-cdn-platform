@@ -81,8 +81,21 @@ def platform_ips() -> set[str]:
 
 
 def current_dns(domain: str) -> dict:
-    """What the domain points at right now."""
-    return {"cname": resolve_cname(domain), "a": resolve_a(domain)}
+    """What the domain points at right now. The CNAME and the TXT challenge
+    come from the domain's own nameservers when they answer, so a record the
+    owner just changed shows here at once instead of after the resolver's
+    cached copy expires. The A records still go through the resolver, which
+    follows the CNAME chain. `via` says which source the CNAME came from."""
+    from services import dns_service
+    cname = dns_service.lookup(domain, "CNAME")
+    txt = dns_service.lookup(f"_waf-challenge.{domain}", "TXT")
+    return {
+        "cname": (cname["records"][0] if cname["records"] else "").lower(),
+        "a": resolve_a(domain),
+        "via": cname["via"],
+        "nameserver": cname["nameserver"],
+        "txt_challenge": txt["records"],
+    }
 
 
 def detect_cdn(ip: str) -> Optional[str]:

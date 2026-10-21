@@ -1,27 +1,118 @@
-import dns.resolver
+import ipaddress
 import os
+import threading
+import time
+
+import dns.flags
+import dns.message
+import dns.name
+import dns.query
+import dns.rcode
+import dns.rdatatype
+import dns.resolver
 
 WAF_CNAME_TARGET = os.getenv("WAF_CNAME_TARGET", "cdn.local")
 
-def resolve_cname(domain: str) -> str:
-    try:
-        answers = dns.resolver.resolve(domain, 'CNAME')
-        for rdata in answers:
-            return str(rdata.target).rstrip('.')
-    except Exception:
-        return ""
+# Ask the domain's own nameservers before the system resolver. The resolver
+# keeps an old answer until its TTL runs out, so a customer who had pointed the
+# name elsewhere (e.g. at Vercel) and then switched it to us waited up to the
+# old record's TTL for verification (2026-10-21: 12 minutes, CNAME TTL 3000s).
+# The authoritative answer shows the change as soon as the provider publishes it.
+# WAF_DNS_AUTHORITATIVE=0 turns this off and uses only the resolver.
+AUTHORITATIVE_TIMEOUT_SECONDS = 2.0
+_NS_CACHE_SECONDS = 300
+_ns_cache: dict = {}
+_ns_lock = threading.Lock()
 
-def resolve_txt(domain: str) -> list[str]:
+
+def _authoritative_enabled() -> bool:
+    return os.getenv("WAF_DNS_AUTHORITATIVE", "1").strip() != "0"
+
+
+def _nameservers(name: str) -> list:
+    """[(nameserver host, ip)] for the zone holding `name`. Only public
+    addresses: a zone may list a nameserver at 127.0.0.1 or 10.x, and we must
+    not send packets inside our own network on a customer's say-so."""
+    zone = dns.resolver.zone_for_name(name, lifetime=4.0)
+    key = zone.to_text()
+    now = time.monotonic()
+    with _ns_lock:
+        hit = _ns_cache.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+    servers = []
+    hosts = sorted(str(r.target).rstrip(".") for r in dns.resolver.resolve(zone, "NS", lifetime=4.0))
+    for host in hosts[:4]:
+        try:
+            for a in dns.resolver.resolve(host, "A", lifetime=3.0):
+                if ipaddress.ip_address(a.address).is_global:
+                    servers.append((host, a.address))
+        except Exception:
+            continue
+    with _ns_lock:
+        _ns_cache[key] = (now + _NS_CACHE_SECONDS, servers)
+    return servers
+
+
+def _rdata_text(rdata, rdtype: str) -> str:
+    if rdtype == "CNAME":
+        return str(rdata.target).rstrip(".").lower()
+    if rdtype == "TXT":
+        return b"".join(rdata.strings).decode("utf-8", errors="replace")
+    return rdata.to_text()
+
+
+def _authoritative(name: str, rdtype: str):
+    """(records, nameserver host) from the first nameserver that answers with
+    authority, or None if none did (then the caller falls back)."""
+    if not _authoritative_enabled():
+        return None
     try:
-        answers = dns.resolver.resolve(domain, 'TXT')
-        results = []
-        for rdata in answers:
-            # Join multiple strings in a single TXT record
-            txt_str = b"".join(rdata.strings).decode('utf-8')
-            results.append(txt_str)
-        return results
+        servers = _nameservers(name)
+    except Exception:
+        return None
+    qname = dns.name.from_text(name)
+    rt = dns.rdatatype.from_text(rdtype)
+    for host, ip in servers[:3]:
+        query = dns.message.make_query(qname, rt)
+        query.flags &= ~dns.flags.RD
+        try:
+            reply = dns.query.udp(query, ip, timeout=AUTHORITATIVE_TIMEOUT_SECONDS)
+            if reply.flags & dns.flags.TC:
+                reply = dns.query.tcp(query, ip, timeout=AUTHORITATIVE_TIMEOUT_SECONDS)
+        except Exception:
+            continue
+        if reply.rcode() not in (dns.rcode.NOERROR, dns.rcode.NXDOMAIN) or not reply.flags & dns.flags.AA:
+            continue  # lame or refusing server: try the next one
+        records = [_rdata_text(rd, rdtype) for rrset in reply.answer
+                   if rrset.name == qname and rrset.rdtype == rt for rd in rrset]
+        return records, host
+    return None
+
+
+def _from_resolver(name: str, rdtype: str) -> list:
+    try:
+        return [_rdata_text(rd, rdtype) for rd in dns.resolver.resolve(name, rdtype)]
     except Exception:
         return []
+
+
+def lookup(name: str, rdtype: str) -> dict:
+    """Records of one type at `name`, and where the answer came from:
+    {"records": [...], "via": "authoritative" | "resolver", "nameserver": host or ""}."""
+    found = _authoritative(name, rdtype)
+    if found is not None:
+        return {"records": found[0], "via": "authoritative", "nameserver": found[1]}
+    return {"records": _from_resolver(name, rdtype), "via": "resolver", "nameserver": ""}
+
+
+def resolve_cname(domain: str) -> str:
+    records = lookup(domain, "CNAME")["records"]
+    return records[0] if records else ""
+
+
+def resolve_txt(domain: str) -> list[str]:
+    return lookup(domain, "TXT")["records"]
 
 
 # 2026-09-22 (self-service onboarding, overnight session): a subdomain of

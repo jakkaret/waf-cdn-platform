@@ -30,6 +30,10 @@ os.environ["FRP_AUTH_TOKEN"] = "test-frp-token-for-pytest-only"
 os.environ["WAF_CONTAINER_NAME"] = "test-waf-container-does-not-exist"
 os.environ["GEMINI_API_KEY"] = ""
 os.environ.setdefault("ORIGINS_QUOTA_DEFAULT", "5")
+# DNS checks ask the domain's nameservers directly in production; tests stay on
+# the resolver path they always used. tests/test_dns_authoritative.py turns it on
+# with fake nameservers.
+os.environ["WAF_DNS_AUTHORITATIVE"] = "0"
 # Services keep sqlite/json state in dashboard/backend/data/, which is tracked in
 # git and is live data on Main. Tests get a throwaway directory instead.
 import tempfile  # noqa: E402

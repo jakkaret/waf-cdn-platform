@@ -27,7 +27,7 @@ from services.rbac import ARCHIVED_ORIGIN_STATUSES, get_current_user, verify_ori
 import services.origin_service as origin_service
 from services import site_connect
 from services import nginx_site_service
-from services.dns_service import verify_domain_dns
+from services.dns_service import record_cname_target, verify_domain_dns
 
 router = APIRouter(prefix="/api/onboarding", tags=["Onboarding"])
 
@@ -270,6 +270,17 @@ def _domains_for_origin(origin_id: str) -> list:
     return domains_db.list_domains(origin_id=origin_id)
 
 
+def _with_record_checks(current: dict, token: str) -> dict:
+    """Tell the page whether each record already matches, so it can say
+    "correct, confirming" instead of "waiting". The TXT values themselves are
+    not sent back, only whether one matches."""
+    out = {k: v for k, v in current.items() if k != "txt_challenge"}
+    txt = current.get("txt_challenge") or []
+    out["cname_ok"] = bool(token) and (current.get("cname") or "").rstrip(".") == record_cname_target(token)
+    out["txt_ok"] = bool(token) and any(v in (token, f"waf-verification-token={token}") for v in txt)
+    return out
+
+
 async def _check_pending(d: dict) -> tuple:
     """(verified now?, current DNS) -- at most one real check per domain per
     VERIFY_THROTTLE_SECONDS however often the page polls."""
@@ -282,6 +293,8 @@ async def _check_pending(d: dict) -> tuple:
     name = d.get("domain_name", "")
     ok = await asyncio.to_thread(verify_domain_dns, name, d.get("verification_token"))
     current = None if ok else await asyncio.to_thread(site_connect.current_dns, name)
+    if current is not None:
+        current = _with_record_checks(current, d.get("verification_token") or "")
     _last_verify[domain_id] = (now, current)
     if ok:
         _mark_verified(domain_id)

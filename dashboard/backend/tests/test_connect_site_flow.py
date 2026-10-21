@@ -395,7 +395,7 @@ def test_progress_reports_pending_dns_with_the_current_answer(client, tenant):
     p = client.get(f"/api/onboarding/progress/{origin_id}", headers=tenant["headers"]).json()
     [d] = p["domains"]
     assert d["dns"]["status"] == "pending"
-    assert d["dns"]["current"] == {"cname": "", "a": ["203.0.113.10"]}
+    assert d["dns"]["current"] == {"cname": "", "a": ["203.0.113.10"], "cname_ok": False, "txt_ok": False}
     assert d["connection"]["status"] == "waiting_dns"  # P3.2: no agent token before DNS proves ownership
     assert d["ready"] is False and p["all_ready"] is False
 

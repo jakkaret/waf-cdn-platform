@@ -1,7 +1,7 @@
 // Pure helpers behind ConnectSiteFlow and DomainStatusCard: what to show for
 // an /api/onboarding/inspect result and for each /progress check. Kept out of
 // the components so every branch is unit-tested.
-import type { InspectResult, ProgressDomain, ConnectionMode } from '../api/onboarding'
+import type { InspectResult, ProgressDomain, ConnectionMode, CurrentDns } from '../api/onboarding'
 
 // People paste the site's address as they see it in the browser
 // ("https://shop.example.com/", with a path or port); keep only the hostname.
@@ -27,10 +27,27 @@ export function dnsCheck(d: ProgressDomain): CheckView {
     return { state: 'done', label: 'DNS', detail: `ชี้มาที่ ${d.dns.instructions.cname_record.value} แล้ว` }
   }
   const cur = d.dns.current
+  const want = d.dns.instructions.cname_record.value
+  if (cur?.cname_ok || cur?.txt_ok) {
+    const which = cur.cname_ok ? 'CNAME' : 'TXT'
+    return { state: 'waiting', label: 'DNS', detail: `${which} ถูกต้องแล้ว กำลังยืนยัน (ไม่เกิน 1 นาที)` }
+  }
   let now = 'ยังไม่พบ record'
   if (cur?.cname) now = `ตอนนี้ CNAME ชี้ไปที่ ${cur.cname}`
   else if (cur?.a?.length) now = `ตอนนี้ชี้ไปที่ ${cur.a.join(', ')}`
-  return { state: 'waiting', label: 'DNS', detail: `รอ CNAME → ${d.dns.instructions.cname_record.value} (${now})` }
+  return { state: 'waiting', label: 'DNS', detail: `รอ CNAME → ${want} (${now})${dnsSource(cur)}` }
+}
+
+// Where that answer came from. A resolver answer can be an old cached copy, so
+// say so: a customer who just changed the record should not think it failed.
+function dnsSource(cur: CurrentDns | null): string {
+  if (cur?.via === 'authoritative') {
+    return cur.nameserver ? ` · ตามที่ ${cur.nameserver} ตอบ ถ้าเพิ่งแก้ที่ผู้ให้บริการ DNS รอ 1-2 นาที` : ''
+  }
+  if (cur?.via === 'resolver') {
+    return ' · ดูผ่าน DNS cache ค่าที่เพิ่งแก้อาจยังไม่ขึ้นจนกว่า TTL ของค่าเก่าจะหมด'
+  }
+  return ''
 }
 
 export function connectionCheck(d: ProgressDomain, mode: ConnectionMode | null): CheckView {
