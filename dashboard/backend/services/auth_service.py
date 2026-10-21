@@ -134,6 +134,7 @@ class AuthService:
         auth_provider: str = "local",
         provider_id: Optional[str] = None,
         avatar_url: Optional[str] = None,
+        email_verified: bool = False,
     ) -> Dict:
         """Insert a user (and its Google/Telegram identity, same transaction).
         A duplicate email or identity raises a ValueError."""
@@ -143,7 +144,7 @@ class AuthService:
             email=email, username=username,
             password_hash=self.hash_password(password) if password else None,
             role=role, auth_provider=auth_provider, provider_id=provider_id,
-            avatar_url=avatar_url,
+            avatar_url=avatar_url, email_verified=email_verified,
         )
 
     def update_last_login(self, user_id: str):
@@ -227,6 +228,20 @@ class AuthService:
         if existing:
             raise ValueError("Email already registered")
         return self.create_user(email=email, username=username, password=password, role=role)
+
+    def mark_email_verified(self, user_id: str) -> None:
+        self._pg.mark_email_verified(user_id)
+
+    def reset_password(self, user_id: str, new_password: str) -> bool:
+        """Set a new password once the mailbox proved itself with a reset
+        code. The address counts as verified from now on, and every session
+        and token issued before the reset is revoked: whoever knew the old
+        password, or registered this address first, is signed out everywhere."""
+        if not self._pg.set_password_hash(user_id, self.hash_password(new_password)):
+            return False
+        self._pg.mark_email_verified(user_id)
+        self.revoke_sessions(user_id)
+        return True
 
     def login_local(self, email: str, password: str) -> Optional[Dict]:
         user = self.get_user_by_email(email)
@@ -359,6 +374,7 @@ class AuthService:
             auth_provider="google",
             provider_id=provider_id,
             avatar_url=avatar,
+            email_verified=True,  # refused above unless Google verified the address
         )
 
     def verify_telegram_login(self, data: Dict) -> bool:

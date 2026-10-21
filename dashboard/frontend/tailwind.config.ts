@@ -109,12 +109,18 @@ export default {
           '0%': { transform: 'translateX(-100%)' },
           '100%': { transform: 'translateX(0)' },
         },
+        shake: {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '20%, 60%': { transform: 'translateX(-5px)' },
+          '40%, 80%': { transform: 'translateX(5px)' },
+        },
       },
       animation: {
         'pulse-subtle': 'pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'fade-in': 'fade-in 0.15s ease-out forwards',
         'slide-in-right': 'slide-in-right 0.2s ease-out forwards',
         'slide-in-left': 'slide-in-left 0.2s ease-out forwards',
+        shake: 'shake 0.35s ease-in-out',
       },
     },
   },

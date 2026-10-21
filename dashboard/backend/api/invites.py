@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from services import audit_log, invite_service
-from services.rbac import get_current_user
+from services.rbac import get_current_user, require_verified_email
 from services.txn import atomic
 
 router = APIRouter(prefix="/api/invites", tags=["Invites"])
@@ -12,7 +12,7 @@ class AcceptInvite(BaseModel):
     token: str
 
 
-@router.post("/accept")
+@router.post("/accept", dependencies=[Depends(require_verified_email("accept_invite"))])
 async def accept_invite(body: AcceptInvite, current_user: dict = Depends(get_current_user)):
     """Grant the invited role to the signed-in user who holds the emailed link
     (N9/H64). Unknown, expired and already used links all get the same 404."""

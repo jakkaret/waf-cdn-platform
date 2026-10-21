@@ -7,7 +7,7 @@ from services.gemini_service import gemini_service
 from services.ai_quota import check_ai_quota
 from services.clickhouse_service import ClickHouseService
 from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
-from services.rbac import get_current_user, verify_origin_access, verify_origin_edit_access, verify_origin_ownership
+from services.rbac import get_current_user, verify_origin_access, verify_origin_edit_access, verify_origin_ownership, require_verified_email
 from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter, build_domain_pattern_sql
 from services import audit_log
 import logging
@@ -51,7 +51,7 @@ def _parse_time_bound(value: Any, field: str) -> datetime:
         detail=f"{field} must match one of {', '.join(_TIME_FORMATS)}",
     )
 
-@router.post("/summarize-range")
+@router.post("/summarize-range", dependencies=[Depends(require_verified_email("ai"))])
 async def summarize_threat_range(
     req: SummarizeRangeRequest,
     current_user: dict = Depends(get_current_user)
@@ -433,7 +433,7 @@ class PostmortemCreateRequest(BaseModel):
     end_time: str
 
 
-@router.post("/postmortems/{origin_id}")
+@router.post("/postmortems/{origin_id}", dependencies=[Depends(require_verified_email("ai"))])
 async def create_postmortem(
     origin_id: str,
     req: PostmortemCreateRequest,

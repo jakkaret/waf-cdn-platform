@@ -30,11 +30,13 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { originRoleOf } from '../lib/roles'
+import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
 
 export const Origins: React.FC = () => {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const guard = useVerifiedGuard()
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'pending' | 'error' | 'archived'>('all')
   const currentUser = useAuthStore((st) => st.user)
@@ -128,7 +130,7 @@ export const Origins: React.FC = () => {
         action={
           <Button
             variant="brand"
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={() => guard('create_origin', () => setIsAddModalOpen(true))}
             disabled={quotaFull}
             icon={<Plus size={14} />}
           >

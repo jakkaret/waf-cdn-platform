@@ -5,6 +5,7 @@ import { useAuthStore } from '../store/authStore'
 import { ThemeToggle } from '../components/ui/ThemeToggle'
 import { Button } from '../components/ui/Button'
 import toast from 'react-hot-toast'
+import { passwordChecks } from '../lib/passwordRules'
 import {
   ArrowRight,
   CheckCircle2,
@@ -18,12 +19,6 @@ import {
   UsersRound,
 } from 'lucide-react'
 
-const passwordChecks = [
-  { label: '8+ characters', test: (value: string) => value.length >= 8 },
-  { label: 'Uppercase letter', test: (value: string) => /[A-Z]/.test(value) },
-  { label: 'Number', test: (value: string) => /[0-9]/.test(value) },
-  { label: 'Symbol', test: (value: string) => /[^A-Za-z0-9]/.test(value) },
-]
 
 export const Register: React.FC = () => {
   const [formData, setFormData] = useState({ username: '', email: '', password: '', confirmPassword: '' })
@@ -64,8 +59,8 @@ export const Register: React.FC = () => {
       await authApi.login(formData.email.trim(), formData.password) // sets the HttpOnly session cookie
       const user = await authApi.getMe()
       setAuth(user)
-      toast.success('Account created successfully')
-      navigate('/')
+      toast.success('สร้างบัญชีแล้ว ยืนยันอีเมลด้วยรหัสที่ส่งไปให้')
+      navigate('/verify-email')
     } catch (err: any) {
       // Matches Login.tsx's identical login->getMe flow: if getMe() throws
       // after the token was already set into the store, reset it here too

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Query
 from fastapi.responses import PlainTextResponse
 from typing import List, Dict, Any, Optional, Tuple
-from services.rbac import require_viewer_or_above, get_current_user
+from services.rbac import require_viewer_or_above, get_current_user, require_verified_email
 from services.tenant_service import get_user_origins_and_domains, invalidate_tenant_cache
 from services.dynamodb_service import DynamoDBService
 from services.auth_service import AuthService
@@ -283,7 +283,7 @@ def _canonical_or_422(domain: str) -> str:
         raise HTTPException(status_code=422, detail=str(exc))
 
 
-@router.post("/token")
+@router.post("/token", dependencies=[Depends(require_verified_email("agent_token"))])
 async def create_tunnel_token(payload: CreateTunnelTokenRequest, current_user: dict = Depends(get_current_user)):
     """
     Generate a cryptographic signed JWT Tunnel Token tied to the user and domain.
@@ -336,7 +336,7 @@ def _local_address_or_422(value: str) -> str:
     raise HTTPException(status_code=422, detail="local_ip must be an IP address or a hostname")
 
 
-@router.get("/config-generator")
+@router.get("/config-generator", dependencies=[Depends(require_verified_email("agent_token"))])
 async def get_tunnel_config(
     domain: str = Query(
         ...,

@@ -24,7 +24,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
-from services.rbac import ARCHIVED_ORIGIN_STATUSES, get_current_user, verify_origin_access
+from services.rbac import ARCHIVED_ORIGIN_STATUSES, get_current_user, verify_origin_access, require_verified_email
 import services.origin_service as origin_service
 from services import site_connect
 from services import nginx_site_service
@@ -152,7 +152,7 @@ class InspectRequest(BaseModel):
         return _hostname(v)
 
 
-@router.post("/inspect")
+@router.post("/inspect", dependencies=[Depends(require_verified_email("create_origin"))])
 async def inspect_domain(payload: InspectRequest, current_user: dict = Depends(get_current_user)):
     from api.domains import _assert_platform_subdomain_allowed, domain_registered
     _assert_platform_subdomain_allowed(payload.domain, current_user)
@@ -179,7 +179,7 @@ class ConnectRequest(BaseModel):
         return _hostname(v)
 
 
-@router.post("/connect")
+@router.post("/connect", dependencies=[Depends(require_verified_email("create_origin"))])
 async def connect_site(payload: ConnectRequest, current_user: dict = Depends(get_current_user)):
     from api.domains import (
         _assert_platform_subdomain_allowed, assert_domain_available, create_domain_record,

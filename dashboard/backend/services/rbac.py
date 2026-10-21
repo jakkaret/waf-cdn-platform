@@ -86,6 +86,27 @@ def require_roles(roles: List[str]):
     return dependency
 
 
+# Until the owner proves the address with the emailed code (api/auth.py
+# /verify-email), an account can sign in and look around but cannot do what
+# reaches the edge or other people: add a site or domain, mint agent tokens,
+# send or accept team invitations, or use the AI features. The 403 detail
+# carries the blocked action so the UI can say why it matters.
+def email_verified(user: dict) -> bool:
+    return bool(user.get("email_verified"))
+
+
+def require_verified_email(action: str):
+    def dependency(current_user: dict = Depends(get_current_user)):
+        if not email_verified(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "email_unverified", "action": action,
+                        "message": "ยืนยันอีเมลก่อนใช้งานส่วนนี้"},
+            )
+        return current_user
+    return dependency
+
+
 # Shorthand dependencies
 def require_admin(current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "admin":

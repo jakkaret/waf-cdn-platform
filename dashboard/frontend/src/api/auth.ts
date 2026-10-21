@@ -20,6 +20,30 @@ export const authApi = {
     return res.data
   },
 
+  // Email verification by a 6-digit code (api/auth.py /verify-email).
+  sendVerifyCode: async () => {
+    const res = await api.post<{ verified: boolean; sent?: boolean; retry_after?: number; expires_in?: number }>(
+      '/auth/verify-email/send'
+    )
+    return res.data
+  },
+
+  confirmVerifyCode: async (code: string) => {
+    const res = await api.post<{ verified: boolean; user: User }>('/auth/verify-email/confirm', { code })
+    return res.data
+  },
+
+  forgotPassword: async (email: string) => {
+    const res = await api.post<{ message: string }>('/auth/password/forgot', { email })
+    return res.data
+  },
+
+  // Signs the account out on every device (api/auth.py reset_password).
+  resetPassword: async (email: string, code: string, newPassword: string) => {
+    const res = await api.post<{ message: string }>('/auth/password/reset', { email, code, new_password: newPassword })
+    return res.data
+  },
+
   getUsers: async () => {
     const res = await api.get<{ users: User[] }>('/auth/users')
     return res.data.users

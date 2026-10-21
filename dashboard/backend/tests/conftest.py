@@ -84,6 +84,7 @@ pg_harness.ensure_database()
 def pytest_configure(config):
     config.addinivalue_line("markers", "pg: needs a real PostgreSQL (TEST_DATABASE_URL)")
     config.addinivalue_line("markers", "no_auto_accept: invitations stay pending until the test accepts them")
+    config.addinivalue_line("markers", "email_unverified: accounts stay unverified (the real email check runs)")
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -278,3 +279,28 @@ def _ai_quota_allows_by_default(monkeypatch):
             return True, 999, 0
 
     monkeypatch.setattr(ai_quota, "_limiter", _AllowAll())
+
+
+@pytest.fixture(autouse=True)
+def code_mailbox(monkeypatch):
+    """Verification and reset codes (services/email_codes.py) land here
+    instead of an SMTP server."""
+    from services import email_codes
+
+    sent = []
+
+    def fake_send(to_addr, purpose, code):
+        sent.append({"to": to_addr, "purpose": purpose, "code": code})
+        return True
+
+    monkeypatch.setattr(email_codes, "send_code_email", fake_send)
+    return sent
+
+
+@pytest.fixture(autouse=True)
+def _email_verified_by_default(request, monkeypatch):
+    """Tests about other features act as an owner who already confirmed the
+    emailed code (the suite creates most users straight in the database).
+    Tests marked email_unverified run the real check (tests/test_email_verification.py)."""
+    if request.node.get_closest_marker("email_unverified") is None:
+        monkeypatch.setattr(rbac_module, "email_verified", lambda user: True)

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
-import { Menu } from 'lucide-react'
+import { Link, useLocation } from 'react-router-dom'
+import { Menu, MailWarning, ArrowRight } from 'lucide-react'
+import { useAuthStore } from '../../store/authStore'
+import { isUnverified } from '../auth/EmailVerifyGate'
 import { Sidebar } from './Sidebar'
 import { NAV_SECTIONS, breadcrumbFor } from './navigation'
 import { AICopilotWidget } from '../copilot/AICopilotWidget'
@@ -9,6 +11,7 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const location = useLocation()
   const crumbs = breadcrumbFor(NAV_SECTIONS, location.pathname)
+  const user = useAuthStore((s) => s.user)
 
   useEffect(() => {
     setMobileNavOpen(false)
@@ -30,6 +33,21 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
           <span className="text-[13px] font-bold font-mono text-[var(--text-primary)]">Firewall WAF</span>
         </div>
         <main className="flex-1 p-5 sm:p-7 min-w-0">
+          {isUnverified(user) && (
+            <div className="max-w-[1560px] mx-auto mb-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-[10px] border border-amber-500/30 bg-[var(--warning-subtle)] px-4 py-3 text-[12.5px]">
+              <MailWarning size={16} className="text-amber-500 shrink-0 hidden sm:block" />
+              <p className="m-0 flex-1 text-[var(--text-secondary)] leading-5">
+                <span className="font-semibold text-[var(--text-primary)]">ยังไม่ได้ยืนยันอีเมล</span>{' '}
+                <span className="font-mono">{user?.email}</span> · เพิ่มเว็บ เชิญทีม สร้าง token Agent และใช้ AI ได้หลังยืนยัน
+              </p>
+              <Link
+                to={`/verify-email?next=${encodeURIComponent(location.pathname + location.search)}`}
+                className="inline-flex items-center justify-center gap-1.5 shrink-0 rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] px-3 py-1.5 text-[12px] font-semibold text-white transition-colors"
+              >
+                ยืนยันอีเมล <ArrowRight size={13} />
+              </Link>
+            </div>
+          )}
           {crumbs.length > 0 && (
             <nav aria-label="Breadcrumb" className="max-w-[1560px] mx-auto mb-3">
               <ol className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-[var(--text-muted)]">

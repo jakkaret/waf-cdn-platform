@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useAuthStore } from '../store/authStore'
+import { parseEmailGate, useEmailGateStore } from '../lib/emailGate'
 
 export const api = axios.create({
   baseURL: '/api',
@@ -31,13 +32,21 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
-// Response Interceptor: handle 401
+// Response Interceptor: handle 401, and the unverified-email gate (403
+// email_unverified) for any button a page did not guard itself: open the
+// dialog that says why, and turn the detail into a plain message so the
+// page's own error toast still reads well.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
       // Clear store if token is invalid/expired
       useAuthStore.getState().logout()
+    }
+    const gate = parseEmailGate(error)
+    if (gate) {
+      useEmailGateStore.getState().show(gate.action)
+      error.response.data.detail = gate.message
     }
     return Promise.reject(error)
   }
