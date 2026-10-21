@@ -33,13 +33,25 @@ export interface ConnectResult {
 
 export type ConnectionStatus = 'connected' | 'waiting_agent' | 'waiting_dns' | 'configuring' | 'error' | 'unknown'
 
+// What the platform sees for a pending domain. `via` is where the CNAME came
+// from: the domain's own nameservers (fresh) or the resolver (may be a cached,
+// older answer). cname_ok / txt_ok: that record already matches.
+export interface CurrentDns {
+  cname: string
+  a: string[]
+  via?: 'authoritative' | 'resolver'
+  nameserver?: string
+  cname_ok?: boolean
+  txt_ok?: boolean
+}
+
 export interface ProgressDomain {
   domain_id: string
   domain_name: string
   created_at?: string
   dns: {
     status: 'verified' | 'pending'
-    current: { cname: string; a: string[] } | null
+    current: CurrentDns | null
     instructions: DnsInstructions
   }
   connection: { status: ConnectionStatus }
