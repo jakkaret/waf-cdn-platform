@@ -620,7 +620,7 @@ async function request(btn){
     challengeId=j.challenge_id;$('sent-to').textContent=SENT_PREFIX+email+' แล้ว';
     emailStep.style.display='none';codeStep.style.display='block';$('step2').className='on';
     digits.forEach(x=>x.value='');paint();digits[0].focus();clearTimeout(timer);wait=60;tick();
-  }catch(e){errorEl.textContent='เกิดข้อผิดพลาด กรุณาลองใหม่';}finally{busy(btn,false);if(btn===resendBtn)tick();}
+  }catch(e){errorEl.textContent='เกิดข้อผิดพลาด กรุณาลองใหม่';}finally{busy(btn,false);if(btn===resendBtn)resendBtn.disabled=wait>0;}
 }
 sendBtn.onclick=()=>{email=$('email').value.trim();if(!/^[^@\\s]+@[^@\\s]+$/.test(email)){errorEl.textContent='กรุณากรอกอีเมลให้ถูกต้อง';return;}request(sendBtn);};
 $('email').addEventListener('keydown',e=>{if(e.key==='Enter')sendBtn.click();});

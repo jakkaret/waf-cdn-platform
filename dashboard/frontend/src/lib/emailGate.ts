@@ -6,7 +6,7 @@ import { create } from 'zustand'
 // detail {code: 'email_unverified', action}. This file says, per action, why
 // that matters, for the modal, the inline notices and the verify page.
 
-export type GateAction = 'create_origin' | 'add_domain' | 'invite' | 'accept_invite' | 'agent_token' | 'ai'
+export type GateAction = 'create_origin' | 'add_domain' | 'invite' | 'accept_invite' | 'agent_token' | 'ai' | 'link_google'
 
 export interface GateCopy {
   title: string
@@ -49,6 +49,13 @@ export const GATE_COPY: Record<GateAction, GateCopy> = {
     impacts: [
       'token เปิด tunnel จากเซิร์ฟเวอร์ของคุณเข้า edge ได้นาน 90 วัน',
       'ถ้าบัญชีไม่ใช่ของจริง token อาจถูกใช้พา traffic ที่ไม่ใช่ของคุณผ่าน WAF',
+    ],
+  },
+  link_google: {
+    title: 'ยืนยันอีเมลก่อนเชื่อม Google',
+    impacts: [
+      'บัญชี Google ที่เชื่อมแล้วใช้เข้าระบบแทนรหัสผ่านได้ แม้รีเซ็ตรหัสผ่านไปแล้ว',
+      'ถ้าบัญชีนี้ถูกคนอื่นสมัครด้วยอีเมลของคุณ เขาจะเชื่อม Google ของเขาไว้เข้าแทนคุณได้',
     ],
   },
   ai: {

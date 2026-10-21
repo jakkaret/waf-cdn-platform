@@ -291,7 +291,9 @@ GOOGLE_FLOW_PATH = "/api/auth/google"
 
 
 def _google_error(code: str) -> RedirectResponse:
-    resp = RedirectResponse(url=f"/login?error={code}", status_code=302)
+    # Linking needs a verified address: send the signed-in user to verify it.
+    url = "/verify-email?action=link_google&next=/settings" if code == "google_link_unverified" else f"/login?error={code}"
+    resp = RedirectResponse(url=url, status_code=302)
     resp.delete_cookie(GOOGLE_FLOW_COOKIE, path=GOOGLE_FLOW_PATH, samesite="lax", secure=_cookie_secure())
     return resp
 
@@ -301,7 +303,10 @@ async def google_login(request: Request, link: bool = False):
     """Start Google sign-in. link=true attaches Google to the account that is
     signed in right now (the only way to use Google on an existing account)."""
     if link:
-        get_current_user(request, None)  # 401 unless signed in
+        current = get_current_user(request, None)  # 401 unless signed in
+        from services import rbac
+        if not rbac.email_verified(current):
+            return _google_error("google_link_unverified")
     url, flow = auth_service.start_google_flow(link=link)
     resp = RedirectResponse(url)
     resp.set_cookie(GOOGLE_FLOW_COOKIE, flow, httponly=True, samesite="lax",
