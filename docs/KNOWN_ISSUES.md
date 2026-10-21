@@ -125,8 +125,8 @@ These were not:
 Tests: `tests/test_access_control_audit.py` (two real accounts through the
 API); full suite 733 passed.
 
-Still by design, not changed: WAF custom rules, IP rules, rate-limit rules,
-BOLA policies and global settings are platform-wide. Every viewer can read the
+Still by design, not changed: WAF custom rules, IP rules, rate-limit rules
+and global settings are platform-wide (BOLA policies were removed 2026-10-21). Every viewer can read the
 same list (only admins can change them) and tenants cannot own rules of their
 own. `GET /api/logs/filters` returns the distinct status codes/methods across
 all traffic (no hostnames or IPs).

@@ -15,7 +15,6 @@ status: VERIFIED
 | | Traffic Logs | `/logs` | admin, viewer |
 | | Origin Servers | `/origins` (+ `/origins/:id`) | admin, viewer |
 | Protection Rules | WAF Rules | `/rules` | admin, viewer |
-| | API Security (BOLA) | `/bola` | admin, viewer |
 | | IP Access List | `/ip-rules` | admin, viewer |
 | | Rate Limiting | `/rate-limits` | admin, viewer |
 | | ML Anomaly Rules | `/ml-rules` | admin |
@@ -26,7 +25,6 @@ status: VERIFIED
 | | Zero Trust Tunnels | `/tunnels` | admin, viewer |
 | Administration & System | Access Control | `/users` | admin |
 | | System Settings | `/settings` | admin, viewer |
-| | Concepts (preview) | `/concepts` (+ 13 หน้าย่อย) | admin |
 
 ## 28.2 หน้าที่ไม่อยู่ในเมนู
 
@@ -40,7 +38,7 @@ status: VERIFIED
 ## 28.3 การป้องกัน route
 
 - ทุกหน้าภายในห่อด้วย `ProtectedRoute` → ไม่ได้ login ไป `/login`
-- `requireAdmin` ใช้กับ `/users` เท่านั้น หน้าอื่นที่เป็นของ admin (เช่น `/ml-rules`, `/concepts`) ซ่อนจากเมนูแต่ **สิทธิ์จริงถูกตรวจที่ backend** (`require_admin`)
+- `requireAdmin` ใช้กับ `/users` เท่านั้น หน้าอื่นที่เป็นของ admin (เช่น `/ml-rules`) ซ่อนจากเมนูแต่ **สิทธิ์จริงถูกตรวจที่ backend** (`require_admin`)
 - เมนูกรองตาม role ใน `Sidebar.tsx`
 
 ## แหล่งอ้างอิง (Evidence)

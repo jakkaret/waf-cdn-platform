@@ -527,7 +527,7 @@ class BlastRadiusService:
             "report_id": f"AUDIT-SIM-{int(time.time())}",
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "compliance_frameworks": [
-                "OWASP Top 10 (API1 BOLA & Injection)",
+                "OWASP Top 10 (Injection)",
                 "PDPA / GDPR Zero-Trust",
                 "PCI-DSS 6.4.1 (WAF Change Management)"
             ],

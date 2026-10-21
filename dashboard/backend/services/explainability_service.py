@@ -132,15 +132,6 @@ SIGNATURE_PATTERNS = [
         "explanation": "ทราฟฟิกตรงกับเงื่อนไข Custom Rule 990001 (WAF Sync Test Verification)",
         "remediation": "ตรวจสอบกฎที่สร้างขึ้นในเมนู Rules Management บน Dashboard",
         "confidence": 1.0
-    },
-    # 8. Context-Aware BOLA / IDOR Guard (Custom 990003 & 990030-990035)
-    {
-        "category": "Broken Object Level Authorization (BOLA)",
-        "crs_prefix": ("990003", "990030", "990031", "990032", "990033", "BOLA-GUARD"),
-        "regex": re.compile(r"(?i)(?:bola|idor|cross-tenant|unauthorized_object|spoofed_user|/api/(?:v[0-9]+/)?(?:users|tenants|accounts|orders)/[a-zA-Z0-9_\-]+)"),
-        "explanation": "ตรวจพบความพยายามเข้าถึงทรัพยากรข้าม Tenant หรือข้าม User ID (Broken Object Level Authorization / BOLA)",
-        "remediation": "ตรวจสอบความถูกต้องของ JWT Claims เทียบกับ Path Parameter ใน Request และบังคับใช้ Zero-Trust Tenancy Boundary",
-        "confidence": 0.96
     }
 ]
 

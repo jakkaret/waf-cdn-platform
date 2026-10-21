@@ -16,7 +16,7 @@ flowchart TB
   main["main.tsx"] --> app["App.tsx: BrowserRouter + QueryClientProvider"]
   app --> pr["ProtectedRoute (isAuthenticated, requireAdmin)"]
   pr --> layout["AppLayout: Sidebar + TopBar + OriginSelector"]
-  layout --> pages["pages/*: Dashboard, Logs, Origins, Rules, BolaRules, IPRules, RateLimiting, MLRules, MLAnalyst, ThresholdProposals, Alerts, CDN, Tunnels, Users, Settings, concepts/*"]
+  layout --> pages["pages/*: Dashboard, Logs, Origins, Rules, IPRules, RateLimiting, MLRules, MLAnalyst, ThresholdProposals, Alerts, CDN, Tunnels, Users, Settings, Support"]
   pages --> ui["components/ui: Drawer, Modal, useDialog, Table, Badge, StatCard ..."]
   pages --> rq["TanStack Query (polling 5-30s)"]
   rq --> apis["src/api/*.ts"]

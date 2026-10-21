@@ -17,11 +17,16 @@ describe('NAV_SECTIONS', () => {
     expect(new Set(all).size).toBe(all.length)
     expect([...all].sort()).toEqual(
       [
-        '/', '/logs', '/origins', '/rules', '/bola', '/ip-rules', '/rate-limits', '/ml-rules',
+        '/', '/logs', '/origins', '/rules', '/ip-rules', '/rate-limits', '/ml-rules',
         '/ml-analyst', '/threshold-proposals', '/alerts', '/cdn', '/tunnels', '/users',
-        '/settings', '/concepts', '/support',
+        '/settings', '/support',
       ].sort(),
     )
+  })
+
+  it('no longer links the removed BOLA and concept pages', () => {
+    expect(paths()).not.toContain('/bola')
+    expect(paths().some((p) => p.startsWith('/concepts'))).toBe(false)
   })
 
   it('puts the most-used pages first', () => {
@@ -31,16 +36,15 @@ describe('NAV_SECTIONS', () => {
 
 describe('visibleSections', () => {
   it('shows everything to an operator', () => {
-    expect(paths(visibleSections(NAV_SECTIONS, true))).toHaveLength(17)
+    expect(paths(visibleSections(NAV_SECTIONS, true))).toHaveLength(15)
   })
 
   it('hides operator-only pages from a regular user', () => {
     const visible = paths(visibleSections(NAV_SECTIONS, false))
     expect(visible).not.toContain('/ml-rules')
     expect(visible).not.toContain('/users')
-    expect(visible).not.toContain('/concepts')
     expect(visible).toContain('/support') // every member can reach support
-    expect(visible).toHaveLength(14)
+    expect(visible).toHaveLength(13)
   })
 
   it('drops a group whose children are all hidden', () => {
@@ -69,7 +73,7 @@ describe('isPathActive', () => {
 
 describe('activeGroupId', () => {
   it('finds the group holding the current page', () => {
-    expect(activeGroupId(NAV_SECTIONS, '/bola')).toBe('security-rules')
+    expect(activeGroupId(NAV_SECTIONS, '/ip-rules')).toBe('security-rules')
     expect(activeGroupId(NAV_SECTIONS, '/threshold-proposals')).toBe('detection')
   })
 
@@ -101,7 +105,7 @@ describe('filterSections', () => {
 
   it('matches labels case-insensitively, inside groups too', () => {
     expect(paths(filterSections(NAV_SECTIONS, 'rate'))).toEqual(['/rate-limits'])
-    expect(paths(filterSections(NAV_SECTIONS, 'BOLA'))).toEqual(['/bola'])
+    expect(paths(filterSections(NAV_SECTIONS, 'IP ACCESS'))).toEqual(['/ip-rules'])
   })
 
   it('matches keywords', () => {

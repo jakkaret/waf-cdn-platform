@@ -1,10 +1,9 @@
 import asyncio
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Any, Union
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field, field_validator
 from services.rule_manager import RuleManager
 from services.blast_radius_service import blast_radius_service
-from services.bola_guard import bola_guard
 from services.rbac import require_viewer_or_above, require_admin
 
 router = APIRouter(prefix="/api/rules", tags=["rules"])
@@ -12,7 +11,6 @@ rule_manager = RuleManager()
 
 
 from services.explainability_service import explainability_service
-from services.bola_guard import validate_policy_regex
 
 
 ALLOWED_ACTIONS = {"BLOCK", "CHALLENGE", "DECEIVE"}
@@ -114,37 +112,6 @@ class BlastRadiusRequest(BaseModel):
     rule_id: Optional[str] = None
     domain_id: Optional[str] = None
     anomaly_threshold: int = 5
-
-
-class BolaPolicyCreate(BaseModel):
-    id: Optional[str] = None
-    name: str
-    path_pattern: str
-    claim_key: str = "sub"
-    resource_type: str = "user_id"
-    action: str = "BLOCK"
-    allow_admin: bool = True
-    description: Optional[str] = ""
-    enabled: bool = True
-    methods: Optional[List[str]] = ["ALL"]
-
-
-class BolaPolicyUpdate(BaseModel):
-    name: Optional[str] = None
-    path_pattern: Optional[str] = None
-    claim_key: Optional[str] = None
-    resource_type: Optional[str] = None
-    action: Optional[str] = None
-    allow_admin: Optional[bool] = None
-    description: Optional[str] = None
-    enabled: Optional[bool] = None
-    methods: Optional[List[str]] = None
-
-
-class BolaInspectRequest(BaseModel):
-    path: str
-    headers: Optional[Dict[str, str]] = {}
-    method: str = "GET"
 
 
 class MitigateCandidateRequest(BaseModel):
@@ -322,62 +289,3 @@ async def export_blast_radius_audit(payload: BlastRadiusRequest, current_user: d
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==========================================
-# 3. Context-Aware BOLA / IDOR Guard API
-# ==========================================
-
-@router.get("/bola/policies")
-async def get_bola_policies(current_user: dict = Depends(require_viewer_or_above)):
-    """List active BOLA protection policies."""
-    return {"policies": bola_guard.list_policies()}
-
-
-@router.post("/bola/policies")
-async def create_bola_policy(policy: BolaPolicyCreate, current_user: dict = Depends(require_admin)):
-    """Add or update a BOLA protection policy."""
-    is_valid, err_msg = validate_policy_regex(policy.path_pattern)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=f"Invalid BOLA policy regex: {err_msg}")
-
-    success = bola_guard.add_policy(policy.dict(), persist=True)
-    if success:
-        return {"success": True, "message": "BOLA Policy configured successfully"}
-    raise HTTPException(status_code=400, detail="Invalid BOLA policy configuration")
-
-
-@router.put("/bola/policies/{policy_id}")
-async def update_bola_policy(policy_id: str, updates: BolaPolicyUpdate, current_user: dict = Depends(require_admin)):
-    """Update an existing BOLA protection policy."""
-    update_data = {k: v for k, v in updates.dict().items() if v is not None}
-    if "path_pattern" in update_data:
-        is_valid, err_msg = validate_policy_regex(update_data["path_pattern"])
-        if not is_valid:
-            raise HTTPException(status_code=400, detail=f"Invalid BOLA policy regex: {err_msg}")
-
-    success = bola_guard.update_policy(policy_id, update_data, persist=True)
-    if success:
-        return {"success": True, "message": f"BOLA Policy {policy_id} updated"}
-    raise HTTPException(status_code=404, detail=f"BOLA Policy {policy_id} not found")
-
-
-@router.delete("/bola/policies/{policy_id}")
-async def delete_bola_policy(policy_id: str, current_user: dict = Depends(require_admin)):
-    """Delete a BOLA protection policy."""
-    success = bola_guard.remove_policy(policy_id, persist=True)
-    if success:
-        return {"success": True, "message": f"BOLA Policy {policy_id} removed"}
-    raise HTTPException(status_code=404, detail="BOLA Policy not found")
-
-
-@router.post("/bola/inspect")
-async def inspect_request_bola(req: BolaInspectRequest, current_user: dict = Depends(require_viewer_or_above)):
-    """Test/Inspect a request path and headers against BOLA guard engine."""
-    result = bola_guard.inspect_request(
-        path=req.path,
-        headers=req.headers or {},
-        method=req.method,
-        verified_user=current_user
-    )
-    return result

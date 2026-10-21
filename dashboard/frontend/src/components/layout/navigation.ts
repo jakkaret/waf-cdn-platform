@@ -2,7 +2,6 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Bell,
   Brain,
-  FlaskConical,
   Globe,
   LayoutDashboard,
   LifeBuoy,
@@ -20,7 +19,7 @@ import {
 //
 // `access` decides who sees an entry. "operator" entries are hidden from
 // regular users. It mirrors today's visibility; role-3 plan Phase 6 moves the
-// platform-wide pages (rules, BOLA, IP list, rate limits, tuning proposals,
+// platform-wide pages (rules, IP list, rate limits, tuning proposals,
 // settings) to "operator" together with the backend guards.
 
 export type NavAccess = 'member' | 'operator'
@@ -74,7 +73,6 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: ShieldAlert,
         children: [
           { kind: 'link', id: 'rules', label: 'WAF rules', path: '/rules', access: 'member', keywords: ['modsecurity', 'crs'] },
-          { kind: 'link', id: 'bola', label: 'API security (BOLA)', path: '/bola', access: 'member' },
           { kind: 'link', id: 'ip-rules', label: 'IP access list', path: '/ip-rules', access: 'member', keywords: ['block', 'allow'] },
           { kind: 'link', id: 'rate-limits', label: 'Rate limiting', path: '/rate-limits', access: 'member' },
           { kind: 'link', id: 'ml-rules', label: 'ML anomaly rules', path: '/ml-rules', access: 'operator' },
@@ -101,7 +99,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { kind: 'link', id: 'users', label: 'Access control', path: '/users', icon: Users, access: 'operator', keywords: ['users', 'roles'] },
       { kind: 'link', id: 'support', label: 'Support tickets', path: '/support', icon: LifeBuoy, access: 'member', keywords: ['help', 'ticket'] },
       { kind: 'link', id: 'settings', label: 'System settings', path: '/settings', icon: Settings, access: 'member' },
-      { kind: 'link', id: 'concepts', label: 'Concepts', path: '/concepts', icon: FlaskConical, access: 'operator', badge: 'Preview' },
     ],
   },
 ]

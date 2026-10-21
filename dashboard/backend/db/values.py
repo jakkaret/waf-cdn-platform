@@ -9,7 +9,6 @@ used with DynamoDB/SQLite. Each table keeps the timestamp format it had:
     naive_utc    '%Y-%m-%d %H:%M:%S'                postmortems.start_time/end_time
     date_text    'YYYY-MM-DD'                       status_history_days.date_bucket
     epoch int                                       tunnel_token_issued_at, ip_rules
-    epoch str                                       bola_policies.updated_at
 """
 from __future__ import annotations
 
