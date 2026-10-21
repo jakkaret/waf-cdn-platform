@@ -29,25 +29,10 @@ import MLAnalyst from './pages/MLAnalyst'
 import Tunnels from './pages/Tunnels'
 import StatusPage from './pages/StatusPage'
 import Onboarding from './pages/Onboarding'
-import ConceptsIndex from './pages/concepts/ConceptsIndex'
 import NotFound from './pages/NotFound'
-import AiRuleComposer from './pages/concepts/AiRuleComposer'
-import TeamWorkspace from './pages/concepts/TeamWorkspace'
-import IncidentPostmortem from './pages/concepts/IncidentPostmortem'
-import AiBotControl from './pages/concepts/AiBotControl'
-import CveAutoPatch from './pages/concepts/CveAutoPatch'
-import SupplyChainMonitor from './pages/concepts/SupplyChainMonitor'
-import ApiSchemaGuard from './pages/concepts/ApiSchemaGuard'
-import AttackCostShield from './pages/concepts/AttackCostShield'
-import AgenticTrafficGovernance from './pages/concepts/AgenticTrafficGovernance'
-import AiFirewallLlm from './pages/concepts/AiFirewallLlm'
-import DeceptionLayer from './pages/concepts/DeceptionLayer'
-import QuantumSafeTls from './pages/concepts/QuantumSafeTls'
-import UnifiedRiskScore from './pages/concepts/UnifiedRiskScore'
 import { queryClient } from './lib/queryClient'
 import { authApi } from './api/auth'
 import ThresholdProposals from './pages/ThresholdProposals'
-import BolaRules from './pages/BolaRules'
 
 
 const ProtectedRoute = ({
@@ -137,14 +122,6 @@ export const App: React.FC = () => {
             }
           />
           <Route
-            path="/bola"
-            element={
-              <ProtectedRoute>
-                <BolaRules />
-              </ProtectedRoute>
-            }
-          />
-          <Route
             path="/threshold-proposals"
             element={
               <ProtectedRoute>
@@ -213,118 +190,6 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 <Onboarding />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts"
-            element={
-              <ProtectedRoute requireAdmin>
-                <ConceptsIndex />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/ai-rules"
-            element={
-              <ProtectedRoute requireAdmin>
-                <AiRuleComposer />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/team"
-            element={
-              <ProtectedRoute requireAdmin>
-                <TeamWorkspace />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/postmortem"
-            element={
-              <ProtectedRoute requireAdmin>
-                <IncidentPostmortem />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/ai-bots"
-            element={
-              <ProtectedRoute requireAdmin>
-                <AiBotControl />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/cve-patch"
-            element={
-              <ProtectedRoute requireAdmin>
-                <CveAutoPatch />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/supply-chain"
-            element={
-              <ProtectedRoute requireAdmin>
-                <SupplyChainMonitor />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/api-guard"
-            element={
-              <ProtectedRoute requireAdmin>
-                <ApiSchemaGuard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/cost-shield"
-            element={
-              <ProtectedRoute requireAdmin>
-                <AttackCostShield />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/agentic-traffic"
-            element={
-              <ProtectedRoute requireAdmin>
-                <AgenticTrafficGovernance />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/ai-firewall"
-            element={
-              <ProtectedRoute requireAdmin>
-                <AiFirewallLlm />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/deception"
-            element={
-              <ProtectedRoute requireAdmin>
-                <DeceptionLayer />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/quantum-tls"
-            element={
-              <ProtectedRoute requireAdmin>
-                <QuantumSafeTls />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/concepts/risk-score"
-            element={
-              <ProtectedRoute requireAdmin>
-                <UnifiedRiskScore />
               </ProtectedRoute>
             }
           />

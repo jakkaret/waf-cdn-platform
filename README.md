@@ -27,7 +27,7 @@
 
 ระบบนี้จำลองแพลตฟอร์ม WAF + CDN เชิงพาณิชย์ (แนวทางเดียวกับ Cloudflare) ให้ผู้ใช้แต่ละคนเพิ่มเว็บไซต์ของตัวเองเข้ามาให้ระบบป้องกันได้ — ประกอบด้วย 4 เลเยอร์หลัก:
 
-1. **เลเยอร์ป้องกัน (Prevention)** — ModSecurity v3 + OWASP CRS ตรวจจับและบล็อกการโจมตีมาตรฐาน (SQLi, XSS, RCE, LFI ฯลฯ) แบบ signature-based พร้อม security module เสริมที่เขียนเอง (BOLA/IDOR guard, payload normalizer ต้าน evasion, ReDoS-safe regex engine)
+1. **เลเยอร์ป้องกัน (Prevention)** — ModSecurity v3 + OWASP CRS ตรวจจับและบล็อกการโจมตีมาตรฐาน (SQLi, XSS, RCE, LFI ฯลฯ) แบบ signature-based พร้อม security module เสริมที่เขียนเอง (payload normalizer ต้าน evasion, ReDoS-safe regex engine)
 2. **เลเยอร์ตรวจจับ (Detection)** — โมเดล Machine Learning (Random Forest + Isolation Forest) ให้คะแนนความผิดปกติของ request แบบ real-time พร้อมระบบอธิบายเหตุผลเชิง feature-attribution เป็นภาษาไทย
 3. **เลเยอร์วิเคราะห์ (Analysis)** — AI Copilot (Gemini) ตอบคำถามเชิงความปลอดภัยโดยอ้างอิงข้อมูล telemetry สดจาก ClickHouse สรุปเหตุการณ์และรายงานภาพรวมเป็นภาษาไทย
 4. **เลเยอร์บริหารจัดการ (Management)** — Dashboard แบบ multi-tenant ครบวงจร: สมัคร/ล็อกอิน, เพิ่ม origin server ของตัวเอง, จัดการ custom rule, ดู analytics, ตั้งค่า rate-limit, รับแจ้งเตือนผ่าน Telegram
@@ -123,7 +123,7 @@
 | ชั้น | เทคโนโลยี |
 |---|---|
 | **WAF Engine** | ModSecurity v3 + OWASP CRS v3.3.10, nginx, Caddy (SSL termination อัตโนมัติ) |
-| **Security เสริม (เขียนเอง)** | BOLA/IDOR guard (JWT + path canonicalization), payload normalizer ต้าน evasion, ReDoS-safe regex engine (process-isolated, RE2 fast-path) |
+| **Security เสริม (เขียนเอง)** | payload normalizer ต้าน evasion, ReDoS-safe regex engine (process-isolated, RE2 fast-path) |
 | **Backend** | Python 3.11, FastAPI 0.104, Uvicorn |
 | **Frontend** | React 18.3 + TypeScript 5.6, Vite 5.4, TailwindCSS 3.4, TanStack Query 5.62, Zustand 4.5 |
 | **Machine Learning** | scikit-learn (Random Forest + Isolation Forest ensemble), joblib |

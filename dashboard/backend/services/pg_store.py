@@ -787,40 +787,6 @@ class PgStore:
                  "actor_username": r["actor_username"], "action": r["action"], "summary": r["summary"],
                  "details": r["details"]} for r in rows]
 
-    # ------------------------------------------------------------------
-    # BOLA policies
-    # ------------------------------------------------------------------
-    def list_bola_policies(self) -> List[Dict]:
-        rows = pool.q("SELECT * FROM bola_policies ORDER BY priority, id")
-        return [{"id": r["id"], "type": "bola_policy", "name": r["name"], "path_pattern": r["path_pattern"],
-                 "claim_key": r["claim_key"], "resource_type": r["resource_type"], "action": r["action"],
-                 "allow_admin": bool(r["allow_admin"]), "description": r["description"],
-                 "enabled": bool(r["enabled"]), "methods": list(r["methods"]), "priority": int(r["priority"]),
-                 "updated_at": str(int(r["updated_at"].timestamp()))} for r in rows]
-
-    def put_bola_policy(self, item: Dict) -> None:
-        methods = item.get("methods") or ["ALL"]
-        if isinstance(methods, str):
-            methods = [methods]
-        updated = item.get("updated_at")
-        pool.exec_(
-            "INSERT INTO bola_policies (id, name, path_pattern, claim_key, resource_type, action, allow_admin, "
-            "description, enabled, methods, priority, updated_at) VALUES (%s, %s, %s, %s, %s, upper(%s), %s, %s, %s, "
-            "%s, %s, COALESCE(to_timestamp(%s::bigint), now())) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, "
-            "path_pattern = EXCLUDED.path_pattern, claim_key = EXCLUDED.claim_key, "
-            "resource_type = EXCLUDED.resource_type, action = EXCLUDED.action, allow_admin = EXCLUDED.allow_admin, "
-            "description = EXCLUDED.description, enabled = EXCLUDED.enabled, methods = EXCLUDED.methods, "
-            "priority = EXCLUDED.priority, updated_at = EXCLUDED.updated_at",
-            (str(item["id"]), item.get("name") or "Custom BOLA Policy", item["path_pattern"],
-             item.get("claim_key") or "sub", item.get("resource_type") or "user_id", item.get("action") or "BLOCK",
-             bool(item.get("allow_admin", True)), item.get("description") or "", bool(item.get("enabled", True)),
-             [str(m).upper() for m in methods], int(item.get("priority", 100)),
-             str(int(float(updated))) if updated not in (None, "") else None),
-        )
-
-    def delete_bola_policy(self, policy_id: str) -> None:
-        pool.exec_("DELETE FROM bola_policies WHERE id = %s", (str(policy_id),))
-
 
 # ----------------------------------------------------------------------
 # users (waf.users + waf.user_identities), used by services/auth_service.py

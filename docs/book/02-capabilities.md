@@ -27,20 +27,16 @@ status: PARTIAL
 | Multi-tenancy | ข้อมูล log/alert/origin แยกตามเจ้าของ, สิทธิ์ owner/editor/viewer ต่อ origin | 12 | VERIFIED |
 | Authentication | อีเมล/รหัสผ่าน (Argon2) + Google OAuth, JWT | 11 | VERIFIED |
 | IP access list / rate limit | กฎ IP และ rate limit ต่อ path (SQLite + nginx `auth_request`) | 43 | VERIFIED (โค้ด) |
-| BOLA guard | นโยบายกัน Broken Object Level Authorization สำหรับ API | 32 | PARTIAL (มี API และหน้าเว็บ, ยังไม่ได้ตรวจการบังคับใช้ที่ nginx) |
 | Threat intel ข้ามลูกค้า | บันทึกรูปแบบการโจมตีแบบไม่ระบุตัวตน (opt-in) | 15 | VERIFIED (โค้ด) |
 | Public status page | `/status` แสดงสถานะ edge | 30 | VERIFIED |
 | GeoDNS | เลือก edge ตามประเทศของผู้ใช้ | 22 | PARTIAL — ไม่ได้อยู่ในเส้นทาง DNS สาธารณะ |
 
-## 2.2 หน้าแนวคิด (Concepts preview)
-
-เมนู **Concepts (preview)** ในหน้า dashboard (เฉพาะ admin) มี 13 หน้า เช่น AI Rule Composer, Quantum-safe TLS, Supply-chain monitor หน้าเหล่านี้เป็น **ต้นแบบหน้าจอ** แสดงแนวคิดในอนาคต **ไม่ได้เชื่อมกับการทำงานจริงทั้งหมด** จึงนับเป็น `PLANNED` ยกเว้นหัวข้อที่มีบทอธิบายการทำงานจริงแยกไว้ (เช่น Deception)
-
-## 2.3 สิ่งที่ระบบ **ไม่มี** (ณ วันที่ตรวจ)
+## 2.2 สิ่งที่ระบบ **ไม่มี** (ณ วันที่ตรวจ)
 
 - การกระจาย edge แบบ anycast หรือมากกว่า 2 โหนด
 - ระบบสำรองของเครื่อง Main (HA / failover)
 - การบล็อกอัตโนมัติจากผล ML โดยไม่ผ่านการอนุมัติ
+- การป้องกัน BOLA/IDOR ให้เว็บของลูกค้า (เคยมีโมดูลทดลองแต่ไม่ได้อยู่ในเส้นทาง request จึงลบออกเมื่อ 2026-10-21 ต้องแก้ในโค้ดของแอปลูกค้า)
 
 ## แหล่งอ้างอิง (Evidence)
 - `dashboard/frontend/src/App.tsx`, `components/layout/Sidebar.tsx`

@@ -20,7 +20,7 @@ status: VERIFIED
 - **ตรวจ:** เทียบ `stat -c %i` บน host กับใน container
 - **แก้:** `docker restart <container>`
 
-### 50.3 หน้าเว็บขาดหน้า/ฟีเจอร์ (เช่นหน้า Concepts หาย)
+### 50.3 หน้าเว็บขาดหน้า/ฟีเจอร์ (เช่นหน้า Support หาย)
 - **สาเหตุ:** `dist/` เป็น build เก่า หรือ source ถูกแทนที่
 - **ตรวจ:** `curl -s https://waf-it-kku.online/ | grep -o 'assets/index-[^"]*\.js'` แล้ว grep ข้อความที่ควรมีใน bundle
 - **แก้:** `git status` ให้สะอาด แล้ว `npm run build`

@@ -68,8 +68,10 @@ def test_all_tables_and_view_exist(db):
     tables = {r[0] for r in c.execute(
         "SELECT table_name FROM information_schema.tables "
         "WHERE table_schema='waf' AND table_type='BASE TABLE'")}
-    # 0006 origin_invites, 0007 tunnel_proxy_owners, 0008 user_sessions, 0009 support (4 tables)
-    assert len(tables - {"schema_migrations"}) == 26
+    # 0006 origin_invites, 0007 tunnel_proxy_owners, 0008 user_sessions, 0009 support (4 tables),
+    # 0010 drops bola_policies
+    assert len(tables - {"schema_migrations"}) == 25
+    assert "bola_policies" not in tables
     assert "origin_invites" in tables
     assert "tunnel_proxy_owners" in tables
     assert "user_sessions" in tables

@@ -230,11 +230,6 @@ status: VERIFIED
 | POST | `/api/rules/` | `create_rule` | admin |  |
 | POST | `/api/rules/blast-radius` | `simulate_blast_radius` | viewer+ | Replays historical traffic against candidate rule to estimate false positives and blast ra |
 | POST | `/api/rules/blast-radius/export` | `export_blast_radius_audit` | viewer+ | Generates and exports an Enterprise SecOps Compliance Audit Report for the simulated rule. |
-| POST | `/api/rules/bola/inspect` | `inspect_request_bola` | viewer+ | Test/Inspect a request path and headers against BOLA guard engine. |
-| GET | `/api/rules/bola/policies` | `get_bola_policies` | viewer+ | List active BOLA protection policies. |
-| POST | `/api/rules/bola/policies` | `create_bola_policy` | admin | Add or update a BOLA protection policy. |
-| PUT | `/api/rules/bola/policies/{policy_id}` | `update_bola_policy` | admin | Update an existing BOLA protection policy. |
-| DELETE | `/api/rules/bola/policies/{policy_id}` | `delete_bola_policy` | admin | Delete a BOLA protection policy. |
 | POST | `/api/rules/mitigate-candidate` | `generate_mitigation_candidate_rule` | viewer+ | Analyzes an attack log or token and returns an auto-generated, ReDoS-safe candidate ModSec |
 | POST | `/api/rules/sync` | `sync_rules_to_edges` | admin | Trigger sync of WAF rules from this API to all CDN edge nodes. |
 | DELETE | `/api/rules/{rule_id}` | `delete_rule` | admin |  |

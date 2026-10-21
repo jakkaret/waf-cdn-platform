@@ -446,9 +446,6 @@ class TestRbacBypassAttempts:
             ("PUT", "/api/rules/400001", {"variable": "REQUEST_URI", "operator": "@rx .", "severity": "HIGH", "message": "unauth"}),
             ("DELETE", "/api/rules/400001", None),
             ("POST", "/api/rules/sync", None),
-            ("POST", "/api/rules/bola/policies", {"name": "test", "path_pattern": "^/api/test"}),
-            ("PUT", "/api/rules/bola/policies/pol1", {"name": "test"}),
-            ("DELETE", "/api/rules/bola/policies/pol1", None),
         ]
 
         for method, path, body in endpoints:

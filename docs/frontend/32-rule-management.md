@@ -33,11 +33,10 @@ status: VERIFIED
 
 | หน้า | หน้าที่ | สถานะ |
 |---|---|---|
-| API Security (BOLA) `/bola` | จัดการนโยบาย BOLA (`/api/rules/bola/policies`) | PARTIAL |
 | IP Access List `/ip-rules` | allow/deny IP (SQLite) | VERIFIED (โค้ด) |
 | Rate Limiting `/rate-limits` | กฎจำกัดอัตราต่อ path | VERIFIED (โค้ด) |
 | ML Anomaly Rules `/ml-rules` | อนุมัติ/ปฏิเสธ/ลบกฎที่ ML เสนอ, สแกน CVE | VERIFIED |
 | Tuning Proposals `/threshold-proposals` | สร้าง/อนุมัติ/ปฏิเสธ/rollback ข้อเสนอ threshold | VERIFIED |
 
 ## แหล่งอ้างอิง (Evidence)
-- `pages/Rules.tsx`, `pages/BolaRules.tsx`, `pages/IPRules.tsx`, `pages/RateLimiting.tsx`, `pages/MLRules.tsx`, `pages/ThresholdProposals.tsx`, `services/rule_manager.py`
+- `pages/Rules.tsx`, `pages/IPRules.tsx`, `pages/RateLimiting.tsx`, `pages/MLRules.tsx`, `pages/ThresholdProposals.tsx`, `services/rule_manager.py`

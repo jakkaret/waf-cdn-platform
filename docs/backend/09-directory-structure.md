@@ -46,7 +46,7 @@ status: VERIFIED
 | Path | บทบาท |
 |---|---|
 | `App.tsx` | กำหนด route ทั้งหมด |
-| `pages/` | 35 ไฟล์หน้า รวม `pages/concepts/` |
+| `pages/` | 25 ไฟล์หน้า |
 | `components/` | layout (Sidebar, Header), ui (Drawer, Modal, Badge, StatCard ...) |
 | `api/` | client เรียก backend ผ่าน axios |
 | `store/` | Zustand (`authStore`, `themeStore`) |

@@ -20,7 +20,7 @@ status: VERIFIED
 | `/api/auth` | `api/auth.py` | 11 | สมัคร, login, logout, Google OAuth, Telegram, `/me`, ผู้ใช้ |
 | `/api/origins` | `api/origins.py`, `api/domains.py` | 18 + บางส่วน | origin ของลูกค้า, ทีม (viewer/editor), captcha/OTP ต่อ origin, audit log |
 | `/api/domains` | `api/domains.py` | 9 | โดเมน, การยืนยัน DNS, `check-ssl-allowed` สำหรับ Caddy |
-| `/api/rules` | `api/rules.py` | 13 | custom rule (BLOCK/CHALLENGE/DECEIVE), sync, blast radius, BOLA policy |
+| `/api/rules` | `api/rules.py` | 8 | custom rule (BLOCK/CHALLENGE/DECEIVE), sync, blast radius |
 | `/api/logs` | `api/logs.py` | 7 | ค้น log, ตัวเลือกกรอง, explain ด้วย AI, mask PII |
 | `/api/alerts` | `api/alerts.py` | 5 | alert ของ tenant |
 | `/api/analytics` | `api/analytics.py` | 1 | สถิติ dashboard |
