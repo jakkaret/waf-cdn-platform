@@ -34,6 +34,8 @@ os.environ.setdefault("ORIGINS_QUOTA_DEFAULT", "5")
 # the resolver path they always used. tests/test_dns_authoritative.py turns it on
 # with fake nameservers.
 os.environ["WAF_DNS_AUTHORITATIVE"] = "0"
+# Same for the on-demand HTTPS probe of the progress page (real TLS to an edge).
+os.environ["WAF_HTTPS_PROBE"] = "0"
 # Services keep sqlite/json state in dashboard/backend/data/, which is tracked in
 # git and is live data on Main. Tests get a throwaway directory instead.
 import tempfile  # noqa: E402

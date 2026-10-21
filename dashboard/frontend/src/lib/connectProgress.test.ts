@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { dnsCheck, connectionCheck, httpsCheck, describeInspect, normalizeDomainInput } from './connectProgress'
+import { dnsCheck, connectionCheck, httpsCheck, describeInspect, normalizeDomainInput, liveElsewhere } from './connectProgress'
 import type { ProgressDomain } from '../api/onboarding'
 
 const base: ProgressDomain = {
@@ -37,6 +37,24 @@ describe('dnsCheck', () => {
   it('warns that a resolver answer may be an old cached one', () => {
     const v = dnsCheck({ ...base, dns: { ...base.dns, current: { cname: 'old.example.net', a: [], via: 'resolver' } } })
     expect(v.detail).toContain('TTL')
+  })
+  it('asks a live site to add the TXT first', () => {
+    const d = { ...base, dns: { ...base.dns, current: { cname: 'old.vercel-dns-017.com', a: [], via: 'authoritative' as const, points_here: false } } }
+    expect(liveElsewhere(d)).toBe(true)
+    expect(dnsCheck(d).detail).toContain('ขั้นที่ 1 เพิ่ม TXT')
+  })
+  it('keeps the CNAME step open after a TXT verification while the name still points elsewhere', () => {
+    const d = { ...base, dns: { ...base.dns, status: 'verified' as const,
+      current: { cname: 'old.vercel-dns-017.com', a: [], points_here: false } }, connection: { status: 'connected' as const } }
+    expect(dnsCheck(d).state).toBe('waiting')
+    expect(dnsCheck(d).detail).toContain('ขั้นที่ 2')
+    expect(connectionCheck(d, 'direct').state).toBe('waiting')
+    expect(httpsCheck(d).state).toBe('blocked')
+  })
+  it('is done once a verified name points here', () => {
+    const d = { ...base, dns: { ...base.dns, status: 'verified' as const, current: null } }
+    expect(liveElsewhere(d)).toBe(false)
+    expect(dnsCheck(d).state).toBe('done')
   })
   it('says a matching record is being confirmed instead of waiting', () => {
     const v = dnsCheck({ ...base, dns: { ...base.dns, current: { cname: '', a: [], via: 'authoritative', txt_ok: true } } })

@@ -15,6 +15,7 @@ services (origin_service.create_origin quota/validation, the domain
 ownership checks, verify_domain_dns, the FRP gatekeeper for agent tokens).
 """
 import asyncio
+import logging
 import os
 import time
 from datetime import datetime
@@ -28,6 +29,8 @@ import services.origin_service as origin_service
 from services import site_connect
 from services import nginx_site_service
 from services.dns_service import record_cname_target, verify_domain_dns
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/onboarding", tags=["Onboarding"])
 
@@ -259,8 +262,12 @@ async def connect_site(payload: ConnectRequest, current_user: dict = Depends(get
 # --- progress -------------------------------------------------------------
 
 VERIFY_THROTTLE_SECONDS = 15
+ROUTE_THROTTLE_SECONDS = 30
+HTTPS_PROBE_THROTTLE_SECONDS = 60
 FRP_FORCE_POLL_SECONDS = 15
 _last_verify: dict = {}       # domain_id -> (monotonic time, current dns)
+_last_route: dict = {}        # verified domain_id -> (monotonic time, current dns)
+_last_https_probe: dict = {}  # domain name -> monotonic time
 _last_frp_poll: dict = {}     # origin_id -> monotonic time
 _last_reconcile_request: dict = {}
 
@@ -270,15 +277,90 @@ def _domains_for_origin(origin_id: str) -> list:
     return domains_db.list_domains(origin_id=origin_id)
 
 
+def _points_here(current: dict, token: str) -> bool:
+    """Whether the name already sends visitors to the edge: a CNAME to the
+    platform target (this record's own or the shared one), or A records that
+    are all ours."""
+    target = site_connect.cname_target()
+    cname = (current.get("cname") or "").rstrip(".").lower()
+    if cname:
+        return (bool(token) and cname == record_cname_target(token)) or cname == target or cname.endswith("." + target)
+    a = current.get("a") or []
+    return bool(a) and set(a) <= site_connect.platform_ips()
+
+
 def _with_record_checks(current: dict, token: str) -> dict:
     """Tell the page whether each record already matches, so it can say
-    "correct, confirming" instead of "waiting". The TXT values themselves are
-    not sent back, only whether one matches."""
+    "correct, confirming" instead of "waiting", and whether the name still
+    serves visitors from somewhere else (a live site: verify by TXT first,
+    move the CNAME after). The TXT values themselves are not sent back."""
     out = {k: v for k, v in current.items() if k != "txt_challenge"}
     txt = current.get("txt_challenge") or []
     out["cname_ok"] = bool(token) and (current.get("cname") or "").rstrip(".") == record_cname_target(token)
     out["txt_ok"] = bool(token) and any(v in (token, f"waf-verification-token={token}") for v in txt)
+    out["points_here"] = _points_here(current, token)
     return out
+
+
+def _https_probe_enabled() -> bool:
+    return os.getenv("WAF_HTTPS_PROBE", "1").strip() != "0"
+
+
+def _probe_https_via_edge(domain: str) -> dict:
+    """The certificate the edge serves for `domain`. Connects to the edge
+    itself, so a stale DNS answer on Main cannot probe the old host. Since
+    the domain is verified, this handshake also lets the edge issue the
+    certificate (on-demand TLS) without waiting for a real visitor."""
+    from services import ssl_cert_monitor
+    edges = site_connect.resolve_a(site_connect.cname_target())
+    return ssl_cert_monitor.probe_certificate(domain, timeout=15.0, connect_host=edges[0] if edges else None)
+
+
+async def _probe_https(name: str) -> None:
+    """Record the certificate as soon as the edge serves a valid one. A failed
+    probe writes nothing: before the first issuance the status stays pending,
+    not "error" (the 6-hourly monitor still records real failures)."""
+    from services import ssl_cert_monitor
+    from api.domains import db as domains_db
+    try:
+        result = await asyncio.to_thread(_probe_https_via_edge, name)
+        if result.get("status") != "ok":
+            return
+
+        async def _same(_domain):
+            return result
+        await ssl_cert_monitor.check_domain_certificate(name, domains_db, probe=_same)
+    except Exception as exc:  # never let a probe break the page
+        logger.warning("on-demand HTTPS probe for %s failed: %s", name, exc)
+
+
+def _schedule_https_probe(name: str) -> None:
+    """The cert monitor runs every 6 hours, so a just-issued certificate read
+    "pending" for hours. Probe a pending, routed domain at most once a minute;
+    the result shows on the next poll."""
+    if not _https_probe_enabled():
+        return
+    now = time.monotonic()
+    if now - _last_https_probe.get(name, 0) < HTTPS_PROBE_THROTTLE_SECONDS:
+        return
+    _last_https_probe[name] = now
+    asyncio.create_task(_probe_https(name))
+
+
+async def _route_state(d: dict) -> dict:
+    """For a verified domain: does the name point at us yet? A live site may
+    be verified by TXT while its CNAME still points at the old host; the page
+    then shows the CNAME step instead of "done". One real lookup per domain
+    per ROUTE_THROTTLE_SECONDS."""
+    domain_id = d.get("id")
+    now = time.monotonic()
+    last = _last_route.get(domain_id)
+    if last and now - last[0] < ROUTE_THROTTLE_SECONDS:
+        return last[1]
+    current = await asyncio.to_thread(site_connect.current_dns, d.get("domain_name", ""))
+    current = _with_record_checks(current, d.get("verification_token") or "")
+    _last_route[domain_id] = (now, current)
+    return current
 
 
 async def _check_pending(d: dict) -> tuple:
@@ -366,7 +448,14 @@ async def get_progress(origin_id: str, current_user: dict = Depends(get_current_
             verified, current = await _check_pending(d)
             if verified:
                 d = dict(d, dns_verified=True)
+        if verified and can_edit and current is None:
+            current = await _route_state(d)
+        points_here = None if current is None else current.get("points_here")
         formatted = await asyncio.to_thread(format_domain, d)
+        if verified and can_edit and points_here is not False and formatted.get("ssl_status") == "pending":
+            # Not while the name points elsewhere: the CA would validate the
+            # old host and fail, spending our issuance rate limit.
+            _schedule_https_probe(name)
 
         reconcile = False
         if mode == "direct":
@@ -408,7 +497,9 @@ async def get_progress(origin_id: str, current_user: dict = Depends(get_current_
             "created_at": formatted.get("created_at"),
             "dns": {
                 "status": "verified" if verified else "pending",
-                "current": current,
+                # verified but still serving visitors from the old host
+                # (verified by TXT, CNAME not moved yet): show it, not current=None
+                "current": current if (not verified or points_here is False) else None,
                 "instructions": dns_instructions_for(name, token),
             },
             "connection": conn,

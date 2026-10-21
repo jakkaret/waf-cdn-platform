@@ -76,16 +76,17 @@ def _issuer_label(cert: dict) -> str:
     return flat.get("organizationName") or flat.get("commonName") or "unknown"
 
 
-def probe_certificate(domain: str, port: int = 443, timeout: float = 8.0) -> dict:
+def probe_certificate(domain: str, port: int = 443, timeout: float = 8.0, connect_host: Optional[str] = None) -> dict:
     """Real TLS handshake against `domain:port` with SNI=domain, validated
     against the default trust store (catches broken chains / expired roots
     / hostname mismatches -- real failure modes a real client would also
     hit, not just raw expiry). Never raises: any failure degrades to a
     structured {"status": "error", ...} so one unreachable domain can't take
-    down a whole scan."""
+    down a whole scan. connect_host: connect there (e.g. an edge IP) instead of
+    resolving `domain`, still sending SNI=domain and checking the name."""
     try:
         ctx = ssl.create_default_context()
-        with socket.create_connection((domain, port), timeout=timeout) as sock:
+        with socket.create_connection((connect_host or domain, port), timeout=timeout) as sock:
             with ctx.wrap_socket(sock, server_hostname=domain) as tls_sock:
                 cert = tls_sock.getpeercert()
         return {
