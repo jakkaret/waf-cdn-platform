@@ -349,6 +349,12 @@ class AuthService:
 
         user = self.get_user_by_provider("google", provider_id)
         if link_to is not None:
+            # An unverified account may belong to whoever typed someone
+            # else's address at sign-up; a Google identity linked now would
+            # survive the real owner's password reset (MSRC "trojan identifier").
+            from services import rbac
+            if not rbac.email_verified(link_to):
+                raise GoogleLoginRejected("google_link_unverified")
             if user and user["user_id"] != link_to["user_id"]:
                 raise GoogleLoginRejected("google_linked_elsewhere")
             if not user:

@@ -188,3 +188,20 @@ def test_reserved_domains_never_get_mail(monkeypatch):
     assert mailer.deliverable("someone@gmail.com") is True
     monkeypatch.setenv("SMTP_HOST", "smtp.invalid")
     assert mailer.send_mail("pgmig-1@example.org", "s", "t") is False
+
+
+def test_an_unverified_account_cannot_link_google(register_user, auth_header):
+    """Otherwise someone who registered another person's address links their
+    own Google account first and keeps it after the owner resets the password."""
+    from services.auth_service import AuthService, GoogleLoginRejected
+    body, _headers = _signup(register_user, auth_header)
+    svc = AuthService()
+    account = svc.get_user_by_id(body["user"]["user_id"])
+    google = {"sub": "squatter-google", "email": "squatter@gmail.com", "email_verified": True}
+    with pytest.raises(GoogleLoginRejected, match="google_link_unverified"):
+        svc.login_or_register_google(google, link_to=account)
+    assert svc.get_user_by_provider("google", "squatter-google") is None
+
+    svc.mark_email_verified(account["user_id"])
+    linked = svc.login_or_register_google(google, link_to=svc.get_user_by_id(account["user_id"]))
+    assert linked["user_id"] == account["user_id"]

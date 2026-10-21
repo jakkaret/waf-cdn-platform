@@ -27,7 +27,7 @@ export const Login: React.FC = () => {
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get('error')
     const messages: Record<string, string> = {
-      google_link_required: 'This email already has an account. Sign in with your password, then link Google from Settings.',
+      google_link_required: 'อีเมลนี้มีบัญชีแบบรหัสผ่านอยู่แล้ว เข้าด้วยรหัสผ่านแล้วเชื่อม Google ที่ Settings หรือถ้าไม่ได้สมัครเอง/จำรหัสไม่ได้ ใช้ "ลืมรหัสผ่าน?" เพื่อยึดบัญชีคืน',
       google_email_unverified: 'Google has not verified this email address.',
       google_linked_elsewhere: 'This Google account is linked to a different user.',
       google_link_conflict: 'Your account already has a Google account linked.',

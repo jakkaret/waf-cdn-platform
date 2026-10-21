@@ -5,6 +5,7 @@ import { systemApi } from '../api/system'
 import { threatIntelApi, TrendingPattern } from '../api/threatIntel'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
+import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -34,6 +35,7 @@ import {
 
 export const Settings: React.FC = () => {
   const { user, updateUser } = useAuthStore()
+  const guard = useVerifiedGuard()
   const isAdmin = user?.role === 'admin'
   const queryClient = useQueryClient()
 
@@ -162,7 +164,7 @@ export const Settings: React.FC = () => {
           <div className="flex items-center gap-2">
             <Button
               variant="secondary"
-              onClick={() => { window.location.href = '/api/auth/google?link=true' }}
+              onClick={() => guard('link_google', () => { window.location.href = '/api/auth/google?link=true' })}
             >
               Link Google account
             </Button>
