@@ -22,15 +22,41 @@ export interface CheckView {
   detail: string
 }
 
+// The name still sends visitors to another host: a site that is already
+// live. Such a site is verified by TXT first and its CNAME moved after, so
+// visitors never reach the edge before it can issue the certificate.
+export function liveElsewhere(d: ProgressDomain): boolean {
+  const cur = d.dns.current
+  return !!cur && cur.points_here === false && (!!cur.cname || (cur.a?.length ?? 0) > 0)
+}
+
+function pointsAt(cur: CurrentDns): string {
+  return cur.cname || cur.a.join(', ')
+}
+
 export function dnsCheck(d: ProgressDomain): CheckView {
-  if (d.dns.status === 'verified') {
-    return { state: 'done', label: 'DNS', detail: `ชี้มาที่ ${d.dns.instructions.cname_record.value} แล้ว` }
-  }
   const cur = d.dns.current
   const want = d.dns.instructions.cname_record.value
+  if (d.dns.status === 'verified') {
+    if (cur && liveElsewhere(d)) {
+      return {
+        state: 'waiting',
+        label: 'DNS',
+        detail: `ยืนยันโดเมนแล้ว · ขั้นที่ 2 แก้ CNAME ให้ชี้มาที่ ${want} (ตอนนี้ยังชี้ไปที่ ${pointsAt(cur)})`,
+      }
+    }
+    return { state: 'done', label: 'DNS', detail: `ชี้มาที่ ${want} แล้ว` }
+  }
   if (cur?.cname_ok || cur?.txt_ok) {
     const which = cur.cname_ok ? 'CNAME' : 'TXT'
     return { state: 'waiting', label: 'DNS', detail: `${which} ถูกต้องแล้ว กำลังยืนยัน (ไม่เกิน 1 นาที)` }
+  }
+  if (cur && liveElsewhere(d)) {
+    return {
+      state: 'waiting',
+      label: 'DNS',
+      detail: `เว็บนี้ใช้งานอยู่ (ตอนนี้ชี้ไปที่ ${pointsAt(cur)}) · ขั้นที่ 1 เพิ่ม TXT ด้านล่างก่อน ยืนยันแล้วค่อยแก้ CNAME เว็บจะไม่สะดุด${dnsSource(cur)}`,
+    }
   }
   let now = 'ยังไม่พบ record'
   if (cur?.cname) now = `ตอนนี้ CNAME ชี้ไปที่ ${cur.cname}`
@@ -51,6 +77,9 @@ function dnsSource(cur: CurrentDns | null): string {
 }
 
 export function connectionCheck(d: ProgressDomain, mode: ConnectionMode | null): CheckView {
+  if (d.connection.status === 'connected' && liveElsewhere(d)) {
+    return { state: 'waiting', label: 'เชื่อมต่อ', detail: 'route พร้อมแล้ว · traffic จะผ่าน WAF หลังแก้ CNAME' }
+  }
   switch (d.connection.status) {
     case 'connected':
       return {
@@ -86,6 +115,9 @@ export function httpsCheck(d: ProgressDomain): CheckView {
   }
   if (d.dns.status !== 'verified') {
     return { state: 'blocked', label: 'HTTPS', detail: 'ออกใบรับรองให้อัตโนมัติหลัง DNS ชี้มาที่เรา' }
+  }
+  if (liveElsewhere(d)) {
+    return { state: 'blocked', label: 'HTTPS', detail: 'ออกใบรับรองให้ทันทีที่มีคนเข้าเว็บหลังแก้ CNAME' }
   }
   return { state: 'waiting', label: 'HTTPS', detail: 'ออกใบรับรองตอนมีคนเข้าเว็บครั้งแรก แล้วระบบตรวจรอบถัดไป' }
 }

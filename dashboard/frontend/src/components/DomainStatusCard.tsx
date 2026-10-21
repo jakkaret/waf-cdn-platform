@@ -7,7 +7,7 @@ import { Button } from './ui/Button'
 import { Badge } from './ui/Badge'
 import type { ConnectionMode, ProgressDomain } from '../api/onboarding'
 import { buildTunnelCommands } from '../lib/tunnelCommands'
-import { dnsCheck, connectionCheck, httpsCheck, CheckView } from '../lib/connectProgress'
+import { dnsCheck, connectionCheck, httpsCheck, liveElsewhere, CheckView } from '../lib/connectProgress'
 
 // One card per domain on the origin's Domains tab: the three things that must
 // be true before visitors reach the site through the WAF -- DNS points at us,
@@ -101,6 +101,8 @@ export const DomainStatusCard: React.FC<DomainStatusCardProps> = ({ item, mode, 
   const conn = connectionCheck(item, mode)
   const https = httpsCheck(item)
   const rec = item.dns.instructions
+  const verified = item.dns.status === 'verified'
+  const live = liveElsewhere(item)
 
   const row = (check: CheckView, body?: React.ReactNode) => (
     <div className="py-2.5 border-t border-[var(--bg-border-subtle)] first:border-t-0">
@@ -133,6 +135,30 @@ export const DomainStatusCard: React.FC<DomainStatusCardProps> = ({ item, mode, 
 
       {row(
         dns,
+        live && !verified && rec.txt_record.value ? (
+          <>
+            <p className="m-0 text-[11.5px] text-[var(--text-secondary)]">
+              <b>ขั้นที่ 1</b> เพิ่ม TXT นี้ที่ผู้ให้บริการ DNS (ไม่กระทบเว็บที่ใช้อยู่)
+            </p>
+            <CopyField label="TXT" value={rec.txt_record.name} />
+            <CopyField label="Value" value={rec.txt_record.value} />
+            <p className="m-0 text-[11.5px] text-[var(--text-muted)]">
+              <b>ขั้นที่ 2</b> หลังขั้นที่ 1 ผ่าน: แก้ CNAME เดิมของชื่อนี้ให้ชี้มาที่ค่าด้านล่าง (แก้ record เดิม ไม่ต้องสร้างใหม่)
+            </p>
+            <CopyField label="Type" value={rec.cname_record.type} />
+            <CopyField label="Name" value={rec.cname_record.name} />
+            <CopyField label="Target" value={rec.cname_record.value} />
+          </>
+        ) : live && verified ? (
+          <>
+            <p className="m-0 text-[11.5px] text-[var(--text-secondary)]">
+              <b>ขั้นที่ 2</b> แก้ record เดิมของชื่อนี้ที่ผู้ให้บริการ DNS ให้เป็น CNAME นี้ (ใบรับรองออกให้ทันทีที่ traffic มาถึง เว็บไม่สะดุด)
+            </p>
+            <CopyField label="Type" value={rec.cname_record.type} />
+            <CopyField label="Name" value={rec.cname_record.name} />
+            <CopyField label="Target" value={rec.cname_record.value} />
+          </>
+        ) : (
         <>
           <p className="m-0 text-[11.5px] text-[var(--text-muted)]">
             ที่ผู้ให้บริการ DNS ของคุณ: ลบ A record เดิมของชื่อนี้ (ถ้ามี) แล้วเพิ่ม 1 record
@@ -158,6 +184,7 @@ export const DomainStatusCard: React.FC<DomainStatusCardProps> = ({ item, mode, 
             </div>
           )}
         </>
+        )
       )}
       {row(
         conn,

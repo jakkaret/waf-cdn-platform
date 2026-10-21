@@ -43,6 +43,8 @@ export interface CurrentDns {
   nameserver?: string
   cname_ok?: boolean
   txt_ok?: boolean
+  // false: the name still sends visitors somewhere else (a live site)
+  points_here?: boolean
 }
 
 export interface ProgressDomain {

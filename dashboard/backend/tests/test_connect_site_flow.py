@@ -293,6 +293,8 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(site_connect, "platform_ips", lambda: {"45.154.26.91"})
     monkeypatch.setenv("WAF_CNAME_TARGET", "cdn.waf-it-kku.online")
     onboarding_module._last_verify.clear()
+    onboarding_module._last_route.clear()
+    onboarding_module._last_https_probe.clear()
     onboarding_module._last_frp_poll.clear()
     origin_service._LIVE_PROXIES_CACHE = None
 
@@ -395,9 +397,36 @@ def test_progress_reports_pending_dns_with_the_current_answer(client, tenant):
     p = client.get(f"/api/onboarding/progress/{origin_id}", headers=tenant["headers"]).json()
     [d] = p["domains"]
     assert d["dns"]["status"] == "pending"
-    assert d["dns"]["current"] == {"cname": "", "a": ["203.0.113.10"], "cname_ok": False, "txt_ok": False}
+    assert d["dns"]["current"] == {"cname": "", "a": ["203.0.113.10"], "cname_ok": False, "txt_ok": False,
+                                   "points_here": False}
     assert d["connection"]["status"] == "waiting_dns"  # P3.2: no agent token before DNS proves ownership
     assert d["ready"] is False and p["all_ready"] is False
+
+
+def test_progress_says_a_live_site_verified_by_txt_still_needs_its_cname_moved(client, tenant, monkeypatch):
+    """TXT-first for a live site: ownership is proven while the name still
+    sends visitors to the old host. The page must keep showing the CNAME step,
+    not "points at us"."""
+    origin_id = _connect(client, tenant)
+    monkeypatch.setattr(onboarding_module, "verify_domain_dns", lambda d, t: True)
+    monkeypatch.setattr(site_connect, "current_dns",
+                        lambda d: {"cname": "old.vercel-dns-017.com", "a": ["216.198.79.1"], "via": "authoritative",
+                                   "nameserver": "ns1.example.net", "txt_challenge": []})
+    [d] = client.get(f"/api/onboarding/progress/{origin_id}", headers=tenant["headers"]).json()["domains"]
+    assert d["dns"]["status"] == "verified"
+    assert d["dns"]["current"]["points_here"] is False
+    assert d["dns"]["current"]["cname"] == "old.vercel-dns-017.com"
+    assert d["ready"] is False
+
+
+def test_progress_drops_the_dns_detail_once_the_name_points_here(client, tenant, monkeypatch):
+    origin_id = _connect(client, tenant)
+    monkeypatch.setattr(onboarding_module, "verify_domain_dns", lambda d, t: True)
+    monkeypatch.setattr(site_connect, "current_dns",
+                        lambda d: {"cname": "waf-token-x.cdn.waf-it-kku.online", "a": ["45.154.26.91"]})
+    [d] = client.get(f"/api/onboarding/progress/{origin_id}", headers=tenant["headers"]).json()["domains"]
+    assert d["dns"]["status"] == "verified"
+    assert d["dns"]["current"] is None
 
 
 def test_progress_checks_dns_at_most_once_per_throttle_window(client, tenant, monkeypatch):
@@ -905,3 +934,46 @@ def test_rereview10_onboarding_status_does_not_depend_on_scan_order():
     s2 = onboarding_module.compute_onboarding_status(origins, [b, a])
     assert s1 == s2
     assert s1["next_step"] == "done" and s1["resume_domain_id"] == "a"
+
+
+def test_progress_probes_https_for_a_routed_domain_and_records_a_valid_certificate(client, tenant, monkeypatch):
+    """The cert monitor runs every 6 hours; the page used to show a
+    just-issued certificate as pending for hours."""
+    monkeypatch.setenv("WAF_HTTPS_PROBE", "1")
+    origin_id = _connect(client, tenant)
+    monkeypatch.setattr(onboarding_module, "verify_domain_dns", lambda d, t: True)
+    monkeypatch.setattr(site_connect, "current_dns",
+                        lambda d: {"cname": "waf-token-x.cdn.waf-it-kku.online", "a": ["45.154.26.91"]})
+    probed = []
+    monkeypatch.setattr(onboarding_module, "_probe_https_via_edge",
+                        lambda d: probed.append(d) or {"status": "ok", "not_after": "2027-01-19T00:00:00+00:00",
+                                                       "issuer": "Let's Encrypt"})
+    url = f"/api/onboarding/progress/{origin_id}"
+    client.get(url, headers=tenant["headers"])          # schedules the probe
+    [d] = client.get(url, headers=tenant["headers"]).json()["domains"]
+    assert probed == ["shop.example.com"]               # once per minute, not per poll
+    assert d["https"]["status"] == "active"
+
+
+def test_progress_does_not_probe_https_while_the_name_points_elsewhere(client, tenant, monkeypatch):
+    monkeypatch.setenv("WAF_HTTPS_PROBE", "1")
+    origin_id = _connect(client, tenant)
+    monkeypatch.setattr(onboarding_module, "verify_domain_dns", lambda d, t: True)
+    monkeypatch.setattr(site_connect, "current_dns", lambda d: {"cname": "old.vercel-dns-017.com", "a": []})
+    probed = []
+    monkeypatch.setattr(onboarding_module, "_probe_https_via_edge", lambda d: probed.append(d) or {"status": "ok"})
+    client.get(f"/api/onboarding/progress/{origin_id}", headers=tenant["headers"])
+    assert probed == []
+
+
+def test_a_failed_https_probe_leaves_the_status_pending(client, tenant, monkeypatch):
+    monkeypatch.setenv("WAF_HTTPS_PROBE", "1")
+    origin_id = _connect(client, tenant)
+    monkeypatch.setattr(onboarding_module, "verify_domain_dns", lambda d, t: True)
+    monkeypatch.setattr(site_connect, "current_dns",
+                        lambda d: {"cname": "waf-token-x.cdn.waf-it-kku.online", "a": ["45.154.26.91"]})
+    monkeypatch.setattr(onboarding_module, "_probe_https_via_edge", lambda d: {"status": "error", "error": "not yet"})
+    url = f"/api/onboarding/progress/{origin_id}"
+    client.get(url, headers=tenant["headers"])
+    [d] = client.get(url, headers=tenant["headers"]).json()["domains"]
+    assert d["https"]["status"] == "pending"
