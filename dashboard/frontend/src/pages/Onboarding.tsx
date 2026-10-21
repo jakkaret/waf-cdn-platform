@@ -5,6 +5,8 @@ import { Info, Globe } from 'lucide-react'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
 import { ConnectSiteFlow } from '../components/ConnectSiteFlow'
+import { EmailVerifyNotice, isUnverified } from '../components/auth/EmailVerifyGate'
+import { useAuthStore } from '../store/authStore'
 
 // The wizard used to be four steps (origin → domain → verify → agent) with
 // its own copy of the domain logic, and it resumed from an account-wide
@@ -16,6 +18,7 @@ import { ConnectSiteFlow } from '../components/ConnectSiteFlow'
 export const Onboarding: React.FC = () => {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const user = useAuthStore((s) => s.user)
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-fade-in pb-16">
@@ -25,7 +28,7 @@ export const Onboarding: React.FC = () => {
         badge={<Badge color="brand">Connect</Badge>}
       />
 
-      <div className="dash-card p-5 sm:p-6 space-y-4">
+      {isUnverified(user) ? <EmailVerifyNotice action="create_origin" /> : <div className="dash-card p-5 sm:p-6 space-y-4">
         <h3 className="text-[14.5px] font-bold font-mono m-0 flex items-center gap-2">
           <Globe size={16} className="text-orange-500" />
           เว็บของคุณอยู่ที่โดเมนไหน
@@ -36,7 +39,7 @@ export const Onboarding: React.FC = () => {
             navigate(`/origins/${originId}?tab=domains`)
           }}
         />
-      </div>
+      </div>}
 
       <div className="dash-card p-4 text-[11px] font-mono text-[var(--text-secondary)] leading-relaxed flex items-start gap-2">
         <Info size={13} className="text-sky-500 shrink-0 mt-0.5" />

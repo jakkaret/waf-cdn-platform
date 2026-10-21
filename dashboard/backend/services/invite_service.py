@@ -10,11 +10,10 @@ import hashlib
 import logging
 import os
 import secrets
-import smtplib
-from email.mime.text import MIMEText
 from typing import Dict, Optional, Tuple
 
 from db import pool
+from services import mailer
 
 logger = logging.getLogger(__name__)
 
@@ -103,26 +102,10 @@ def pending_invites(origin_id: str) -> list:
 
 
 def send_invite_email(to_addr: str, origin_label: str, role: str, link: str) -> bool:
-    """Best effort; returns False (and logs why) when SMTP is not configured."""
-    host, user, password, sender = (os.getenv(k, "") for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"))
-    if not (host and user and password and sender):
-        logger.warning("invite email not sent: SMTP is not configured")
-        return False
+    """Best effort; returns False when the mail did not go out (services/mailer.py)."""
     body = (
         f"You were invited to {role} the site \"{origin_label}\" on the WAF dashboard.\n\n"
         f"Open this link while signed in to accept (valid {INVITE_TTL_DAYS} days):\n{link}\n\n"
         "If you did not expect this, ignore this email."
     )
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = "WAF dashboard invitation"
-    msg["From"] = sender
-    msg["To"] = to_addr
-    try:
-        with smtplib.SMTP(host, int(os.getenv("SMTP_PORT", "587")), timeout=10) as s:
-            s.starttls()
-            s.login(user, password)
-            s.send_message(msg)
-        return True
-    except Exception as exc:
-        logger.warning("invite email to %s failed: %s", to_addr, exc)
-        return False
+    return mailer.send_mail(to_addr, "WAF dashboard invitation", body)

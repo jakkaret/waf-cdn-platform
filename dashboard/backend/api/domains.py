@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 import uuid
 from datetime import datetime
-from services.rbac import get_current_user, require_admin, verify_origin_ownership, verify_origin_edit_access
+from services.rbac import get_current_user, require_admin, verify_origin_ownership, verify_origin_edit_access, require_verified_email
 from services import audit_log
 from services.txn import atomic
 from services.dynamodb_service import DynamoDBService, DuplicateDomain
@@ -154,7 +154,7 @@ class DomainResponse(BaseModel):
     ssl_status: str
     created_at: str
 
-@router.post("", response_model=DomainResponse)
+@router.post("", response_model=DomainResponse, dependencies=[Depends(require_verified_email("add_domain"))])
 async def create_domain(payload: DomainCreate, current_user: dict = Depends(get_current_user)):
     # 1. Verify that current user can edit the target origin (Team
     # Workspace, 2026-09-22: owner or editor -- adding a domain is a
@@ -255,7 +255,7 @@ async def release_unverified_domain(domain_id: str, current_user: dict = Depends
     return {"status": "success", "message": f"Domain {domain['domain_name']} released"}
 
 
-@router.post("/{domain_id}/verify")
+@router.post("/{domain_id}/verify", dependencies=[Depends(require_verified_email("add_domain"))])
 async def verify_domain_now(domain_id: str, current_user: dict = Depends(get_current_user)):
     # 1. Fetch domain
     domain = db.get_domain(domain_id)
@@ -542,7 +542,7 @@ def assert_domain_quota(origin_id: str) -> None:
         )
 
 
-@origins_domains_router.post("/{origin_id}/domains")
+@origins_domains_router.post("/{origin_id}/domains", dependencies=[Depends(require_verified_email("add_domain"))])
 async def create_domain_under_origin(origin_id: str, payload: DomainCreatePayload, current_user: dict = Depends(get_current_user)):
     verify_origin_edit_access(origin_id, current_user)
     result = create_domain_record(origin_id, payload.domain_name, current_user)
@@ -607,7 +607,7 @@ def create_domain_record(origin_id: str, domain_name: str, current_user: dict) -
         "auto_verified": False,
     }
 
-@origins_domains_router.post("/{origin_id}/domains/{domain_id}/verify")
+@origins_domains_router.post("/{origin_id}/domains/{domain_id}/verify", dependencies=[Depends(require_verified_email("add_domain"))])
 async def verify_domain_now_under_origin(origin_id: str, domain_id: str, current_user: dict = Depends(get_current_user)):
     verify_origin_edit_access(origin_id, current_user)
     

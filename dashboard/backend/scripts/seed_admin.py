@@ -63,7 +63,7 @@ def seed(email: str, username: str, role: str, password: str | None) -> str:
         return f"exists, unchanged ({role}): {email}"
     if not password:
         sys.exit(f"no password for new account {email}")
-    auth.create_user(email=email, username=username, password=password, role=role)
+    auth.create_user(email=email, username=username, password=password, role=role, email_verified=True)
     return f"created ({role}): {email}"
 
 

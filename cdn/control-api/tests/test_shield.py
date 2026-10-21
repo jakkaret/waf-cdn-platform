@@ -426,3 +426,9 @@ def test_otp_body_host_must_match_request_host(client, redis_, sent):
     r = client.post("/cdn-cgi/otp/verify", json={"challenge_id": "x", "code": "123456", "host": HOST},
                     headers={"User-Agent": "pytest", "Host": "other-site.example"})
     assert r.status_code == 400
+
+
+def test_challenge_page_has_one_box_per_code_digit():
+    assert otp_engine._challenge_html(False, 6).count('class="digit"') == 6
+    assert otp_engine._challenge_html(False, 8).count('class="digit"') == 8
+    assert otp_engine._challenge_html(False, 99).count('class="digit"') == 8  # clamped like the code itself

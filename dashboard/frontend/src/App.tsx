@@ -10,6 +10,9 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import OAuthSuccess from './pages/OAuthSuccess'
 import AcceptInvite from './pages/AcceptInvite'
+import VerifyEmail from './pages/VerifyEmail'
+import ForgotPassword from './pages/ForgotPassword'
+import { EmailVerifyModal } from './components/auth/EmailVerifyGate'
 import Dashboard from './pages/Dashboard'
 import Logs from './pages/Logs'
 import Rules from './pages/Rules'
@@ -51,6 +54,15 @@ const ProtectedRoute = ({
   if (requireAdmin && user?.role !== 'admin') return <Navigate to="/" replace />
 
   return <AppLayout>{children}</AppLayout>
+}
+
+// Signed in, but a full-screen page outside the dashboard frame (email
+// verification right after sign-up).
+const SessionRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated, sessionChecked } = useAuthStore()
+  if (!isAuthenticated && !sessionChecked) return null
+  if (!isAuthenticated) return <Navigate to="/login" replace />
+  return <>{children}</>
 }
 
 // F-103: an already signed-in user opening /login or /register is sent home.
@@ -95,6 +107,8 @@ export const App: React.FC = () => {
           <Route path="/oauth-success" element={<OAuthSuccess />} />
           <Route path="/invites/accept" element={<AcceptInvite />} />
           <Route path="/status" element={<StatusPage />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/verify-email" element={<SessionRoute><VerifyEmail /></SessionRoute>} />
 
           {/* Protected Routes */}
           <Route
@@ -254,6 +268,7 @@ export const App: React.FC = () => {
           {/* F-029: unknown URLs used to render a blank screen */}
           <Route path="*" element={<NotFound />} />
         </Routes>
+        <EmailVerifyModal />
       </BrowserRouter>
       <Toaster
         position="top-right"

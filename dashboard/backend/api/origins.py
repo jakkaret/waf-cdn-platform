@@ -4,7 +4,7 @@ import ipaddress
 import re
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Literal, Optional
-from services.rbac import get_current_user, verify_origin_ownership, verify_origin_access, verify_origin_edit_access
+from services.rbac import get_current_user, verify_origin_ownership, verify_origin_access, verify_origin_edit_access, require_verified_email
 import services.origin_service as origin_service
 from services.captcha_config import DEFAULT_CONFIG, get_origin_config, save_origin_config
 from services.otp_config import (
@@ -183,7 +183,7 @@ class OtpShieldConfig(BaseModel):
         return values
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_verified_email("create_origin"))])
 async def create_origin(origin: OriginCreate, current_user: dict = Depends(get_current_user)):
     try:
         data = origin_service.create_origin(
@@ -454,7 +454,7 @@ async def cancel_origin_invite(
     return {"status": "cancelled"}
 
 
-@router.post("/{origin_id}/viewers")
+@router.post("/{origin_id}/viewers", dependencies=[Depends(require_verified_email("invite"))])
 async def add_origin_viewer(
     request: Request,
     payload: OriginViewerGrant,
@@ -497,7 +497,7 @@ async def remove_origin_viewer(
 async def get_origin_editors(origin: dict = Depends(verify_origin_ownership)):
     return {"editors": origin_service.list_origin_editors(origin.get("id"))}
 
-@router.post("/{origin_id}/editors")
+@router.post("/{origin_id}/editors", dependencies=[Depends(require_verified_email("invite"))])
 async def add_origin_editor(
     request: Request,
     payload: OriginViewerGrant,

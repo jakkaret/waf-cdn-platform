@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from services.gemini_service import GeminiService, gemini_headers
 from services.ai_quota import check_ai_quota
 from services.clickhouse_service import ClickHouseService
-from services.rbac import require_viewer_or_above
+from services.rbac import require_viewer_or_above, require_verified_email
 from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class ChatRequest(BaseModel):
     history: List[MessageItem] = Field(default=[], max_length=20, description="Chat context history")
 
 
-@router.post("/chat")
+@router.post("/chat", dependencies=[Depends(require_verified_email("ai"))])
 async def copilot_chat(
     req: ChatRequest,
     current_user: dict = Depends(require_viewer_or_above)

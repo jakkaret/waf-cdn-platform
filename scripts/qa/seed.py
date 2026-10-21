@@ -32,12 +32,26 @@ def token_for(name: str) -> str:
         r = client.post(f"{API}/auth/register", json={**acct, "role": "viewer"})
         if r.status_code != 200:
             sys.exit(f"register {name} failed: {r.status_code} {r.text[:200]}")
+        mark_verified(r.json()["user"]["user_id"])
         state["accounts"][name] = acct
         save()
     r = client.post(f"{API}/auth/login", json={"email": acct["email"], "password": acct["password"]})
     if r.status_code != 200:
         sys.exit(f"login {name} failed: {r.status_code} {r.text[:200]}")
     return r.json()["access_token"]
+
+
+def _backend():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "dashboard" / "backend"))
+    from dotenv import load_dotenv, find_dotenv
+    load_dotenv(find_dotenv())
+
+
+def mark_verified(user_id: str):
+    # The QA mailboxes are not real; their owner is this script.
+    _backend()
+    from services.auth_service import AuthService
+    AuthService().mark_email_verified(user_id)
 
 
 def save():
@@ -69,9 +83,7 @@ def ensure_origin(key: str, owner_token: str, host: str) -> dict:
 
 def deploy_route(origin: dict):
     # Mode A route (domains.py doesn't do this yet -- see KNOWN_ISSUES).
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "dashboard" / "backend"))
-    from dotenv import load_dotenv, find_dotenv
-    load_dotenv(find_dotenv())
+    _backend()
     from services import nginx_site_service as nss
     nss.deploy_site_route(origin["host"], {"id": origin["id"], "ip": ECHO_IP, "port": ECHO_PORT})
 

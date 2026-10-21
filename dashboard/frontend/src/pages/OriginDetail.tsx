@@ -60,6 +60,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { ORIGIN_ROLE_LABEL, canEditOrigin, canManageOrigin, originRoleOf } from '../lib/roles'
+import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
 
 const cveSeverityClass = (sev: string): string => {
   switch (sev) {
@@ -80,6 +81,7 @@ export const OriginDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const currentUser = useAuthStore((s) => s.user)
+  const guard = useVerifiedGuard()
   const [viewerEmailInput, setViewerEmailInput] = useState('')
   const [editorEmailInput, setEditorEmailInput] = useState('')
   type OriginTab = 'overview' | 'domains' | 'waf' | 'shield' | 'team' | 'postmortem'
@@ -1374,7 +1376,7 @@ export const OriginDetail: React.FC = () => {
                   <Button
                     size="sm"
                     icon={<Plus size={14} />}
-                    onClick={() => viewerEmailInput.trim() && addViewerMutation.mutate(viewerEmailInput.trim())}
+                    onClick={() => viewerEmailInput.trim() && guard('invite', () => addViewerMutation.mutate(viewerEmailInput.trim()))}
                     disabled={!viewerEmailInput.trim() || addViewerMutation.isPending}
                   >
                     Add Viewer
@@ -1433,7 +1435,7 @@ export const OriginDetail: React.FC = () => {
                   <Button
                     size="sm"
                     icon={<Plus size={14} />}
-                    onClick={() => editorEmailInput.trim() && addEditorMutation.mutate(editorEmailInput.trim())}
+                    onClick={() => editorEmailInput.trim() && guard('invite', () => addEditorMutation.mutate(editorEmailInput.trim()))}
                     disabled={!editorEmailInput.trim() || addEditorMutation.isPending}
                   >
                     Add Admin

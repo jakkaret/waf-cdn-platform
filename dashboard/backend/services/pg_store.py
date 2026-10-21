@@ -794,7 +794,7 @@ class PgStore:
 _USER_SELECT = (
     "SELECT u.user_id, u.email, u.username, u.role, u.password_hash, u.auth_provider, "
     "u.avatar_url, u.telegram_chat_id, u.share_threat_intel, u.created_at, u.last_login, "
-    "u.token_version, "
+    "u.token_version, u.email_verified_at, "
     "i.provider_user_id AS provider_id "
     "FROM users u LEFT JOIN user_identities i "
     "ON i.user_id = u.user_id AND i.provider = u.auth_provider "
@@ -820,6 +820,7 @@ class PgUserRepository:
             "auth_provider": row["auth_provider"],
             "share_threat_intel": bool(row["share_threat_intel"]),
             "token_version": int(row.get("token_version") or 0),
+            "email_verified": row.get("email_verified_at") is not None,
             "created_at": iso_z_us(row["created_at"]),
             "last_login": iso_z_us(row["last_login"]),
         }
@@ -852,15 +853,18 @@ class PgUserRepository:
             (provider, str(provider_id))))
 
     def create(self, email: str, username: str, password_hash: Optional[str], role: str,
-               auth_provider: str, provider_id: Optional[str], avatar_url: Optional[str]) -> Dict:
+               auth_provider: str, provider_id: Optional[str], avatar_url: Optional[str],
+               email_verified: bool = False) -> Dict:
         """Insert the user and its OAuth/Telegram identity in one transaction.
         A duplicate email or identity raises UniqueConflict (a ValueError)."""
         role = role if role in ("admin", "viewer") else "viewer"
         with pool.transaction():
             row = pool.q1(
                 "INSERT INTO users (email, username, role, password_hash, auth_provider, avatar_url, "
-                "last_login) VALUES (%s, %s, %s, %s, %s, %s, now()) RETURNING user_id",
-                (email, username, role, password_hash or None, auth_provider or "local", avatar_url or None),
+                "last_login, email_verified_at) VALUES (%s, %s, %s, %s, %s, %s, now(), "
+                "CASE WHEN %s THEN now() END) RETURNING user_id",
+                (email, username, role, password_hash or None, auth_provider or "local", avatar_url or None,
+                 bool(email_verified)),
             )
             if provider_id and auth_provider in ("google", "telegram"):
                 pool.exec_("INSERT INTO user_identities (provider, provider_user_id, user_id) "
@@ -944,6 +948,18 @@ class PgUserRepository:
         uid = as_uuid(user_id)
         if uid is not None:
             pool.exec_("UPDATE users SET token_version = token_version + 1 WHERE user_id = %s", (uid,))
+
+    def mark_email_verified(self, user_id: str) -> None:
+        uid = as_uuid(user_id)
+        if uid is not None:
+            pool.exec_("UPDATE users SET email_verified_at = coalesce(email_verified_at, now()) "
+                       "WHERE user_id = %s", (uid,))
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> bool:
+        uid = as_uuid(user_id)
+        return uid is not None and pool.exec_(
+            "UPDATE users SET password_hash = %s WHERE user_id = %s AND auth_provider = 'local'",
+            (password_hash, uid)) > 0
 
     def touch_login(self, user_id: str) -> None:
         uid = as_uuid(user_id)

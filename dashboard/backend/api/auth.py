@@ -1,6 +1,7 @@
 import asyncio
 import os
-from fastapi import APIRouter, HTTPException, Depends, Response, Request, status
+import re
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Response, Request, status
 from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from typing import Literal, Optional
@@ -8,6 +9,7 @@ from services.auth_service import AuthService, GoogleLoginRejected
 from services.rbac import bearer_scheme, get_current_user, require_admin
 from fastapi.security import HTTPAuthorizationCredentials
 from services.rate_limiter import limiter
+from services import email_codes
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 auth_service = AuthService()
@@ -62,6 +64,28 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class VerifyEmailRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=12)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=1, max_length=12)
+    new_password: str = Field(min_length=8, max_length=256)
+
+
+# Same rule as the sign-up form (Register.tsx passwordChecks).
+def _password_problem(password: str) -> Optional[str]:
+    if len(password) < 8 or not re.search(r"[A-Z]", password) or not re.search(r"[0-9]", password) \
+            or not re.search(r"[^A-Za-z0-9]", password):
+        return "รหัสผ่านต้องยาว 8 ตัวขึ้นไป และมีตัวพิมพ์ใหญ่ ตัวเลข และสัญลักษณ์"
+    return None
+
+
 class TelegramLoginRequest(BaseModel):
     id: int
     first_name: Optional[str] = ""
@@ -84,7 +108,7 @@ def _first_user_admin_enabled() -> bool:
 
 @router.post("/register")
 @limiter.limit("10/minute")
-async def register(request: Request, req: RegisterRequest, response: Response):
+async def register(request: Request, req: RegisterRequest, response: Response, background: BackgroundTasks):
     # Self-registration never grants admin. The first admin is seeded by an
     # operator (scripts/seed_admin.py): on the public site, "the first user
     # to register becomes admin" handed the platform to whoever signed up
@@ -107,12 +131,80 @@ async def register(request: Request, req: RegisterRequest, response: Response):
     token = auth_service.start_session(user, *_client_info(request))
 
     _set_session_cookies(response, token)
+    _queue_code(background, user, "verify")
 
     return {
         "access_token": token,
         "token_type": "bearer",
         "user": _safe_user(user),
     }
+
+
+def _queue_code(background: BackgroundTasks, user: dict, purpose: str) -> int:
+    """Issue a code and mail it after the response (SMTP takes seconds, and
+    the forgot-password answer must not take longer for a real account).
+    Returns the seconds to wait when the per-account limit holds."""
+    code, wait = email_codes.issue(user["user_id"], purpose)
+    if code:
+        background.add_task(email_codes.send_code_email, user["email"], purpose, code)
+    return wait
+
+
+# --- Email verification (OTP) and password reset -------------------------
+
+@router.post("/verify-email/send")
+@limiter.limit("5/minute")
+async def send_verification_code(request: Request, background: BackgroundTasks,
+                                 current_user: dict = Depends(get_current_user)):
+    if current_user.get("email_verified"):
+        return {"verified": True}
+    if not current_user.get("email"):
+        raise HTTPException(status_code=400, detail="บัญชีนี้ไม่มีอีเมล")
+    wait = _queue_code(background, current_user, "verify")
+    return {"verified": False, "sent": wait == 0, "retry_after": wait or email_codes.RESEND_COOLDOWN_SECONDS,
+            "expires_in": email_codes.CODE_TTL_MINUTES * 60}
+
+
+@router.post("/verify-email/confirm")
+@limiter.limit("10/minute")
+async def confirm_verification_code(request: Request, req: VerifyEmailRequest,
+                                    current_user: dict = Depends(get_current_user)):
+    if not current_user.get("email_verified"):
+        if not email_codes.check(current_user["user_id"], "verify", req.code):
+            raise HTTPException(status_code=400, detail="รหัสไม่ถูกต้องหรือหมดอายุ ขอรหัสใหม่ได้")
+        auth_service.mark_email_verified(current_user["user_id"])
+    return {"verified": True, "user": _safe_user(auth_service.get_user_by_id(current_user["user_id"]))}
+
+
+_FORGOT_MESSAGE = "ถ้าอีเมลนี้มีบัญชีที่เข้าด้วยรหัสผ่าน เราส่งรหัสไปแล้ว ตรวจกล่องจดหมาย (และ Junk)"
+
+
+@router.post("/password/forgot")
+@limiter.limit("5/minute")
+async def forgot_password(request: Request, req: ForgotPasswordRequest, background: BackgroundTasks):
+    """Same answer whether or not the address has an account (no enumeration);
+    the mail goes out after the response so timing does not tell either."""
+    user = auth_service.get_user_by_email(req.email)
+    if user and user.get("auth_provider", "local") == "local":
+        _queue_code(background, user, "reset")
+    return {"message": _FORGOT_MESSAGE}
+
+
+@router.post("/password/reset")
+@limiter.limit("10/minute")
+async def reset_password(request: Request, req: ResetPasswordRequest, response: Response):
+    problem = _password_problem(req.new_password)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
+    user = auth_service.get_user_by_email(req.email)
+    if not user or user.get("auth_provider", "local") != "local" \
+            or not email_codes.check(user["user_id"], "reset", req.code):
+        raise HTTPException(status_code=400, detail="รหัสไม่ถูกต้องหรือหมดอายุ ขอรหัสใหม่ได้")
+    if not auth_service.reset_password(user["user_id"], req.new_password):
+        raise HTTPException(status_code=400, detail="ตั้งรหัสผ่านใหม่ไม่สำเร็จ")
+    email_codes.void(user["user_id"])
+    _clear_session_cookies(response)
+    return {"message": "ตั้งรหัสผ่านใหม่แล้ว ทุกอุปกรณ์ออกจากระบบแล้ว เข้าสู่ระบบด้วยรหัสผ่านใหม่"}
 
 
 @router.post("/login")
@@ -338,6 +430,7 @@ def _safe_user(user: dict) -> dict:
         "created_at": user.get("created_at"),
         "last_login": user.get("last_login"),
         "share_threat_intel": bool(user.get("share_threat_intel", False)),
+        "email_verified": bool(user.get("email_verified", False)),
     }
 
 
