@@ -257,8 +257,7 @@ export const Dashboard: React.FC = () => {
             <Shield size={16} className="text-indigo-400 shrink-0" />
             <span className="truncate">
               Currently Scoped to Origin:{' '}
-              <strong className="text-white font-bold">{selectedOriginLabel}</strong>{' '}
-              <span className="text-indigo-300/70 text-[11px]">({selectedOrigin})</span>
+              <strong className="text-white font-bold">{selectedOriginLabel}</strong>
             </span>
           </div>
           <button
