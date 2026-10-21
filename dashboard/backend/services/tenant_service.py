@@ -1,4 +1,5 @@
 import time
+import uuid
 import logging
 from typing import List, Dict, Tuple, Optional
 from services.dynamodb_service import DynamoDBService
@@ -112,6 +113,9 @@ def _admin_filter(origin: Optional[str]) -> str:
         return "1=0"
     blocked = sorted(tenant_hosts - granted_hosts)
     if origin and str(origin).strip().upper() not in ["ALL", ""]:
+        hosts = _origin_scope_hosts(str(origin).strip())
+        if hosts is not None:
+            return _hosts_clause([h for h in hosts if h not in blocked])
         req = _normalize_origin_key(origin)
         if req in blocked:
             return "1=0"  # a tenant's host with no active support grant
@@ -134,6 +138,11 @@ def build_tenant_origin_filter(origin: Optional[str], user_domains: List[str], i
     # 1. If a specific origin was requested
     if origin and str(origin).strip().upper() not in ["ALL", ""]:
         req_clean = str(origin).strip()
+        hosts = _origin_scope_hosts(req_clean)
+        if hosts is not None:
+            # An origin id: only the hosts this user may read, so another
+            # tenant's origin id yields "1=0".
+            return _hosts_clause([h for h in hosts if is_origin_owned(h, user_domains)])
         # Also covers a user with no domains at all: that used to skip the
         # check entirely and query whatever origin was asked for.
         if not is_origin_owned(req_clean, user_domains):
@@ -146,9 +155,33 @@ def build_tenant_origin_filter(origin: Optional[str], user_domains: List[str], i
     if not user_domains:
         return "1=0"  # No registered origins -> no logs, ever
 
-    clauses = [build_domain_pattern_sql(d) for d in user_domains]
+    return _hosts_clause(user_domains)
+
+
+def _hosts_clause(hosts: List[str]) -> str:
+    clauses = [build_domain_pattern_sql(h) for h in hosts]
     clauses = [c for c in clauses if c]
     return f"({' OR '.join(clauses)})" if clauses else "1=0"
+
+
+def _origin_scope_hosts(origin: str) -> Optional[List[str]]:
+    """The hostnames that scope one origin's rows when `origin` is an origin
+    id, which is what the origin selector sends (an origin's ip is not unique:
+    two sites on one hosting provider share it, 2026-10-22). None when it is
+    not an origin id; [] when that origin is unknown or unreadable."""
+    try:
+        uuid.UUID(origin)
+    except ValueError:
+        return None
+    try:
+        row = db.get_origin_by_id(origin)
+        if not row:
+            return []
+        domain_rows = db.get_domains_by_origin_ids([origin])
+    except Exception as exc:
+        logger.warning("origin scope lookup for %s failed: %s", origin, exc)
+        return []
+    return sorted(verified_scope_keywords([row], domain_rows))
 
 
 def verified_scope_keywords(origins: List[Dict], domain_rows: List[Dict]) -> set:

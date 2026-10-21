@@ -157,12 +157,15 @@ export const OriginSelector: React.FC = () => {
             {/* User Specific Origins */}
             {allAvailableOrigins.length > 0 ? (
               allAvailableOrigins.map((origin) => {
-                const isSelected = selectedOrigin === origin.ip || selectedOrigin === origin.id
+                // Keyed by id: an origin's ip is not unique (two sites on
+                // one hosting provider share it) and logs are scoped by the
+                // origin's domains, which the backend looks up from the id.
+                const isSelected = selectedOrigin === origin.id
 
                 return (
                   <button
                     key={origin.id}
-                    onClick={() => handleSelect(origin.ip, origin.label)}
+                    onClick={() => handleSelect(origin.id, origin.label)}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-[12px] transition-all text-left cursor-pointer ${
                       isSelected
                         ? 'bg-indigo-600/15 text-indigo-300 font-bold border border-indigo-500/30'

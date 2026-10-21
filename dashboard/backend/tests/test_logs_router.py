@@ -327,3 +327,59 @@ def test_logs_answer_503_when_clickhouse_is_down_instead_of_a_legacy_buffer(
         resp = client.get(path, headers=headers)
         assert resp.status_code == 503, path
         assert resp.json()["detail"] == "ClickHouse unavailable"
+
+
+def _two_sites_on_one_ip(client, register_user, auth_header):
+    """One tenant with two sites hosted on the same upstream IP (two Vercel
+    projects answer on 216.198.79.1), each with its own verified domain."""
+    register_user(email="same-ip-bootstrap@example.com", username="same_ip_bootstrap")
+    owner = register_user(email="same-ip-owner@example.com", username="same_ip_owner", role="viewer")
+    headers = auth_header(owner["access_token"])
+    ids = {}
+    for name in ("demo1.example.com", "www.demo2.example.com"):
+        resp = client.post("/api/origins", json={"label": name, "ip": "203.0.113.40", "port": 443}, headers=headers)
+        assert resp.status_code == 200, resp.text
+        ids[name] = resp.json()["id"]
+        seed_domain(tenant_service_module.db, {
+            "origin_id": ids[name], "domain_name": name, "dns_verified": True,
+        })
+    return headers, ids
+
+
+def test_logs_for_one_origin_are_scoped_by_its_id_to_its_own_domains(
+    client: TestClient, register_user, auth_header, monkeypatch
+):
+    """2026-10-22: the origin selector sent the origin's upstream IP, so two
+    sites on one IP were selected together and the query (host = '<ip>')
+    found nothing. It now sends the origin id, which stands for that
+    origin's verified domains only."""
+    spy = MagicMock(return_value={"logs": [], "total": 0, "page": 1, "limit": 20, "total_pages": 1})
+    monkeypatch.setattr(logs_module.ch, "connected", True)
+    monkeypatch.setattr(logs_module.ch, "get_logs", spy)
+    headers, ids = _two_sites_on_one_ip(client, register_user, auth_header)
+
+    resp = client.get("/api/logs", params={"origin": ids["demo1.example.com"]}, headers=headers)
+    assert resp.status_code == 200
+    clause = spy.call_args.kwargs["origin_clause"]
+    assert "host = 'demo1.example.com'" in clause
+    assert "demo2" not in clause
+
+
+def test_another_tenants_origin_id_returns_empty(
+    client: TestClient, register_user, auth_header, monkeypatch
+):
+    spy = MagicMock(return_value={"logs": [{"url": "/should-never-be-returned"}]})
+    monkeypatch.setattr(logs_module.ch, "connected", True)
+    monkeypatch.setattr(logs_module.ch, "get_logs", spy)
+    _headers, ids = _two_sites_on_one_ip(client, register_user, auth_header)
+    other = register_user(email="same-ip-other@example.com", username="same_ip_other", role="viewer")
+    other_headers = auth_header(other["access_token"])
+    own = client.post("/api/origins", json={"label": "mine", "ip": "203.0.113.41", "port": 443}, headers=other_headers)
+    seed_domain(tenant_service_module.db, {
+        "origin_id": own.json()["id"], "domain_name": "mine.example.com", "dns_verified": True,
+    })
+
+    resp = client.get("/api/logs", params={"origin": ids["demo1.example.com"]}, headers=other_headers)
+    assert resp.status_code == 200
+    assert resp.json()["logs"] == []
+    assert spy.call_count == 0

@@ -68,3 +68,12 @@ def test_admin_alerts_fail_closed(monkeypatch):
         raise RuntimeError("db down")
     monkeypatch.setattr(ts, "admin_log_scope", boom)
     assert ai_summary._visible_alerts_for_user({"role": "admin", "user_id": "a"}) == []
+
+
+def test_admin_origin_id_scopes_to_that_origins_hosts(scope, monkeypatch):
+    oid = "6f1c0d2e-0000-4000-8000-000000000001"
+    monkeypatch.setattr(ts, "_origin_scope_hosts", lambda o: ["shop.com", "www.shop.com"] if o == oid else None)
+    scope["tenant"] = {"shop.com", "www.shop.com", "blog.com"}
+    assert ts.build_tenant_origin_filter(oid, [], True) == "1=0"  # no support grant yet
+    scope["granted"] = {"shop.com", "www.shop.com"}
+    assert ts.build_tenant_origin_filter(oid, [], True) == "((host = 'shop.com') OR (host = 'www.shop.com'))"
