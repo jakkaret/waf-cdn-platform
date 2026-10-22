@@ -19,9 +19,14 @@ describe('email gate', () => {
   })
 
   it('explains every action the backend can block', () => {
-    for (const action of ['create_origin', 'add_domain', 'invite', 'accept_invite', 'agent_token', 'ai'] as const) {
-      expect(GATE_COPY[action].impacts.length).toBeGreaterThan(0)
+    for (const action of ['create_origin', 'add_domain', 'invite', 'accept_invite', 'agent_token', 'ai', 'link_google'] as const) {
+      expect(GATE_COPY[action].reasons.length).toBeGreaterThan(0)
     }
+  })
+
+  it('saves the amber warning for actions that touch a live site or other people', () => {
+    const caution = Object.entries(GATE_COPY).filter(([, c]) => c.level === 'caution').map(([a]) => a).sort()
+    expect(caution).toEqual(['add_domain', 'agent_token', 'create_origin', 'invite'])
   })
 })
 

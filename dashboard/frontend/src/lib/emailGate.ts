@@ -8,73 +8,71 @@ import { create } from 'zustand'
 
 export type GateAction = 'create_origin' | 'add_domain' | 'invite' | 'accept_invite' | 'agent_token' | 'ai' | 'link_google'
 
+// How loud the dialog is. 'caution': the action changes how a live site is
+// served or who can see it, so the dialog lists what it does in an amber box.
+// 'info': nothing reaches the site or other people beyond this account, so one
+// calm line is enough. Either way the copy speaks to the address owner (the
+// usual reader), never as if they were the suspect.
+export type GateLevel = 'caution' | 'info'
+
 export interface GateCopy {
   title: string
-  impacts: string[]
+  level: GateLevel
+  reasons: string[]
 }
 
 export const GATE_COPY: Record<GateAction, GateCopy> = {
   create_origin: {
     title: 'ยืนยันอีเมลก่อนเพิ่มเว็บ',
-    impacts: [
-      'traffic จริงของเว็บจะวิ่งผ่าน WAF ทุก request ถ้าตั้งผิด ผู้ใช้อาจเข้าเว็บไม่ได้',
-      'ระบบจะออกใบรับรอง HTTPS ให้โดเมน และเก็บ log ของผู้เข้าเว็บ (IP, URL) ไว้ในบัญชีนี้',
-      'เมื่อมีการโจมตีหรือเว็บล่ม เราต้องติดต่อเจ้าของตัวจริงได้',
+    level: 'caution',
+    reasons: [
+      'traffic ของเว็บจะวิ่งผ่าน WAF และระบบจะเก็บ log ผู้เข้าเว็บ (IP, URL) ไว้ในบัญชีนี้',
+      'อีเมลนี้จะเป็นช่องทางกู้บัญชีและติดต่อเจ้าของเว็บ จึงต้องแน่ใจว่าใช้ได้จริง',
     ],
   },
   add_domain: {
     title: 'ยืนยันอีเมลก่อนเพิ่มโดเมน',
-    impacts: [
-      'โดเมนที่เพิ่มจะถูก route ผ่าน edge และออกใบรับรอง HTTPS',
-      'log ของผู้เข้าเว็บในโดเมนนี้จะอยู่ในบัญชีนี้',
-    ],
+    level: 'caution',
+    reasons: ['ระบบจะออกใบรับรอง HTTPS ให้โดเมนนี้ และเก็บ log ผู้เข้าเว็บไว้ในบัญชีนี้'],
   },
   invite: {
     title: 'ยืนยันอีเมลก่อนเชิญทีม',
-    impacts: [
-      'คนที่ถูกเชิญจะเห็น log ของผู้เข้าเว็บ และ editor แก้กฎ WAF, rate limit และ route ได้',
-      'คำเชิญส่งในนามบัญชีนี้ ผู้รับต้องมั่นใจว่ามาจากเจ้าของอีเมลจริง',
-      'ถ้าบัญชีถูกคนอื่นสมัครด้วยอีเมลของคุณ เขาจะเชิญคนนอกเข้ามาดูเว็บได้',
-    ],
-  },
-  accept_invite: {
-    title: 'ยืนยันอีเมลก่อนรับคำเชิญ',
-    impacts: [
-      'การรับคำเชิญให้สิทธิ์ดู log และ config ของเว็บคนอื่น',
-      'เจ้าของเว็บต้องมั่นใจว่าบัญชีที่รับเป็นเจ้าของอีเมลจริง',
+    level: 'caution',
+    reasons: [
+      'สมาชิกที่เชิญจะเห็น log ผู้เข้าเว็บ ส่วน editor แก้กฎ WAF, rate limit และ route ได้',
+      'คำเชิญส่งในชื่ออีเมลนี้ ผู้รับจึงควรรู้แน่ว่ามาจากคุณ',
     ],
   },
   agent_token: {
     title: 'ยืนยันอีเมลก่อนสร้าง token ของ Agent',
-    impacts: [
-      'token เปิด tunnel จากเซิร์ฟเวอร์ของคุณเข้า edge ได้นาน 90 วัน',
-      'ถ้าบัญชีไม่ใช่ของจริง token อาจถูกใช้พา traffic ที่ไม่ใช่ของคุณผ่าน WAF',
-    ],
+    level: 'caution',
+    reasons: ['token นี้เชื่อมเซิร์ฟเวอร์ของคุณเข้า edge ได้ 90 วัน เก็บไว้เหมือนรหัสผ่าน'],
+  },
+  accept_invite: {
+    title: 'ยืนยันอีเมลเพื่อรับคำเชิญ',
+    level: 'info',
+    reasons: ['คำเชิญส่งถึงอีเมลนี้ ยืนยันแล้วเจ้าของเว็บจะมั่นใจว่าคนที่เข้าร่วมคือคุณ'],
   },
   link_google: {
-    title: 'ยืนยันอีเมลก่อนเชื่อม Google',
-    impacts: [
-      'บัญชี Google ที่เชื่อมแล้วใช้เข้าระบบแทนรหัสผ่านได้ แม้รีเซ็ตรหัสผ่านไปแล้ว',
-      'ถ้าบัญชีนี้ถูกคนอื่นสมัครด้วยอีเมลของคุณ เขาจะเชื่อม Google ของเขาไว้เข้าแทนคุณได้',
-    ],
+    title: 'ยืนยันอีเมลเพื่อเชื่อม Google',
+    level: 'info',
+    reasons: ['เชื่อมแล้วเข้าระบบด้วย Google แทนรหัสผ่านได้ จึงต้องยืนยันก่อนว่าบัญชีนี้เป็นของคุณ'],
   },
   ai: {
-    title: 'ยืนยันอีเมลก่อนใช้ AI',
-    impacts: [
-      'AI ใช้โควตาที่มีค่าใช้จ่ายจริง เปิดให้เฉพาะบัญชีที่ยืนยันแล้ว เพื่อกันบัญชีปลอมใช้โควตาหมด',
-      'AI อ่าน log การโจมตีของเว็บคุณ ต้องแน่ใจว่าคนถามคือเจ้าของบัญชี',
-    ],
+    title: 'ยืนยันอีเมลเพื่อใช้ AI',
+    level: 'info',
+    reasons: ['AI อ่าน log การโจมตีของเว็บคุณและมีโควตาต่อบัญชี จึงเปิดให้บัญชีที่ยืนยันอีเมลแล้ว'],
   },
 }
 
-// Why verify at all (verify page and modal footer).
+// Why verify at all (verify page).
 export const WHY_VERIFY = [
-  'กู้บัญชีได้: ลืมรหัสผ่านต้องใช้รหัสที่ส่งไปที่อีเมลนี้',
-  'กันคนอื่นใช้อีเมลของคุณสมัครไว้ก่อน แล้วรอเข้าถึงเว็บที่คุณจะเพิ่ม',
-  'คำเชิญทีมและการแจ้งเตือนสำคัญส่งไปที่อีเมลนี้',
+  'ใช้กู้บัญชีเมื่อลืมรหัสผ่าน',
+  'ยืนยันว่าอีเมลนี้เป็นของคุณ ไม่มีใครใช้อีเมลของคุณสมัครแทนได้',
+  'คำเชิญทีมจะส่งมาที่อีเมลนี้',
 ]
 
-export const LOCKED_UNTIL_VERIFIED = ['เพิ่มเว็บและโดเมน', 'เชิญหรือรับคำเชิญทีม', 'สร้าง token ของ Agent', 'ใช้ AI Copilot']
+export const LOCKED_UNTIL_VERIFIED = ['เพิ่มเว็บและโดเมน', 'เชิญหรือรับคำเชิญทีม', 'สร้าง token ของ Agent', 'ใช้ AI Copilot', 'เชื่อมบัญชี Google']
 export const OPEN_BEFORE_VERIFIED = ['ดู Dashboard และหน้าต่าง ๆ', 'จัดการอุปกรณ์ที่เข้าระบบ', 'เปิด ticket ขอความช่วยเหลือ']
 
 export const isGateAction = (value: unknown): value is GateAction =>
