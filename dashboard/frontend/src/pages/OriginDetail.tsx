@@ -61,6 +61,7 @@ import {
 } from 'lucide-react'
 import { ORIGIN_ROLE_LABEL, canEditOrigin, canManageOrigin, originRoleOf } from '../lib/roles'
 import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
+import { ReportText } from '../components/ai/ReportText'
 
 const cveSeverityClass = (sev: string): string => {
   switch (sev) {
@@ -1642,9 +1643,10 @@ export const OriginDetail: React.FC = () => {
                             {selectedPostmortem.ai_narrative_degraded && (
                               <Badge color="warning">AI summary may be truncated</Badge>
                             )}
-                            <div className="whitespace-pre-wrap text-[12.5px] font-mono text-[var(--text-primary)] bg-[var(--bg-surface-elevated)] rounded p-4 leading-relaxed">
-                              {selectedPostmortem.ai_narrative}
-                            </div>
+                            <ReportText
+                              text={selectedPostmortem.ai_narrative}
+                              className="text-[12.5px] bg-[var(--bg-surface-elevated)] rounded p-4"
+                            />
                           </div>
                         ) : (
                           <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">

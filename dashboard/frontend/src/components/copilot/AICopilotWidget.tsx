@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { api } from '../../api/axios'
-import { useAuthStore } from '../../store/authStore'
 import {
   Sparkles,
   Bot,
@@ -17,6 +16,7 @@ import {
   ChevronDown
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { ReportText } from '../ai/ReportText'
 
 interface Message {
   id: string
@@ -26,14 +26,18 @@ interface Message {
 }
 
 const QUICK_PROMPTS = [
-  '🔍 วิเคราะห์ภัยคุกคาม 24 ชม. ล่าสุด',
-  '📊 สรุปภาพรวมทราฟฟิกและอัตราการบล็อกวันนี้',
-  '🚨 มี IP ไหนพยายามโจมตีถี่ผิดปกติที่ควรบล็อกไหม?',
-  '🛡️ อธิบายว่าระบบป้องกัน SQL Injection และ XSS อย่างไร',
+  'สรุปการโจมตี 24 ชั่วโมงล่าสุด',
+  'IP ไหนควรบล็อก',
+  'การโจมตีประเภทไหนเยอะสุด และควรทำอะไร',
+  'URL ไหนถูกเล็งมากสุด',
 ]
 
+// Answers come from this account's last 24 hours of logs only (api/copilot.py).
+const INTRO = 'ถามเรื่องทราฟฟิกและการโจมตีของเว็บในบัญชีนี้ ข้อมูล 24 ชั่วโมงล่าสุด'
+
+const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
 export const AICopilotWidget: React.FC = () => {
-  const { user } = useAuthStore()
   const [isOpen, setIsOpen] = useState(false)
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -44,8 +48,8 @@ export const AICopilotWidget: React.FC = () => {
     {
       id: 'welcome-1',
       role: 'model',
-      content: `สวัสดีครับคุณ **${user?.username || 'Security Engineer'}**! 🛡️✨\n\nผมคือ **WAF AI Copilot** ผู้ช่วยวิเคราะห์ความปลอดภัยอัจฉริยะ คุณสามารถถามเรื่อง Log สถิติทราฟฟิก หรือให้ช่วยวิเคราะห์ภัยคุกคามแบบ Real-time ได้ทันทีครับ`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      content: INTRO,
+      timestamp: now(),
     },
   ])
 
@@ -75,8 +79,8 @@ export const AICopilotWidget: React.FC = () => {
     setIsLoading(true)
 
     try {
-      // Build history payload
-      const historyPayload = messages.map((m) => ({
+      // Build history payload (the intro line is not part of the exchange)
+      const historyPayload = messages.filter((m) => !m.id.startsWith('welcome')).map((m) => ({
         role: m.role,
         content: m.content,
       }))
@@ -86,7 +90,7 @@ export const AICopilotWidget: React.FC = () => {
         history: historyPayload,
       })
 
-      const botReply = response.data?.reply || 'ขออภัยครับ ไม่สามารถดึงข้อมูลได้ในขณะนี้'
+      const botReply = response.data?.reply || 'ไม่มีคำตอบจากระบบ ลองใหม่อีกครั้ง'
 
       const botMessage: Message = {
         id: `bot-${Date.now()}`,
@@ -97,11 +101,11 @@ export const AICopilotWidget: React.FC = () => {
 
       setMessages((prev) => [...prev, botMessage])
     } catch (error: any) {
-      toast.error('Copilot request failed')
+      toast.error('ส่งคำถามไม่สำเร็จ')
       const errorMessage: Message = {
         id: `err-${Date.now()}`,
         role: 'model',
-        content: '⚠️ เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI Copilot กรุณาลองใหม่อีกครั้งครับ',
+        content: 'เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้ง',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       }
       setMessages((prev) => [...prev, errorMessage])
@@ -113,7 +117,7 @@ export const AICopilotWidget: React.FC = () => {
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text)
     setCopiedId(id)
-    toast.success('คัดลอกข้อความแล้ว!')
+    toast.success('คัดลอกแล้ว')
     setTimeout(() => setCopiedId(null), 2000)
   }
 
@@ -122,55 +126,11 @@ export const AICopilotWidget: React.FC = () => {
       {
         id: 'welcome-reset',
         role: 'model',
-        content: `เริ่มการสนทนาใหม่แล้วครับ! มีอะไรให้ผมช่วยวิเคราะห์ความปลอดภัยของระบบ WAF ไหมครับ? 🛡️`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        content: INTRO,
+        timestamp: now(),
       },
     ])
     toast.success('ล้างประวัติการสนทนาแล้ว')
-  }
-
-  // Format markdown helper (bold, code, lists)
-  const renderFormattedText = (text: string) => {
-    return text.split('\n').map((line, i) => {
-      // Headers
-      if (line.startsWith('### ')) {
-        return <h4 key={i} className="text-[13px] font-bold text-indigo-400 mt-2 mb-1">{line.replace('### ', '')}</h4>
-      }
-      if (line.startsWith('## ')) {
-        return <h3 key={i} className="text-[14px] font-bold text-indigo-300 mt-2.5 mb-1">{line.replace('## ', '')}</h3>
-      }
-      // List items
-      if (line.startsWith('• ') || line.startsWith('- ') || line.startsWith('* ')) {
-        return (
-          <li key={i} className="ml-3.5 list-disc text-[12px] leading-relaxed">
-            {formatInlineText(line.replace(/^[•\-\*]\s+/, ''))}
-          </li>
-        )
-      }
-      return (
-        <p key={i} className="text-[12px] leading-relaxed my-1">
-          {formatInlineText(line)}
-        </p>
-      )
-    })
-  }
-
-  const formatInlineText = (str: string) => {
-    // Basic bold **text** and code `text` formatting
-    const parts = str.split(/(\*\*.*?\*\*|`.*?`)/g)
-    return parts.map((part, index) => {
-      if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={index} className="font-bold text-[var(--text-primary)]">{part.slice(2, -2)}</strong>
-      }
-      if (part.startsWith('`') && part.endsWith('`')) {
-        return (
-          <code key={index} className="px-1 py-0.5 rounded bg-black/40 text-emerald-400 font-mono text-[11px] border border-white/10">
-            {part.slice(1, -1)}
-          </code>
-        )
-      }
-      return part
-    })
   }
 
   return (
@@ -205,15 +165,12 @@ export const AICopilotWidget: React.FC = () => {
               <div>
                 <div className="flex items-center gap-1.5">
                   <h3 className="text-[13.5px] font-bold text-[var(--text-primary)] m-0 font-mono">
-                    WAF AI Copilot
+                    WAF Copilot
                   </h3>
-                  <span className="px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9.5px] font-mono font-bold">
-                    GEMINI 2.0
-                  </span>
                 </div>
-                <p className="text-[10.5px] text-[var(--text-muted)] m-0 font-mono flex items-center gap-1 mt-0.5">
+                <p className="text-[10.5px] text-[var(--text-muted)] m-0 flex items-center gap-1 mt-0.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-                  <span>Real-time SecOps Telemetry</span>
+                  <span>ข้อมูล 24 ชม. ของเว็บในบัญชีนี้</span>
                 </p>
               </div>
             </div>
@@ -259,7 +216,7 @@ export const AICopilotWidget: React.FC = () => {
                     }`}
                   >
                     <div className="space-y-1">
-                      {isBot ? renderFormattedText(msg.content) : msg.content}
+                      {isBot ? <ReportText text={msg.content} className="text-[12px]" /> : msg.content}
                     </div>
 
                     <div className="flex items-center justify-between gap-2 mt-2 pt-1 border-t border-white/5 text-[10px] text-[var(--text-muted)] font-mono">

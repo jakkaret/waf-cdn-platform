@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { Sparkles, X, Send, Calendar, ShieldCheck, AlertTriangle, Copy, Check, BarChart3, Clock, ArrowRight } from 'lucide-react'
 import { aiSummaryApi, SummarizeRangeResponse } from '../api/aiSummary'
 import toast from 'react-hot-toast'
+import { ReportText } from './ai/ReportText'
 
 interface AISummaryModalProps {
   isOpen: boolean
@@ -59,10 +60,10 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
             </div>
             <div>
               <h2 className="text-[16px] font-bold text-[var(--text-primary)] font-mono tracking-tight m-0">
-                AI Threat Intelligence & Range Summarizer
+                สรุปเหตุการณ์ความปลอดภัย
               </h2>
               <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-                สรุปเหตุการณ์การโจมตีตามช่วงเวลา หรือพิมพ์ข้อความภาษาธรรมชาติให้ Gemini วิเคราะห์
+                การโจมตีของเว็บในบัญชีนี้ตามช่วงเวลาที่เลือก
               </p>
             </div>
           </div>
@@ -80,7 +81,7 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
           {/* Natural language query input */}
           <div className="space-y-2">
             <label className="text-[12px] font-bold font-mono text-[var(--text-secondary)] uppercase tracking-wider block">
-              💬 พิมพ์ข้อความช่วงเวลาที่ต้องการสรุป (Natural Language Prompt):
+              ช่วงเวลา
             </label>
             <div className="relative flex items-center">
               <input
@@ -88,7 +89,7 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
                 value={queryText}
                 onChange={(e) => setQueryText(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && summaryMutation.mutate()}
-                placeholder="เช่น 'สรุป 3 วันล่าสุดให้หน่อย', 'เมื่อวานถึงเที่ยงวันนี้', 'สัปดาห์นี้มีอะไรน่ากังวลไหม'"
+                placeholder="เช่น '3 วันล่าสุด', 'เมื่อวานถึงเที่ยงวันนี้'"
                 className="w-full pl-4 pr-28 py-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)] text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-indigo-500 transition-colors shadow-inner"
               />
               <button
@@ -102,7 +103,7 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
                 ) : (
                   <>
                     <Send size={13} />
-                    <span>วิเคราะห์</span>
+                    <span>สรุป</span>
                   </>
                 )}
               </button>
@@ -165,15 +166,14 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
                 </div>
               </div>
 
-              {/* Gemini Markdown Executive Summary */}
+              {/* AI findings and actions (ReportText) */}
               <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)] space-y-3">
                 <div className="flex items-center gap-2 text-indigo-400 font-bold text-[13px] font-mono border-b border-[var(--bg-border-subtle)] pb-2">
                   <Sparkles size={16} />
-                  <span>🤖 รายงานสรุปเชิงลึกโดย Gemini AI (Executive SecOps Report)</span>
+                  <span>ข้อสังเกตและสิ่งที่ควรทำ</span>
                 </div>
-                <div className="text-[13px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap font-sans space-y-2">
-                  {result.ai_executive_summary}
-                </div>
+                <ReportText text={result.ai_executive_summary} className="text-[13px]" />
+                <p className="m-0 text-[11px] text-[var(--text-muted)]">สรุปโดย AI จาก log ของช่วงนี้ ตัวเลขด้านบนมาจาก log โดยตรง</p>
               </div>
             </div>
           )}

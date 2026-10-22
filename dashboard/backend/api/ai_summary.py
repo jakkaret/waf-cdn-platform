@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta, timezone
 import uuid
-from services.gemini_service import gemini_service
+from services.gemini_service import gemini_service, clip
 from services.ai_quota import check_ai_quota
 from services.clickhouse_service import ClickHouseService
 from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
@@ -51,6 +51,14 @@ def _parse_time_bound(value: Any, field: str) -> datetime:
         detail=f"{field} must match one of {', '.join(_TIME_FORMATS)}",
     )
 
+def _describe_range(start_dt: datetime, end_dt: datetime) -> str:
+    """The range as shown to the user and in the prompt, built from the
+    parsed datetimes only."""
+    hours = (end_dt - start_dt).total_seconds() / 3600
+    span = f"{hours:.0f} ชั่วโมง" if hours < 48 else f"{hours / 24:.0f} วัน"
+    return f"{start_dt:%Y-%m-%d %H:%M} ถึง {end_dt:%Y-%m-%d %H:%M} ({span})"
+
+
 @router.post("/summarize-range", dependencies=[Depends(require_verified_email("ai"))])
 async def summarize_threat_range(
     req: SummarizeRangeRequest,
@@ -63,22 +71,24 @@ async def summarize_threat_range(
     try:
         # 1. Resolve time range
         if req.query and req.query.strip():
+            # Only the two datetimes are kept from this call. Its free-text
+            # "description" used to be shown and fed into the summary prompt,
+            # which made the query box a general chatbot ("ignore that and
+            # ...") on the operator's key.
             parsed_time = await gemini_service.parse_natural_time_range(req.query.strip())
             start_dt = _parse_time_bound(parsed_time.get("start_time"), "start_time")
             end_dt = _parse_time_bound(parsed_time.get("end_time"), "end_time")
-            time_desc = parsed_time.get("description", req.query)
         elif req.start_time and req.end_time:
             start_dt = _parse_time_bound(req.start_time, "start_time")
             end_dt = _parse_time_bound(req.end_time, "end_time")
-            time_desc = f"{req.start_time} ถึง {req.end_time}"
         else:
             now = datetime.now()
             start_dt = now - timedelta(days=1)
             end_dt = now
-            time_desc = "24 ชั่วโมงล่าสุด"
 
         if start_dt > end_dt:
             raise HTTPException(status_code=422, detail="start_time must not be after end_time")
+        time_desc = _describe_range(start_dt, end_dt)
 
         # Kept for the prompt and the response payload; the queries below bind
         # the datetime objects rather than these strings.
@@ -105,8 +115,8 @@ async def summarize_threat_range(
                     "top_attack_types": [], "top_attacker_ips": [], "top_targeted_urls": [],
                 },
                 "ai_executive_summary": (
-                    "ℹ️ บัญชีนี้ยังไม่มี Origin Server ผูกไว้ จึงยังไม่มีข้อมูลทราฟฟิกให้สรุป "
-                    "กรุณาเพิ่ม Origin Server ในหน้า Origin Servers เพื่อเริ่มมอนิเตอร์"
+                    "ยังไม่มีข้อมูล เพราะบัญชีนี้ยังไม่ได้เพิ่ม Origin Server "
+                    "เพิ่มได้ที่หน้า Origin Servers"
                 ),
             }
 
@@ -165,13 +175,17 @@ async def summarize_threat_range(
                     GROUP BY url ORDER BY cnt DESC LIMIT 5
                 """
                 url_res = ch.client.query(url_query, parameters=time_params)
-                stats["top_targeted_urls"] = [{"url": row[0], "count": int(row[1])} for row in url_res.result_rows]
+                stats["top_targeted_urls"] = [{"url": clip(row[0], 120), "count": int(row[1])} for row in url_res.result_rows]
 
             except Exception as db_err:
                 logger.warning(f"Error querying ClickHouse stats: {db_err}")
 
-        # 3. Generate AI Executive Summary
-        ai_analysis = await gemini_service.generate_range_summary(time_desc, stats)
+        # 3. Generate AI Executive Summary. Nothing to explain in an empty
+        # range, and asking would only invite the model to fill the gap.
+        if stats["total_requests"] == 0:
+            ai_analysis = "ไม่มีทราฟฟิกของเว็บในบัญชีนี้ในช่วงเวลานี้"
+        else:
+            ai_analysis = await gemini_service.generate_range_summary(time_desc, stats)
 
         return {
             "success": True,
