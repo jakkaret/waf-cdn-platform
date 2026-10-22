@@ -161,12 +161,17 @@ export const VerifyEmail: React.FC = () => {
 
         <aside className="lg:col-span-6 space-y-4">
           {action && (
-            <div className="dash-card p-5 border-amber-500/30">
-              <h2 className="m-0 mb-2 flex items-center gap-2 text-[13.5px] font-bold text-amber-600 dark:text-amber-400">
-                <ShieldAlert size={15} /> {GATE_COPY[action].title}
+            <div className={`dash-card p-5 ${GATE_COPY[action].level === 'caution' ? 'border-amber-500/30' : ''}`}>
+              <h2
+                className={`m-0 mb-2 flex items-center gap-2 text-[13.5px] font-bold ${
+                  GATE_COPY[action].level === 'caution' ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--text-primary)]'
+                }`}
+              >
+                {GATE_COPY[action].level === 'caution' ? <ShieldAlert size={15} /> : <Lock size={15} className="text-[var(--text-muted)]" />}
+                {GATE_COPY[action].title}
               </h2>
-              <ul className="m-0 pl-4 space-y-1.5 text-[12.5px] leading-5 text-[var(--text-secondary)]">
-                {GATE_COPY[action].impacts.map((t) => (
+              <ul className="m-0 pl-4 list-disc marker:text-[var(--text-muted)] space-y-1.5 text-[12.5px] leading-5 text-[var(--text-secondary)]">
+                {GATE_COPY[action].reasons.map((t) => (
                   <li key={t}>{t}</li>
                 ))}
               </ul>
@@ -176,7 +181,7 @@ export const VerifyEmail: React.FC = () => {
             <h2 className="m-0 mb-3 flex items-center gap-2 text-[13.5px] font-bold text-[var(--text-primary)]">
               <ShieldCheck size={15} className="text-orange-500" /> ทำไมต้องยืนยันอีเมล
             </h2>
-            <ul className="m-0 pl-4 space-y-1.5 text-[12.5px] leading-5 text-[var(--text-secondary)]">
+            <ul className="m-0 pl-4 list-disc marker:text-[var(--text-muted)] space-y-1.5 text-[12.5px] leading-5 text-[var(--text-secondary)]">
               {WHY_VERIFY.map((t) => (
                 <li key={t}>{t}</li>
               ))}
@@ -184,7 +189,7 @@ export const VerifyEmail: React.FC = () => {
           </div>
           <div className="dash-card p-5 grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div>
-              <p className="m-0 mb-2 text-[11px] font-mono uppercase tracking-wider text-[var(--text-muted)]">ใช้ได้หลังยืนยัน</p>
+              <p className="m-0 mb-2 text-[11.5px] font-semibold text-[var(--text-muted)]">ใช้ได้หลังยืนยัน</p>
               <ul className="m-0 p-0 list-none space-y-1.5 text-[12.5px]">
                 {LOCKED_UNTIL_VERIFIED.map((t) => (
                   <li key={t} className="flex items-center gap-2 text-[var(--text-secondary)]">
@@ -194,7 +199,7 @@ export const VerifyEmail: React.FC = () => {
               </ul>
             </div>
             <div>
-              <p className="m-0 mb-2 text-[11px] font-mono uppercase tracking-wider text-[var(--text-muted)]">ใช้ได้เลยตอนนี้</p>
+              <p className="m-0 mb-2 text-[11.5px] font-semibold text-[var(--text-muted)]">ใช้ได้เลยตอนนี้</p>
               <ul className="m-0 p-0 list-none space-y-1.5 text-[12.5px]">
                 {OPEN_BEFORE_VERIFIED.map((t) => (
                   <li key={t} className="flex items-center gap-2 text-[var(--text-secondary)]">
