@@ -18,14 +18,6 @@ from services.auth_service import AuthService
 T0 = dt.datetime(2026, 10, 24, 3, 0, tzinfo=dt.timezone.utc)
 
 
-@pytest.fixture(autouse=True)
-def _routers(client):
-    from api import alerts as alerts_module
-    from api import domains as domains_module
-    client.app.include_router(alerts_module.router)
-    client.app.include_router(domains_module.origins_domains_router)
-
-
 @pytest.fixture()
 def support(register_user):
     return register_user(email="support@example.com", username="support")  # first account = admin

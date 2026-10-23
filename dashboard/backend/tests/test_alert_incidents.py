@@ -211,9 +211,7 @@ def test_support_is_told_only_under_a_grant_or_for_unattributed_traffic(client, 
 # ---- API --------------------------------------------------------------------
 
 def test_incidents_api_shows_only_the_callers_sites(client, register_user, auth_header, admin):
-    from api import alerts as alerts_module
     from services.tenant_service import invalidate_admin_scope_cache
-    client.app.include_router(alerts_module.router)
     owner_a, origin_a = _origin(client, register_user, auth_header, "ia@example.com", "shop A")
     owner_b, _origin_b = _origin(client, register_user, auth_header, "ib@example.com", "shop B")
     _alerts(origin_a, T0, 60)

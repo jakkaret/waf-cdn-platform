@@ -189,6 +189,10 @@ def app() -> FastAPI:
     test_app.include_router(ai_summary_module.router)
     from api import invites as invites_module
     test_app.include_router(invites_module.router)
+    from api import alerts as alerts_module
+    from api import domains as domains_module
+    test_app.include_router(alerts_module.router)
+    test_app.include_router(domains_module.origins_domains_router)
     return test_app
 
 

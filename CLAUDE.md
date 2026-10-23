@@ -1,7 +1,8 @@
 # CLAUDE.md — waf-cdn-platform (WAF + CDN)
 
 Repo: github.com/jakkaret/waf-cdn-platform, branch `main`.
-Local checkout (Mac): `/Users/boss/project/waf-cdn-platform-main`. The older
+Local checkout (Mac): `/Users/boss/project/waf-cdn-platform-new`. The older
+`/Users/boss/project/waf-cdn-platform-main` (stopped 2026-10-12), the older
 `/Users/boss/project/waf_project` (repo `waf_project`, branch `Backend`) and
 `/Users/boss/project/waf-cdn-platform` (unrelated history) are stale; don't work in them.
 On the main node the deployed tree is `/root/waf_project` (remote `origin` =
