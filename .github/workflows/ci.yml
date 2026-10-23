@@ -76,6 +76,9 @@ jobs:
       - name: TypeScript type check
         run: npx tsc --noEmit
 
+      - name: Unit tests (vitest)
+        run: npx vitest run
+
   # ── Job 3: Frontend Build ───────────────────────────────────────────────
   build-frontend:
     name: "Build: Frontend (Vite)"

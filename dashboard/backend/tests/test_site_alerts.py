@@ -15,12 +15,6 @@ from services.auth_service import AuthService
 T0 = dt.datetime(2026, 10, 24, 3, 0, tzinfo=dt.timezone.utc)
 
 
-@pytest.fixture(autouse=True)
-def _domains_router(client):
-    from api import domains as domains_module
-    client.app.include_router(domains_module.origins_domains_router)
-
-
 def _site(client, register_user, auth_header, email, label, domain):
     user = register_user(email=email, username=email.split("@")[0].replace("-", "_"))
     h = auth_header(user["access_token"])
@@ -183,3 +177,20 @@ def test_old_audit_events_are_not_replayed(client, register_user, auth_header, s
     then = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=2)
     _audit(oid, editor, "domain.create", "เพิ่มโดเมน: a.example.com", then)
     assert asyncio.run(sa.team_tick()) == 0
+
+
+def test_the_worker_builds_one_clickhouse_client_not_one_per_tick(monkeypatch):
+    # ClickHouseService() runs the table DDL; building it every minute ran DDL every minute.
+    from services import clickhouse_service
+    built = []
+
+    class FakeClickHouse:
+        connected = True
+
+        def __init__(self):
+            built.append(self)
+
+    monkeypatch.setattr(clickhouse_service, "ClickHouseService", FakeClickHouse)
+    monkeypatch.setattr(sa, "_ch", None)
+    assert sa._clickhouse() is sa._clickhouse() is sa._clickhouse()
+    assert len(built) == 1

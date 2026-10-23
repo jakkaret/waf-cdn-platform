@@ -11,7 +11,7 @@ status: VERIFIED
 | Main 2 vCPU / 3.7 GiB / Ubuntu 26.04 | `nproc`, `free -h`, `hostnamectl` | VERIFIED |
 | container บน Main 7 ตัว | `docker ps -a` 2026-09-27 | VERIFIED |
 | FastAPI ให้บริการ dashboard API ที่ :8000 | `systemctl show waf-dashboard`, `ss -ltnp`, `main.py` | VERIFIED |
-| 24 routers / 123 endpoints | `main.py` include_router, AST ของ `api/*.py` (`reference/api-reference.md`) | VERIFIED |
+| ดูบรรทัดสรุปใน `reference/api-reference.md` | สร้างโดย `scripts/gen_api_reference.py`, ตรวจโดย `tests/test_api_reference_doc.py` | VERIFIED |
 | WAF ใช้ ModSecurity + CRS 3.3.10, PL1, threshold 10 | `docker-compose.yml` env, audit `OWASP_CRS/3.3.10`, env edge | VERIFIED |
 | custom rules โหลดหลัง CRS | `nginx/templates/modsecurity.d/setup.conf.template` | VERIFIED |
 | DECEIVE = phase 1 status 418 | `services/rule_manager.py::_build_secrule_directives`, `custom-deceive.conf` | VERIFIED |
