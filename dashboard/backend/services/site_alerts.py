@@ -44,6 +44,15 @@ TEAM_ACTIONS = {
 TEAM_LOOKBACK_SECONDS = 600
 
 _tunnel_offline_since: Dict[str, float] = {}
+_ch = None  # one ClickHouse client for the worker: its constructor runs the table DDL
+
+
+def _clickhouse():
+    global _ch
+    if _ch is None or not getattr(_ch, "connected", False):
+        from services.clickhouse_service import ClickHouseService
+        _ch = ClickHouseService()
+    return _ch
 
 
 def _e(value: Any) -> str:
@@ -79,9 +88,10 @@ def host_origins() -> Dict[str, str]:
     return {h: next(iter(ids)) for h, ids in owners.items() if len(ids) == 1}
 
 
-def edge_counts(ch, now: dt.datetime) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
+def edge_counts(ch, now: dt.datetime, with_served: bool = True) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
     """Per origin: 5xx and total responses in the outage window, and non-5xx
-    responses in the last day (did the site serve anyone lately)."""
+    responses in the last day (did the site serve anyone lately; only the
+    tunnel check needs it, so it is skipped when there are no tunnels)."""
     naive = now.astimezone(dt.timezone.utc).replace(tzinfo=None)
     window = ch.client.query(
         "SELECT host, countIf(status_code IN (502, 503, 504)) AS e, count() AS t FROM access_logs "
@@ -90,7 +100,7 @@ def edge_counts(ch, now: dt.datetime) -> Tuple[Dict[str, Dict[str, int]], Dict[s
     day = ch.client.query(
         "SELECT host, countIf(status_code < 500) AS ok FROM access_logs "
         "WHERE timestamp > {since:DateTime} AND host != '' GROUP BY host",
-        parameters={"since": naive - dt.timedelta(days=1)}).result_rows
+        parameters={"since": naive - dt.timedelta(days=1)}).result_rows if with_served else []
     hosts = host_origins()
     per: Dict[str, Dict[str, int]] = {}
     for host, e, t in window:
@@ -191,9 +201,7 @@ def format_up(o: Dict[str, Any], label: str) -> str:
 
 async def outage_tick(now: Optional[dt.datetime] = None, ch=None) -> List[Tuple[str, Dict[str, Any]]]:
     now = now or dt.datetime.now(dt.timezone.utc)
-    if ch is None:
-        from services.clickhouse_service import ClickHouseService
-        ch = ClickHouseService()
+    ch = ch or _clickhouse()
     if not getattr(ch, "connected", False):
         return []
     try:
@@ -204,8 +212,8 @@ async def outage_tick(now: Optional[dt.datetime] = None, ch=None) -> List[Tuple[
             online = {p.get("name") for p in proxies if p.get("status") == "online" and p.get("name")} if proxies else None
     except Exception:
         online = None
-    per, served = await asyncio.to_thread(edge_counts, ch, now)
     tunnels = await asyncio.to_thread(tunnel_states, online)
+    per, served = await asyncio.to_thread(edge_counts, ch, now, bool(tunnels))
     events = await asyncio.to_thread(advance_outages, now, per, served, tunnels)
     for kind, o in events:
         try:
