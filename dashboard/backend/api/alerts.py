@@ -7,6 +7,10 @@ from services.dynamodb_service import DynamoDBService
 # exactly what went wrong before).
 from api.ai_summary import _visible_alerts_for_user, visible_incident_scopes
 from db import pool
+from pydantic import BaseModel, Field
+from services import audit_log, notification_prefs
+from services.txn import atomic
+from services.tenant_service import get_user_origins_and_domains
 from services.rbac import get_current_user, auth_service
 from services.telegram_listener import invalidate_user_cache
 import os, secrets, time, httpx, asyncio, logging, uuid
@@ -94,6 +98,92 @@ async def get_incidents(
         for k in ("opened_at", "last_seen_at", "closed_at"):
             r[k] = r[k].isoformat() if r[k] else None
     return {"incidents": rows}
+
+
+# Notification preferences (services/notification_prefs.py): per site, what
+# this person is told on Telegram, and the site's attack sensitivity.
+class PrefsUpdate(BaseModel):
+    attacks: Optional[bool] = None
+    outages: Optional[bool] = None
+    certs: Optional[bool] = None
+    team: Optional[bool] = None
+    digest: Optional[bool] = None
+
+
+class SensitivityUpdate(BaseModel):
+    sensitivity: str = Field(pattern="^(low|medium|high)$")
+
+
+def _my_sites(user_id: str) -> list:
+    origin_ids, _active, _domains = get_user_origins_and_domains(user_id)
+    sites = []
+    for oid in origin_ids:
+        origin = db.get_origin_by_id(oid)
+        role = notification_prefs.role_on(origin, user_id)
+        if origin and role:
+            sites.append((origin, role))
+    return sites
+
+
+@router.get("/preferences")
+async def get_preferences(current_user: dict = Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    sites = await asyncio.to_thread(_my_sites, user_id)
+    levels = await asyncio.to_thread(notification_prefs.sensitivities, [o["id"] for o, _r in sites])
+    rows = {}
+    if sites:
+        rows = {str(r["origin_id"]): r for r in await asyncio.to_thread(
+            pool.q, "SELECT * FROM notification_prefs WHERE user_id = %s::uuid", (user_id,))}
+    return {
+        "telegram_connected": bool(current_user.get("telegram_chat_id")),
+        "levels": {k: {"total": t, "per_ip": i} for k, (t, i) in notification_prefs.SENSITIVITY.items()},
+        "sites": [{
+            "origin_id": o["id"], "label": o.get("label"), "role": role,
+            "sensitivity": levels.get(o["id"], notification_prefs.DEFAULT_SENSITIVITY),
+            "can_set_sensitivity": role in ("owner", "editor"),
+            "prefs": notification_prefs.effective(role, rows.get(o["id"])),
+            "changeable": sorted(notification_prefs.CHANGEABLE[role]),
+        } for o, role in sites],
+    }
+
+
+@router.put("/preferences/{origin_id}")
+async def put_preferences(origin_id: str, body: PrefsUpdate, current_user: dict = Depends(get_current_user)):
+    origin = await asyncio.to_thread(db.get_origin_by_id, origin_id)
+    role = notification_prefs.role_on(origin, current_user["user_id"])
+    if not role:
+        raise HTTPException(status_code=404, detail="Site not found")
+    prefs = await asyncio.to_thread(notification_prefs.set_prefs, current_user["user_id"], origin["id"], role,
+                                    body.model_dump(exclude_none=True))
+    return {"prefs": prefs}
+
+
+@router.put("/sensitivity/{origin_id}")
+async def put_sensitivity(origin_id: str, body: SensitivityUpdate, current_user: dict = Depends(get_current_user)):
+    origin = await asyncio.to_thread(db.get_origin_by_id, origin_id)
+    role = notification_prefs.role_on(origin, current_user["user_id"])
+    if not role:
+        raise HTTPException(status_code=404, detail="Site not found")
+    if role not in ("owner", "editor"):
+        raise HTTPException(status_code=403, detail="Only the owner or an editor can change this site's sensitivity")
+    await asyncio.to_thread(_set_sensitivity_audited, origin["id"], body.sensitivity, current_user)
+    return {"sensitivity": body.sensitivity}
+
+
+SENSITIVITY_TH = {"low": "ต่ำ", "medium": "กลาง", "high": "สูง"}
+
+
+def _set_sensitivity_audited(origin_id: str, sensitivity: str, user: dict) -> None:
+    with atomic():
+        notification_prefs.set_sensitivity(origin_id, sensitivity, user["user_id"])
+        audit_log.write_audit_event(
+            scope_id=origin_id,
+            actor_user_id=user.get("user_id"),
+            actor_username=user.get("username", ""),
+            action="alerts.sensitivity",
+            summary=f"ตั้งความไวการแจ้งเตือนการโจมตีเป็น {SENSITIVITY_TH[sensitivity]}",
+            details={"sensitivity": sensitivity},
+        )
 
 
 # GET /api/alerts/connect/status

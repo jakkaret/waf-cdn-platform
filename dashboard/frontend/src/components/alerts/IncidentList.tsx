@@ -82,7 +82,7 @@ export const IncidentList: React.FC = () => {
         <div className="min-w-0">
           <h3 className="m-0 text-[13.5px] font-bold text-[var(--text-primary)]">เหตุการณ์โจมตี</h3>
           <p className="m-0 text-[11.5px] text-[var(--text-muted)]">
-            เปิดเมื่อเว็บถูกบล็อก 50 ครั้งใน 5 นาที หรือ IP เดียว 30 ครั้ง · จบเมื่อเงียบ 30 นาที · Telegram แจ้งตอนเริ่มและตอนจบ
+            เปิดตามความไวของแต่ละเว็บ (ค่าเริ่มต้น: บล็อก 50 ครั้งใน 5 นาที หรือ IP เดียว 30 ครั้ง) · จบเมื่อเงียบ 30 นาที · Telegram แจ้งตอนเริ่มและตอนจบ
           </p>
         </div>
         {ongoing.length > 0 && (
