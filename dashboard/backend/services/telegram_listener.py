@@ -58,14 +58,18 @@ def _get_telegram_users() -> list:
     return _user_cache
 
 
-def _alert_recipients(users: list, origin: dict) -> list:
+def _alert_recipients(users: list, origin: dict, support_allowed: bool) -> list:
     """Users who may see this alert, i.e. who would see it in the Alert Center.
 
-    Admins get everything (including the admin-only ``unattributed``
-    partition). Otherwise only the origin's owner, editors and viewers.
+    The origin's owner, editors and viewers. Platform admins (the support
+    team) only when ``support_allowed``: the alert belongs to no tenant
+    (unattributed) or the origin has an active support grant -- the same
+    scope as _visible_alerts_for_user in api/ai_summary.py.
     2026-09-28: every user with a chat id used to receive every alert, so
     tenant A was sent tenant B's IPs, URLs, rules and AI summary even though
     the stored alert itself is correctly partitioned by origin_id.
+    2026-10-23: admins still received every tenant's alerts here after the
+    web views were narrowed to support grants (docs/tickets/support-access.md).
     """
     allowed = set()
     if origin:
@@ -73,7 +77,16 @@ def _alert_recipients(users: list, origin: dict) -> list:
             allowed.add(origin["admin_user_id"])
         allowed |= set(origin.get("editor_user_ids") or [])
         allowed |= set(origin.get("viewer_user_ids") or [])
-    return [u for u in users if u.get("role") == "admin" or u.get("user_id") in allowed]
+    return [u for u in users if u.get("user_id") in allowed or (support_allowed and u.get("role") == "admin")]
+
+
+def _support_may_receive(origin_id: str) -> bool:
+    """Unattributed alerts, or an origin under an active support grant.
+    A failed grant lookup counts as no grant (active_grant fails closed)."""
+    if origin_id == db.ALERTS_UNATTRIBUTED:
+        return True
+    from services import support_service
+    return bool(support_service.active_grant(origin_id))
 
 
 # F-039: every blocked request produced its own Telegram push to every
@@ -229,7 +242,8 @@ async def dispatch_telegram_alert(data: dict):
         origin = {}
         if origin_id != db.ALERTS_UNATTRIBUTED:
             origin = await asyncio.to_thread(db.get_origin_by_id, origin_id) or {}
-        users = _alert_recipients(users, origin)
+        support_allowed = await asyncio.to_thread(_support_may_receive, origin_id)
+        users = _alert_recipients(users, origin, support_allowed)
         if not users:
             logger.info("No Telegram recipients allowed to see alert for origin %s", origin_id)
             return
