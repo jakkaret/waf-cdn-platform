@@ -54,7 +54,7 @@ def test_merged_and_expired_entries_are_stored_in_one_bulk_insert_off_the_loop(m
         alerts.append(data["request_id"])
 
     monkeypatch.setattr(lf, "ch", ch)
-    monkeypatch.setattr(lf, "dispatch_telegram_alert", fake_alert)
+    monkeypatch.setattr(lf, "record_alert", fake_alert)
     lf.log_buffer.clear()
     lf._ready.clear()
 

@@ -235,6 +235,22 @@ def _visible_alerts_for_user(current_user: dict, max_items: int = 2000) -> List[
             if str(a.get("origin_id") or "") in visible_origin_ids]
 
 
+def visible_incident_scopes(current_user: dict) -> set:
+    """alert_incidents.scope values this user may see: the sites they are a
+    member of, and for Support also unattributed traffic and sites under an
+    active support grant (the same rule as the Telegram recipients)."""
+    origin_ids, _active, _domains = get_user_origins_and_domains(current_user.get("user_id"))
+    scopes = {str(o) for o in origin_ids if o}
+    if current_user.get("role") == "admin":
+        from services.tenant_service import admin_log_scope
+        try:
+            _hosts, _granted_hosts, _tenant_ids, granted_ids = admin_log_scope()
+        except Exception:
+            return scopes  # fail closed: no support access
+        scopes |= {"unattributed"} | {str(g) for g in granted_ids}
+    return scopes
+
+
 @router.get("/notifications/feed")
 async def get_notification_feed(
     limit: int = 50,

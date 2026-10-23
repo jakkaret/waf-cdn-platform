@@ -189,7 +189,7 @@ def test_ingest_endpoint_dispatches_one_alert_per_flagged_entry(monkeypatch):
     async def _fake_dispatch(entry):
         dispatched.append(entry)
 
-    monkeypatch.setattr(cdn_module, "dispatch_telegram_alert", _fake_dispatch)
+    monkeypatch.setattr(cdn_module, "record_alert", _fake_dispatch)
     monkeypatch.setattr(
         cdn_module, "_KNOWN_EDGE_FORWARDER_IPS", {"203.0.113.9"}
     )

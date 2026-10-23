@@ -5,10 +5,12 @@ from services.dynamodb_service import DynamoDBService
 # place alert tenant-scoping is decided, and a second copy would be a
 # second thing to get wrong (this endpoint's own hand-rolled filter is
 # exactly what went wrong before).
-from api.ai_summary import _visible_alerts_for_user
+from api.ai_summary import _visible_alerts_for_user, visible_incident_scopes
+from db import pool
 from services.rbac import get_current_user, auth_service
 from services.telegram_listener import invalidate_user_cache
-import os, secrets, time, httpx, asyncio, logging
+import os, secrets, time, httpx, asyncio, logging, uuid
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,42 @@ async def get_recent_alerts(
         return {"alerts": alerts[:limit]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# GET /api/alerts/incidents
+# Attack incidents (services/alert_incidents.py), newest first. `incident`
+# fetches one by id (the Telegram link), still only within the caller's scopes.
+@router.get("/incidents")
+async def get_incidents(
+    limit: int = 20,
+    origin: Optional[str] = None,
+    incident: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    scopes = sorted(await asyncio.to_thread(visible_incident_scopes, current_user))
+    if origin:
+        scopes = [s for s in scopes if s == origin]
+    if not scopes:
+        return {"incidents": []}
+    sql = ("SELECT i.incident_id::text AS incident_id, i.scope, i.origin_id::text AS origin_id, o.label, "
+           "i.opened_at, i.last_seen_at, i.closed_at, i.blocked_count, i.ip_count, i.top_ips, i.top_types, "
+           "i.top_paths, i.summary, i.summary_by_ai FROM alert_incidents i LEFT JOIN origins o ON o.id = i.origin_id "
+           "WHERE i.scope = ANY(%s)")
+    params: list = [scopes]
+    if incident:
+        try:
+            uuid.UUID(incident)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        sql += " AND i.incident_id = %s::uuid"
+        params.append(incident)
+    sql += " ORDER BY i.closed_at IS NULL DESC, i.opened_at DESC LIMIT %s"
+    params.append(max(1, min(int(limit), 100)))
+    rows = await asyncio.to_thread(pool.q, sql, tuple(params))
+    for r in rows:
+        for k in ("opened_at", "last_seen_at", "closed_at"):
+            r[k] = r[k].isoformat() if r[k] else None
+    return {"incidents": rows}
 
 
 # GET /api/alerts/connect/status

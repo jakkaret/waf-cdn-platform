@@ -1,10 +1,16 @@
 import { api } from './axios'
 import { WafAlert } from '../types'
+import type { Incident } from '../lib/incidents'
 
 export const alertsApi = {
   getAlerts: async (limit: number = 200) => {
     const res = await api.get<{ alerts: WafAlert[] }>('/alerts/recent', { params: { limit } })
     return res.data.alerts
+  },
+
+  getIncidents: async (params: { limit?: number; incident?: string } = {}) => {
+    const res = await api.get<{ incidents: Incident[] }>('/alerts/incidents', { params })
+    return res.data.incidents
   },
 
   getConnectionStatus: async () => {

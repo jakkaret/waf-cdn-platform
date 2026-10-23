@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from services.clickhouse_service import ClickHouseService
 from services.edge_tunnel import EDGE_TUNNEL_IPS
-from services.telegram_listener import dispatch_telegram_alert
+from services.telegram_listener import record_alert
 
 logger = logging.getLogger(__name__)
 
@@ -353,7 +353,7 @@ async def flush_old_logs():
             # create_task needs a running event loop.
             for data in batch:
                 if _is_alert(data):
-                    asyncio.create_task(dispatch_telegram_alert(data))
+                    asyncio.create_task(record_alert(data))
 
         await asyncio.sleep(1)
 

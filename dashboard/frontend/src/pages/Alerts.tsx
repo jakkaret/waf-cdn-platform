@@ -34,6 +34,7 @@ import {
 import { WafAlert } from '../types'
 import toast from 'react-hot-toast'
 import { getDispatchLabel } from '../lib/alertDispatch'
+import { IncidentList } from '../components/alerts/IncidentList'
 
 const ALERTS_FETCH_LIMIT = 200
 
@@ -130,6 +131,13 @@ export const Alerts: React.FC = () => {
     queryKey: ['alerts'],
     queryFn: () => alertsApi.getAlerts(ALERTS_FETCH_LIMIT),
     refetchInterval: 8000,
+  })
+
+  // Same query as IncidentList (shared cache): Telegram goes out per incident.
+  const { data: incidents = [] } = useQuery({
+    queryKey: ['alert-incidents'],
+    queryFn: () => alertsApi.getIncidents({ limit: 10 }),
+    refetchInterval: 30000,
   })
 
   // Connect Mutation
@@ -489,6 +497,8 @@ export const Alerts: React.FC = () => {
         )}
       </div>
 
+      <IncidentList />
+
       {/* 3 Metric Cards Strip (Balanced & Scannable) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-3.5">
         <div className="dash-card p-4 sm:p-4.5 flex items-center justify-between">
@@ -528,13 +538,13 @@ export const Alerts: React.FC = () => {
         <div className="dash-card p-4 sm:p-4.5 flex items-center justify-between">
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] block font-mono mb-1">
-              Dispatched to Telegram
+              Attack incidents
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-[24px] font-bold font-mono text-sky-600 dark:text-sky-400 leading-none">
-                {alertMetrics.dispatched ?? '—'}
+                {incidents.length}
               </span>
-              <span className="text-[11px] font-mono text-[var(--text-muted)]">Push alerts sent</span>
+              <span className="text-[11px] font-mono text-[var(--text-muted)]">Latest, Telegram sent per incident</span>
             </div>
           </div>
           <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-sky-500/10">
