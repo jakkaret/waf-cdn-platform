@@ -1,6 +1,7 @@
 import { api } from './axios'
 import { WafAlert } from '../types'
 import type { Incident } from '../lib/incidents'
+import type { NotificationPrefs, PrefKind, Sensitivity } from '../lib/notificationPrefs'
 
 export const alertsApi = {
   getAlerts: async (limit: number = 200) => {
@@ -11,6 +12,21 @@ export const alertsApi = {
   getIncidents: async (params: { limit?: number; incident?: string } = {}) => {
     const res = await api.get<{ incidents: Incident[] }>('/alerts/incidents', { params })
     return res.data.incidents
+  },
+
+  getPreferences: async () => {
+    const res = await api.get<NotificationPrefs>('/alerts/preferences')
+    return res.data
+  },
+
+  setPreferences: async (originId: string, changes: Partial<Record<PrefKind, boolean>>) => {
+    const res = await api.put<{ prefs: Record<PrefKind, boolean> }>(`/alerts/preferences/${originId}`, changes)
+    return res.data.prefs
+  },
+
+  setSensitivity: async (originId: string, sensitivity: Sensitivity) => {
+    const res = await api.put<{ sensitivity: Sensitivity }>(`/alerts/sensitivity/${originId}`, { sensitivity })
+    return res.data.sensitivity
   },
 
   getConnectionStatus: async () => {

@@ -6,7 +6,9 @@ but not pushed. Attacks arrive in bursts -- on Main, 21-23 Oct 2026, 83% of
 burst becomes one incident and costs the reader two messages, not dozens:
 
 - open:     in the last WINDOW_SECONDS a site was blocked OPEN_TOTAL times,
-            or one IP was blocked OPEN_PER_IP times -> push "under attack".
+            or one IP was blocked OPEN_PER_IP times (the site's sensitivity,
+            services/notification_prefs.py; these are "medium") -> push
+            "under attack".
 - ongoing:  counts refresh every tick, nothing is pushed; once, if the
             incident grows to ESCALATE_FACTOR x its opening count, push an update.
 - close:    no block for QUIET_CLOSE_SECONDS -> push a summary (Gemini writes
@@ -28,13 +30,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from db import pool
+from services import notification_prefs
 
 logger = logging.getLogger(__name__)
 
 UNATTRIBUTED = "unattributed"
 WINDOW_SECONDS = 300
-OPEN_TOTAL = 50
-OPEN_PER_IP = 30
+OPEN_TOTAL, OPEN_PER_IP = notification_prefs.SENSITIVITY["medium"]
 QUIET_CLOSE_SECONDS = 1800
 ESCALATE_FACTOR = 10
 TICK_SECONDS = 60
@@ -102,8 +104,11 @@ def _row(r: Dict[str, Any]) -> Dict[str, Any]:
 
 def _open_new(now: dt.datetime) -> List[Dict[str, Any]]:
     opened = []
-    for w in window_counts(now):
-        if w["n"] < OPEN_TOTAL and w["top_ip"] < OPEN_PER_IP:
+    windows = window_counts(now)
+    levels = notification_prefs.sensitivities([w["origin_id"] for w in windows])
+    for w in windows:
+        total, per_ip = notification_prefs.thresholds(levels.get(w["origin_id"] or ""))
+        if w["n"] < total and w["top_ip"] < per_ip:
             continue
         s = incident_stats(w["scope"], w["first_at"], now)
         row = pool.q1(
@@ -277,7 +282,9 @@ async def _notify(kind: str, inc: Dict[str, Any]) -> None:
             (summary, bool(summary), inc["incident_id"]))
         text = format_close(inc, label, summary)
 
-    chats = [u.get("telegram_chat_id") for u in await asyncio.to_thread(tl.recipients_for, inc["scope"], origin)]
+    users = await asyncio.to_thread(tl.recipients_for, inc["scope"], origin)
+    users = await asyncio.to_thread(notification_prefs.filter_users, users, origin, "attacks")
+    chats = [u.get("telegram_chat_id") for u in users]
     link = incident_link(inc)
     sent = await tl.send_telegram(chats, text, [("ดูเหตุการณ์", link)] if link else None)
     column = {"open": "open_notified_at", "escalate": "escalated_notified_at", "close": "close_notified_at"}[kind]

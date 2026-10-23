@@ -35,6 +35,7 @@ import { WafAlert } from '../types'
 import toast from 'react-hot-toast'
 import { getDispatchLabel } from '../lib/alertDispatch'
 import { IncidentList } from '../components/alerts/IncidentList'
+import { NotificationSettings } from '../components/alerts/NotificationSettings'
 
 const ALERTS_FETCH_LIMIT = 200
 
@@ -496,6 +497,8 @@ export const Alerts: React.FC = () => {
           </div>
         )}
       </div>
+
+      <NotificationSettings />
 
       <IncidentList />
 

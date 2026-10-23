@@ -8,7 +8,7 @@ are grouped separately, services/alert_incidents.py):
             (two checks in a row) after it served traffic in the last day.
             Recovered when the edge answers normally again, the tunnel is
             back, or no 5xx was seen for OUTAGE_QUIET_SECONDS.
-            Sent to the owner and editors.
+            Sent to the owner and editors (notification_prefs "outages").
 - cert:     a site's HTTPS certificate is close to expiry (ssl_cert_monitor),
             to the domain's owner and editors; a domain of no site goes to
             Support.
@@ -26,6 +26,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from db import pool
+from services import notification_prefs
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +36,10 @@ OUTAGE_ERROR_RATIO = 0.5
 RECOVERED_ERROR_RATIO = 0.2
 OUTAGE_QUIET_SECONDS = 1800
 TUNNEL_OFFLINE_CONFIRM_SECONDS = 110  # two ticks
-FIX_ROLES = ("owner", "editor")
 TEAM_ACTIONS = {
     "domain.create", "domain.delete", "domain.release", "origin.update",
     "viewer.grant", "editor.grant", "viewer.invite", "editor.invite",
-    "viewer.revoke", "editor.revoke", "invite.cancel", "rule.approve", "rule.reject",
+    "viewer.revoke", "editor.revoke", "invite.cancel", "rule.approve", "rule.reject", "alerts.sensitivity",
 }
 TEAM_LOOKBACK_SECONDS = 600
 
@@ -221,7 +221,9 @@ async def _notify_outage(kind: str, o: Dict[str, Any]) -> None:
     origin = await asyncio.to_thread(tl.db.get_origin_by_id, oid) or {}
     label = origin.get("label") or "เว็บของคุณ"
     text = format_down(o, label) if kind == "down" else format_up(o, label)
-    chats = [u.get("telegram_chat_id") for u in await asyncio.to_thread(tl.recipients_for, oid, origin, FIX_ROLES)]
+    users = await asyncio.to_thread(tl.recipients_for, oid, origin)
+    users = await asyncio.to_thread(notification_prefs.filter_users, users, origin, "outages")
+    chats = [u.get("telegram_chat_id") for u in users]
     sent = await tl.send_telegram(chats, text, _site_button(oid))
     col = "down_notified_at" if kind == "down" else "up_notified_at"
     await asyncio.to_thread(pool.exec_, f"UPDATE site_outages SET {col} = now() WHERE outage_id = %s", (o["outage_id"],))
@@ -248,7 +250,9 @@ async def notify_cert(domain: str, days_remaining: int, not_after: str) -> int:
     oid = await asyncio.to_thread(origin_for_host, domain)
     origin = (await asyncio.to_thread(tl.db.get_origin_by_id, oid) or {}) if oid else {}
     scope = oid or tl.db.ALERTS_UNATTRIBUTED
-    chats = [u.get("telegram_chat_id") for u in await asyncio.to_thread(tl.recipients_for, scope, origin, FIX_ROLES)]
+    users = await asyncio.to_thread(tl.recipients_for, scope, origin)
+    users = await asyncio.to_thread(notification_prefs.filter_users, users, origin, "certs")
+    chats = [u.get("telegram_chat_id") for u in users]
     return await tl.send_telegram(chats, format_cert(domain, days_remaining, not_after),
                                   _site_button(oid) if oid else None)
 
@@ -289,7 +293,9 @@ async def team_tick(now: Optional[dt.datetime] = None) -> int:
         if not owner or actor == str(owner):
             continue  # nobody to tell, or the owner did it themselves
         users = await asyncio.to_thread(tl._get_telegram_users)
-        chats = [u.get("telegram_chat_id") for u in tl._alert_recipients(users, origin, False, ("owner",))]
+        owners = tl._alert_recipients(users, origin, False, ("owner",))
+        chats = [u.get("telegram_chat_id") for u in
+                 await asyncio.to_thread(notification_prefs.filter_users, owners, origin, "team")]
         actor_is_support = await asyncio.to_thread(_is_support, actor)
         sent += await tl.send_telegram(chats, format_team(ev, origin.get("label") or "เว็บของคุณ", actor_is_support),
                                        _site_button(ev["scope_id"]))
@@ -307,7 +313,8 @@ def _is_support(user_id: str) -> bool:
 
 
 async def tick(now: Optional[dt.datetime] = None) -> None:
-    for name, step in (("outage", outage_tick), ("team", team_tick)):
+    from services import daily_digest
+    for name, step in (("outage", outage_tick), ("team", team_tick), ("digest", daily_digest.tick)):
         try:
             await step(now)
         except Exception:
