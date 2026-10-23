@@ -58,13 +58,6 @@ def test_admin_report_is_redacted_for_origin_viewers():
     assert ai._redact_for(item, {"role": "admin"}) is item
 
 
-def test_chat_id_is_admin_only():
-    s = {"telegram_chat_id": "123456", "waf_mode": "blocking"}
-    assert "telegram_chat_id" not in mask_settings(s, is_admin=False)
-    assert mask_settings(s, is_admin=False)["telegram_chat_id_set"] is True
-    assert mask_settings(s, is_admin=True)["telegram_chat_id"] == "123456"
-
-
 def test_unwired_settings_are_reported():
     out = mask_settings({"real_ip_header": "X-Real-IP"})
     assert set(out["not_implemented"]) == set(NOT_IMPLEMENTED_SETTINGS)

@@ -12,7 +12,6 @@ import { Button } from '../components/ui/Button'
 import toast from 'react-hot-toast'
 import {
   Shield,
-  Bell,
   Globe,
   Save,
   CheckCircle2,
@@ -20,7 +19,6 @@ import {
   Server,
   Activity,
   Zap,
-  Info,
   RotateCw,
   Sliders,
   Radio,
@@ -38,7 +36,7 @@ export const Settings: React.FC = () => {
   const isAdmin = user?.role === 'admin'
   const queryClient = useQueryClient()
 
-  const [activeTab, setActiveTab] = useState<'waf' | 'alerts' | 'edge' | 'system' | 'threat-intel'>('waf')
+  const [activeTab, setActiveTab] = useState<'waf' | 'edge' | 'system' | 'threat-intel'>('waf')
 
   // Stack Diagnostics (tab 4): was fully static JSX with a hardcoded green
   // pulsing dot and "ONLINE" for all 4 services regardless of real state --
@@ -59,9 +57,6 @@ export const Settings: React.FC = () => {
     outbound_anomaly_threshold: 10,
     auto_purge_edge_cache: true,
     real_ip_header: 'X-Forwarded-For',
-    telegram_notifications: true,
-    telegram_bot_token: '',
-    telegram_chat_id: '',
     edge_sync_interval_seconds: 5,
   })
 
@@ -194,18 +189,6 @@ export const Settings: React.FC = () => {
             >
               <Shield size={14} />
               <span>WAF & Core Engine</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('alerts')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-all cursor-pointer whitespace-nowrap ${
-                activeTab === 'alerts'
-                  ? 'bg-orange-500 text-white shadow-sm'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-              }`}
-            >
-              <Bell size={14} />
-              <span>Telegram Alerts</span>
             </button>
 
             <button
@@ -391,79 +374,6 @@ export const Settings: React.FC = () => {
                   <span className="text-[10.5px] text-[var(--text-muted)] font-mono mt-1 block">
                     Not applied yet: saved here, but nginx does not read this setting.
                   </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ═══ Tab 2: Telegram Alerts ═══ */}
-          {activeTab === 'alerts' && (
-            <div className="dash-card p-5 sm:p-6 space-y-5 animate-fade-in">
-              <div>
-                <h3 className="text-[14.5px] font-bold text-[var(--text-primary)] font-mono m-0 mb-1 flex items-center gap-2">
-                  <Bell size={16} className="text-orange-600 dark:text-orange-400" />
-                  Telegram Threat Alerts Configuration
-                </h3>
-                <p className="text-[12px] text-[var(--text-muted)] m-0">
-                  Receive instant incident notifications directly to your Telegram chat or security team channel.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-lg border border-[var(--bg-border)] space-y-4 bg-[var(--bg-primary)]">
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center font-bold font-mono text-[12px] border border-sky-500/20">
-                      TG
-                    </div>
-                    <div>
-                      <h4 className="text-[13px] font-bold text-[var(--text-primary)] font-mono m-0">
-                        Telegram Bot Credentials
-                      </h4>
-                      <span className="text-[11px] text-[var(--text-muted)] font-mono">
-                        Real-time threat notifications via Telegram Bot API
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-2">
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase font-mono text-[var(--text-secondary)] mb-1">
-                      Bot API Token
-                    </label>
-                    <input
-                      type="password"
-                      placeholder={settings?.telegram_bot_token_masked || 'Paste Bot Token from @BotFather'}
-                      className="w-full dash-input font-mono text-[12px]"
-                      value={form.telegram_bot_token || ''}
-                      onChange={(e) => setForm({ ...form, telegram_bot_token: e.target.value })}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase font-mono text-[var(--text-secondary)] mb-1">
-                      Chat ID / Channel ID
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. -100123456789 or 987654321"
-                      className="w-full dash-input font-mono text-[12px]"
-                      value={form.telegram_chat_id || ''}
-                      onChange={(e) => setForm({ ...form, telegram_chat_id: e.target.value })}
-                    />
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-lg bg-[var(--bg-surface)] border border-[var(--bg-border-subtle)] text-[12px] text-[var(--text-muted)] space-y-1">
-                  <div className="flex items-center gap-1.5 text-[var(--text-secondary)] font-mono font-bold text-[11px] uppercase">
-                    <Info size={13} className="text-orange-500" />
-                    <span>Setup Instructions:</span>
-                  </div>
-                  <ol className="list-decimal list-inside pl-1 space-y-0.5 text-[11.5px] font-mono leading-relaxed">
-                    <li>Message <code className="text-orange-600 dark:text-orange-400 font-bold">@BotFather</code> on Telegram to generate a bot token.</li>
-                    <li>Add your bot to your channel/group or send it <code className="text-orange-600 dark:text-orange-400 font-bold">/start</code>.</li>
-                    <li>Enter Token and Chat ID above. Each person tests their own Telegram in <strong>Alert Center</strong> under notification settings.</li>
-                  </ol>
                 </div>
               </div>
             </div>
@@ -742,13 +652,6 @@ export const Settings: React.FC = () => {
                 <span className="text-[var(--text-muted)]">Outbound Threshold:</span>
                 <span className="text-[var(--text-primary)]">
                   {form.outbound_anomaly_threshold} pts
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-[var(--text-muted)]">Telegram Alerts:</span>
-                <span className={`${form.telegram_chat_id ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-[var(--text-muted)]'}`}>
-                  {form.telegram_chat_id ? 'Configured' : 'Not Set'}
                 </span>
               </div>
 

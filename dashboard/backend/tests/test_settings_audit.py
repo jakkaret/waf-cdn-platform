@@ -85,23 +85,3 @@ def test_an_unchanged_value_writes_no_audit_event(
 
     events = audit_log_module.get_audit_log("global", db=audit_log_module.db)
     assert not [e for e in events if e["action"] == "settings.update"]
-
-
-def test_a_secret_field_change_is_recorded_without_the_real_value(
-    client, register_user, auth_header, fake_settings_service,
-):
-    admin_h = _admin(client, register_user, auth_header)
-    fake_settings_service.get_settings.return_value = {"telegram_bot_token": "old-real-secret-value"}
-    fake_settings_service.update_settings.return_value = {"telegram_bot_token": "new-real-secret-value"}
-
-    resp = client.post(
-        "/api/settings/", json={"telegram_bot_token": "new-real-secret-value"}, headers=admin_h,
-    )
-    assert resp.status_code == 200, resp.text
-
-    events = audit_log_module.get_audit_log("global", db=audit_log_module.db)
-    update_events = [e for e in events if e["action"] == "settings.update"]
-    assert len(update_events) == 1
-    detail = update_events[0]["details"]["telegram_bot_token"]
-    assert "old-real-secret-value" not in str(detail)
-    assert "new-real-secret-value" not in str(detail)
