@@ -24,7 +24,6 @@ ADMIN_ONLY = [
     ("DELETE", "/api/ip-rules/1.2.3.4"),
     ("POST", "/api/ip-rules/bulk-delete"),
     ("POST", "/api/settings/"),
-    ("POST", "/api/settings/test-notification"),
     ("POST", "/api/rules/"),
     ("PUT", "/api/rules/abc"),
     ("DELETE", "/api/rules/abc"),

@@ -50,9 +50,4 @@ export const settingsApi = {
     const res = await api.post<{ status: string; settings: SystemSettings }>('/settings/', editableSettings(data))
     return res.data.settings
   },
-
-  sendTestNotification: async (channel: 'telegram' = 'telegram') => {
-    const res = await api.post('/settings/test-notification', { channel })
-    return res.data
-  },
 }

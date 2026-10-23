@@ -36,10 +36,6 @@ class SettingsUpdate(BaseModel):
     edge_sync_interval_seconds: Optional[int] = Field(None, ge=1, le=3600)
 
 
-class TestNotificationRequest(BaseModel):
-    channel: str = "telegram"
-
-
 @router.get("/")
 async def get_settings(
     current_user: dict = Depends(require_viewer_or_above),
@@ -99,19 +95,5 @@ async def update_settings(
         return {"status": "success", "settings": mask_settings(updated)}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/test-notification")
-async def send_test_alert(
-    payload: TestNotificationRequest,
-    current_user: dict = Depends(require_admin),
-):
-    try:
-        result = await service.send_test_notification(payload.channel)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

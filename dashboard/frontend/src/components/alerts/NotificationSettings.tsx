@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Send } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { alertsApi } from '../../api/alerts'
+import { Button } from '../ui/Button'
 import {
   NotificationPrefs, PrefKind, ROLE_LABEL, SENSITIVITY_LABEL, Sensitivity, SitePrefs, sensitivityHint, visibleKinds,
 } from '../../lib/notificationPrefs'
@@ -95,6 +96,11 @@ export const NotificationSettings: React.FC = () => {
   const [open, setOpen] = useState(false)
   const { data } = useQuery({ queryKey: ['notification-prefs'], queryFn: alertsApi.getPreferences })
   const sites = data?.sites ?? []
+  const test = useMutation({
+    mutationFn: alertsApi.sendTest,
+    onSuccess: () => toast.success('ส่งแล้ว เปิด Telegram ดูได้เลย'),
+    onError: (err: any) => toast.error(err.response?.data?.detail || 'ส่งไม่สำเร็จ ลองใหม่อีกครั้ง'),
+  })
 
   return (
     <div className="dash-card overflow-hidden mt-3.5">
@@ -116,6 +122,16 @@ export const NotificationSettings: React.FC = () => {
         <div className="px-4 pb-4 space-y-3">
           {data && !data.telegram_connected && (
             <p className="m-0 text-[12px] text-amber-600 dark:text-amber-400">ยังไม่ได้เชื่อม Telegram ตั้งค่าไว้ก่อนได้ จะเริ่มส่งเมื่อเชื่อมแล้ว</p>
+          )}
+          {data?.telegram_connected && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] px-3.5 py-2.5">
+              <p className="m-0 min-w-0 text-[12px] text-[var(--text-muted)]">
+                ส่งข้อความทดสอบเข้า Telegram ของคุณคนเดียว พร้อมรายการเรื่องที่คุณรับอยู่ตอนนี้
+              </p>
+              <Button variant="secondary" size="sm" icon={<Send size={13} />} isLoading={test.isPending} onClick={() => test.mutate()}>
+                ส่งข้อความทดสอบ
+              </Button>
+            </div>
           )}
           {sites.length === 0 ? (
             <p className="m-0 text-[12.5px] text-[var(--text-muted)]">ยังไม่มีเว็บในบัญชีนี้</p>
