@@ -29,7 +29,7 @@ Design (2026-09-21), reviewed before writing this:
 
 Integration seam: record_pattern_hit_for_domain(domain, rule_id,
 attack_type) is the one function the alert pipeline calls (from
-services/telegram_listener.py's dispatch_telegram_alert, itself already an
+services/telegram_listener.py's record_alert, itself already an
 async background task -- this adds no latency to the WAF's actual block
 response). Domain->owner resolution only covers domains this codebase can
 already attribute today: DNS-verified domains_table rows and cloudwaf

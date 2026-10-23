@@ -479,6 +479,41 @@ class GeminiService:
 
         return "AI สรุปไม่สำเร็จในขณะนี้ ตัวเลขด้านบนมาจาก log โดยตรง"
 
+    async def summarize_incident(self, stats: Dict[str, Any]) -> Optional[str]:
+        """Two short lines for the Telegram message that closes an attack
+        incident (services/alert_incidents.py): what happened, and one action.
+        None when Gemini did not answer, so the caller sends the numbers alone
+        and never labels template text as AI."""
+        prompt = (
+            "สรุปเหตุการณ์ที่ WAF บล็อกการโจมตีเว็บหนึ่งเว็บ จากตัวเลขต่อไปนี้\n"
+            f"{UNTRUSTED_DATA_RULE}\n{data_block(stats)}\n\n"
+            "ตอบ 2 บรรทัดเท่านั้น ไม่มีหัวข้อ:\n"
+            "บรรทัด 1: ผู้โจมตีพยายามทำอะไร (ทุกคำขอในข้อมูลถูกบล็อกแล้ว ไม่มีคำขอไหนถึงเว็บ)\n"
+            "บรรทัด 2: ขึ้นต้นด้วย 'ควรทำ:' แล้วตามด้วยสิ่งเดียวที่ควรทำ ถ้าไม่ต้องทำอะไร เขียน 'ควรทำ: ไม่ต้องทำอะไรเพิ่ม'\n"
+            "ห้ามระบุ IP ห้ามทวนตัวเลข\n\n"
+            f"{REPORT_STYLE}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(
+                    BASE_URL,
+                    headers=gemini_headers(self.api_key),
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 200},
+                    },
+                )
+                if res.status_code == 200:
+                    candidates = res.json().get("candidates", [])
+                    if candidates:
+                        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                        return text[:600] or None
+                else:
+                    logger.error("Gemini incident summary error: %s", res.status_code)
+        except Exception as e:
+            logger.error("Failed to summarize incident: %s", e)
+        return None
+
     async def generate_postmortem_narrative(self, timeline: Dict[str, Any]) -> Dict[str, Any]:
         """AI Incident Postmortem (2026-09-22). Deliberately NOT a reuse of
         generate_range_summary: that method's maxOutputTokens=800/timeout=15s

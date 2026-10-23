@@ -13,7 +13,7 @@ import pathlib as _pathlib
 from services.rbac import require_viewer_or_above, require_admin
 from services.clickhouse_service import ClickHouseService
 from services.log_normalize import normalize_cdn_access
-from services.telegram_listener import dispatch_telegram_alert
+from services.telegram_listener import record_alert
 from services.pii_masker import pii_masker
 from services.edge_tunnel import EDGE_TUNNEL_IPS
 from services.tenant_service import get_user_origins_and_domains, build_tenant_origin_filter
@@ -536,8 +536,8 @@ async def ingest_cdn_logs(payload: CdnLogIngestPayload, request: _Request):
     stored, flagged = await asyncio.to_thread(_store_cdn_log_batch, entries, region)
 
     # Fire-and-forget, same pattern log_forward.py uses: the response to
-    # the edge forwarder must not wait on a Gemini call or a DynamoDB write.
+    # the edge forwarder must not wait on the alert store write.
     for entry in flagged:
-        asyncio.create_task(dispatch_telegram_alert(entry))
+        asyncio.create_task(record_alert(entry))
 
     return {"received": len(payload.logs), "stored": stored}

@@ -6,10 +6,9 @@ import secrets
 import time
 import httpx
 from datetime import datetime
-from typing import Dict, Tuple
+from typing import Optional
 from dotenv import load_dotenv
 from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
-from services.gemini_service import gemini_service
 from services import threat_intel
 
 load_dotenv()
@@ -89,47 +88,12 @@ def _support_may_receive(origin_id: str) -> bool:
     return bool(support_service.active_grant(origin_id))
 
 
-# F-039: every blocked request produced its own Telegram push to every
-# recipient, so one scanner run meant hundreds of messages (and Telegram's own
-# rate limit dropping them). Alerts are still all stored; only repeat pushes
-# for the same (origin, client IP, rule) inside the window are suppressed.
-TELEGRAM_COOLDOWN_SECONDS = 300
-_last_push: Dict[Tuple[str, str, str], float] = {}
-
-
-def _telegram_cooldown_ok(key: Tuple[str, str, str], now: float) -> bool:
-    last = _last_push.get(key)
-    if last is not None and now - last < TELEGRAM_COOLDOWN_SECONDS:
-        return False
-    _last_push[key] = now
-    if len(_last_push) > 10000:  # bound memory: drop entries outside the window
-        for k, t in list(_last_push.items()):
-            if now - t >= TELEGRAM_COOLDOWN_SECONDS:
-                _last_push.pop(k, None)
-    return True
-
-
-def _format_alert_message(status_code, edge_node, ip, url, rule_id, severity,
-                          attack_type, ai_summary, time_local) -> str:
-    """Telegram parse_mode=HTML message. Every value is escaped: the URL is
+def _esc(value) -> str:
+    """Telegram parse_mode=HTML. Every value is escaped: URLs and paths are
     attacker-controlled, and an unescaped `<script>` (a routine XSS probe)
-    made Telegram reject the message, so exactly those alerts were silently
-    dropped -- or a crafted `<a href>` could put a link into an admin's
-    alert (F-039)."""
-    e = lambda v: html.escape(str(v), quote=False)  # noqa: E731
-    return (
-        f"🚨 <b>WAF SECURITY ALERT ({e(status_code)})</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🌐 <b>Node:</b> <code>{e(edge_node)}</code>\n"
-        f"📍 <b>Client IP:</b> <code>{e(ip)}</code>\n"
-        f"🎯 <b>URL:</b> <code>{e(url[:500])}</code>\n"
-        f"🛡️ <b>Rule ID:</b> <code>{e(rule_id)}</code> ({e(severity)})\n"
-        f"⚠️ <b>Attack Type:</b> {e(attack_type)}\n\n"
-        f"🤖 <b>[บทวิเคราะห์โดย AI]:</b>\n"
-        f"<i>{e(ai_summary)}</i>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"⏰ <b>Time:</b> <code>{e(time_local)}</code>"
-    )
+    made Telegram reject the message, or a crafted `<a href>` could put a link
+    into someone's alert (F-039)."""
+    return html.escape(str(value), quote=False)
 
 
 def invalidate_user_cache():
@@ -137,22 +101,22 @@ def invalidate_user_cache():
     _user_cache_ts = 0.0
 
 
-async def dispatch_telegram_alert(data: dict):
-    """Send real-time Telegram alert with Gemini AI Human-Readable Explanation and persist to DB"""
+async def record_alert(data: dict):
+    """Store one blocked request as an alert and count its pattern for threat
+    intel. Nothing is pushed from here (2026-10-24): a blocked request is the
+    WAF working, and pushing each one (F-039, then a 5-minute cooldown per
+    IP+rule) still sent dozens of messages per scanner run. Telegram now goes
+    out per attack incident (services/alert_incidents.py). No Gemini call per
+    request either; ai_summary stays empty and the UI shows the attack type."""
     try:
         ip = str(data.get("ip") or data.get("remote_addr") or data.get("client_ip") or "unknown").strip()
         url = str(data.get("url") or data.get("request_uri") or data.get("uri") or "unknown").strip()
         status_code = str(data.get("status") or data.get("status_code") or "403")
-        time_local = str(data.get("datetime") or data.get("time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         attack_type = str(data.get("attack_type") or "WAF Security Block")
         rule_id = str(data.get("rule_id") or "WAF-CRS")
         severity = str(data.get("severity") or "CRITICAL")
         edge_node = str(data.get("edge_node") or data.get("region") or "Edge-TH")
 
-        # 1. Generate human-readable AI explanation using Gemini 2.0/Flash
-        ai_summary = await gemini_service.explain_attack(data)
-
-        # 2. Save alert into AWS DynamoDB waf_alerts with AI analysis
         timestamp_int = int(data.get("timestamp") or time.time())
         rand_suffix = secrets.token_hex(8).upper()  # 2 bytes collided within a second
         raw_alert_id = data.get("alert_id")
@@ -204,7 +168,7 @@ async def dispatch_telegram_alert(data: dict):
                     "attack_type": attack_type,
                     "severity": severity,
                     "edge_node": edge_node,
-                    "ai_summary": ai_summary,
+                    "ai_summary": None,
                     "message": f"{attack_type} (Rule: {rule_id})",
                     "timestamp": datetime.utcnow().isoformat() + "Z",
                     "read": False
@@ -219,7 +183,7 @@ async def dispatch_telegram_alert(data: dict):
         # This is *this* async task, already a fire-and-forget
         # asyncio.create_task() from every caller -- adds no latency to the
         # WAF's actual block response. Never raises: a missing host or a
-        # DynamoDB hiccup here must never take down the Telegram alert path.
+        # DynamoDB hiccup here must never take down the alert store.
         host = data.get("host")
         if host:
             try:
@@ -229,53 +193,46 @@ async def dispatch_telegram_alert(data: dict):
             except Exception as e:
                 logger.warning("threat_intel pattern recording failed for %s: %s", host, e)
 
-        if not BOT_TOKEN:
-            logger.warning("Telegram BOT_TOKEN missing, alert not sent via Telegram")
-            return
-
-        # 3. Get registered users with chat_id from DynamoDB
-        users = await asyncio.to_thread(_get_telegram_users)
-        if not users:
-            logger.warning("No users registered with telegram_chat_id")
-            return
-
-        origin = {}
-        if origin_id != db.ALERTS_UNATTRIBUTED:
-            origin = await asyncio.to_thread(db.get_origin_by_id, origin_id) or {}
-        support_allowed = await asyncio.to_thread(_support_may_receive, origin_id)
-        users = _alert_recipients(users, origin, support_allowed)
-        if not users:
-            logger.info("No Telegram recipients allowed to see alert for origin %s", origin_id)
-            return
-
-        if not _telegram_cooldown_ok((origin_id, ip, rule_id), time.time()):
-            logger.info("Telegram push suppressed (cooldown) for %s %s %s", origin_id, ip, rule_id)
-            return
-
-        msg = _format_alert_message(status_code, edge_node, ip, url, rule_id, severity,
-                                    attack_type, ai_summary, time_local)
-
-        async with httpx.AsyncClient(timeout=6.0) as client:
-            for user in users:
-                chat_id = user.get("telegram_chat_id")
-                if chat_id and str(chat_id).strip():
-                    try:
-                        res = await client.post(
-                            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                            json={
-                                "chat_id": chat_id,
-                                "text": msg,
-                                "parse_mode": "HTML"
-                            }
-                        )
-                    except Exception as e:
-                        print(f"❌ Failed to send Telegram alert to {chat_id}: {e}")
-
     except Exception as e:
-        print(f"❌ Error in dispatch_telegram_alert: {e}")
+        logger.error("record_alert failed: %s", e)
+
+
+def recipients_for(scope: str, origin: dict) -> list:
+    """Telegram recipients for a site's alert (scope = origin id) or for
+    traffic that belongs to no site (scope = ALERTS_UNATTRIBUTED, origin {})."""
+    users = _get_telegram_users()
+    if not users:
+        return []
+    return _alert_recipients(users, origin, _support_may_receive(scope))
+
+
+async def send_telegram(chat_ids: list, text: str, buttons: Optional[list] = None) -> int:
+    """Send one HTML message to each chat. buttons: [(label, https url)], URL
+    buttons only (no callbacks, so nothing in a message can act by itself).
+    Returns how many sends Telegram accepted."""
+    if not BOT_TOKEN or not chat_ids:
+        return 0
+    payload = {"text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+    if buttons:
+        payload["reply_markup"] = {"inline_keyboard": [[{"text": t, "url": u} for t, u in buttons]]}
+    sent = 0
+    async with httpx.AsyncClient(timeout=6.0) as client:
+        for chat_id in chat_ids:
+            if not chat_id or not str(chat_id).strip():
+                continue
+            try:
+                res = await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                                        json={**payload, "chat_id": chat_id})
+                if res.status_code == 200:
+                    sent += 1
+                else:
+                    logger.warning("Telegram send rejected: %s", res.status_code)
+            except Exception as e:
+                logger.warning("Telegram send failed: %s", e)
+    return sent
 
 
 async def alert_worker():
-    logger.info("📡 Telegram Alert Worker active")
-    while True:
-        await asyncio.sleep(60)
+    """Telegram goes out per attack incident, never per blocked request."""
+    from services.alert_incidents import incident_worker
+    await incident_worker()

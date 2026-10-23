@@ -40,8 +40,23 @@ def test_unattributed_alert_goes_to_admins_only():
     assert ids(tl._alert_recipients(USERS, {}, True)) == ["u-admin"]
 
 
-def _run_dispatch(monkeypatch, origin_id, origin, grant=None):
-    sent = []
+def test_recipients_for_unattributed_traffic_is_support_only(monkeypatch):
+    monkeypatch.setattr(tl, "_get_telegram_users", lambda: USERS)
+    assert ids(tl.recipients_for(tl.db.ALERTS_UNATTRIBUTED, {})) == ["u-admin"]
+
+
+def test_recipients_for_a_site_follows_its_support_grant(monkeypatch):
+    from services import support_service
+    monkeypatch.setattr(tl, "_get_telegram_users", lambda: USERS)
+    monkeypatch.setattr(support_service, "active_grant", lambda oid: None)
+    assert ids(tl.recipients_for("origin-a", ORIGIN_A)) == ["u-a", "u-ed", "u-view"]
+    monkeypatch.setattr(support_service, "active_grant", lambda oid: {"grant_id": "g-1", "level": "read"})
+    assert ids(tl.recipients_for("origin-a", ORIGIN_A)) == ["u-a", "u-admin", "u-ed", "u-view"]
+
+
+def test_a_blocked_request_is_stored_but_never_pushed_or_sent_to_ai(monkeypatch):
+    """Telegram goes out per incident (services/alert_incidents.py)."""
+    stored, posted = [], []
 
     class FakeClient:
         async def __aenter__(self):
@@ -51,34 +66,19 @@ def _run_dispatch(monkeypatch, origin_id, origin, grant=None):
             return False
 
         async def post(self, url, json):
-            sent.append(json["chat_id"])
+            posted.append(url)
 
     fake_db = MagicMock()
     fake_db.ALERTS_UNATTRIBUTED = "unattributed"
-    fake_db.get_origin_id_for_domain.return_value = origin_id
-    fake_db.get_origin_by_id.return_value = origin
+    fake_db.get_origin_id_for_domain.return_value = "origin-a"
+    fake_db.put_alert.side_effect = stored.append
     monkeypatch.setattr(tl, "db", fake_db)
     monkeypatch.setattr(tl, "BOT_TOKEN", "test-token")
-    monkeypatch.setattr(tl, "_get_telegram_users", lambda: USERS)
-    monkeypatch.setattr(tl.gemini_service, "explain_attack", AsyncMock(return_value="summary"))
     monkeypatch.setattr(tl.threat_intel, "record_pattern_hit_for_domain", lambda *a: None)
     monkeypatch.setattr(tl, "invalidate_alerts_cache", lambda: None)
     monkeypatch.setattr(tl.httpx, "AsyncClient", lambda **kw: FakeClient())
-    from services import support_service
-    monkeypatch.setattr(support_service, "active_grant", lambda oid: grant)
-    monkeypatch.setattr(tl, "_last_push", {})  # same (origin, ip, rule) in every test: no cooldown carry-over
-    asyncio.run(tl.dispatch_telegram_alert({"ip": "8.8.8.8", "url": "/x", "host": "shop-a.example", "status": 403}))
-    return sorted(sent)
-
-
-def test_dispatch_sends_only_to_the_alerts_origin_team(monkeypatch):
-    assert _run_dispatch(monkeypatch, "origin-a", ORIGIN_A) == ["2", "3", "4"]
-
-
-def test_dispatch_includes_admins_under_a_support_grant(monkeypatch):
-    grant = {"grant_id": "g-1", "level": "read"}
-    assert _run_dispatch(monkeypatch, "origin-a", ORIGIN_A, grant) == ["1", "2", "3", "4"]
-
-
-def test_dispatch_for_unresolvable_host_reaches_admins_only(monkeypatch):
-    assert _run_dispatch(monkeypatch, None, {}) == ["1"]
+    from services.gemini_service import gemini_service
+    monkeypatch.setattr(gemini_service, "explain_attack", AsyncMock(side_effect=AssertionError("no AI per request")))
+    asyncio.run(tl.record_alert({"ip": "8.8.8.8", "url": "/x", "host": "shop-a.example", "status": 403}))
+    assert posted == []
+    assert len(stored) == 1 and stored[0]["origin_id"] == "origin-a" and stored[0]["ai_summary"] is None
