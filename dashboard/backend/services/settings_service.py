@@ -33,9 +33,6 @@ DEFAULT_SETTINGS = {
     "outbound_anomaly_threshold": 10,            # default CRS outbound limit
     "auto_purge_edge_cache": True,               # purge cache on rule update
     "real_ip_header": "X-Forwarded-For",         # header for client IP extraction
-    "telegram_notifications": True,
-    "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN", ""),
-    "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID", ""),
     "edge_sync_interval_seconds": 5,
     "ml_enforcement_enabled": False,              # keep False until Phase 2's promotion gate passes
     "ml_block_threshold": 0.95,                   # attack_probability >= this -> 403 block
@@ -50,27 +47,22 @@ _SECRET_KEY_MARKERS = ("token", "password", "secret", "api_key", "apikey", "priv
 # reports them so the UI can label them instead of implying they take effect.
 NOT_IMPLEMENTED_SETTINGS = ("real_ip_header", "edge_sync_interval_seconds", "auto_purge_edge_cache")
 
-# Admin-only values: shown to admins, reported only as <key>_set to others (H22).
-ADMIN_ONLY_SETTINGS = ("telegram_chat_id",)
+# Telegram used to be configured here (one bot token and one chat for the
+# whole platform). Alerts now go to each person's own linked chat, and the bot
+# token is read from TELEGRAM_BOT_TOKEN in .env, so these keys are gone from
+# DEFAULT_SETTINGS: get_settings() no longer returns them and the next save
+# drops them from the settings file.
 
 
-def mask_settings(settings: Dict[str, Any], is_admin: bool = True) -> Dict[str, Any]:
+def mask_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     """Client-safe copy of a settings dict: every secret-looking key is removed
-    and replaced by <key>_set (bool) and, for the Telegram token, a
-    <key>_masked hint showing only the last 4 chars (F-123)."""
+    and replaced by <key>_set (bool) (F-123)."""
     out: Dict[str, Any] = {"not_implemented": list(NOT_IMPLEMENTED_SETTINGS)}
     for k, v in settings.items():
         if k.endswith("_masked") or k.endswith("_set"):
             continue
-        if k in ADMIN_ONLY_SETTINGS and not is_admin:
-            out[f"{k}_set"] = bool(v)
-            continue
         if any(m in k.lower() for m in _SECRET_KEY_MARKERS):
             out[f"{k}_set"] = bool(v)
-            if k == "telegram_bot_token":
-                out["telegram_bot_token_masked"] = (
-                    f"...{v[-4:]}" if isinstance(v, str) and len(v) > 8 else ""
-                )
             continue
         out[k] = v
     return out
@@ -146,8 +138,7 @@ class SettingsService:
             raw_data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
             # Filter only valid keys in DEFAULT_SETTINGS
             data = {k: raw_data.get(k, v) for k, v in DEFAULT_SETTINGS.items()}
-            # Raw values: internal callers (Telegram sender, ssl monitor,
-            # update_settings) need the real token. HTTP responses must go
+            # Raw values for internal callers. HTTP responses must go
             # through mask_settings() -- never return this dict to a client.
             return data
         except Exception as e:
@@ -158,9 +149,6 @@ class SettingsService:
         current = self.get_settings()
         for k, v in new_settings.items():
             if k in DEFAULT_SETTINGS:
-                # If secret token was sent empty, keep old token unless explicitly set
-                if k == "telegram_bot_token" and (not v or v.startswith("***") or "..." in v):
-                    continue
                 current[k] = v
 
         clean_save = {k: v for k, v in current.items() if not k.endswith("_masked")}

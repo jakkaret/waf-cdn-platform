@@ -7,17 +7,11 @@ export interface SystemSettings {
   outbound_anomaly_threshold: number
   auto_purge_edge_cache: boolean
   real_ip_header: string
-  telegram_notifications: boolean
-  telegram_bot_token?: string
-  telegram_bot_token_masked?: string
-  telegram_bot_token_set?: boolean
-  telegram_chat_id?: string
   edge_sync_interval_seconds: number
 }
 
 // POST /api/settings/ accepts only these fields (SettingsUpdate, extra="forbid").
-// GET also returns read-only ones (not_implemented, telegram_bot_token_set,
-// telegram_bot_token_masked, ml_*), and the Settings page posts back the
+// GET also returns read-only ones (not_implemented, ml_*), and the Settings page posts back the
 // object it loaded, so every save was refused with a 422.
 const EDITABLE_SETTINGS = [
   'waf_mode',
@@ -26,9 +20,6 @@ const EDITABLE_SETTINGS = [
   'outbound_anomaly_threshold',
   'auto_purge_edge_cache',
   'real_ip_header',
-  'telegram_notifications',
-  'telegram_bot_token',
-  'telegram_chat_id',
   'edge_sync_interval_seconds',
 ] as const
 

@@ -153,7 +153,7 @@ def test_two_concurrent_writes_never_interleave(tmp_path):
 @pytest.mark.parametrize("body", [
     {"waf_mode": "blockng"}, {"waf_mode": "off"}, {"paranoia_level": 7}, {"paranoia_level": 0},
     {"inbound_anomaly_threshold": -1}, {"real_ip_header": "X-Evil"}, {"edge_sync_interval_seconds": 0},
-    {"telegram_chat_id": "12; rm"}, {"unknown_field": 1},
+    {"telegram_chat_id": "-1001"}, {"telegram_bot_token": "1:x"}, {"unknown_field": 1},
 ])
 def test_invalid_settings_are_a_422(body):
     from pydantic import ValidationError

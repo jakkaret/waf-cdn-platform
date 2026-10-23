@@ -41,14 +41,16 @@ describe('settingsApi.updateSettings', () => {
       outbound_anomaly_threshold: 4,
       auto_purge_edge_cache: false,
       real_ip_header: 'X-Real-IP',
-      telegram_notifications: false,
-      telegram_chat_id: '',
       edge_sync_interval_seconds: 30,
     })
   })
 
-  it('passes a newly typed bot token through', async () => {
-    await settingsApi.updateSettings({ ...loaded, telegram_bot_token: '123:abc' })
-    expect(post.mock.calls[0][1].telegram_bot_token).toBe('123:abc')
+  // Telegram moved to per-person links (Alert Center); the bot token lives in .env.
+  it('never sends the retired global Telegram fields', async () => {
+    await settingsApi.updateSettings({ ...loaded, telegram_bot_token: '123:abc' } as unknown as SystemSettings)
+    const sent = post.mock.calls[0][1]
+    expect(sent).not.toHaveProperty('telegram_bot_token')
+    expect(sent).not.toHaveProperty('telegram_chat_id')
+    expect(sent).not.toHaveProperty('telegram_notifications')
   })
 })

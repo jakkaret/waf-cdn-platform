@@ -14,10 +14,6 @@ service = SettingsService()
 # them use this fixed scope_id rather than an origin_id -- matches
 # services/audit_log.py's documented convention.
 AUDIT_SCOPE_GLOBAL = "global"
-# Never write a real secret value into a persistent store (standing rule,
-# this session) -- a changed telegram_bot_token is recorded as "changed",
-# never its old/new value.
-_SECRET_FIELDS = {"telegram_bot_token"}
 
 
 class SettingsUpdate(BaseModel):
@@ -30,9 +26,6 @@ class SettingsUpdate(BaseModel):
     outbound_anomaly_threshold: Optional[int] = Field(None, ge=1, le=1000)
     auto_purge_edge_cache: Optional[bool] = None
     real_ip_header: Optional[Literal["X-Forwarded-For", "X-Real-IP"]] = None
-    telegram_notifications: Optional[bool] = None
-    telegram_bot_token: Optional[str] = Field(None, max_length=200)
-    telegram_chat_id: Optional[str] = Field(None, pattern=r"^-?\d{1,20}$|^$")
     edge_sync_interval_seconds: Optional[int] = Field(None, ge=1, le=3600)
 
 
@@ -42,7 +35,7 @@ async def get_settings(
 ):
     try:
         settings = service.get_settings()
-        return {"settings": mask_settings(settings, is_admin=current_user.get("role") == "admin")}
+        return {"settings": mask_settings(settings)}
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to load settings")
 
@@ -62,10 +55,7 @@ async def update_settings(
             old_value = before.get(field)
             if old_value == new_value:
                 continue
-            if field in _SECRET_FIELDS:
-                changed[field] = {"old": "(changed)", "new": "(changed)"}
-            else:
-                changed[field] = {"old": old_value, "new": new_value}
+            changed[field] = {"old": old_value, "new": new_value}
 
         if changed:
             try:
