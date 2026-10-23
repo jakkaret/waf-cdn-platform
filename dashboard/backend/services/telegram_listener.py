@@ -57,7 +57,10 @@ def _get_telegram_users() -> list:
     return _user_cache
 
 
-def _alert_recipients(users: list, origin: dict, support_allowed: bool) -> list:
+ALL_ROLES = ("owner", "editor", "viewer")
+
+
+def _alert_recipients(users: list, origin: dict, support_allowed: bool, roles: tuple = ALL_ROLES) -> list:
     """Users who may see this alert, i.e. who would see it in the Alert Center.
 
     The origin's owner, editors and viewers. Platform admins (the support
@@ -72,10 +75,12 @@ def _alert_recipients(users: list, origin: dict, support_allowed: bool) -> list:
     """
     allowed = set()
     if origin:
-        if origin.get("admin_user_id"):
+        if origin.get("admin_user_id") and "owner" in roles:
             allowed.add(origin["admin_user_id"])
-        allowed |= set(origin.get("editor_user_ids") or [])
-        allowed |= set(origin.get("viewer_user_ids") or [])
+        if "editor" in roles:
+            allowed |= set(origin.get("editor_user_ids") or [])
+        if "viewer" in roles:
+            allowed |= set(origin.get("viewer_user_ids") or [])
     return [u for u in users if u.get("user_id") in allowed or (support_allowed and u.get("role") == "admin")]
 
 
@@ -197,13 +202,14 @@ async def record_alert(data: dict):
         logger.error("record_alert failed: %s", e)
 
 
-def recipients_for(scope: str, origin: dict) -> list:
+def recipients_for(scope: str, origin: dict, roles: tuple = ALL_ROLES) -> list:
     """Telegram recipients for a site's alert (scope = origin id) or for
-    traffic that belongs to no site (scope = ALERTS_UNATTRIBUTED, origin {})."""
+    traffic that belongs to no site (scope = ALERTS_UNATTRIBUTED, origin {}).
+    roles narrows the site's team, e.g. ("owner",) for team changes."""
     users = _get_telegram_users()
     if not users:
         return []
-    return _alert_recipients(users, origin, _support_may_receive(scope))
+    return _alert_recipients(users, origin, _support_may_receive(scope), roles)
 
 
 async def send_telegram(chat_ids: list, text: str, buttons: Optional[list] = None) -> int:

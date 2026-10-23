@@ -69,10 +69,11 @@ def test_all_tables_and_view_exist(db):
         "SELECT table_name FROM information_schema.tables "
         "WHERE table_schema='waf' AND table_type='BASE TABLE'")}
     # 0006 origin_invites, 0007 tunnel_proxy_owners, 0008 user_sessions, 0009 support (4 tables),
-    # 0010 drops bola_policies, 0011 email_codes + email_code_sends, 0012 alert_incidents
-    assert len(tables - {"schema_migrations"}) == 28
+    # 0010 drops bola_policies, 0011 email_codes + email_code_sends, 0012 alert_incidents,
+    # 0013 site_outages + audit_notified
+    assert len(tables - {"schema_migrations"}) == 30
     assert {"email_codes", "email_code_sends"} <= tables
-    assert "alert_incidents" in tables
+    assert {"alert_incidents", "site_outages", "audit_notified"} <= tables
     assert "bola_policies" not in tables
     assert "origin_invites" in tables
     assert "tunnel_proxy_owners" in tables

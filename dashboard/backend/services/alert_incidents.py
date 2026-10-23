@@ -297,10 +297,12 @@ async def tick(now: Optional[dt.datetime] = None) -> List[Tuple[str, Dict[str, A
 
 
 async def incident_worker() -> None:
-    print(f"[Alert Incidents] worker active, tick every {TICK_SECONDS}s")
+    print(f"[Alert Incidents] worker active (attack incidents, outages, team changes), tick every {TICK_SECONDS}s")
     while True:
         try:
             await tick()
         except Exception:
             logger.exception("alert incident tick failed")
+        from services import site_alerts
+        await site_alerts.tick()
         await asyncio.sleep(TICK_SECONDS)

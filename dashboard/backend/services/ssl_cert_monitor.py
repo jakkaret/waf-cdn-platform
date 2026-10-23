@@ -24,7 +24,6 @@ import socket
 import ssl
 from typing import Callable, Optional
 
-import httpx
 
 CERT_EXPIRY_ALERT_THRESHOLD_DAYS = int(os.getenv("SSL_CERT_ALERT_THRESHOLD_DAYS", "14"))
 CERT_REALERT_COOLDOWN_HOURS = int(os.getenv("SSL_CERT_REALERT_COOLDOWN_HOURS", "24"))
@@ -103,27 +102,12 @@ async def _probe_certificate_async(domain: str) -> dict:
 
 
 async def _send_expiry_telegram_alert(domain: str, days_remaining: int, not_after: str) -> None:
-    from services.settings_service import SettingsService
-
-    settings = SettingsService().get_settings()
-    bot_token = settings.get("telegram_bot_token")
-    chat_id = settings.get("telegram_chat_id")
-    if not bot_token or not chat_id:
-        return
-
-    state = "EXPIRED" if days_remaining < 0 else f"expires in {days_remaining} day(s)"
-    msg = (
-        "\U0001F512 *SSL Certificate Warning*\n\n"
-        f"Domain: `{domain}`\n"
-        f"Status: {state} (notAfter: {not_after})\n"
-        "Action: check ACME renewal is completing for this domain."
-    )
+    """To the domain's owner and editors (Support for a domain of no site),
+    services/site_alerts.py. It used to go to one global chat id, which was
+    empty on Main, so nobody was ever told."""
+    from services.site_alerts import notify_cert
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-            )
+        await notify_cert(domain, days_remaining, not_after)
     except Exception as e:
         print(f"[SSL Cert Monitor] Failed to send Telegram alert for {domain}: {e}")
 
