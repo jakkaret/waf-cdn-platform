@@ -33,7 +33,12 @@ status: VERIFIED
 | GET | `/api/alerts/connect/poll` | `connect_poll` | login |  |
 | POST | `/api/alerts/connect/start` | `connect_start` | login |  |
 | GET | `/api/alerts/connect/status` | `connect_status` | login |  |
+| GET | `/api/alerts/incidents` | `get_incidents` | login |  |
+| GET | `/api/alerts/preferences` | `get_preferences` | login |  |
+| PUT | `/api/alerts/preferences/{origin_id}` | `put_preferences` | login |  |
 | GET | `/api/alerts/recent` | `get_recent_alerts` | login |  |
+| PUT | `/api/alerts/sensitivity/{origin_id}` | `put_sensitivity` | login |  |
+| POST | `/api/alerts/test` | `send_test` | login |  |
 
 ## `api/analytics.py`
 
@@ -243,7 +248,6 @@ status: VERIFIED
 |---|---|---|---|---|
 | GET | `/api/settings/` | `get_settings` | viewer+ |  |
 | POST | `/api/settings/` | `update_settings` | admin |  |
-| POST | `/api/settings/test-notification` | `send_test_alert` | admin |  |
 
 ## `api/threat_intel.py`
 

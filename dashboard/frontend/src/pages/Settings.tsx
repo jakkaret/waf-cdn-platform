@@ -15,7 +15,6 @@ import {
   Bell,
   Globe,
   Save,
-  Send,
   CheckCircle2,
   AlertTriangle,
   Server,
@@ -88,17 +87,6 @@ export const Settings: React.FC = () => {
     },
     onError: (err: any) => {
       toast.error(err.response?.data?.detail || 'Failed to save settings')
-    },
-  })
-
-  // Test Notification Mutation
-  const testAlertMutation = useMutation({
-    mutationFn: () => settingsApi.sendTestNotification('telegram'),
-    onSuccess: (res) => {
-      toast.success(res.message || 'Test notification sent to Telegram!')
-    },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.detail || 'Test notification failed')
     },
   })
 
@@ -436,17 +424,6 @@ export const Settings: React.FC = () => {
                       </span>
                     </div>
                   </div>
-                  {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => testAlertMutation.mutate()}
-                      disabled={testAlertMutation.isPending}
-                      className="px-3 py-1.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--bg-border)] rounded-md text-[11.5px] font-mono font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
-                    >
-                      <Send size={12} className="text-sky-500" />
-                      <span>{testAlertMutation.isPending ? 'Sending...' : 'Send Test Alert'}</span>
-                    </button>
-                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-2">
@@ -485,7 +462,7 @@ export const Settings: React.FC = () => {
                   <ol className="list-decimal list-inside pl-1 space-y-0.5 text-[11.5px] font-mono leading-relaxed">
                     <li>Message <code className="text-orange-600 dark:text-orange-400 font-bold">@BotFather</code> on Telegram to generate a bot token.</li>
                     <li>Add your bot to your channel/group or send it <code className="text-orange-600 dark:text-orange-400 font-bold">/start</code>.</li>
-                    <li>Enter Token and Chat ID above, then click <strong>Send Test Alert</strong>.</li>
+                    <li>Enter Token and Chat ID above. Each person tests their own Telegram in <strong>Alert Center</strong> under notification settings.</li>
                   </ol>
                 </div>
               </div>
@@ -791,21 +768,6 @@ export const Settings: React.FC = () => {
             </h4>
 
             <div className="space-y-2">
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => testAlertMutation.mutate()}
-                  disabled={testAlertMutation.isPending}
-                  className="w-full py-2 px-3 rounded-md bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--bg-border)] text-[11.5px] font-mono font-medium flex items-center justify-between transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <Send size={12} className="text-sky-500" />
-                    <span>Test Telegram Dispatch</span>
-                  </div>
-                  <span className="text-[10.5px] font-mono text-[var(--text-muted)]">Ping</span>
-                </button>
-              )}
-
               {isAdmin && (
                 <button
                   type="button"

@@ -212,30 +212,53 @@ def recipients_for(scope: str, origin: dict, roles: tuple = ALL_ROLES) -> list:
     return _alert_recipients(users, origin, _support_may_receive(scope), roles)
 
 
+def _payload(text: str, buttons: Optional[list]) -> dict:
+    payload = {"text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+    if buttons:
+        payload["reply_markup"] = {"inline_keyboard": [[{"text": t, "url": u} for t, u in buttons]]}
+    return payload
+
+
+async def _send_one(client: httpx.AsyncClient, chat_id, payload: dict) -> Optional[str]:
+    """None when Telegram accepted the message, else why not (its description)."""
+    try:
+        res = await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                                json={**payload, "chat_id": chat_id})
+    except Exception as e:
+        logger.warning("Telegram send failed: %s", e)
+        return "unreachable"
+    if res.status_code == 200:
+        return None
+    logger.warning("Telegram send rejected: %s", res.status_code)
+    try:
+        return res.json().get("description") or str(res.status_code)
+    except ValueError:
+        return str(res.status_code)
+
+
 async def send_telegram(chat_ids: list, text: str, buttons: Optional[list] = None) -> int:
     """Send one HTML message to each chat. buttons: [(label, https url)], URL
     buttons only (no callbacks, so nothing in a message can act by itself).
     Returns how many sends Telegram accepted."""
     if not BOT_TOKEN or not chat_ids:
         return 0
-    payload = {"text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    if buttons:
-        payload["reply_markup"] = {"inline_keyboard": [[{"text": t, "url": u} for t, u in buttons]]}
+    payload = _payload(text, buttons)
     sent = 0
     async with httpx.AsyncClient(timeout=6.0) as client:
         for chat_id in chat_ids:
             if not chat_id or not str(chat_id).strip():
                 continue
-            try:
-                res = await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                                        json={**payload, "chat_id": chat_id})
-                if res.status_code == 200:
-                    sent += 1
-                else:
-                    logger.warning("Telegram send rejected: %s", res.status_code)
-            except Exception as e:
-                logger.warning("Telegram send failed: %s", e)
+            if await _send_one(client, chat_id, payload) is None:
+                sent += 1
     return sent
+
+
+async def send_telegram_to(chat_id, text: str, buttons: Optional[list] = None) -> Optional[str]:
+    """One chat, reporting the outcome: None when sent, else why not."""
+    if not BOT_TOKEN:
+        return "no bot"
+    async with httpx.AsyncClient(timeout=6.0) as client:
+        return await _send_one(client, chat_id, _payload(text, buttons))
 
 
 async def alert_worker():

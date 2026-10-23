@@ -170,3 +170,80 @@ def test_no_digest_after_leaving_the_team(client, register_user, auth_header, su
     np_.set_prefs(editor["user"]["user_id"], oid, "editor", {"digest": True})
     pool.exec_("DELETE FROM origin_members WHERE origin_id = %s AND user_id = %s", (oid, editor["user"]["user_id"]))
     assert asyncio.run(daily_digest.tick(dt.datetime(2026, 10, 24, 9, 0, tzinfo=ai.BKK))) == 0
+
+
+# ---- test message -----------------------------------------------------------
+
+@pytest.fixture()
+def test_sends(monkeypatch):
+    from api import alerts as alerts_module
+    out = []
+    reply = {"failure": None}
+
+    async def fake_send_to(chat_id, text, buttons=None):
+        out.append({"chat": chat_id, "text": text})
+        return reply["failure"]
+
+    monkeypatch.setattr(tl, "send_telegram_to", fake_send_to)
+    alerts_module._last_test.clear()
+    return out, reply
+
+
+def test_test_message_goes_only_to_me_and_lists_what_i_receive(client, register_user, auth_header, support, sent, test_sends):
+    out, _reply = test_sends
+    oid, _owner, _editor, viewer = _team(client, register_user, auth_header, "t")
+    np_.set_prefs(viewer["user"]["user_id"], oid, "viewer", {"digest": True})
+    h = auth_header(viewer["access_token"])
+    resp = client.post("/api/alerts/test", headers=h)
+    assert resp.status_code == 200
+    assert [m["chat"] for m in out] == ["3"]
+    assert "ทดสอบการแจ้งเตือน" in out[0]["text"]
+    assert "<b>shop t</b> (Viewer): การโจมตี, สรุปรายวัน" in out[0]["text"]
+    assert "Support" not in out[0]["text"]
+    assert sent == []  # nobody else on the team is messaged
+
+    again = client.post("/api/alerts/test", headers=h)
+    assert again.status_code == 429 and "นาทีละครั้ง" in again.json()["detail"]
+    assert len(out) == 1
+
+
+def test_test_message_needs_a_linked_telegram(client, register_user, auth_header, support, sent, test_sends):
+    out, _reply = test_sends
+    loner = register_user(email="loner@example.com", username="loner")
+    resp = client.post("/api/alerts/test", headers=auth_header(loner["access_token"]))
+    assert resp.status_code == 400 and resp.json()["detail"] == "ยังไม่ได้เชื่อม Telegram"
+    assert out == []
+
+
+def test_test_message_explains_a_blocked_bot(client, register_user, auth_header, support, sent, test_sends):
+    _out, reply = test_sends
+    _oid, owner, _e, _v = _team(client, register_user, auth_header, "b")
+    reply["failure"] = "Forbidden: bot was blocked by the user"
+    resp = client.post("/api/alerts/test", headers=auth_header(owner["access_token"]))
+    assert resp.status_code == 400 and "บล็อกบอท" in resp.json()["detail"]
+
+
+def test_support_sees_what_it_receives_as_support(client, register_user, auth_header, support, sent, test_sends):
+    out, _reply = test_sends
+    AuthService().set_telegram_chat_id(support["user"]["user_id"], "9")
+    resp = client.post("/api/alerts/test", headers=auth_header(support["access_token"]))
+    assert resp.status_code == 200
+    assert "<b>Support</b>: เหตุการณ์ที่ระบุเว็บไม่ได้" in out[0]["text"]
+
+
+def test_send_telegram_to_reports_telegrams_reason(monkeypatch):
+    import httpx
+
+    def handler(request):
+        if b'"chat_id":"blocked"' in request.content.replace(b" ", b""):
+            return httpx.Response(403, json={"ok": False, "description": "Forbidden: bot was blocked by the user"})
+        return httpx.Response(200, json={"ok": True})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(tl.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(tl, "BOT_TOKEN", "test-token")
+    assert asyncio.run(tl.send_telegram_to("blocked", "hi")) == "Forbidden: bot was blocked by the user"
+    assert asyncio.run(tl.send_telegram_to("42", "hi")) is None
+    assert asyncio.run(tl.send_telegram(["42", "blocked", ""], "hi")) == 1
+    monkeypatch.setattr(tl, "BOT_TOKEN", None)
+    assert asyncio.run(tl.send_telegram_to("42", "hi")) == "no bot"

@@ -1,7 +1,6 @@
 import os
 import json
 import logging
-import httpx
 from pathlib import Path
 from typing import Dict, Any
 from services.rule_manager import RuleManager, NginxConfigError
@@ -197,30 +196,3 @@ class SettingsService:
         except Exception as e:
             # nginx/docker not reachable from here (dev, tests): best effort.
             logger.warning(f"Failed to apply dynamic ModSecurity override: {e}")
-
-    async def send_test_notification(self, channel: str = "telegram") -> Dict[str, Any]:
-        settings = self.get_settings()
-        if channel == "telegram":
-            bot_token = settings.get("telegram_bot_token")
-            chat_id = settings.get("telegram_chat_id")
-            if not bot_token or not chat_id:
-                raise ValueError("Telegram Bot Token and Chat ID must be configured first")
-
-            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            msg = (
-                "🛡️ *CloudWAF Test Alert*\n\n"
-                "✅ Integration verified successfully!\n"
-                "Your alert channel is active and ready to receive real-time threat notifications."
-            )
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(url, json={
-                    "chat_id": chat_id,
-                    "text": msg,
-                    "parse_mode": "Markdown"
-                })
-                if resp.status_code == 200:
-                    return {"status": "success", "message": "Test alert sent to Telegram successfully"}
-                else:
-                    raise RuntimeError(f"Telegram API error: {resp.text}")
-
-        raise ValueError(f"Unknown alert channel: {channel}")

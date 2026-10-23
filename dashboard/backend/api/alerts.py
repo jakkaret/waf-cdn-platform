@@ -12,8 +12,9 @@ from services import audit_log, notification_prefs
 from services.txn import atomic
 from services.tenant_service import get_user_origins_and_domains
 from services.rbac import get_current_user, auth_service
+from services import telegram_listener
 from services.telegram_listener import invalidate_user_cache
-import os, secrets, time, httpx, asyncio, logging, uuid
+import os, secrets, time, httpx, asyncio, logging, uuid, html
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,68 @@ def _set_sensitivity_audited(origin_id: str, sensitivity: str, user: dict) -> No
             summary=f"ตั้งความไวการแจ้งเตือนการโจมตีเป็น {SENSITIVITY_TH[sensitivity]}",
             details={"sensitivity": sensitivity},
         )
+
+
+# Test message: only to the caller's own chat, at most once a minute per
+# person. It lists what they receive now, so a wrong setting shows up too.
+TEST_INTERVAL_SECONDS = 60
+TEST_MAX_SITES = 20
+_last_test: dict = {}
+KIND_TH = {"attacks": "การโจมตี", "outages": "เว็บเปิดไม่ได้", "certs": "ใบรับรอง",
+           "team": "คนอื่นแก้เว็บ", "digest": "สรุปรายวัน"}
+ROLE_EN = {"owner": "Owner", "editor": "Editor", "viewer": "Viewer"}
+
+
+def _test_message(user: dict) -> str:
+    sites = _my_sites(user["user_id"])
+    rows = {str(r["origin_id"]): r for r in pool.q(
+        "SELECT * FROM notification_prefs WHERE user_id = %s::uuid", (user["user_id"],))} if sites else {}
+    lines = ["🧪 <b>ทดสอบการแจ้งเตือน</b>",
+             "ถ้าเห็นข้อความนี้ แปลว่า Telegram ของคุณรับแจ้งเตือนจาก WAF ได้", "", "ตอนนี้คุณรับเรื่องเหล่านี้:"]
+    for origin, role in sites[:TEST_MAX_SITES]:
+        on = notification_prefs.effective(role, rows.get(origin["id"]))
+        kinds = ", ".join(KIND_TH[k] for k in notification_prefs.KINDS if on[k]) or "ปิดทั้งหมด"
+        lines.append(f"• <b>{html.escape(origin.get('label') or 'เว็บไม่มีชื่อ', quote=False)}</b> ({ROLE_EN[role]}): {kinds}")
+    if len(sites) > TEST_MAX_SITES:
+        lines.append(f"• และอีก {len(sites) - TEST_MAX_SITES} เว็บ")
+    if user.get("role") == "admin":
+        lines.append("• <b>Support</b>: เหตุการณ์ที่ระบุเว็บไม่ได้ และใบรับรองของโดเมนแพลตฟอร์ม")
+    elif not sites:
+        lines.append("ยังไม่มีเว็บในบัญชีนี้ จึงยังไม่มีอะไรส่งมา")
+    return "\n".join(lines)
+
+
+def _test_failure(reason: str) -> HTTPException:
+    r = reason.lower()
+    if r == "no bot":
+        return HTTPException(status_code=503, detail="ระบบยังไม่ได้ตั้งบอท Telegram แจ้ง Support")
+    if "blocked" in r:
+        return HTTPException(status_code=400, detail="คุณบล็อกบอทอยู่ เปิดแชตกับบอทใน Telegram แล้วกด Restart จากนั้นลองใหม่")
+    if "chat not found" in r or "deactivated" in r:
+        return HTTPException(status_code=400, detail="ไม่พบแชตนี้ใน Telegram ยกเลิกการเชื่อมแล้วเชื่อมใหม่")
+    if "too many" in r:
+        return HTTPException(status_code=429, detail="Telegram ให้รอสักครู่ ลองใหม่อีกครั้ง")
+    return HTTPException(status_code=502, detail="ส่งไม่สำเร็จ ลองใหม่อีกครั้ง")
+
+
+@router.post("/test")
+async def send_test(current_user: dict = Depends(get_current_user)):
+    chat_id = current_user.get("telegram_chat_id")
+    if not chat_id:
+        raise HTTPException(status_code=400, detail="ยังไม่ได้เชื่อม Telegram")
+    now = time.monotonic()
+    wait = TEST_INTERVAL_SECONDS - (now - _last_test.get(current_user["user_id"], -TEST_INTERVAL_SECONDS))
+    if wait > 0:
+        raise HTTPException(status_code=429, detail=f"ส่งทดสอบได้นาทีละครั้ง รออีก {int(wait) + 1} วินาที")
+    _last_test[current_user["user_id"]] = now
+    text = await asyncio.to_thread(_test_message, current_user)
+    from services.site_alerts import _base_url
+    base = _base_url()
+    failure = await telegram_listener.send_telegram_to(
+        chat_id, text, [("ตั้งค่าการแจ้งเตือน", f"{base}/alerts")] if base else None)
+    if failure:
+        raise _test_failure(failure)
+    return {"sent": True}
 
 
 # GET /api/alerts/connect/status

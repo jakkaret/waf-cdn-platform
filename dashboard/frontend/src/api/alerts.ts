@@ -29,6 +29,11 @@ export const alertsApi = {
     return res.data.sensitivity
   },
 
+  sendTest: async () => {
+    const res = await api.post<{ sent: boolean }>('/alerts/test')
+    return res.data
+  },
+
   getConnectionStatus: async () => {
     const res = await api.get<{ connected: boolean; chat_id: string | null }>('/alerts/connect/status')
     return res.data
