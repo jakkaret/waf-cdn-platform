@@ -147,7 +147,9 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest==9.1.1 pytest-asyncio==1.4.0 pytest-cov==7.1.0 fakeredis==2.40.0
+        # libinjection-python: tests/test_phase4_rules.py::test_gen3_template_still_passes
+        # reaches into ml/ (gen3 rule templates), whose value_features.py requires it.
+        run: pip install -r requirements.txt libinjection-python==1.1.6 pytest==9.1.1 pytest-asyncio==1.4.0 pytest-cov==7.1.0 fakeredis==2.40.0
 
       - name: Run pytest with coverage
         run: pytest tests/ -q --tb=short --cov=. --cov-report=term-missing:skip-covered --cov-report=xml
