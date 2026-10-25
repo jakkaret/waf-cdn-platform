@@ -81,7 +81,10 @@ normal FRP path serves it (config-generator token, `NewProxy` gatekeeper,
 - Removal (by the owner, an admin, or the idle worker) deletes the origin and its
   domain row and writes a `quick_tunnel.remove` event to the global audit log. An agent
   that is still connected keeps serving until it reconnects: frps has no API to drop
-  one proxy, and its plugin ops are Login/NewProxy/CloseProxy only.
+  one proxy, and its plugin ops are Login/NewProxy/CloseProxy only. A reconnect is
+  refused ("Tunnel token no longer valid", verified 2026-10-26). The edge also keeps
+  answering from its cache (`max-age=600`) for up to 10 minutes, because the production
+  edges have no purge endpoint yet (audit H13).
 
 ## Rule synchronization
 
