@@ -413,7 +413,7 @@ export const OriginDetail: React.FC = () => {
   const removeEditorMutation = useMutation({
     mutationFn: (editorId: string) => removeOriginEditor(id!, editorId),
     onSuccess: () => {
-      toast.success('Admin access removed')
+      toast.success('Editor removed')
       queryClient.invalidateQueries({ queryKey: ['origin-editors', id] })
     },
     onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to remove editor'),
@@ -1417,13 +1417,12 @@ export const OriginDetail: React.FC = () => {
             {isOwner && (
               <div className="dash-card p-5 space-y-4">
                 <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
-                  <Users size={14} /> Admin Access
+                  <Users size={14} /> Editor Access
                 </h3>
                 <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                  An Admin has full control of this origin: rename it, change its IP/port,
-                  configure the CAPTCHA/OTP shield, manage domains and WAF rules, and grant or
-                  revoke Viewer/Admin access -- except they cannot remove the origin's creator
-                  or archive/restore the origin itself.
+                  An Editor can rename this origin, change its IP/port, configure the CAPTCHA/OTP
+                  shield, and manage domains and WAF rules. Only the Owner can add or remove
+                  Editors and Viewers, or archive/restore the origin.
                 </p>
                 <div className="flex gap-2">
                   <input
@@ -1439,14 +1438,14 @@ export const OriginDetail: React.FC = () => {
                     onClick={() => editorEmailInput.trim() && guard('invite', () => addEditorMutation.mutate(editorEmailInput.trim()))}
                     disabled={!editorEmailInput.trim() || addEditorMutation.isPending}
                   >
-                    Add Admin
+                    Add Editor
                   </Button>
                 </div>
                 {editorsLoading ? (
                   <LoadingSpinner />
                 ) : editors.length === 0 ? (
                   <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                    No additional Admins granted yet.
+                    No Editors yet.
                   </p>
                 ) : (
                   <div className="space-y-2 font-mono text-[12px]">
@@ -1462,7 +1461,7 @@ export const OriginDetail: React.FC = () => {
                           onClick={() => removeEditorMutation.mutate(ed.user_id)}
                           disabled={removeEditorMutation.isPending}
                           className="text-red-500 hover:text-red-400"
-                          title="Revoke Admin access"
+                          title="Remove Editor"
                         >
                           <Trash2 size={14} />
                         </button>
