@@ -1,7 +1,9 @@
 import React, { useState } from 'react'
-import { buildTunnelCommands } from '../lib/tunnelCommands'
+import { buildTunnelCommands, tunnelErrorMessage } from '../lib/tunnelCommands'
 import { tunnelStatusBadge, combineTunnelHubStatus } from '../lib/tunnelStatus'
-import { useQuery } from '@tanstack/react-query'
+import { formatBkkDateTime } from '../lib/time'
+import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/axios'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
@@ -21,11 +23,34 @@ import {
   FileCode,
   Sparkles,
   RefreshCw,
+  Globe,
+  Plus,
+  Trash2,
 } from 'lucide-react'
 import { CRS_VERSION } from '../lib/crsVersion'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
 
+// A platform-named address (POST /api/tunnels/quick) for a user who has no
+// domain of their own; see services/quick_tunnel.py.
+interface QuickTunnel {
+  origin_id: string
+  domain_name: string
+  url: string
+  port: number | null
+  owner_username: string
+  created_at: string
+  last_seen_at: string | null
+  is_online: boolean
+  expires_at: string | null
+}
+
 export const Tunnels: React.FC = () => {
+  const queryClient = useQueryClient()
+  const guard = useVerifiedGuard()
+  // 'quick': the platform names the address. 'own': a domain the user has
+  // added to an origin and verified.
+  const [mode, setMode] = useState<'quick' | 'own'>('quick')
+  const [quickHost, setQuickHost] = useState<string | null>(null)
   // Empty by default: a tunnel token is scoped to one domain and the backend
   // only issues it to that domain's owner, so pre-filling another tenant's
   // hostname here would just produce a 403 on page load.
@@ -58,14 +83,48 @@ export const Tunnels: React.FC = () => {
   const hubStatus = combineTunnelHubStatus(data !== undefined && !frpErrored, cloudwaf)
   const cloudwafAgents = cloudwaf?.agents || []
 
+  const { data: quickData } = useQuery({
+    queryKey: ['quick-tunnels'],
+    queryFn: () => api.get('/tunnels/quick').then((r) => r.data),
+    refetchInterval: 10000,
+  })
+  const quickTunnels: QuickTunnel[] = quickData?.tunnels || []
+  const quickLimit: number = quickData?.limit ?? 3
+  const selectedQuick = quickTunnels.find((t) => t.domain_name === quickHost) || quickTunnels[0] || null
+
+  const selectQuick = (t: QuickTunnel) => {
+    setQuickHost(t.domain_name)
+    if (t.port) setLocalPort(t.port)
+  }
+
+  const createQuick = useMutation({
+    mutationFn: () => api.post('/tunnels/quick', { port: localPort }).then((r) => r.data),
+    onSuccess: (t: { domain_name: string }) => {
+      setQuickHost(t.domain_name)
+      queryClient.invalidateQueries({ queryKey: ['quick-tunnels'] })
+      toast.success(`Created ${t.domain_name}`)
+    },
+    onError: (err) => toast.error(tunnelErrorMessage(err) || 'Could not create the address'),
+  })
+
+  const removeQuick = useMutation({
+    mutationFn: (originId: string) => api.delete(`/tunnels/quick/${originId}`).then((r) => r.data),
+    onSuccess: (r: { domain_name: string }) => {
+      if (r.domain_name === quickHost) setQuickHost(null)
+      queryClient.invalidateQueries({ queryKey: ['quick-tunnels'] })
+      toast.success(`Removed ${r.domain_name}`)
+    },
+    onError: (err) => toast.error(tunnelErrorMessage(err) || 'Could not remove the address'),
+  })
+
   // Each config-generator call mints a tunnel token and scans the domains
   // table, so wait for typing to pause instead of calling per keystroke (F-104).
-  const debouncedDomain = useDebouncedValue(domain)
+  const debouncedDomain = useDebouncedValue(mode === 'quick' ? selectedQuick?.domain_name || '' : domain)
   const debouncedPort = useDebouncedValue(localPort)
   const debouncedIp = useDebouncedValue(localIp)
 
   // Fetch generated commands
-  const { data: configData } = useQuery({
+  const { data: configData, error: configError } = useQuery({
     queryKey: ['tunnel-config', debouncedDomain, debouncedPort, debouncedIp, activeTab],
     queryFn: () =>
       api
@@ -74,6 +133,8 @@ export const Tunnels: React.FC = () => {
         })
         .then((r) => r.data),
     enabled: debouncedDomain.trim().length > 0,
+    // A 403/422 is an answer, not a hiccup: show it instead of retrying.
+    retry: false,
   })
 
   const tunnels = data?.tunnels || []
@@ -95,8 +156,12 @@ export const Tunnels: React.FC = () => {
   // unscoped frpc config). buildTunnelCommands returns null until the backend
   // has minted a config for a domain the user owns.
   const cmds = buildTunnelCommands(configData)
-  const PLACEHOLDER =
-    '# Enter a domain you own above to generate a signed install command.'
+  const configMessage = debouncedDomain.trim() ? tunnelErrorMessage(configError) : null
+  const PLACEHOLDER = configMessage
+    ? `# ${configMessage}`
+    : mode === 'quick'
+      ? '# Create an address above to get a signed install command.'
+      : '# Enter a domain you own above to generate a signed install command.'
   const linuxCmd = cmds?.linux || PLACEHOLDER
   const dockerCmd = cmds?.docker || PLACEHOLDER
   const rawToml = cmds?.toml || PLACEHOLDER
@@ -189,20 +254,128 @@ export const Tunnels: React.FC = () => {
           </span>
         </div>
 
-        {/* Input Parameters Form */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-          <div>
-            <label className="block text-[11px] font-mono uppercase tracking-wider text-[var(--text-muted)] mb-1">
-              Public Target Domain
-            </label>
-            <input
-              type="text"
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-              placeholder="your-domain.example.com (a domain you own)"
-              className="w-full px-3 py-2 bg-[var(--bg-surface)] border border-[var(--bg-border)] rounded-lg text-[13px] font-mono text-[var(--text-primary)] focus:outline-none focus:border-indigo-500"
-            />
+        {/* Address source: a platform-named address, or the user's own domain */}
+        <div className="flex flex-wrap items-center gap-2 pt-2" role="tablist" aria-label="Public address">
+          <button
+            role="tab"
+            aria-selected={mode === 'quick'}
+            onClick={() => setMode('quick')}
+            className={`px-3 py-1.5 rounded-lg text-[12px] font-mono font-medium flex items-center gap-1.5 transition-all border ${
+              mode === 'quick'
+                ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/50'
+                : 'text-[var(--text-secondary)] border-[var(--bg-border)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+            }`}
+          >
+            <Sparkles size={14} /> No domain? Use a platform address
+          </button>
+          <button
+            role="tab"
+            aria-selected={mode === 'own'}
+            onClick={() => setMode('own')}
+            className={`px-3 py-1.5 rounded-lg text-[12px] font-mono font-medium flex items-center gap-1.5 transition-all border ${
+              mode === 'own'
+                ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/50'
+                : 'text-[var(--text-secondary)] border-[var(--bg-border)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+            }`}
+          >
+            <Globe size={14} /> Use my own domain
+          </button>
+        </div>
+
+        {mode === 'quick' && (
+          <div className="rounded-xl border border-[var(--bg-border)] bg-[var(--bg-surface)] p-4 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <p className="text-[12px] text-[var(--text-secondary)] m-0 max-w-[60ch]">
+                The platform gives your app an address under <span className="font-mono">{quickData?.zone || '…'}</span>.
+                The name is random and cannot be chosen. An address whose agent stays offline for{' '}
+                {quickData?.idle_days ?? 7} days is removed.
+              </p>
+              <button
+                onClick={() => guard('agent_token', () => createQuick.mutate())}
+                disabled={createQuick.isPending || quickTunnels.length >= quickLimit}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-mono text-[12px] font-semibold flex items-center gap-1.5 transition-all"
+              >
+                <Plus size={13} />
+                {createQuick.isPending ? 'Creating…' : `New address (${quickTunnels.length}/${quickLimit})`}
+              </button>
+            </div>
+
+            {quickTunnels.length === 0 ? (
+              <p className="text-[12px] text-[var(--text-muted)] m-0">
+                You have no address yet. Set the local port below, then press New address.
+              </p>
+            ) : (
+              <ul className="divide-y divide-[var(--bg-border-subtle)] m-0 p-0 list-none">
+                {quickTunnels.map((t) => {
+                  const b = tunnelStatusBadge(t.is_online)
+                  const selected = selectedQuick?.domain_name === t.domain_name
+                  return (
+                    <li key={t.origin_id} className="flex flex-wrap items-center gap-3 py-2">
+                      <label className="flex items-center gap-2 min-w-0 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="quick-tunnel"
+                          checked={selected}
+                          onChange={() => selectQuick(t)}
+                          className="accent-indigo-500"
+                        />
+                        <span className="font-mono text-[13px] text-[var(--text-primary)] break-all">{t.domain_name}</span>
+                      </label>
+                      <Badge color={b.color}>{b.label}</Badge>
+                      <span className="text-[11.5px] text-[var(--text-muted)] font-mono">
+                        {t.port ? `port ${t.port} · ` : ''}
+                        {t.expires_at ? `removed after ${formatBkkDateTime(t.expires_at, { seconds: false })} if still offline` : 'connected'}
+                      </span>
+                      <span className="ml-auto flex items-center gap-1">
+                        <a
+                          href={t.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                          title="Open"
+                        >
+                          <ExternalLink size={13} />
+                        </a>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Remove ${t.domain_name}? Its agent stops working and the name is gone for good.`)) {
+                              removeQuick.mutate(t.origin_id)
+                            }
+                          }}
+                          disabled={removeQuick.isPending}
+                          className="p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-red-400 hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                          title="Remove"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </div>
+        )}
+
+        {/* Input Parameters Form */}
+        <div className={`grid grid-cols-1 ${mode === 'own' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-4 pt-2`}>
+          {mode === 'own' && (
+            <div>
+              <label className="block text-[11px] font-mono uppercase tracking-wider text-[var(--text-muted)] mb-1">
+                Public Target Domain
+              </label>
+              <input
+                type="text"
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                placeholder="your-domain.example.com (a domain you own)"
+                className="w-full px-3 py-2 bg-[var(--bg-surface)] border border-[var(--bg-border)] rounded-lg text-[13px] font-mono text-[var(--text-primary)] focus:outline-none focus:border-indigo-500"
+              />
+              <p className="text-[11px] text-[var(--text-muted)] mt-1 mb-0">
+                Add it to one of your origins and verify its DNS first.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-[11px] font-mono uppercase tracking-wider text-[var(--text-muted)] mb-1">
@@ -296,7 +469,8 @@ export const Tunnels: React.FC = () => {
                 activeTab
               )
             }
-            className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-[11.5px] font-semibold flex items-center gap-1.5 transition-all shadow-lg cursor-pointer"
+            disabled={!cmds}
+            className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-mono text-[11.5px] font-semibold flex items-center gap-1.5 transition-all shadow-lg cursor-pointer"
           >
             {copiedKey === activeTab ? <Check size={13} /> : <Copy size={13} />}
             {copiedKey === activeTab ? 'COPIED!' : 'COPY COMMAND'}

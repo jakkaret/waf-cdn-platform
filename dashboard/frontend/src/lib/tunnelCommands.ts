@@ -36,3 +36,25 @@ export function buildTunnelCommands(
   if (!linux) return null
   return { linux, docker: docker ?? '', toml: toml ?? '' }
 }
+
+// Why the backend refused to mint a config, as one line for the command box.
+// The page used to swallow this error and keep showing its placeholder, so a
+// domain the user did not own looked like a page that did nothing. detail is
+// a string from our own HTTPExceptions, a list from FastAPI's 422 validation,
+// or {message} from the email gate.
+export function tunnelErrorMessage(error: unknown): string | null {
+  if (!error) return null
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  if (typeof detail === 'string' && detail) return detail
+  if (Array.isArray(detail) && detail.length) {
+    const first = detail[0] as { loc?: unknown[]; msg?: string }
+    const field = Array.isArray(first?.loc) ? first.loc[first.loc.length - 1] : null
+    if (field === 'domain') return 'Enter a full hostname, for example shop.example.com.'
+    if (field === 'port') return 'Local port must be a number from 1 to 65535.'
+    return first?.msg || 'The request was not valid.'
+  }
+  if (detail && typeof detail === 'object' && typeof (detail as { message?: unknown }).message === 'string') {
+    return (detail as { message: string }).message
+  }
+  return 'Could not reach the server. Try again.'
+}
