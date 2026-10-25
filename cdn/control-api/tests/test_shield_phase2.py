@@ -187,6 +187,7 @@ RULES = [
 
 def _limited(redis_, rules=RULES):
     redis_.set(rate_limit.RULES_KEY, json.dumps(rules))
+    redis_.hset(rate_limit.HOSTMAP_KEY, HOST, ORIGIN)  # HOST is a site's host
 
 
 def test_over_the_limit_gets_429_with_retry_after(client, redis_):
@@ -329,6 +330,8 @@ def test_a_sites_rule_counts_only_that_sites_hosts(client, redis_):
 
 
 def test_platform_rules_count_each_site_on_its_own(client, redis_):
+    redis_.hset(rate_limit.HOSTMAP_KEY, HOST, ORIGIN)
+    redis_.hset(rate_limit.HOSTMAP_KEY, "other.example.com", "origin-2")
     _limited(redis_, [{"id": "rule_flood", "path_pattern": "*", "method": "ALL", "limit_count": 1,
                        "window_seconds": 60, "enabled": 1}])
     rate_limit._cache["at"] = -1e9
@@ -336,3 +339,13 @@ def test_platform_rules_count_each_site_on_its_own(client, redis_):
     assert _site_request(client, "other.example.com", "/").status_code == 204   # its own bucket
     assert _site_request(client, HOST, "/").status_code == 401
     assert redis_.kv["rate:limit:rule_flood:other.example.com|198.51.100.7"] == 1
+
+
+def test_made_up_hosts_share_one_bucket(client, redis_):
+    # A Host header that is no site's host cannot open a fresh bucket.
+    _limited(redis_, [{"id": "rule_flood", "path_pattern": "*", "method": "ALL", "limit_count": 2,
+                       "window_seconds": 60, "enabled": 1}])
+    rate_limit._cache["at"] = -1e9
+    codes = [_site_request(client, f"random-{i}.invalid", "/").status_code for i in range(3)]
+    assert codes == [204, 204, 401]
+    assert redis_.kv["rate:limit:rule_flood:-|198.51.100.7"] == 3

@@ -10,7 +10,9 @@ step of the shield check that every proxied location already makes.
 The dashboard publishes the enabled rules to Redis (RULES_KEY, see
 dashboard/backend/services/rate_limit_service.py). Every rule that matches a
 request counts it in its own window, per site host and client IP:
-rate:limit:<rule id>:<host>|<ip>. Going over any of them answers 429.
+rate:limit:<rule id>:<host>|<ip>. Going over any of them answers 429. Only a
+host in the host map gets its own bucket; every other Host value counts in the
+shared "-" bucket, so a client cannot dodge a limit by inventing Host headers.
 
 A rule with an origin_id belongs to one site (its owner or editors set it on
 the site's page) and only applies when the request's host belongs to that
@@ -56,7 +58,7 @@ def _rules(client) -> list:
         rules = json.loads(raw) if raw else []
         if not isinstance(rules, list):
             rules = []
-        hostmap = client.hgetall(HOSTMAP_KEY) if any(r.get("origin_id") for r in rules) else {}
+        hostmap = client.hgetall(HOSTMAP_KEY) if rules else {}
     except Exception as exc:
         logger.warning("rate limit rules unavailable, keeping the previous set: %s", exc)
         return _cache["rules"]
@@ -107,10 +109,10 @@ def check(client, method: str, raw_uri: str, ip: str, host: str = "") -> tuple:
     if is_static_asset(path):
         return True, 0
     retry_after = 0
-    host = host or "-"
     try:
         rules = _rules(client)
-        site = _site_of(host)
+        site = _site_of(host or "-")
+        host = host if site else "-"  # unknown hosts share one bucket
         for rule in rules:
             if not _matches(rule, method, path, site):
                 continue
