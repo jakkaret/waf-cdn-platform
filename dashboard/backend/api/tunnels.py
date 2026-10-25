@@ -15,6 +15,7 @@ from services.tenant_service import get_user_origins_and_domains, invalidate_ten
 from services.dynamodb_service import DynamoDBService
 from services.auth_service import AuthService
 from services.dns_service import is_platform_subdomain
+from services import quick_tunnel
 from services.hostnames import HOSTNAME_RE, canonical_host, canonical_or_none
 from services.rbac import ARCHIVED_ORIGIN_STATUSES
 import services.origin_service as origin_service
@@ -250,6 +251,8 @@ def tunnel_domain_problem(domain_clean: str, user: Optional[dict]) -> Optional[s
     if not row:
         if is_platform_subdomain(domain_clean):
             return "Subdomains of the platform domain are provisioned by the operator; register your own domain instead."
+        if quick_tunnel.in_zone(domain_clean):
+            return "This quick tunnel no longer exists; create a new one on the Zero Trust tunnels page."
         return "Add this domain to one of your origins and verify its DNS first."
     origin = db.get_origin_by_id(row.get("origin_id")) or {}
     if not origin or origin.get("status") in ARCHIVED_ORIGIN_STATUSES:

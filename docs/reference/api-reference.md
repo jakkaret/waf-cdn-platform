@@ -10,7 +10,7 @@ status: VERIFIED
 
 Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/api/system/*`, ไฟล์ static) อยู่นอกขอบเขตของไฟล์นี้
 
-พบทั้งหมด **168 endpoints** ใน **28 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 29 รายการ
+พบทั้งหมด **171 endpoints** ใน **29 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 30 รายการ
 
 ## `api/ai_summary.py`
 
@@ -242,6 +242,16 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 |---|---|---|---|---|
 | GET | `/api/status/public` | `get_public_status` | public | No auth -- this is meant to be reachable by anyone, the same as |
 | GET | `/api/status/public/history` | `get_public_status_history` | public |  |
+
+## `api/quick_tunnels.py`
+
+สถานะการลงทะเบียน: ลงทะเบียนใน main.py
+
+| Method | Path | Handler | Auth | คำอธิบาย (docstring) |
+|---|---|---|---|---|
+| GET | `/api/tunnels/quick` | `list_quick_tunnels` | login |  |
+| POST | `/api/tunnels/quick` | `create_quick_tunnel` | login |  |
+| DELETE | `/api/tunnels/quick/{origin_id}` | `delete_quick_tunnel` | login | The owner removes their own; an admin removes anyone's (abuse). Anything |
 
 ## `api/rate_limits.py`
 

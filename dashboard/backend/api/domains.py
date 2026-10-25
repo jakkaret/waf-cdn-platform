@@ -11,6 +11,7 @@ from services import audit_log
 from services.txn import atomic
 from services.dynamodb_service import DynamoDBService, DuplicateDomain
 from services import shield_sync
+from services import quick_tunnel
 from services.dns_service import (
     verify_domain_dns, is_claimable_own_wildcard_subdomain, is_platform_subdomain, record_cname_target,
 )
@@ -121,13 +122,22 @@ def _assert_platform_subdomain_allowed(domain_name: str, current_user: dict) -> 
     _assert_domain_claimable treated the self-created record as proof of ownership
     — mint a tunnel token for it and bind a proxy, taking over a host under the
     platform's own domain. Restrict platform-apex registration AND its auto-verify
-    to admins; tenants onboard their own external domains instead."""
+    to admins; tenants onboard their own external domains instead.
+
+    The quick tunnel zone (services/quick_tunnel.py) is held to the same rule:
+    its wildcard points at the edge too, and its names are handed out by the
+    platform only (POST /api/tunnels/quick), never typed in by a tenant."""
     if current_user.get("role") == "admin":
         return
     if is_platform_subdomain(domain_name):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Subdomains of the platform domain are provisioned by the operator; register your own domain instead.",
+        )
+    if quick_tunnel.in_zone(domain_name):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Quick tunnel names are assigned by the platform; create one on the Zero Trust tunnels page.",
         )
 
 

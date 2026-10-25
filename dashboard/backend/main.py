@@ -283,6 +283,7 @@ from api import managed_rules as managed_rules_api
 from api import invites as invites_api
 from api import support as support_api
 from api import site_access as site_access_api
+from api import quick_tunnels as quick_tunnels_api
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
@@ -294,6 +295,7 @@ app.include_router(rate_limits.router)
 app.include_router(settings.router)
 app.include_router(ai_summary.router)
 app.include_router(tunnels.router)
+app.include_router(quick_tunnels_api.router)
 app.include_router(tunnel_api.router)
 app.include_router(copilot.router)
 app.include_router(threshold_proposals.router)
@@ -450,6 +452,11 @@ async def startup_event():
         from services.shield_sync import shield_sync_worker
         from services.dynamodb_service import DynamoDBService
         app.state.shield_sync_task = asyncio.create_task(shield_sync_worker(DynamoDBService()))
+    # Quick tunnels (platform-named hosts for users without a domain): one
+    # whose agent stays offline for QUICK_TUNNEL_IDLE_DAYS is removed.
+    if not hasattr(app.state, "quick_tunnel_expiry_task"):
+        from services.quick_tunnel import quick_tunnel_expiry_worker
+        app.state.quick_tunnel_expiry_task = asyncio.create_task(quick_tunnel_expiry_worker())
 
 
 @app.on_event("shutdown")
