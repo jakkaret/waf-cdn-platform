@@ -40,6 +40,8 @@ TEAM_ACTIONS = {
     "domain.create", "domain.delete", "domain.release", "origin.update",
     "viewer.grant", "editor.grant", "viewer.invite", "editor.invite",
     "viewer.revoke", "editor.revoke", "invite.cancel", "rule.approve", "rule.reject", "alerts.sensitivity",
+    "site_ip_rule.add", "site_ip_rule.delete",
+    "site_rate_limit.add", "site_rate_limit.update", "site_rate_limit.delete",
 }
 TEAM_LOOKBACK_SECONDS = 600
 

@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from typing import Literal, Optional, List
 from services.ip_rule_service import IPRuleService
-from services.rbac import require_viewer_or_above, require_admin
+from services.rbac import require_admin
 
 router = APIRouter(prefix="/api/ip-rules", tags=["ip-rules"])
 service = IPRuleService()
@@ -24,7 +24,9 @@ class BulkDeleteRequest(BaseModel):
 async def get_ip_rules(
     rule_type: Optional[str] = Query("all", description="'all', 'block', or 'allow'"),
     search: Optional[str] = Query(None, description="Search term for IP or reason"),
-    current_user: dict = Depends(require_viewer_or_above),
+    # The platform-wide list (and the reason Support wrote for each IP) is the
+    # operator's; a site's own list is /api/origins/{id}/ip-rules (2026-10-25).
+    current_user: dict = Depends(require_admin),
 ):
     try:
         rules = service.list_rules(rule_type=rule_type, search=search)

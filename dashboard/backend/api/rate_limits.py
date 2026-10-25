@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
 from typing import Literal, Optional, List, Dict
 from services.rate_limit_service import RateLimitService
-from services.rbac import require_viewer_or_above, require_admin
+from services.rbac import require_admin
 
 router = APIRouter(prefix="/api/rate-limits", tags=["rate-limits"])
 service = RateLimitService()
@@ -45,7 +45,9 @@ class ResetClientRequest(BaseModel):
 
 @router.get("/rules")
 async def list_rate_rules(
-    current_user: dict = Depends(require_viewer_or_above),
+    # Platform-wide rules (they include the dashboard's own /api/auth/* guard);
+    # a site's rules are /api/origins/{id}/rate-limits (2026-10-25).
+    current_user: dict = Depends(require_admin),
 ):
     try:
         rules = service.list_rules()
@@ -110,16 +112,21 @@ async def delete_rate_rule(
 
 @router.get("/throttled")
 async def get_throttled_clients(
-    current_user: dict = Depends(require_viewer_or_above),
+    current_user: dict = Depends(require_admin),
 ):
-    # Buckets are keyed by client IP alone, with no host/tenant, so they cannot
-    # be scoped per tenant; only admins see them (2026-09-28: every viewer used
-    # to get every tenant's throttled client IPs).
-    if current_user.get("role") != "admin":
-        return {"throttled_clients": []}
+    """Every bucket is per site host and client IP. The operator sees the IPs
+    of hosts that belong to no site and of sites with an active support grant;
+    other sites' clients are only counted (their owners see them on the site's
+    page), the same rule as logs (services/tenant_service.admin_log_scope)."""
+    from services.tenant_service import admin_log_scope
     try:
         clients = service.get_throttled_clients()
-        return {"throttled_clients": clients}
+        try:
+            tenant_hosts, granted_hosts, _ids, _gids = admin_log_scope()
+        except Exception:
+            return {"throttled_clients": [], "hidden_site_clients": len(clients)}
+        visible = [c for c in clients if c.get("host") not in tenant_hosts or c.get("host") in granted_hosts]
+        return {"throttled_clients": visible, "hidden_site_clients": len(clients) - len(visible)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

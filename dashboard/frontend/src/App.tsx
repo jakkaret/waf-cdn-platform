@@ -1,3 +1,4 @@
+import { OperatorOnly } from './components/OperatorOnly'
 import React, { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -147,7 +148,9 @@ export const App: React.FC = () => {
             path="/ip-rules"
             element={
               <ProtectedRoute>
-                <IPRules />
+                <OperatorOnly originTab="IP Access">
+                  <IPRules />
+                </OperatorOnly>
               </ProtectedRoute>
             }
           />
@@ -155,7 +158,9 @@ export const App: React.FC = () => {
             path="/rate-limits"
             element={
               <ProtectedRoute>
-                <RateLimiting />
+                <OperatorOnly originTab="Rate Limits">
+                  <RateLimiting />
+                </OperatorOnly>
               </ProtectedRoute>
             }
           />

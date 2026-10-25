@@ -191,6 +191,8 @@ def app() -> FastAPI:
     test_app.include_router(invites_module.router)
     test_app.include_router(alerts_module.router)
     test_app.include_router(domains_module.origins_domains_router)
+    from api import site_access as site_access_module
+    test_app.include_router(site_access_module.router)
     return test_app
 
 

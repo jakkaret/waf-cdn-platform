@@ -282,6 +282,7 @@ from api import tenant_rules as tenant_rules_api
 from api import managed_rules as managed_rules_api
 from api import invites as invites_api
 from api import support as support_api
+from api import site_access as site_access_api
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
 app.include_router(analytics.router)
@@ -305,6 +306,7 @@ app.include_router(tenant_rules_api.router)
 app.include_router(managed_rules_api.router)
 app.include_router(invites_api.router)
 app.include_router(support_api.router)
+app.include_router(site_access_api.router)
 
 # Error Handlers
 from fastapi import Request
@@ -392,8 +394,9 @@ async def startup_event():
         app.state.alert_task = asyncio.create_task(alert_worker())
     # Retention for the PostgreSQL store (replaces DynamoDB's TTL).
     if not hasattr(app.state, "retention_task"):
-        from services.retention_worker import retention_worker
+        from services.retention_worker import retention_worker, site_ip_expiry_worker
         app.state.retention_task = asyncio.create_task(retention_worker())
+        app.state.site_ip_expiry_task = asyncio.create_task(site_ip_expiry_worker())
     if not hasattr(app.state, "log_forward_task"):
         app.state.log_forward_task = asyncio.create_task(log_forward_worker())
     if not hasattr(app.state, "cleanup_pending_task"):

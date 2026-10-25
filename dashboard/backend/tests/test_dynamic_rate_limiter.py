@@ -61,7 +61,7 @@ def test_rules_are_published_for_control_api():
     assert {"rule_auth_protect", "rule_global_api", "rule_edge_flood"} <= set(published)
     assert published["rule_auth_protect"] == {
         "id": "rule_auth_protect", "name": "Authentication Brute-Force Guard", "path_pattern": "/api/auth/*",
-        "method": "POST", "limit_count": 10, "window_seconds": 60, "enabled": 1,
+        "method": "POST", "limit_count": 10, "window_seconds": 60, "enabled": 1, "origin_id": None,
     }
 
 

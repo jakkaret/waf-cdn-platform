@@ -72,14 +72,15 @@ def cleanup_test_ip():
     ip_rules_module.service.delete_rule(TEST_IP)
 
 
-def test_viewer_can_list_rules_but_not_add_one(client: TestClient, register_user, auth_header):
+def test_viewer_can_neither_list_nor_add_platform_rules(client: TestClient, register_user, auth_header):
+    # 2026-10-25: the platform-wide list is the operator's; a site's own list
+    # is /api/origins/{id}/ip-rules (tests/test_site_access_rules.py).
     admin = register_user(email="ipr-admin1@example.com", username="ipr_admin1")
     viewer = register_user(email="ipr-viewer1@example.com", username="ipr_viewer1")
     viewer_headers = auth_header(viewer["access_token"])
 
     resp = client.get("/api/ip-rules/", headers=viewer_headers)
-    assert resp.status_code == 200
-    assert "rules" in resp.json()
+    assert resp.status_code == 403
 
     resp = client.post(
         "/api/ip-rules/",

@@ -9,8 +9,13 @@ step of the shield check that every proxied location already makes.
 
 The dashboard publishes the enabled rules to Redis (RULES_KEY, see
 dashboard/backend/services/rate_limit_service.py). Every rule that matches a
-request counts it in its own window, per client IP:
-rate:limit:<rule id>:<ip>. Going over any of them answers 429.
+request counts it in its own window, per site host and client IP:
+rate:limit:<rule id>:<host>|<ip>. Going over any of them answers 429.
+
+A rule with an origin_id belongs to one site (its owner or editors set it on
+the site's page) and only applies when the request's host belongs to that
+site, by the host map the dashboard publishes (HOSTMAP_KEY). Platform rules
+(no origin_id) apply to every host, each host counted on its own.
 
 Fails open (request allowed) when Redis or the rules are unavailable, like
 the limiter it replaces.
@@ -25,6 +30,7 @@ from shield_paths import normalize_path
 logger = logging.getLogger(__name__)
 
 RULES_KEY = "waf:ratelimit:rules"
+HOSTMAP_KEY = "waf:shield:hostmap"  # host -> origin_id, see captcha_engine.HOSTMAP_KEY
 KEY_PREFIX = "rate:limit:"
 RULES_CACHE_SECONDS = 5
 
@@ -34,7 +40,7 @@ _STATIC_RE = re.compile(
 )
 _STATIC_PREFIXES = ("/assets/", "/static/")
 
-_cache = {"at": 0.0, "rules": []}
+_cache = {"at": 0.0, "rules": [], "hostmap": {}}
 
 
 def is_static_asset(path: str) -> bool:
@@ -50,15 +56,23 @@ def _rules(client) -> list:
         rules = json.loads(raw) if raw else []
         if not isinstance(rules, list):
             rules = []
+        hostmap = client.hgetall(HOSTMAP_KEY) if any(r.get("origin_id") for r in rules) else {}
     except Exception as exc:
         logger.warning("rate limit rules unavailable, keeping the previous set: %s", exc)
         return _cache["rules"]
-    _cache.update(at=now, rules=rules)
+    _cache.update(at=now, rules=rules, hostmap=hostmap or {})
     return rules
 
 
-def _matches(rule: dict, method: str, path: str) -> bool:
+def _site_of(host: str) -> str:
+    value = _cache["hostmap"].get(host, "")
+    return value.decode() if isinstance(value, bytes) else str(value or "")
+
+
+def _matches(rule: dict, method: str, path: str, site: str = "") -> bool:
     if not rule.get("enabled", 1):
+        return False
+    if rule.get("origin_id") and str(rule["origin_id"]) != site:
         return False
     rule_method = str(rule.get("method") or "ALL").upper()
     if rule_method != "ALL" and rule_method != method:
@@ -82,8 +96,8 @@ def _count(client, key: str, window: int) -> tuple:
     return int(count), int(ttl)
 
 
-def check(client, method: str, raw_uri: str, ip: str) -> tuple:
-    """(allowed, retry_after seconds)."""
+def check(client, method: str, raw_uri: str, ip: str, host: str = "") -> tuple:
+    """(allowed, retry_after seconds). host: the request's normalised Host."""
     if client is None:
         return True, 0
     method = (method or "GET").upper()
@@ -93,13 +107,16 @@ def check(client, method: str, raw_uri: str, ip: str) -> tuple:
     if is_static_asset(path):
         return True, 0
     retry_after = 0
+    host = host or "-"
     try:
-        for rule in _rules(client):
-            if not _matches(rule, method, path):
+        rules = _rules(client)
+        site = _site_of(host)
+        for rule in rules:
+            if not _matches(rule, method, path, site):
                 continue
             limit = max(1, int(rule.get("limit_count") or 1))
             window = max(1, int(rule.get("window_seconds") or 1))
-            count, ttl = _count(client, f"{KEY_PREFIX}{rule.get('id')}:{ip}", window)
+            count, ttl = _count(client, f"{KEY_PREFIX}{rule.get('id')}:{host}|{ip}", window)
             if count > limit:
                 retry_after = max(retry_after, ttl if ttl > 0 else window)
     except Exception as exc:

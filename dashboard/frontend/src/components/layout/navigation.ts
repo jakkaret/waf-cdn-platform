@@ -73,8 +73,8 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: ShieldAlert,
         children: [
           { kind: 'link', id: 'rules', label: 'WAF rules', path: '/rules', access: 'member', keywords: ['modsecurity', 'crs'] },
-          { kind: 'link', id: 'ip-rules', label: 'IP access list', path: '/ip-rules', access: 'member', keywords: ['block', 'allow'] },
-          { kind: 'link', id: 'rate-limits', label: 'Rate limiting', path: '/rate-limits', access: 'member' },
+          { kind: 'link', id: 'ip-rules', label: 'IP access list', path: '/ip-rules', access: 'operator', keywords: ['block', 'allow'] },
+          { kind: 'link', id: 'rate-limits', label: 'Rate limiting', path: '/rate-limits', access: 'operator' },
           { kind: 'link', id: 'ml-rules', label: 'ML anomaly rules', path: '/ml-rules', access: 'operator' },
         ],
       },

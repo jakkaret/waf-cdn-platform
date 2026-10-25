@@ -71,7 +71,7 @@ def test_all_tables_and_view_exist(db):
     # 0006 origin_invites, 0007 tunnel_proxy_owners, 0008 user_sessions, 0009 support (4 tables),
     # 0010 drops bola_policies, 0011 email_codes + email_code_sends, 0012 alert_incidents,
     # 0013 site_outages + audit_notified, 0014 origin_alert_settings + notification_prefs + digest_sent
-    assert len(tables - {"schema_migrations"}) == 33
+    assert len(tables - {"schema_migrations"}) == 35
     assert {"email_codes", "email_code_sends"} <= tables
     assert {"alert_incidents", "site_outages", "audit_notified"} <= tables
     assert {"origin_alert_settings", "notification_prefs", "digest_sent"} <= tables

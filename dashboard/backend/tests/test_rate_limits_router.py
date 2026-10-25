@@ -71,14 +71,15 @@ def _create_rule(client, headers, **overrides):
     return client.post("/api/rate-limits/rules", json=payload, headers=headers)
 
 
-def test_viewer_can_list_rules_but_not_create_one(client: TestClient, register_user, auth_header):
+def test_viewer_can_neither_list_nor_create_platform_rules(client: TestClient, register_user, auth_header):
+    # 2026-10-25: platform rules are the operator's; a site's own are
+    # /api/origins/{id}/rate-limits (tests/test_site_access_rules.py).
     admin = register_user(email="rl-admin1@example.com", username="rl_admin1")
     viewer = register_user(email="rl-viewer1@example.com", username="rl_viewer1")
     viewer_headers = auth_header(viewer["access_token"])
 
     resp = client.get("/api/rate-limits/rules", headers=viewer_headers)
-    assert resp.status_code == 200
-    assert "rules" in resp.json()
+    assert resp.status_code == 403
 
     resp = _create_rule(client, viewer_headers)
     assert resp.status_code == 403
@@ -158,9 +159,11 @@ def test_reset_client_with_no_active_bucket_reports_info_not_an_error(
     assert resp.json()["status"] == "info"
 
 
-def test_throttled_clients_endpoint_requires_only_viewer(client: TestClient, register_user, auth_header):
+def test_throttled_clients_endpoint_is_the_operators(client: TestClient, register_user, auth_header):
     admin = register_user(email="rl-admin7@example.com", username="rl_admin7")
     viewer = register_user(email="rl-viewer7@example.com", username="rl_viewer7")
     resp = client.get("/api/rate-limits/throttled", headers=auth_header(viewer["access_token"]))
+    assert resp.status_code == 403
+    resp = client.get("/api/rate-limits/throttled", headers=auth_header(admin["access_token"]))
     assert resp.status_code == 200
     assert "throttled_clients" in resp.json()

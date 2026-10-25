@@ -10,7 +10,7 @@ status: VERIFIED
 
 Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/api/system/*`, ไฟล์ static) อยู่นอกขอบเขตของไฟล์นี้
 
-พบทั้งหมด **160 endpoints** ใน **27 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 28 รายการ
+พบทั้งหมด **168 endpoints** ใน **28 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 29 รายการ
 
 ## `api/ai_summary.py`
 
@@ -136,7 +136,7 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 
 | Method | Path | Handler | Auth | คำอธิบาย (docstring) |
 |---|---|---|---|---|
-| GET | `/api/ip-rules/` | `get_ip_rules` | viewer+ |  |
+| GET | `/api/ip-rules/` | `get_ip_rules` | admin |  |
 | POST | `/api/ip-rules/` | `add_ip_rule` | admin |  |
 | POST | `/api/ip-rules/bulk-delete` | `bulk_delete_rules` | admin |  |
 | DELETE | `/api/ip-rules/{ip:path}` | `delete_ip_rule` | admin |  |
@@ -250,11 +250,11 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 | Method | Path | Handler | Auth | คำอธิบาย (docstring) |
 |---|---|---|---|---|
 | POST | `/api/rate-limits/reset-client` | `reset_client` | admin |  |
-| GET | `/api/rate-limits/rules` | `list_rate_rules` | viewer+ |  |
+| GET | `/api/rate-limits/rules` | `list_rate_rules` | admin |  |
 | POST | `/api/rate-limits/rules` | `create_rate_rule` | admin |  |
 | DELETE | `/api/rate-limits/rules/{rule_id}` | `delete_rate_rule` | admin |  |
 | PUT | `/api/rate-limits/rules/{rule_id}` | `update_rate_rule` | admin |  |
-| GET | `/api/rate-limits/throttled` | `get_throttled_clients` | viewer+ |  |
+| GET | `/api/rate-limits/throttled` | `get_throttled_clients` | admin | Every bucket is per site host and client IP. The operator sees the IPs |
 
 ## `api/rules.py`
 
@@ -288,6 +288,21 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 |---|---|---|---|---|
 | GET | `/api/origins/{origin_id}/shield-events` | `get_shield_events` | origin read |  |
 | POST | `/api/origins/{origin_id}/shield-events/preview` | `preview_shield` | origin edit | Before an Admin saves CAPTCHA/OTP settings: how much of this origin's |
+
+## `api/site_access.py`
+
+สถานะการลงทะเบียน: ลงทะเบียนใน main.py
+
+| Method | Path | Handler | Auth | คำอธิบาย (docstring) |
+|---|---|---|---|---|
+| GET | `/api/origins/{origin_id}/ip-rules` | `list_site_ip_rules` | origin read |  |
+| POST | `/api/origins/{origin_id}/ip-rules` | `add_site_ip_rule` | origin edit, login |  |
+| DELETE | `/api/origins/{origin_id}/ip-rules/{rule_id}` | `delete_site_ip_rule` | origin edit, login |  |
+| GET | `/api/origins/{origin_id}/rate-limits` | `list_site_rate_limits` | origin read |  |
+| POST | `/api/origins/{origin_id}/rate-limits` | `add_site_rate_limit` | origin edit, login |  |
+| GET | `/api/origins/{origin_id}/rate-limits/throttled` | `site_throttled_clients` | origin read | Clients counted against any rule on this site's hosts right now. |
+| DELETE | `/api/origins/{origin_id}/rate-limits/{rule_id}` | `delete_site_rate_limit` | origin edit, login |  |
+| PUT | `/api/origins/{origin_id}/rate-limits/{rule_id}` | `update_site_rate_limit` | origin edit, login |  |
 
 ## `api/support.py`
 

@@ -16,10 +16,13 @@ ADMIN_ONLY = [
     ("POST", "/api/ml-rules/abc/reject"),
     ("DELETE", "/api/ml-rules/abc"),
     ("POST", "/api/ml-rules/cve-scan"),
+    ("GET", "/api/rate-limits/rules"),
+    ("GET", "/api/rate-limits/throttled"),
     ("POST", "/api/rate-limits/rules"),
     ("PUT", "/api/rate-limits/rules/abc"),
     ("DELETE", "/api/rate-limits/rules/abc"),
     ("POST", "/api/rate-limits/reset-client"),
+    ("GET", "/api/ip-rules/"),
     ("POST", "/api/ip-rules/"),
     ("DELETE", "/api/ip-rules/1.2.3.4"),
     ("POST", "/api/ip-rules/bulk-delete"),
@@ -36,7 +39,10 @@ ADMIN_ONLY = [
 ]
 # Probes safe to run as admin (body validation fails first / unknown id => no side effects)
 ADMIN_SAFE = [
+    ("GET", "/api/rate-limits/rules"),
+    ("GET", "/api/rate-limits/throttled"),
     ("POST", "/api/rate-limits/rules"),
+    ("GET", "/api/ip-rules/"),
     ("POST", "/api/ip-rules/"),
     ("POST", "/api/ip-rules/bulk-delete"),
     ("POST", "/api/ml-rules/abc/reject"),

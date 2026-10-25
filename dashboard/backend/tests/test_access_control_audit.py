@@ -64,7 +64,7 @@ def test_throttled_clients_hidden_from_viewers(client, accounts, monkeypatch):
     admin_h, viewer_h = accounts
     spy = MagicMock(return_value=[{"ip": "198.51.100.9", "request_count": 50}])
     monkeypatch.setattr(rate_limits_module.service, "get_throttled_clients", spy)
-    assert client.get("/api/rate-limits/throttled", headers=viewer_h).json() == {"throttled_clients": []}
+    assert client.get("/api/rate-limits/throttled", headers=viewer_h).status_code == 403
     assert spy.call_count == 0
     assert client.get("/api/rate-limits/throttled", headers=admin_h).json()["throttled_clients"][0]["ip"] == "198.51.100.9"
 

@@ -248,8 +248,10 @@ export const Rules: React.FC = () => {
             Your rules live on each origin.
           </p>
           <p className="m-0">
-            Open an origin and use its <strong>WAF Rules</strong> tab to see the managed ruleset
-            version, update it, and create rules that apply only to that origin's domains.
+            Open an origin and use its <strong>WAF Policies</strong> tab to see the managed ruleset
+            version, update it, and create rules that apply only to that origin's domains. Its{' '}
+            <strong>IP Access</strong> and <strong>Rate Limits</strong> tabs hold that origin's own
+            block/allow list and request limits.
           </p>
         </div>
       </div>

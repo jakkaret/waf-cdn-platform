@@ -13,11 +13,13 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
 
 
 # control-api enforces the rules (cdn/control-api/rate_limit.py, P2.6) and
-# reads them from here; it counts each rule per client IP in
-# rate:limit:<rule id>:<ip> (a plain counter with the window as its TTL).
+# reads them from here; it counts each rule per site host and client IP in
+# rate:limit:<rule id>:<host>|<ip> (a plain counter with the window as its
+# TTL). Keys from before 2026-10-25 have no host: rate:limit:<rule id>:<ip>.
+# A rule with an origin_id counts only requests to that site's hosts.
 RULES_KEY = "waf:ratelimit:rules"
 KEY_PREFIX = "rate:limit:"
-_PUBLISHED_FIELDS = ("id", "name", "path_pattern", "method", "limit_count", "window_seconds", "enabled")
+_PUBLISHED_FIELDS = ("id", "name", "path_pattern", "method", "limit_count", "window_seconds", "enabled", "origin_id")
 
 
 class RateLimitService:
@@ -34,14 +36,15 @@ class RateLimitService:
             logger.warning(f"Redis connection failed: {e}")
             self.redis_client = None
 
-    def list_rules(self) -> List[Dict]:
-        return self._pg.list()
+    def list_rules(self, origin_id: Optional[str] = None) -> List[Dict]:
+        """Platform-wide rules, or one site's rules when origin_id is given."""
+        return self._pg.list(origin_id or self._pg.PLATFORM)
 
     def publish_rules(self) -> None:
         """Hand the enabled rules to control-api. Called after every change
         and by services/shield_sync.py's worker, so a Redis restart is
         repaired within a minute."""
-        rules = [{k: rule.get(k) for k in _PUBLISHED_FIELDS} for rule in self._pg.list() if rule.get("enabled")]
+        rules = [{k: rule.get(k) for k in _PUBLISHED_FIELDS} for rule in self._pg.list(self._pg.ALL) if rule.get("enabled")]
         self.redis_client.set(RULES_KEY, json.dumps(rules, separators=(",", ":")))
 
     def _publish_quietly(self) -> None:
@@ -51,50 +54,57 @@ class RateLimitService:
             logger.warning("rate-limit rules not published (shield sync retries): %s", exc)
 
     def add_rule(self, name: str, path_pattern: str, limit_count: int, window_seconds: int,
-                 method: str = "ALL", burst: int = 0, action: str = "429") -> Dict:
+                 method: str = "ALL", burst: int = 0, action: str = "429", origin_id: Optional[str] = None) -> Dict:
         rule_id = f"rule_{uuid.uuid4().hex[:8]}"
         self._pg.add(rule_id, name.strip(), path_pattern.strip(), method, limit_count, window_seconds,
-                     burst, action)
+                     burst, action, origin_id)
         self._publish_quietly()
-        return {"id": rule_id, "name": name, "path_pattern": path_pattern, "limit_count": limit_count,
-                "window_seconds": window_seconds, "enabled": 1}
+        return {"id": rule_id, "name": name, "path_pattern": path_pattern, "method": method.upper(),
+                "limit_count": limit_count, "window_seconds": window_seconds, "enabled": 1, "origin_id": origin_id}
 
-    def update_rule(self, rule_id: str, data: Dict) -> Optional[Dict]:
-        updated = self._pg.update(rule_id, data)
+    def update_rule(self, rule_id: str, data: Dict, origin_id: Optional[str] = None) -> Optional[Dict]:
+        updated = self._pg.update(rule_id, data, origin_id)
         self._publish_quietly()
         return updated
 
-    def delete_rule(self, rule_id: str) -> bool:
-        deleted = self._pg.delete(rule_id)
+    def delete_rule(self, rule_id: str, origin_id: Optional[str] = None) -> bool:
+        deleted = self._pg.delete(rule_id, origin_id)
         self._publish_quietly()
         return deleted
 
     def _counter_keys(self):
-        """(key, rule id, ip) for control-api's request counters. Other users
-        of the rate:limit: prefix (per-user quotas in api/onboarding.py and
-        api/ml.py, sorted sets) are not client buckets and are skipped."""
+        """(key, rule id, host, ip) for control-api's request counters. Other
+        users of the rate:limit: prefix (per-user quotas in api/onboarding.py
+        and api/ml.py, sorted sets) are not client buckets and are skipped."""
         for key in self.redis_client.scan_iter(match=f"{KEY_PREFIX}rule_*", count=500):
-            rule_id, _, ip = key[len(KEY_PREFIX):].partition(":")
+            rule_id, _, rest = key[len(KEY_PREFIX):].partition(":")
+            host, sep, ip = rest.rpartition("|")
+            if not sep:
+                host, ip = "", rest
             if ip:
-                yield key, rule_id, ip
+                yield key, rule_id, host, ip
 
-    def get_throttled_clients(self) -> List[Dict]:
-        """Client IPs counted by a rule in its current window, busiest first."""
+    def get_throttled_clients(self, hosts: Optional[set] = None) -> List[Dict]:
+        """Client IPs counted by a rule in its current window, busiest first.
+        hosts limits the result to those site hosts (a site's own view)."""
         if not self.redis_client:
             return []
         limits = {}
         try:
-            limits = {r["id"]: int(r.get("limit_count") or 0) for r in self._pg.list()}
+            limits = {r["id"]: int(r.get("limit_count") or 0) for r in self._pg.list(self._pg.ALL)}
         except Exception as e:
             logger.warning(f"rate-limit rules unavailable for the throttled view: {e}")
         throttled = []
         try:
-            for key, rule_id, ip in self._counter_keys():
+            for key, rule_id, host, ip in self._counter_keys():
+                if hosts is not None and host not in hosts:
+                    continue
                 count = int(self.redis_client.get(key) or 0)
                 ttl = self.redis_client.ttl(key)
                 limit = limits.get(rule_id, 0)
                 throttled.append({
                     "ip": ip,
+                    "host": host,
                     "rule_id": rule_id,
                     "request_count": count,
                     "ttl_seconds": max(0, ttl),
@@ -113,7 +123,7 @@ class RateLimitService:
             return False
         ip = ip.strip()
         try:
-            keys = [key for key, _rule, key_ip in self._counter_keys() if key_ip == ip]
+            keys = [key for key, _rule, _host, key_ip in self._counter_keys() if key_ip == ip]
             return bool(keys) and self.redis_client.delete(*keys) > 0
         except Exception as e:
             logger.error(f"Error resetting client rate limit in Redis: {e}")

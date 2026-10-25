@@ -196,7 +196,7 @@ def test_over_the_limit_gets_429_with_retry_after(client, redis_):
     last = check(client, "POST", "/api/auth/login")
     assert last.headers["X-Shield-Type"] == "ratelimit"
     assert int(last.headers["Retry-After"]) > 0
-    assert "rate:limit:rule_auth:198.51.100.7" in redis_.kv
+    assert f"rate:limit:rule_auth:{HOST}|198.51.100.7" in redis_.kv
 
 
 def test_each_rule_counts_in_its_own_bucket(client, redis_):
@@ -204,8 +204,8 @@ def test_each_rule_counts_in_its_own_bucket(client, redis_):
     for _ in range(2):
         assert check(client, "POST", "/api/auth/login").status_code == 204
     # rule_all has its own count (2 so far), its 1 s window is untouched by rule_auth's 60 s one.
-    assert redis_.kv["rate:limit:rule_all:198.51.100.7"] == 2
-    assert redis_.ttls["rate:limit:rule_auth:198.51.100.7"] == 60
+    assert redis_.kv[f"rate:limit:rule_all:{HOST}|198.51.100.7"] == 2
+    assert redis_.ttls[f"rate:limit:rule_auth:{HOST}|198.51.100.7"] == 60
 
 
 def test_disabled_rules_static_assets_and_preflight_are_not_counted(client, redis_):
@@ -304,3 +304,35 @@ def test_challenge_route_answers_429_for_rate_limit(main_app):
 def test_challenge_route_answers_503_when_the_store_is_down(main_app):
     resp = main_app.get("/cdn-cgi/challenge", headers={"X-Shield-Type": "unavailable"})
     assert resp.status_code == 503 and resp.headers["Cache-Control"] == "no-store"
+
+
+# 2026-10-25: a site's own rate limits (origin_id) apply only to that site's
+# hosts, and every bucket is per host as well as per client IP.
+
+def _site_request(client, host, path="/api/x"):
+    headers = {"X-Original-Method": "GET", "X-Original-URI": path, "X-Original-Host": host,
+               "X-Original-IP": "198.51.100.7", "X-Original-User-Agent": "pytest"}
+    return client.get("/api/shield/access", headers=headers)
+
+
+def test_a_sites_rule_counts_only_that_sites_hosts(client, redis_):
+    redis_.hset(rate_limit.HOSTMAP_KEY, HOST, ORIGIN)
+    redis_.hset(rate_limit.HOSTMAP_KEY, "other.example.com", "origin-2")
+    _limited(redis_, [{"id": "rule_site", "path_pattern": "/api/*", "method": "ALL", "limit_count": 1,
+                       "window_seconds": 60, "enabled": 1, "origin_id": ORIGIN}])
+    rate_limit._cache["at"] = -1e9
+    assert _site_request(client, HOST).status_code == 204
+    assert _site_request(client, HOST).status_code == 401           # over this site's limit
+    for _ in range(3):
+        assert _site_request(client, "other.example.com").status_code == 204  # another site: not counted
+    assert not [k for k in redis_.kv if k.startswith("rate:limit:rule_site:other.example.com")]
+
+
+def test_platform_rules_count_each_site_on_its_own(client, redis_):
+    _limited(redis_, [{"id": "rule_flood", "path_pattern": "*", "method": "ALL", "limit_count": 1,
+                       "window_seconds": 60, "enabled": 1}])
+    rate_limit._cache["at"] = -1e9
+    assert _site_request(client, HOST, "/").status_code == 204
+    assert _site_request(client, "other.example.com", "/").status_code == 204   # its own bucket
+    assert _site_request(client, HOST, "/").status_code == 401
+    assert redis_.kv["rate:limit:rule_flood:other.example.com|198.51.100.7"] == 1

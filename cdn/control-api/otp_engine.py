@@ -289,6 +289,7 @@ async def shield_access(request: Request) -> Response:
     allowed, retry_after = rate_limit.check(
         _redis(), request.headers.get("x-original-method", request.method),
         request.headers.get("x-original-uri", "/"), client_ip(request),
+        normalize_host(request.headers.get("x-original-host") or request.headers.get("host", "")),
     )
     if not allowed:
         return Response(

@@ -42,6 +42,14 @@ def expire_ip_bans(service=None) -> int:
     return removed
 
 
+def expire_site_ip_rules(service=None) -> int:
+    """The same for each site's own IP list (services/origin_ip_rules.py):
+    drop expired rows, re-render the sites whose file no longer matches."""
+    if service is None:
+        from api.site_access import ip_service as service
+    return service.expire()
+
+
 UNVERIFIED_DOMAIN_DAYS = 7
 
 
@@ -63,13 +71,36 @@ async def retention_worker():
         try:
             results = await asyncio.to_thread(run_database_retention)
             removed = await asyncio.to_thread(expire_ip_bans)
+            site_removed = await asyncio.to_thread(expire_site_ip_rules)
             stale = await asyncio.to_thread(expire_unverified_domains)
             old_sessions = await asyncio.to_thread(purge_old_sessions)
             deleted = {t: n for t, n in results if n} | ({"ip_rules": removed} if removed else {})
             deleted |= {"unverified_domains": stale} if stale else {}
+            deleted |= {"origin_ip_rules": site_removed} if site_removed else {}
             deleted |= {"user_sessions": old_sessions} if old_sessions else {}
             if deleted:
                 logger.info("retention: deleted %s", deleted)
         except Exception as exc:
             logger.error("retention run failed: %s", exc)
         await asyncio.sleep(INTERVAL_SECONDS)
+
+
+SITE_IP_EXPIRY_SECONDS = 60
+
+
+async def site_ip_expiry_worker():
+    """A site's temporary IP rule should end close to when it says, not up to
+    an hour later: expiry is checked every minute (cheap: the files are only
+    re-rendered, and nginx reloaded, when something changed)."""
+    from db import pool
+    while True:
+        await asyncio.sleep(SITE_IP_EXPIRY_SECONDS)
+        try:
+            due = await asyncio.to_thread(
+                pool.q1, "SELECT 1 AS due FROM origin_ip_rules WHERE expires_at IS NOT NULL AND expires_at <= now() LIMIT 1")
+            if due:
+                removed = await asyncio.to_thread(expire_site_ip_rules)
+                logger.info("site IP rules expired: %d", removed)
+        except Exception as exc:
+            logger.warning("site IP expiry check failed: %s", exc)
+

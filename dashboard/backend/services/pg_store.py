@@ -1299,18 +1299,28 @@ class PgRateLimitRepository:
         rule = dict(row)
         rule["enabled"] = 1 if row["enabled"] else 0
         rule["created_at"] = epoch_int(row["created_at"])
+        rule["origin_id"] = str(row["origin_id"]) if row.get("origin_id") else None
         return rule
 
-    def list(self) -> List[Dict[str, Any]]:
-        return [self.to_rule(r) for r in pool.q("SELECT * FROM rate_limit_rules ORDER BY created_at, id")]
+    # scope: PLATFORM (origin_id IS NULL, the default), ALL, or one origin id.
+    PLATFORM, ALL = "platform", "all"
+
+    def list(self, scope: str = "platform") -> List[Dict[str, Any]]:
+        if scope == self.ALL:
+            rows = pool.q("SELECT * FROM rate_limit_rules ORDER BY created_at, id")
+        elif scope == self.PLATFORM:
+            rows = pool.q("SELECT * FROM rate_limit_rules WHERE origin_id IS NULL ORDER BY created_at, id")
+        else:
+            rows = pool.q("SELECT * FROM rate_limit_rules WHERE origin_id = %s::uuid ORDER BY created_at, id", (scope,))
+        return [self.to_rule(r) for r in rows]
 
     def add(self, rule_id: str, name: str, path_pattern: str, method: str, limit_count: int,
-            window_seconds: int, burst: int, action: str) -> None:
+            window_seconds: int, burst: int, action: str, origin_id: Optional[str] = None) -> None:
         pool.exec_("INSERT INTO rate_limit_rules (id, name, path_pattern, method, limit_count, window_seconds, "
-                   "burst, action, enabled) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, true)",
-                   (rule_id, name, path_pattern, method.upper(), limit_count, window_seconds, burst, action))
+                   "burst, action, enabled, origin_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, true, %s)",
+                   (rule_id, name, path_pattern, method.upper(), limit_count, window_seconds, burst, action, origin_id))
 
-    def update(self, rule_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def update(self, rule_id: str, data: Dict[str, Any], origin_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         values = {}
         for key in _RATE_COLUMNS:
             if key in data:
@@ -1322,9 +1332,13 @@ class PgRateLimitRepository:
                 values[key] = value
         if not values:
             return None
-        query = sql.SQL("UPDATE rate_limit_rules SET {} WHERE id = %s RETURNING *").format(
+        # A rule is only ever changed within its own scope: a site's rule by
+        # that site, a platform rule (origin_id NULL) only from the platform page.
+        query = sql.SQL("UPDATE rate_limit_rules SET {} WHERE id = %s AND origin_id IS NOT DISTINCT FROM %s::uuid "
+                        "RETURNING *").format(
             sql.SQL(", ").join(sql.SQL("{} = {}").format(sql.Identifier(k), sql.Placeholder()) for k in values))
-        return self.to_rule(pool.q1(query.as_string(), [*values.values(), rule_id]))
+        return self.to_rule(pool.q1(query.as_string(), [*values.values(), rule_id, origin_id]))
 
-    def delete(self, rule_id: str) -> bool:
-        return pool.exec_("DELETE FROM rate_limit_rules WHERE id = %s", (rule_id,)) > 0
+    def delete(self, rule_id: str, origin_id: Optional[str] = None) -> bool:
+        return pool.exec_("DELETE FROM rate_limit_rules WHERE id = %s AND origin_id IS NOT DISTINCT FROM %s::uuid",
+                          (rule_id, origin_id)) > 0

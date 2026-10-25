@@ -15,6 +15,8 @@ export interface RateRule {
 
 export interface ThrottledClient {
   ip: string
+  host: string
+  rule_id: string
   request_count: number
   ttl_seconds: number
   status: string
@@ -42,9 +44,10 @@ export const rateLimitsApi = {
     return res.data
   },
 
-  getThrottledClients: async (): Promise<ThrottledClient[]> => {
-    const res = await api.get<{ throttled_clients: ThrottledClient[] }>('/rate-limits/throttled')
-    return res.data.throttled_clients
+  // hidden_site_clients: counters on sites the operator holds no support grant for
+  getThrottledClients: async () => {
+    const res = await api.get<{ throttled_clients: ThrottledClient[]; hidden_site_clients?: number }>('/rate-limits/throttled')
+    return res.data
   },
 
   resetClient: async (ip: string) => {

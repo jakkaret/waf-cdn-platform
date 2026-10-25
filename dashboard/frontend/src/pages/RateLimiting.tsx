@@ -44,11 +44,13 @@ export const RateLimiting: React.FC = () => {
   })
 
   // Fetch Live Throttled Clients
-  const { data: throttledClients = [], isLoading: isLoadingThrottled, refetch: refetchThrottled, isFetching: isFetchingThrottled } = useQuery({
+  const { data: throttledView, isLoading: isLoadingThrottled, refetch: refetchThrottled, isFetching: isFetchingThrottled } = useQuery({
     queryKey: ['throttled-clients'],
     queryFn: rateLimitsApi.getThrottledClients,
     refetchInterval: 5000, // Poll every 5s for live sliding window updates
   })
+  const throttledClients = throttledView?.throttled_clients ?? []
+  const hiddenSiteClients = throttledView?.hidden_site_clients ?? 0
 
   // Create Rule Mutation
   const createMutation = useMutation({
@@ -212,7 +214,7 @@ export const RateLimiting: React.FC = () => {
             {throttledClients.length}
           </div>
           <div className="text-[11px] text-[var(--text-muted)] mt-1 font-mono">
-            Active in Redis sliding window
+            {hiddenSiteClients > 0 ? `+${hiddenSiteClients} on sites without a support grant` : 'Active in Redis sliding window'}
           </div>
         </div>
 
@@ -366,6 +368,7 @@ export const RateLimiting: React.FC = () => {
             <thead>
               <tr>
                 <th>Client IP Address</th>
+                <th>Host</th>
                 <th>Current Bucket Count</th>
                 <th>Remaining Lock TTL</th>
                 <th>Status</th>
@@ -375,23 +378,24 @@ export const RateLimiting: React.FC = () => {
             <tbody>
               {isLoadingThrottled ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-6 text-[var(--text-muted)]">
+                  <td colSpan={6} className="text-center py-6 text-[var(--text-muted)]">
                     Scanning active Redis buckets...
                   </td>
                 </tr>
               ) : throttledClients.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-8 text-[var(--text-muted)]">
+                  <td colSpan={6} className="text-center py-8 text-[var(--text-muted)]">
                     <CheckCircle2 size={20} className="mx-auto mb-1 text-emerald-500/60" />
                     <span className="text-[12.5px]">No throttled clients at this moment. Traffic is healthy.</span>
                   </td>
                 </tr>
               ) : (
                 throttledClients.map((client) => (
-                  <tr key={client.ip}>
+                  <tr key={`${client.rule_id}|${client.host}|${client.ip}`}>
                     <td className="font-mono font-bold text-[12.5px] text-[var(--text-primary)]">
                       {client.ip}
                     </td>
+                    <td className="font-mono text-[12px] text-[var(--text-secondary)]">{client.host}</td>
                     <td className="font-mono text-[12.5px] text-amber-400 font-bold">
                       {client.request_count} requests
                     </td>

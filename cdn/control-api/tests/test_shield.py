@@ -44,6 +44,9 @@ class FakeRedis:
     def hset(self, k, field, value):
         self.hashes.setdefault(k, {})[field] = value
 
+    def hgetall(self, k):
+        return dict(self.hashes.get(k, {}))
+
     def setex(self, k, _ttl, v):
         self.kv[k] = v
 
