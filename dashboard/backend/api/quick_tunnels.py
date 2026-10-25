@@ -35,7 +35,9 @@ async def list_quick_tunnels(
 ):
     is_admin = current_user.get("role") == "admin"
     view_all = is_admin and scope == "all"
-    online = quick_tunnel.online_hosts(await origin_service.get_live_proxies())
+    # force: the shared 60 s proxy cache showed an agent that had just
+    # connected as offline for up to a minute (frps is local, the call is cheap).
+    online = quick_tunnel.online_hosts(await origin_service.get_live_proxies(force=True))
     user_id = str(current_user.get("user_id"))
     items = await asyncio.to_thread(quick_tunnel.list_tunnels, None if view_all else user_id, online)
     if view_all:
