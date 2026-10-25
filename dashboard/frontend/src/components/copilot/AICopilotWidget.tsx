@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { ReportText } from '../ai/ReportText'
+import { formatBkkTime } from '../../lib/time'
 
 interface Message {
   id: string
@@ -35,7 +36,7 @@ const QUICK_PROMPTS = [
 // Answers come from this account's last 24 hours of logs only (api/copilot.py).
 const INTRO = 'ถามเรื่องทราฟฟิกและการโจมตีของเว็บในบัญชีนี้ ข้อมูล 24 ชั่วโมงล่าสุด'
 
-const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+const now = () => formatBkkTime(new Date())
 
 export const AICopilotWidget: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false)
@@ -71,7 +72,7 @@ export const AICopilotWidget: React.FC = () => {
       id: `user-${Date.now()}`,
       role: 'user',
       content: messageText,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: formatBkkTime(new Date()),
     }
 
     setMessages((prev) => [...prev, userMessage])
@@ -96,7 +97,7 @@ export const AICopilotWidget: React.FC = () => {
         id: `bot-${Date.now()}`,
         role: 'model',
         content: botReply,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: formatBkkTime(new Date()),
       }
 
       setMessages((prev) => [...prev, botMessage])
@@ -106,7 +107,7 @@ export const AICopilotWidget: React.FC = () => {
         id: `err-${Date.now()}`,
         role: 'model',
         content: 'เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้ง',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: formatBkkTime(new Date()),
       }
       setMessages((prev) => [...prev, errorMessage])
     } finally {

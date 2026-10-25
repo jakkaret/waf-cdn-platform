@@ -31,6 +31,7 @@ import {
 import { useAuthStore } from '../store/authStore'
 import { originRoleOf } from '../lib/roles'
 import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
+import { bkkDateKey } from '../lib/time'
 
 export const Origins: React.FC = () => {
   const navigate = useNavigate()
@@ -287,7 +288,7 @@ export const Origins: React.FC = () => {
                     </div>
                     <div className="flex justify-between text-[var(--text-secondary)]">
                       <span className="text-[var(--text-muted)]">Added on:</span>
-                      <span>{new Date(origin.created_at).toLocaleDateString()}</span>
+                      <span>{bkkDateKey(origin.created_at)}</span>
                     </div>
                   </div>
                 </div>

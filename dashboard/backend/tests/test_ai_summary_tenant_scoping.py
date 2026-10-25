@@ -165,7 +165,7 @@ def test_the_query_box_is_not_a_free_text_channel_to_the_model(client, register_
     assert resp.status_code == 200
     assert "กลอน" not in captured["time_desc"]
     assert "กลอน" not in resp.json()["time_range"]["description"]
-    assert captured["time_desc"] == "2024-01-01 00:00 ถึง 2024-01-04 00:00 (3 วัน)"
+    assert captured["time_desc"] == "2024-01-01 00:00 ถึง 2024-01-04 00:00 เวลาไทย (3 วัน)"
 
 
 def test_an_empty_range_is_answered_without_the_model(client, register_user, auth_header, monkeypatch):

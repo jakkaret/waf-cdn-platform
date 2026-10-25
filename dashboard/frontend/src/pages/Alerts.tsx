@@ -36,54 +36,9 @@ import toast from 'react-hot-toast'
 import { getDispatchLabel } from '../lib/alertDispatch'
 import { IncidentList } from '../components/alerts/IncidentList'
 import { NotificationSettings } from '../components/alerts/NotificationSettings'
+import { BKK_LABEL, bkkDateKey, formatBkkDateTime } from '../lib/time'
 
 const ALERTS_FETCH_LIMIT = 200
-
-// Helper function to format timestamp to Thailand Timezone (Asia/Bangkok • UTC+7)
-const formatThaiDateTime = (rawDate?: string | number | Date | null): string => {
-  if (!rawDate) return '—'
-  try {
-    let d: Date
-    if (rawDate instanceof Date) {
-      d = rawDate
-    } else if (typeof rawDate === 'number') {
-      d = rawDate < 1e12 ? new Date(rawDate * 1000) : new Date(rawDate)
-    } else {
-      let s = String(rawDate).trim()
-      // If ClickHouse / ISO string lacks timezone offset (e.g. "2026-08-24 06:14:00" stored in UTC)
-      if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
-        s = s.replace(' ', 'T') + 'Z'
-      } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s)) {
-        s = s + 'Z'
-      } else if (!s.endsWith('Z') && !s.includes('+') && !s.includes('-')) {
-        s = s + 'Z'
-      }
-      d = new Date(s)
-    }
-
-    if (isNaN(d.getTime())) return String(rawDate)
-
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Asia/Bangkok',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    }).formatToParts(d)
-
-    const map: Record<string, string> = {}
-    parts.forEach((p) => {
-      map[p.type] = p.value
-    })
-
-    return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`
-  } catch {
-    return String(rawDate)
-  }
-}
 
 // Clean Alert ID helper (formats cleanly and strips accidental IP suffix)
 const formatAlertId = (rawId?: string | null, fallbackIndex?: number): string => {
@@ -207,7 +162,7 @@ export const Alerts: React.FC = () => {
     const now = new Date()
     // Calendar date in Asia/Bangkok, the zone the table displays (F-030):
     // toISOString() gave the UTC date, i.e. yesterday before 07:00 local.
-    const formatDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' })
+    const formatDate = (d: Date) => bkkDateKey(d)
 
     if (preset === 'all') {
       setDateFrom('')
@@ -341,7 +296,7 @@ export const Alerts: React.FC = () => {
     const csvRows = [
       headers.join(','),
       ...filteredAlerts.map((a) => [
-        `"${formatThaiDateTime(a.timestamp)}"`,
+        `"${formatBkkDateTime(a.timestamp)}"`,
         `"${formatAlertId(a.alert_id)}"`,
         `"${a.ip || ''}"`,
         `"${(a.url || '').replace(/"/g, '""')}"`,
@@ -354,7 +309,7 @@ export const Alerts: React.FC = () => {
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
     const a = document.createElement('a')
     a.href = window.URL.createObjectURL(blob)
-    a.download = `waf_alert_incidents_${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `waf_alert_incidents_${bkkDateKey()}.csv`
     a.click()
     toast.success('Downloaded incident alerts CSV')
   }
@@ -377,7 +332,7 @@ export const Alerts: React.FC = () => {
       {/* Top Header Bar */}
       <TopBar
         title="Security Alert Center"
-        subtitle="Real-time Telegram bot incident dispatch and critical attack notifications • Asia/Bangkok (UTC+7)"
+        subtitle="Real-time Telegram bot incident dispatch and critical attack notifications • Bangkok time (UTC+7)"
         badge={
           status?.connected ? (
             <Badge color="success" dot pulse>
@@ -738,7 +693,7 @@ export const Alerts: React.FC = () => {
           <table className="dash-table border-collapse w-full">
             <thead>
               <tr className="border-b border-[var(--bg-border)]">
-                <th className="w-44 border-r border-[var(--bg-border)]">Timestamp (UTC+7)</th>
+                <th className="w-44 border-r border-[var(--bg-border)]">Timestamp ({BKK_LABEL})</th>
                 <th className="w-28 border-r border-[var(--bg-border)]">Alert ID</th>
                 <th className="w-36 border-r border-[var(--bg-border)]">Source IP</th>
                 <th className="border-r border-[var(--bg-border)]">Target URI</th>
@@ -793,9 +748,9 @@ export const Alerts: React.FC = () => {
                       }`}
                       onClick={() => setSelectedAlert(alert)}
                     >
-                      {/* Timestamp (UTC+7) */}
+                      {/* Timestamp (Bangkok) */}
                       <td className="font-mono text-[11px] text-[var(--text-muted)] whitespace-nowrap border-r border-[var(--bg-border-subtle)]">
-                        {formatThaiDateTime(alert.timestamp)}
+                        {formatBkkDateTime(alert.timestamp)}
                       </td>
 
                       {/* Alert ID */}
@@ -992,10 +947,10 @@ export const Alerts: React.FC = () => {
 
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
                   <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
-                    Event Timestamp (UTC+7)
+                    Event Timestamp ({BKK_LABEL})
                   </span>
                   <span className="text-[var(--text-primary)] font-bold">
-                    {formatThaiDateTime(selectedAlert.timestamp)}
+                    {formatBkkDateTime(selectedAlert.timestamp)}
                   </span>
                 </div>
 

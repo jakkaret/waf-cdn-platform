@@ -62,6 +62,7 @@ import {
 import { ORIGIN_ROLE_LABEL, canEditOrigin, canManageOrigin, originRoleOf } from '../lib/roles'
 import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
 import { ReportText } from '../components/ai/ReportText'
+import { BKK_LABEL, formatBkkDateTime } from '../lib/time'
 
 const cveSeverityClass = (sev: string): string => {
   switch (sev) {
@@ -645,7 +646,7 @@ export const OriginDetail: React.FC = () => {
                 <div className="flex justify-between py-1.5">
                   <span className="text-[var(--text-muted)]">Registered Date</span>
                   <span className="text-[var(--text-secondary)]">
-                    {new Date(origin.created_at).toLocaleString()}
+                    {formatBkkDateTime(origin.created_at)}
                   </span>
                 </div>
               </div>
@@ -1499,7 +1500,7 @@ export const OriginDetail: React.FC = () => {
                       </div>
                       <span className="text-[var(--text-muted)] text-[11px]">
                         {ev.actor_username || ev.actor_user_id} &middot;{' '}
-                        {new Date(ev.timestamp).toLocaleString()}
+                        {formatBkkDateTime(ev.timestamp)}
                       </span>
                     </div>
                   ))}
@@ -1531,7 +1532,7 @@ export const OriginDetail: React.FC = () => {
                   </p>
                   <div className="flex flex-wrap items-end gap-3">
                     <div className="space-y-1">
-                      <label className="block text-[11px] text-[var(--text-muted)] font-mono">Start</label>
+                      <label className="block text-[11px] text-[var(--text-muted)] font-mono">Start ({BKK_LABEL})</label>
                       <input
                         type="datetime-local"
                         value={pmStart}
@@ -1540,7 +1541,7 @@ export const OriginDetail: React.FC = () => {
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="block text-[11px] text-[var(--text-muted)] font-mono">End</label>
+                      <label className="block text-[11px] text-[var(--text-muted)] font-mono">End ({BKK_LABEL})</label>
                       <input
                         type="datetime-local"
                         value={pmEnd}
@@ -1668,7 +1669,7 @@ export const OriginDetail: React.FC = () => {
                                 <span className="flex items-center gap-2">
                                   <Badge color={ev.scope === 'global' ? 'warning' : 'gray'}>{ev.scope}</Badge>
                                   <span className="text-[var(--text-muted)] text-[11px]">
-                                    {new Date(ev.timestamp).toLocaleString()}
+                                    {formatBkkDateTime(ev.timestamp)}
                                   </span>
                                 </span>
                               </div>

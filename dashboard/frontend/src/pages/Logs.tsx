@@ -25,49 +25,7 @@ import { WafLog } from '../types'
 import toast from 'react-hot-toast'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
 import { confidenceLabel, LogExplanation, toLogExplanation } from '../lib/logExplanation'
-
-// Helper function to format timestamp to Thailand Timezone (Asia/Bangkok • UTC+7)
-export const formatThaiDateTime = (rawDate?: string | number | Date | null): string => {
-  if (!rawDate) return '—'
-  try {
-    let d: Date
-    if (rawDate instanceof Date) {
-      d = rawDate
-    } else if (typeof rawDate === 'number') {
-      d = rawDate < 1e12 ? new Date(rawDate * 1000) : new Date(rawDate)
-    } else {
-      let s = String(rawDate).trim()
-      if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
-        s = s.replace(' ', 'T') + 'Z'
-      } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s)) {
-        s = s + 'Z'
-      }
-      d = new Date(s)
-    }
-
-    if (isNaN(d.getTime())) return String(rawDate)
-
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Asia/Bangkok',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    }).formatToParts(d)
-
-    const map: Record<string, string> = {}
-    parts.forEach((p) => {
-      map[p.type] = p.value
-    })
-
-    return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`
-  } catch {
-    return String(rawDate)
-  }
-}
+import { BKK_LABEL, bkkDateKey, formatBkkDateTime } from '../lib/time'
 
 export const Logs: React.FC = () => {
   // Filter-first at scale: a time range narrows the search, and we never
@@ -174,7 +132,7 @@ export const Logs: React.FC = () => {
     const csvRows = [
       headers.join(','),
       ...logs.map((log) => [
-        `"${formatThaiDateTime(log.datetime)}"`,
+        `"${formatBkkDateTime(log.datetime)}"`,
         `"${log.ip}"`,
         `"${log.method}"`,
         `"${(log.url || '').replace(/"/g, '""')}"`,
@@ -186,7 +144,7 @@ export const Logs: React.FC = () => {
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
     const a = document.createElement('a')
     a.href = window.URL.createObjectURL(blob)
-    a.download = `waf_traffic_logs_${formatThaiDateTime(new Date()).slice(0, 10)}.csv`
+    a.download = `waf_traffic_logs_${bkkDateKey()}.csv`
     a.click()
     toast.success('Downloaded log records CSV')
   }
@@ -300,7 +258,7 @@ export const Logs: React.FC = () => {
               const h = Math.max(2, Math.round((b.total / histoMax) * 64))
               const bh = b.total > 0 ? Math.round((b.blocked / b.total) * h) : 0
               const d = new Date(b.bucket * 1000)
-              const label = `${d.toLocaleString('en-GB', { timeZone: 'Asia/Bangkok' })} — ${b.total} events, ${b.blocked} blocked`
+              const label = `${formatBkkDateTime(d)} — ${b.total} events, ${b.blocked} blocked`
               return (
                 <div
                   key={b.bucket}
@@ -396,7 +354,7 @@ export const Logs: React.FC = () => {
           <table className="w-full text-left text-[12px]">
             <thead className="bg-[var(--bg-primary)] border-b border-[var(--bg-border)] text-[var(--text-muted)] uppercase text-[10.5px]">
               <tr>
-                <th className="py-3 px-3.5">Timestamp (BKK)</th>
+                <th className="py-3 px-3.5">Timestamp ({BKK_LABEL})</th>
                 <th className="py-3 px-3.5">Client IP</th>
                 <th className="py-3 px-3.5">Method</th>
                 <th className="py-3 px-3.5">Target Path / URL</th>
@@ -438,7 +396,7 @@ export const Logs: React.FC = () => {
                         aria-label={`Inspect event from ${log.ip} at ${log.datetime}`}
                         className="text-left cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60"
                       >
-                        {formatThaiDateTime(log.datetime)}
+                        {formatBkkDateTime(log.datetime)}
                       </button>
                     </td>
                     <td className="py-2.5 px-3.5 font-bold text-[var(--text-primary)] whitespace-nowrap">
@@ -506,8 +464,8 @@ export const Logs: React.FC = () => {
           <div className="space-y-4 font-mono">
               <div className="grid grid-cols-2 gap-3 text-[12px]">
                 <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
-                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Timestamp (Asia/Bangkok)</span>
-                  <p className="font-bold text-[var(--text-primary)] m-0">{formatThaiDateTime(selectedLog.datetime)}</p>
+                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Timestamp ({BKK_LABEL})</span>
+                  <p className="font-bold text-[var(--text-primary)] m-0">{formatBkkDateTime(selectedLog.datetime)}</p>
                 </div>
                 <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
                   <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Client IPv4</span>

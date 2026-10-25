@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getShieldEvents } from '../api/shieldEvents'
 import { Badge } from './ui/Badge'
 import { LoadingSpinner } from './ui/LoadingSpinner'
+import { formatBkkDateTime } from '../lib/time'
 
 const RANGES = [
   { hours: 24, label: '24h' },
@@ -88,7 +89,7 @@ export const ShieldActivity: React.FC<{ originId: string }> = ({ originId }) => 
                   {data.recent.map((e, i) => (
                     <tr key={`${e.timestamp}-${i}`}>
                       <td className="font-mono text-[11.5px] whitespace-nowrap">
-                        {new Date(e.timestamp).toLocaleString()}
+                        {formatBkkDateTime(e.timestamp)}
                       </td>
                       <td>
                         <Badge color={BAD.has(e.event) ? 'danger' : e.event === 'otp_verified' ? 'success' : 'gray'}>

@@ -5,6 +5,7 @@ import logging
 import httpx
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Dict, Any, List, Optional
 
 load_dotenv()
@@ -397,9 +398,10 @@ class GeminiService:
         Parse user's natural language time request (e.g. 'สรุป 3 วันล่าสุด', 'เมื่อวานถึงเที่ยงวันนี้')
         into ISO/SQL timestamps.
         """
-        now = datetime.now()
+        # The user means Bangkok time; api/ai_summary.py reads the answer as Bangkok too.
+        now = datetime.now(ZoneInfo("Asia/Bangkok")).replace(tzinfo=None)
         prompt = (
-            f"Current local time: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"Current local time (Asia/Bangkok, UTC+7): {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"User query in Thai/English: \"{query_text}\"\n"
             "Convert this natural language query into a precise start_time and end_time range for database querying.\n"
             "If the query is not about a time range, return the last 24 hours.\n"

@@ -45,6 +45,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { CRS_VERSION } from '../lib/crsVersion'
+import { formatBkkTime } from '../lib/time'
 
 // Full English country name for an ISO alpha-2 code, from the browser's own
 // data (always complete and current) rather than a list we maintain. The API's
@@ -148,8 +149,8 @@ export const Dashboard: React.FC = () => {
 
   // Time aggregated timeline. log.datetime is a ClickHouse-sourced,
   // offset-less string ("2026-09-22 06:14:00") -- treated as UTC and
-  // rendered in Asia/Bangkok, matching formatThaiDateTime's convention in
-  // Alerts.tsx/Logs.tsx. Previously read as raw browser-local time here,
+  // rendered in Asia/Bangkok, matching lib/time.ts like every other
+  // page. Previously read as raw browser-local time here,
   // so the same event plotted up to 7 hours off from where it shows on
   // those other pages.
   // logs arrive newest-first; reverse to oldest-first so time runs
@@ -157,13 +158,7 @@ export const Dashboard: React.FC = () => {
   const chartData = [...logs]
     .reverse()
     .reduce((acc, log) => {
-      const rawDt = String(log.datetime)
-      const isoDt = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(rawDt)
-        ? rawDt.replace(' ', 'T') + 'Z'
-        : rawDt
-      const time = new Date(isoDt).toLocaleTimeString('en-GB', {
-        timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', second: '2-digit',
-      })
+      const time = formatBkkTime(log.datetime, { seconds: true })
       const existing = acc.find((d: any) => d.time === time)
       const isBlocked = log.status === 403
       const isLimited = log.status === 429

@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import uuid
 from services.gemini_service import gemini_service, clip
 from services.ai_quota import check_ai_quota
@@ -28,6 +29,22 @@ class SummarizeRangeRequest(BaseModel):
 # the query layer.
 _TIME_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d")
 
+# People type and read times in Bangkok time; ClickHouse and PostgreSQL hold
+# UTC. Bounds are converted on the way in and shown in Bangkok on the way out.
+BKK = ZoneInfo("Asia/Bangkok")
+
+
+def _to_utc_naive(local: datetime) -> datetime:
+    """A naive datetime is Bangkok wall time; the result is naive UTC."""
+    aware = local if local.tzinfo else local.replace(tzinfo=BKK)
+    return aware.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _bkk_text(utc: datetime) -> str:
+    """Naive (or aware) UTC as Bangkok wall time text."""
+    aware = utc if utc.tzinfo else utc.replace(tzinfo=timezone.utc)
+    return aware.astimezone(BKK).strftime("%Y-%m-%d %H:%M:%S")
+
 def _parse_time_bound(value: Any, field: str) -> datetime:
     """Turn a caller-supplied time bound into a real datetime.
 
@@ -35,15 +52,16 @@ def _parse_time_bound(value: Any, field: str) -> datetime:
     request body, and indirectly from whatever Gemini returns for a natural
     language range. Parsing them here means only a genuine datetime ever gets
     as far as the ClickHouse queries below, which are parameterised as well.
+    The bound is read as Bangkok time and returned as naive UTC.
     """
     if isinstance(value, datetime):
-        return value
+        return _to_utc_naive(value)
     if not isinstance(value, str) or not value.strip():
         raise HTTPException(status_code=422, detail=f"{field} must be a datetime string")
     text = value.strip()
     for fmt in _TIME_FORMATS:
         try:
-            return datetime.strptime(text, fmt)
+            return _to_utc_naive(datetime.strptime(text, fmt))
         except ValueError:
             continue
     raise HTTPException(
@@ -53,10 +71,10 @@ def _parse_time_bound(value: Any, field: str) -> datetime:
 
 def _describe_range(start_dt: datetime, end_dt: datetime) -> str:
     """The range as shown to the user and in the prompt, built from the
-    parsed datetimes only."""
+    parsed (UTC) datetimes only, in Bangkok time."""
     hours = (end_dt - start_dt).total_seconds() / 3600
     span = f"{hours:.0f} ชั่วโมง" if hours < 48 else f"{hours / 24:.0f} วัน"
-    return f"{start_dt:%Y-%m-%d %H:%M} ถึง {end_dt:%Y-%m-%d %H:%M} ({span})"
+    return f"{_bkk_text(start_dt)[:16]} ถึง {_bkk_text(end_dt)[:16]} เวลาไทย ({span})"
 
 
 @router.post("/summarize-range", dependencies=[Depends(require_verified_email("ai"))])
@@ -82,7 +100,7 @@ async def summarize_threat_range(
             start_dt = _parse_time_bound(req.start_time, "start_time")
             end_dt = _parse_time_bound(req.end_time, "end_time")
         else:
-            now = datetime.now()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             start_dt = now - timedelta(days=1)
             end_dt = now
 
@@ -92,8 +110,8 @@ async def summarize_threat_range(
 
         # Kept for the prompt and the response payload; the queries below bind
         # the datetime objects rather than these strings.
-        start_time = start_dt.strftime("%Y-%m-%d %H:%M:%S")
-        end_time = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+        start_time = _bkk_text(start_dt)
+        end_time = _bkk_text(end_dt)
         time_params = {"start": start_dt, "end": end_dt}
 
         # 1b. Tenant scope -- 2026-09-20 fix: every query below used to have
@@ -458,6 +476,32 @@ def build_incident_timeline(origin: Dict[str, Any], start_dt: datetime, end_dt: 
     }
 
 
+def _timeline_in_bangkok(timeline: Dict[str, Any], start_dt: datetime, end_dt: datetime) -> Dict[str, Any]:
+    """The timeline as people read it (and as the narrative prompt gets it):
+    every time in Bangkok. build_incident_timeline itself stays in UTC."""
+    def event(e: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            ts = datetime.fromisoformat(str(e.get("timestamp")))
+            ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+            return {**e, "timestamp": ts.astimezone(BKK).isoformat()}
+        except ValueError:
+            return e
+
+    def bucket(b: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return {**b, "hour": _bkk_text(datetime.strptime(str(b.get("hour")), "%Y-%m-%d %H:%M:%S"))}
+        except ValueError:
+            return b
+
+    return {
+        **timeline,
+        "start_time": _bkk_text(start_dt),
+        "end_time": _bkk_text(end_dt),
+        "hourly_buckets": [bucket(b) for b in timeline.get("hourly_buckets", [])],
+        "audit_events": [event(e) for e in timeline.get("audit_events", [])],
+    }
+
+
 class PostmortemCreateRequest(BaseModel):
     start_time: str
     end_time: str
@@ -477,8 +521,9 @@ async def create_postmortem(
     if start_dt > end_dt:
         raise HTTPException(status_code=422, detail="start_time must not be after end_time")
 
-    timeline = build_incident_timeline(origin, start_dt, end_dt,
-                                       include_global=_is_platform_admin(current_user))
+    timeline = _timeline_in_bangkok(
+        build_incident_timeline(origin, start_dt, end_dt, include_global=_is_platform_admin(current_user)),
+        start_dt, end_dt)
 
     narrative_result: Dict[str, Any] = {"narrative": None, "degraded": False}
     try:

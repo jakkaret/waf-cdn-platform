@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Bell, ShieldAlert, CheckCheck, Clock, Globe, Shield, Sparkles, X, ChevronRight } from 'lucide-react'
 import { aiSummaryApi, NotificationItem } from '../api/aiSummary'
 import toast from 'react-hot-toast'
+import { formatBkkTime } from '../lib/time'
 
 export const NotificationCenter: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false)
@@ -142,7 +143,7 @@ export const NotificationCenter: React.FC = () => {
                       </div>
                       <span className="text-[10px] text-[var(--text-muted)] font-mono flex items-center gap-1 shrink-0">
                         <Clock size={10} />
-                        {new Date(item.timestamp || '').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {formatBkkTime(item.timestamp)}
                       </span>
                     </div>
 

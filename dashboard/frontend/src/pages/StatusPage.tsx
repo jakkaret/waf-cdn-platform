@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { publicStatusApi, StatusComponent } from '../api/publicStatus'
 import { ThemeToggle } from '../components/ui/ThemeToggle'
 import { Shield, CheckCircle2, AlertTriangle, HelpCircle, Info } from 'lucide-react'
+import { BKK_LABEL, formatBkkDateTime } from '../lib/time'
 
 const STATUS_META: Record<StatusComponent['status'], { label: string; color: string; dot: string }> = {
   operational: { label: 'Operational', color: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
@@ -81,7 +82,7 @@ export const StatusPage: React.FC = () => {
             </div>
             {status?.checked_at && (
               <div className="text-[10.5px] text-[var(--text-muted)] font-mono">
-                Last checked: {new Date(status.checked_at).toLocaleString()}
+                Last checked: {formatBkkDateTime(status.checked_at)} ({BKK_LABEL})
               </div>
             )}
           </div>
