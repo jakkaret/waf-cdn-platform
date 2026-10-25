@@ -44,7 +44,7 @@ export const StatusPage: React.FC = () => {
               <Shield size={18} />
             </div>
             <div>
-              <h1 className="text-[16px] font-bold font-mono m-0">CloudWAF Status</h1>
+              <h1 className="text-[16px] font-bold font-mono m-0">IT KKU WAF Status</h1>
               <p className="text-[11px] text-[var(--text-muted)] font-mono m-0">
                 Live health of the WAF + CDN platform
               </p>

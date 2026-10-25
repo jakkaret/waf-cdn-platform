@@ -122,7 +122,7 @@ export const Origins: React.FC = () => {
     <div className="space-y-6 animate-fade-in">
       <TopBar
         title="Origin Server Infrastructure"
-        subtitle="Upstream web server pools protected behind the CloudWAF reverse proxy"
+        subtitle="Upstream web server pools protected behind the IT KKU WAF reverse proxy"
         badge={
           <Badge color="blue" dot>
             {isLoading ? '—' : origins.filter((o: Origin) => o.status !== 'archived').length} POOLS CONFIGURED

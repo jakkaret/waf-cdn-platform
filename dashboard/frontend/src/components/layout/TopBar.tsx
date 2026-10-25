@@ -22,7 +22,7 @@ export const TopBar: React.FC<TopBarProps> = ({ title, subtitle, badge, action }
     <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6 pb-4 border-b border-[var(--bg-border-subtle)]">
       <div className="min-w-0">
         <div className="flex items-center gap-2.5 flex-wrap">
-          <img src="/firewall.png" alt="Firewall" className="w-7 h-7 object-contain drop-shadow-md rounded-md" />
+          <img src="/itkku-logo.png" alt="IT KKU" className="w-7 h-7 object-contain" />
           <h1 className="text-[20px] font-bold text-[var(--text-primary)] tracking-tight m-0 font-mono">
             {title}
           </h1>

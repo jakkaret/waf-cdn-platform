@@ -225,14 +225,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
         {/* Brand Header */}
         <div className="h-16 px-4 flex items-center justify-between border-b border-[var(--bg-border)] bg-[var(--bg-surface)]">
           <div className="flex items-center gap-2.5">
-            <img src="/firewall.png" alt="Firewall" className="w-8 h-8 object-contain rounded-lg drop-shadow-md" />
+            <img src="/itkku-logo.png" alt="IT KKU" className="w-9 h-9 object-contain" />
             <div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[14px] font-bold text-[var(--text-primary)] tracking-tight font-mono">
-                  Firewall WAF
+                <span className="text-[15px] font-bold tracking-tight">
+                  <span className="text-[#a34830] dark:text-[#d0674a]">IT</span> <span className="text-[#89898a] dark:text-[#a3a3a4]">KKU</span>
                 </span>
                 <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-orange-500/10 text-orange-500 border border-orange-500/20 uppercase font-mono">
-                  EDGE
+                  WAF
                 </span>
               </div>
               <div className="text-[10.5px] text-[var(--text-muted)] tracking-tight flex items-center gap-1 mt-0.5">

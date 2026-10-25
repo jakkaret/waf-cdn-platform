@@ -30,7 +30,7 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
           >
             <Menu size={20} />
           </button>
-          <span className="text-[13px] font-bold font-mono text-[var(--text-primary)]">Firewall WAF</span>
+          <span className="text-[14px] font-bold"><span className="text-[#a34830] dark:text-[#d0674a]">IT</span> <span className="text-[#89898a] dark:text-[#a3a3a4]">KKU</span></span>
         </div>
         <main className="flex-1 p-5 sm:p-7 min-w-0">
           {isUnverified(user) && (
