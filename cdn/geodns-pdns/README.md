@@ -5,10 +5,16 @@ and platform subdomains (`app.`, `vampi.`, ...) match `*.waf-it-kku.online`.
 PowerDNS on both edges serves the whole `waf-it-kku.online` zone (ns1 =
 edge-th, ns2 = edge-asia) and picks the edge for each visitor:
 
-| Visitor | Answer | When that edge fails |
+| Visitor (EDNS Client Subnet, else the resolver's address) | Answer | When that edge fails |
 |---|---|---|
-| Thailand (by EDNS Client Subnet, else the resolver's address) | edge-th `45.154.26.91` | edge-asia |
-| Everyone else | edge-asia `57.158.25.236` (Azure, Hong Kong) | edge-th |
+| East Asia (HK, MO, CN, TW, JP, KR, PH) and Oceania | edge-asia `57.158.25.236` (Azure, Hong Kong) | edge-th |
+| Everyone else, Thailand and its neighbours included | edge-th `45.154.26.91` (Bangkok) | edge-asia |
+
+Why not "nearest edge": every cache miss continues to Main in Nuremberg over
+WireGuard, and edge-th is closer to Main (183 ms RTT) than edge-asia (238 ms,
+measured 2026-10-26). Visitors from Europe, Africa, the Americas and the rest
+of Asia are both far from either edge, so they get the edge with the shorter
+way on to Main; edge-asia only wins where it is much nearer the visitor.
 
 "Fails" means `http://<edge>/healthz/deep` does not answer `OK`: that URL goes
 through the edge's Caddy and nginx and on to Main over WireGuard, so an edge

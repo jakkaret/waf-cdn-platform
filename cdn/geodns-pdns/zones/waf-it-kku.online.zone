@@ -8,8 +8,14 @@
 ;
 ; Every customer CNAME points at waf-token-<id>.cdn.waf-it-kku.online, and
 ; platform subdomains (app., vampi., ...) hit the "*" record: both go through
-; the GeoDNS rule below. Visitors in Thailand (EDNS Client Subnet, else the
-; resolver's address) get edge-th, everyone else edge-asia (Hong Kong).
+; the GeoDNS rule below (EDNS Client Subnet when the resolver sends it, else
+; the resolver's own address):
+;   East Asia (HK, MO, CN, TW, JP, KR, PH) and Oceania  -> edge-asia (Hong Kong)
+;   everyone else, Thailand and its neighbours included  -> edge-th (Bangkok)
+; Every cache miss goes on to Main in Nuremberg over WireGuard, and edge-th is
+; closer to it (183 ms RTT) than edge-asia (238 ms, measured 2026-10-26), so
+; Europe, Africa, the Americas and the rest of Asia are better off on edge-th;
+; edge-asia only wins where it is much nearer the visitor.
 ; ifurlup() checks /healthz/deep on each edge -- the edge AND its WireGuard
 ; path to Main -- in the background; an edge that fails drops out and the other
 ; set answers. Both failing: both addresses are returned.
@@ -18,7 +24,7 @@
 $ORIGIN waf-it-kku.online.
 $TTL 3600
 @           3600 IN SOA ns1.waf-it-kku.online. hostmaster.waf-it-kku.online. (
-                2026102602 ; serial
+                2026102603 ; serial
                 3600       ; refresh
                 600        ; retry
                 604800     ; expire
@@ -36,6 +42,6 @@ main        3600 IN A   178.104.53.123
 ns-geodns   3600 IN A   178.104.53.123
 
 ; CDN edges, chosen per visitor
-cdn           60 IN LUA A ";if country('TH') then return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'45.154.26.91'}, {'57.158.25.236'}}, {stringmatch='OK'}) else return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'57.158.25.236'}, {'45.154.26.91'}}, {stringmatch='OK'}) end"
-*.cdn         60 IN LUA A ";if country('TH') then return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'45.154.26.91'}, {'57.158.25.236'}}, {stringmatch='OK'}) else return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'57.158.25.236'}, {'45.154.26.91'}}, {stringmatch='OK'}) end"
-*             60 IN LUA A ";if country('TH') then return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'45.154.26.91'}, {'57.158.25.236'}}, {stringmatch='OK'}) else return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'57.158.25.236'}, {'45.154.26.91'}}, {stringmatch='OK'}) end"
+cdn           60 IN LUA A ";if country({'HK','MO','CN','TW','JP','KR','PH'}) or continent('OC') then return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'57.158.25.236'}, {'45.154.26.91'}}, {stringmatch='OK'}) else return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'45.154.26.91'}, {'57.158.25.236'}}, {stringmatch='OK'}) end"
+*.cdn         60 IN LUA A ";if country({'HK','MO','CN','TW','JP','KR','PH'}) or continent('OC') then return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'57.158.25.236'}, {'45.154.26.91'}}, {stringmatch='OK'}) else return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'45.154.26.91'}, {'57.158.25.236'}}, {stringmatch='OK'}) end"
+*             60 IN LUA A ";if country({'HK','MO','CN','TW','JP','KR','PH'}) or continent('OC') then return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'57.158.25.236'}, {'45.154.26.91'}}, {stringmatch='OK'}) else return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'45.154.26.91'}, {'57.158.25.236'}}, {stringmatch='OK'}) end"
