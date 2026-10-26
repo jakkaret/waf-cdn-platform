@@ -88,6 +88,11 @@ def _redact_query(uri: str) -> tuple[str, str]:
     return parts.path[:2048] or "/", "&".join(pairs)[:4096]
 
 
+def redacted_uri(uri: str) -> tuple[str, str]:
+    """(path, query with sensitive values redacted), as capture records store them."""
+    return _redact_query(uri)
+
+
 def _redacted_preview(raw_body: bytes, content_type: str) -> str | None:
     if not raw_body:
         return None

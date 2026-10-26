@@ -11,7 +11,9 @@ from pydantic import BaseModel
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from ml.feature_engineering import extract_features_from_request
-from ml.capture_telemetry import capture_request
+from fastapi.concurrency import run_in_threadpool
+
+from ml.capture_telemetry import capture_request, redacted_uri
 from ml.auto_rule_generator import generate_pending_rule
 from ml.attribution import format_attribution
 from ml.onnx_inference import OnnxWafInference
@@ -55,6 +57,13 @@ GEN3_ONNX_PATH = os.environ.get("WAF_GEN3_ONNX_PATH", os.path.join(MODELS_DIR, "
 # since 2026-10-13) or "rf" (13-feature RandomForest ONNX, retired). Shadow only while
 # ml_enforcement_enabled is off; without a Gen 3 model the hook answers "unavailable".
 FAST_ENGINE = os.environ.get("WAF_FAST_ENGINE", "gen3").strip().lower()
+# ML Insights: /capture (nginx mirror, all hosts) scores every request with Gen 3
+# and answers the verdict. "off" stops the scoring; lab telemetry is unaffected.
+CAPTURE_SCORING = os.environ.get("WAF_CAPTURE_SCORING", "on").strip().lower() not in {"0", "off", "false", "no"}
+# Same body budget as the lab capture (64 KB): enough for any form or JSON payload.
+CAPTURE_SCORE_MAX_BODY = 64 * 1024
+# Detectors are listed only for requests scoring at least this, where they explain something.
+CAPTURE_DETECTOR_FLOOR = 0.5
 # Shared secret for a remote ML host (deploy/azure-ml). Unset = no check, which
 # is only allowed while the API is reachable from loopback alone (H51).
 API_TOKEN = os.environ.get("WAF_ML_API_TOKEN", "")
@@ -287,22 +296,75 @@ def predict_gen3(req: PredictionRequest):
     return result
 
 
+def score_captured(*, host: str, method: str, uri: str, request_id: str, body: bytes) -> dict | None:
+    """Gen 3 verdict for one mirrored request (ML Insights), or None when there is none.
+
+    Every host is scored, not only the lab allowlist of capture_request: the
+    verdict holds the score, the detectors and the redacted path/query, never the
+    body. Shadow only, like /predict-gen3: nothing here blocks a request.
+    """
+    if gen3_model is None or not CAPTURE_SCORING:
+        return None
+    method = (method or "GET").upper()[:16]
+    text = (body or b"")[:CAPTURE_SCORE_MAX_BODY].decode("utf-8", errors="replace")
+    result = gen3_model.predict(method=method, url=uri or "/", body=text)
+    detectors = []
+    if result["attack_probability"] >= CAPTURE_DETECTOR_FLOOR:
+        try:
+            from ml.rule_proposal import describe_detectors
+            detectors = [d["detector"] for d in describe_detectors(method, uri or "/", text)]
+        except Exception as exc:
+            print(f"[!] Gen 3 detectors unavailable for capture: {type(exc).__name__}: {exc}")
+    path, query = redacted_uri(uri or "/")
+    return {
+        "request_id": (request_id or "")[:128],
+        "host": (host or "")[:255],
+        "method": method,
+        "path": path,
+        "query": query,
+        "score": result["attack_probability"],
+        "threshold": result["threshold"],
+        "is_attack": bool(result["is_attack"]),
+        "detectors": detectors,
+        "body_length": len(body or b""),
+        "feature_set": result["feature_set"],
+    }
+
+
 @app.post("/capture", include_in_schema=False)
 async def capture_telemetry_endpoint(request: Request):
-    """Internal, fail-open capture endpoint for allowlisted lab hosts only."""
+    """Internal, fail-open capture endpoint: lab telemetry for allowlisted hosts,
+    plus the Gen 3 verdict of every mirrored request (200 with the verdict; 204
+    when there is none). The response never carries the request body."""
     try:
         body = await request.body()
+    except Exception as exc:
+        print(f"[!] Capture body unreadable, failing open: {exc}")
+        return Response(status_code=204)
+    host = request.headers.get("x-original-host", request.headers.get("host", ""))
+    method = request.headers.get("x-original-method", "GET")
+    uri = request.headers.get("x-original-uri", "/")
+    request_id = request.headers.get("x-original-request-id", "")
+    try:
         capture_request(
-            host=request.headers.get("x-original-host", request.headers.get("host", "")),
-            method=request.headers.get("x-original-method", "GET"),
-            uri=request.headers.get("x-original-uri", "/"),
-            request_id=request.headers.get("x-original-request-id", ""),
+            host=host,
+            method=method,
+            uri=uri,
+            request_id=request_id,
             content_type=request.headers.get("content-type", ""),
             body=body,
         )
     except Exception as exc:
         print(f"[!] Telemetry capture failed, failing open: {exc}")
-    return Response(status_code=204)
+    try:
+        # Scoring is CPU work: off the event loop so it cannot stall other calls.
+        verdict = await run_in_threadpool(
+            score_captured, host=host, method=method, uri=uri, request_id=request_id, body=body
+        )
+    except Exception as exc:
+        print(f"[!] Capture scoring failed, failing open: {type(exc).__name__}: {exc}")
+        verdict = None
+    return JSONResponse(verdict) if verdict else Response(status_code=204)
 
 @app.post("/predict")
 def predict_anomaly(req: PredictionRequest):
