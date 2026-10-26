@@ -1,33 +1,9 @@
-"""H13: purge is honestly unavailable (501) until the edges have a purge
-endpoint; the dead cdn/purge-api service is gone."""
+"""H13: the dead cdn/purge-api service stays gone. Purge itself now works
+through the edges' rulesync (services/cdn_purge.py, tests/test_cdn_purge.py);
+until 2026-10-26 the endpoint answered 501."""
 import pathlib
 
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from api import auth as auth_module, cdn as cdn_module
-from services.rate_limiter import limiter
-
 REPO = pathlib.Path(__file__).resolve().parents[3]
-
-
-@pytest.fixture()
-def client() -> TestClient:
-    a = FastAPI()
-    a.state.limiter = limiter
-    a.include_router(auth_module.router)
-    a.include_router(cdn_module.router)
-    return TestClient(a)
-
-
-def test_purge_returns_501_for_admin(client, register_user):
-    admin = register_user(email="purge-admin@example.com", username="purge_admin")
-    client.cookies.clear()
-    r = client.post("/api/cdn/purge", params={"url": "/x"},
-                    headers={"Authorization": f"Bearer {admin['access_token']}"})
-    assert r.status_code == 501
-    assert "not available" in r.json()["detail"]
 
 
 def test_purge_api_service_removed():

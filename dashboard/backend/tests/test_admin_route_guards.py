@@ -31,7 +31,6 @@ ADMIN_ONLY = [
     ("PUT", "/api/rules/abc"),
     ("DELETE", "/api/rules/abc"),
     ("POST", "/api/rules/sync"),
-    ("POST", "/api/cdn/purge"),
     ("POST", "/api/threshold-proposals/generate"),
     ("POST", "/api/threshold-proposals/abc/approve"),
     ("POST", "/api/threshold-proposals/abc/reject"),

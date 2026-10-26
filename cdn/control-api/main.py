@@ -5,6 +5,7 @@ import io
 import ipaddress
 import json
 import os
+import re
 import sqlite3
 import tarfile
 import threading
@@ -14,6 +15,7 @@ from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from captcha_engine import captcha_access, issue_challenge, verify_challenge, ChallengeVerifyRequest
+from captcha_engine import _redis as shared_redis
 from otp_engine import otp_access, shield_access, issue_challenge_page, issue_ml_challenge, request_code, verify_code, OtpRequestPayload, OtpVerifyPayload
 
 # 2026-09-22 (overnight session): this service is bound 0.0.0.0:8070 (see
@@ -289,6 +291,57 @@ def remove_block(ip: str, x_control_token: str = Header(default="")) -> dict:
         conn.close()
 
     return {"status": "ok", "ip": ip}
+
+
+# Edge cache purge queue, written by the dashboard
+# (dashboard/backend/services/cdn_purge.py -- same keys and line format).
+PURGE_SEQ_KEY = "cdn:purge:seq"
+PURGE_JOBS_KEY = "cdn:purge:jobs"
+PURGE_ACKS_KEY = "cdn:purge:acks"
+PURGE_BATCH = 500
+_PURGE_HOST_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
+
+
+def purge_signature(body: bytes, key: str = None) -> str:
+    key = BUNDLE_SIGNING_KEY if key is None else key
+    message = f"purge:{hashlib.sha256(body).hexdigest()}".encode()
+    return hmac.new(key.encode(), message, hashlib.sha256).hexdigest()
+
+
+def _purge_line_ok(line: str) -> bool:
+    parts = line.split("\t")
+    if len(parts) != 3 or not parts[0].isdigit() or not _PURGE_HOST_RE.match(parts[1]):
+        return False
+    path = parts[2]
+    return path.startswith("/") and len(path) <= 2048 and all(0x20 < ord(c) != 0x7F for c in path)
+
+
+@app.get("/api/sync/purges")
+def get_purges(request: Request, after: int = 0) -> Response:
+    """Purge jobs newer than `after` (the last one this edge applied), as
+    "latest\t<id>" followed by "<id>\t<host>\t<path>" lines, signed like the
+    rule bundle. The call also records how far this edge has got, which the
+    dashboard shows per edge."""
+    _require_edge_source(request)
+    if not BUNDLE_SIGNING_KEY:
+        raise HTTPException(status_code=503, detail="Bundle signing key is not configured")
+    r = shared_redis()
+    if r is None:
+        raise HTTPException(status_code=503, detail="Purge queue unavailable")
+    after = max(0, int(after))
+    latest = int(r.get(PURGE_SEQ_KEY) or 0)
+    jobs = r.zrangebyscore(PURGE_JOBS_KEY, after + 1, "+inf", start=0, num=PURGE_BATCH)
+    if len(jobs) == PURGE_BATCH:
+        # More than one batch behind: hand out this batch, the rest next time.
+        latest = int(jobs[-1].split("\t", 1)[0])
+    lines = [j for j in jobs if _purge_line_ok(j)]
+    body = (f"latest\t{latest}\n" + "".join(f"{j}\n" for j in lines)).encode()
+    edge = request.client.host if request.client else ""
+    r.hset(PURGE_ACKS_KEY, edge, f"{min(after, latest)}:{int(time.time())}")
+    return Response(content=body, media_type="text/plain", headers={
+        "X-Purge-Signature": purge_signature(body),
+        "Cache-Control": "no-store",
+    })
 
 
 @app.get("/api/sync/bundle")

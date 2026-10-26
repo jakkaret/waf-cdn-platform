@@ -10,7 +10,7 @@ status: VERIFIED
 
 Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/api/system/*`, ไฟล์ static) อยู่นอกขอบเขตของไฟล์นี้
 
-พบทั้งหมด **171 endpoints** ใน **29 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 30 รายการ
+พบทั้งหมด **172 endpoints** ใน **29 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 30 รายการ
 
 ## `api/ai_summary.py`
 
@@ -84,7 +84,8 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 | GET | `/api/cdn/logs` | `cdn_logs` | viewer+ |  |
 | POST | `/api/cdn/logs/ingest` | `ingest_cdn_logs` | public |  |
 | GET | `/api/cdn/nodes` | `cdn_nodes` | viewer+ | Check live operational health status of configured CDN POPs |
-| POST | `/api/cdn/purge` | `cdn_purge` | admin |  |
+| POST | `/api/cdn/purge` | `cdn_purge` | login | Queue a cache purge for one of the caller's sites. Every edge picks it |
+| GET | `/api/cdn/purge/{job_id}` | `cdn_purge_status` | login | Which edges have applied purge `job_id` (edges poll every few seconds). |
 | GET | `/api/cdn/stats` | `cdn_stats` | viewer+ | Aggregate real-time CDN stats from ClickHouse, strictly isolated per tenant. |
 
 ## `api/copilot.py`

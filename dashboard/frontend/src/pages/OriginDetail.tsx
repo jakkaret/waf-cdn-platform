@@ -20,6 +20,7 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ConnectSiteFlow } from '../components/ConnectSiteFlow'
 import { OriginTarget } from '../components/OriginTarget'
+import { PurgeCache } from '../components/PurgeCache'
 import { DomainStatusCard } from '../components/DomainStatusCard'
 import { Modal } from '../components/ui/Modal'
 import { OriginWafRules } from '../components/OriginWafRules'
@@ -673,6 +674,13 @@ export const OriginDetail: React.FC = () => {
                   <span className="font-bold text-[var(--text-primary)]">{domains.length} Domain(s)</span>
                 </div>
               </div>
+            </div>
+
+            <div className="md:col-span-2">
+              <PurgeCache
+                domains={domains.filter((d: Domain) => d.verification_status === 'verified').map((d: Domain) => d.domain_name)}
+                canEdit={isAdmin}
+              />
             </div>
 
             {isAdmin && (

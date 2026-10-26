@@ -38,7 +38,6 @@ import {
 export const CDN: React.FC = () => {
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin'
-  const [purgePattern, setPurgePattern] = useState('/*')
   const { theme } = useThemeStore()
 
   const { data: nodes = [], isLoading: isLoadingNodes } = useQuery({
@@ -95,7 +94,9 @@ export const CDN: React.FC = () => {
   }
   const thNodeEntry = safeNodes.find((n) => n.region === 'TH')
   const thHealth = thNodeEntry ? nodeHealth(thNodeEntry) : thEdgeLatency?.online ? 'healthy' : 'offline'
-  const operationalPops = safeNodes.filter((n) => nodeHealth(n) === 'healthy').length
+  // MAIN is the WAF core, not an edge: visitors reach only TH and ASIA (GeoDNS).
+  const edgeNodes = safeNodes.filter((n) => n.region !== 'MAIN')
+  const operationalEdges = edgeNodes.filter((n) => nodeHealth(n) === 'healthy').length
   const mainNodeLatencyMs = safeNodes.find((n) => n.region === 'MAIN')?.latency_ms ?? null
 
   // Calculations
@@ -130,10 +131,10 @@ export const CDN: React.FC = () => {
     <div className="space-y-6 animate-fade-in">
       <TopBar
         title="CDN Edge Mesh & Cache Telemetry"
-        subtitle="Global Anycast edge nodes, caching efficiency, and response latency"
+        subtitle="GeoDNS edge nodes (Thailand, Hong Kong), caching efficiency, and response latency"
         badge={
           <Badge color={isLoadingNodes ? 'gray' : 'success'} dot pulse={!isLoadingNodes}>
-            {isLoadingNodes ? 'CHECKING POPS...' : `${operationalPops} POPS OPERATIONAL`}
+            {isLoadingNodes ? 'CHECKING EDGES...' : `${operationalEdges}/${edgeNodes.length} EDGES ONLINE`}
           </Badge>
         }
       />
@@ -159,7 +160,7 @@ export const CDN: React.FC = () => {
           value={`${avgLatency} ms`}
           color="cyan"
           icon={<Activity size={16} />}
-          sub="Across Configured POPs"
+          sub="Across edges and the WAF core"
         />
         <StatCard
           label="Blocked at Edge"
@@ -177,7 +178,7 @@ export const CDN: React.FC = () => {
           <div className="dash-card-header">
             <div className="flex items-center gap-2">
               <Server size={16} className="text-orange-500" />
-              <h3>Anycast Edge POPs</h3>
+              <h3>Edge Nodes (GeoDNS)</h3>
             </div>
             <span className="text-[11px] font-mono text-[var(--text-muted)]">Active Nodes</span>
           </div>
@@ -195,7 +196,7 @@ export const CDN: React.FC = () => {
               safeNodes.map((node) => {
                 const health = nodeHealth(node)
                 const port = node.port || 443
-                const latency = node.latency_ms ? `${node.latency_ms} ms Latency` : 'Anycast Direct'
+                const latency = node.latency_ms ? `${node.latency_ms} ms Latency` : 'No latency sample'
 
                 return (
                   <div
@@ -317,7 +318,7 @@ export const CDN: React.FC = () => {
             <Clock size={16} className="text-orange-500" />
             <h3>Edge POP Latency Acceleration (ms)</h3>
           </div>
-          <span className="text-[11px] font-mono text-[var(--text-muted)]">Edge Anycast vs Direct Origin</span>
+          <span className="text-[11px] font-mono text-[var(--text-muted)]">Edge vs Direct Origin</span>
         </div>
 
         <div className="p-4 sm:p-5 grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -390,43 +391,15 @@ export const CDN: React.FC = () => {
         </div>
       </div>
 
-      {/* Admin Cache Purge Control */}
-      {isAdmin && (
-        <div className="dash-card p-4 sm:p-5 border-l-2 border-l-amber-500 bg-gradient-to-r from-amber-500/[0.04] to-transparent">
-          <div className="flex items-center gap-2 mb-2">
-            <Trash2 size={16} className="text-amber-500" />
-            <h3 className="text-[13.5px] font-bold text-[var(--text-primary)] font-mono m-0">
-              Edge Cache Invalidation & Purge
-            </h3>
-          </div>
-          <p className="text-[12px] text-[var(--text-secondary)] mb-1">
-            Evict cached HTML, static assets, and API responses instantly across all global edge nodes.
-          </p>
-          {/* Kept visible on purpose but disabled: the production edges have no purge endpoint yet (audit H13). */}
-          <p role="note" data-testid="purge-not-available" className="text-[12px] font-semibold text-amber-500 mb-3">
-            ยังใช้งานไม่ได้จริง: edge ที่ใช้งานอยู่ยังไม่มีระบบล้าง cache ปุ่มนี้จึงปิดไว้ก่อน
-          </p>
-
-          <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center max-w-xl">
-            <input
-              type="text"
-              className="flex-1 dash-input font-mono text-[12px]"
-              placeholder="Path to purge (e.g. /* or /api/v1/*)"
-              value={purgePattern}
-              onChange={(e) => setPurgePattern(e.target.value)}
-              disabled
-            />
-            <Button
-              variant="brand"
-              icon={<Trash2 size={14} />}
-              disabled
-              title="ยังใช้งานไม่ได้จริง"
-            >
-              Purge Cache
-            </Button>
-          </div>
+      <div className="dash-card p-4 sm:p-5 border-l-2 border-l-amber-500">
+        <div className="flex items-center gap-2 mb-1.5">
+          <Trash2 size={16} className="text-amber-500" aria-hidden="true" />
+          <h3 className="text-[13.5px] font-bold text-[var(--text-primary)] font-mono m-0">Edge Cache Purge</h3>
         </div>
-      )}
+        <p className="text-[12px] text-[var(--text-secondary)] m-0">
+          ล้าง cache ของเว็บได้ที่หน้า origin ของเว็บนั้น (แท็บ Overview, การ์ด Edge Cache Purge) คำสั่งจะไปถึงทุก edge ภายในไม่กี่วินาที
+        </p>
+      </div>
     </div>
   )
 }

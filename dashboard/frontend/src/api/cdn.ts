@@ -28,12 +28,16 @@ export const cdnApi = {
     return res.data.logs
   },
 
-  // The backend holds the purge token and attaches it upstream itself, so the
-  // caller only supplies what to purge. It reads url/region as query params.
-  purgeCache: async (url_pattern: string = '/*', region: string = 'ALL') => {
-    const res = await api.post('/cdn/purge', null, {
-      params: { url: url_pattern, region },
-    })
+  // Queues a purge of one of the caller's verified sites; every edge applies
+  // it within a few seconds (services/cdn_purge.py). path: "/page" exact,
+  // "/static/*" prefix, "/*" whole site.
+  purgeCache: async (host: string, path: string = '/*') => {
+    const res = await api.post<{ job_id: number; host: string; path: string }>('/cdn/purge', { host, path })
+    return res.data
+  },
+
+  getPurgeStatus: async (jobId: number) => {
+    const res = await api.get<{ job_id: number; edges: Record<string, PurgeEdgeStatus> }>(`/cdn/purge/${jobId}`)
     return res.data
   },
 
@@ -56,4 +60,12 @@ export const cdnApi = {
     })
     return res.data
   }
+}
+
+// One edge's progress on a purge job: applied it, and whether it is polling
+// control-api at all (an edge that is down applies the job when it is back).
+export interface PurgeEdgeStatus {
+  applied: boolean
+  last_poll: number | null
+  polling: boolean
 }

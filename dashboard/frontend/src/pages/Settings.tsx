@@ -658,7 +658,7 @@ export const Settings: React.FC = () => {
               <div className="flex items-center justify-between">
                 <span className="text-[var(--text-muted)]">Edge Auto-Purge:</span>
                 <span className="text-[var(--text-primary)]">
-                  {form.auto_purge_edge_cache ? 'Enabled' : 'Disabled'}
+                  {form.auto_purge_edge_cache ? 'On (not applied yet)' : 'Off'}
                 </span>
               </div>
             </div>

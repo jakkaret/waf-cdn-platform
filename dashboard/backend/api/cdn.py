@@ -10,7 +10,9 @@ from pydantic import BaseModel
 import json as _json
 import pathlib as _pathlib
 
-from services.rbac import require_viewer_or_above, require_admin
+from services.rbac import require_viewer_or_above, get_current_user, verify_origin_edit_access
+from services import audit_log, cdn_purge as purge_queue
+from services.rate_limiter import limiter
 from services.clickhouse_service import ClickHouseService
 from services.log_normalize import normalize_cdn_access
 from services.telegram_listener import record_alert
@@ -26,7 +28,6 @@ ch = ClickHouseService()
 _CDN_NODES_CACHE: Tuple[float, List[Dict[str, Any]]] = (0.0, [])
 CDN_CACHE_TTL = 5.0
 
-PURGE_NOT_AVAILABLE = "Edge cache purge is not available yet: the production edges have no purge endpoint."
 
 # Configured POPs (Thailand Edge POP + Asia Edge POP + Central Core)
 REGIONS_META = {
@@ -343,17 +344,53 @@ async def cdn_latency(
         return results
 
 
+class PurgeRequest(BaseModel):
+    host: str
+    # "/page" (exact), "/static/*" (prefix) or "/*" / empty (whole site)
+    path: Optional[str] = "/*"
+
+
 @router.post("/purge")
-async def cdn_purge(
-    url: str = Query(..., description="URL or URI to purge"),
-    region: Optional[str] = Query("ALL", description="SG/JP/TH/ALL"),
-    current_user: dict = Depends(require_admin),
-):
-    # Not available yet (audit H13). The old cdn/purge-api only served the
-    # local SG/JP/TH simulation, computed a cache key the edges do not use and
-    # was never deployed, so it was removed. The production edges have no
-    # purge endpoint yet; say so instead of failing with a 500/502.
-    raise HTTPException(status_code=501, detail=PURGE_NOT_AVAILABLE)
+@limiter.limit("30/minute")
+async def cdn_purge(request: _Request, payload: PurgeRequest, current_user: dict = Depends(get_current_user)):
+    """Queue a cache purge for one of the caller's sites. Every edge picks it
+    up within a few seconds (services/cdn_purge.py); GET /purge/{job_id}
+    shows which edges have applied it. Owner/Editor of the site's origin
+    (or support with an edit grant), like any other change to the site."""
+    try:
+        host = purge_queue.normalize_host(payload.host)
+        path = purge_queue.normalize_path(payload.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    from services.dynamodb_service import DynamoDBService
+    domain = await asyncio.to_thread(DynamoDBService().get_verified_domain, host)
+    if not domain:
+        raise HTTPException(status_code=404, detail="No verified domain with this name")
+    origin = verify_origin_edit_access(domain["origin_id"], current_user)
+    try:
+        job_id = await asyncio.to_thread(purge_queue.enqueue, host, path)
+    except Exception as e:
+        logger.error("cdn purge enqueue failed: %s", e)
+        raise HTTPException(status_code=503, detail="Purge queue is unavailable, try again shortly")
+    audit_log.write_audit_event(
+        scope_id=str(origin.get("id")),
+        actor_user_id=current_user.get("user_id"),
+        actor_username=current_user.get("username", ""),
+        action="cdn.purge",
+        summary=f"ล้าง cache ที่ edge: {host}{path}",
+        details={"host": host, "path": path, "job_id": job_id},
+    )
+    return {"job_id": job_id, "host": host, "path": path}
+
+
+@router.get("/purge/{job_id}")
+async def cdn_purge_status(job_id: int, current_user: dict = Depends(get_current_user)):
+    """Which edges have applied purge `job_id` (edges poll every few seconds)."""
+    try:
+        edges = await asyncio.to_thread(purge_queue.status, job_id)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Purge queue is unavailable, try again shortly")
+    return {"job_id": job_id, "edges": edges}
 
 
 @router.get("/logs")
