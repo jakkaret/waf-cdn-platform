@@ -46,7 +46,6 @@ Logs (ClickHouse access_logs.host) · Alerts (waf_alerts_v2 partition = origin_i
 | Tunnel | token ต่อ origin (hash เก็บใน origin) |
 | Custom WAF rule | **ใช้ร่วมกันทั้งระบบ** — ไฟล์ใน `modsecurity/custom-rules` มีผลกับทุกโดเมน สร้าง/แก้ได้เฉพาะ admin |
 | Captcha / OTP shield | ตั้งค่าต่อ origin |
-| Threat intel | เก็บเฉพาะรูปแบบ (pattern) แบบไม่ระบุตัวตน และต้อง opt-in |
 
 ## 12.5 ข้อจำกัดที่พบ
 

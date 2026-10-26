@@ -74,7 +74,6 @@ def test_a_blocked_request_is_stored_but_never_pushed_or_sent_to_ai(monkeypatch)
     fake_db.put_alert.side_effect = stored.append
     monkeypatch.setattr(tl, "db", fake_db)
     monkeypatch.setattr(tl, "BOT_TOKEN", "test-token")
-    monkeypatch.setattr(tl.threat_intel, "record_pattern_hit_for_domain", lambda *a: None)
     monkeypatch.setattr(tl, "invalidate_alerts_cache", lambda: None)
     monkeypatch.setattr(tl.httpx, "AsyncClient", lambda **kw: FakeClient())
     from services.gemini_service import gemini_service

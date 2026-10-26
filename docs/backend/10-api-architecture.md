@@ -31,7 +31,6 @@ status: VERIFIED
 | `/api/tunnels`, `/api/tunnel` | 2 ไฟล์ | 5 + 3 | สร้าง/ดู tunnel, hook ของ frps, ยืนยัน agent |
 | `/api/settings` | `api/settings.py` | 3 | ตั้งค่า WAF (paranoia, threshold) |
 | `/api/ai`, `/api/copilot` | 2 ไฟล์ | 6 + 1 | สรุปด้วย AI, notification feed, postmortem, copilot |
-| `/api/threat-intel` | `api/threat_intel.py` | 2 | รูปแบบการโจมตีข้ามลูกค้า |
 | `/api/status` | `api/public_status.py` | 2 | สถานะสาธารณะ |
 | `/api/onboarding` | `api/onboarding.py` | 1 | สถานะขั้นตอนเริ่มต้นใช้งาน |
 | `/api/deception` | `api/deception.py` | 3 | `respond` (ภายใน), `templates`, `simulate` (admin) |

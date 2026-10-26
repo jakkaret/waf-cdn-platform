@@ -273,7 +273,6 @@ app.include_router(alerts.router)
 app.include_router(cdn.router)
 from api import ml, ml_rules, analytics, origins, domains, ip_rules, rate_limits, settings, ai_summary, tunnels, copilot, threshold_proposals
 from api import tunnel as tunnel_api
-from api import threat_intel as threat_intel_api
 from api import public_status as public_status_api
 from api import onboarding as onboarding_api
 from api import deception as deception_api
@@ -299,7 +298,6 @@ app.include_router(quick_tunnels_api.router)
 app.include_router(tunnel_api.router)
 app.include_router(copilot.router)
 app.include_router(threshold_proposals.router)
-app.include_router(threat_intel_api.router)
 app.include_router(public_status_api.router)
 app.include_router(onboarding_api.router)
 app.include_router(deception_api.router)

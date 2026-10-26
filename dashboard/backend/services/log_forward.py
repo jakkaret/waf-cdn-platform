@@ -275,14 +275,14 @@ def normalize_modsec(data):
         "client_port": tx.get("client_port"),
         "server_ip": tx.get("host_ip"),
 
-        # 2026-09-21: added for services/threat_intel.py's domain->owner
-        # attribution. ModSecurity's audit log always carries the real Host
-        # header (confirmed live: a real event showed
-        # "installverify.waf-it-kku.online" here) -- nginx's own JSON access
-        # log (normalize_access() below) does not log $host at all, so an
-        # attack that never triggers a ModSecurity rule (e.g. a raw nginx
-        # rate-limit 429) has no host to attribute here and is silently
-        # skipped by that module rather than guessed at.
+        # 2026-09-21: added for domain->owner attribution (its first user,
+        # the threat intel feature, was removed 2026-10-26). ModSecurity's
+        # audit log always carries the real Host header (confirmed live: a
+        # real event showed "installverify.waf-it-kku.online" here) -- nginx's
+        # own JSON access log (normalize_access() below) does not log $host
+        # at all, so an attack that never triggers a ModSecurity rule (e.g. a
+        # raw nginx rate-limit 429) has no host to attribute here rather than
+        # a guessed one.
         # Host only: X-Forwarded-Host is set by the visitor, and this column
         # decides which tenant sees the row (re-audit 2026-10-17).
         "host": headers.get("Host") or headers.get("host"),

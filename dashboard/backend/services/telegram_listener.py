@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
 from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
-from services import threat_intel
 
 load_dotenv()
 
@@ -182,21 +181,6 @@ async def record_alert(data: dict):
             invalidate_alerts_cache()
         except Exception as err:
             logger.error("Error saving alert to DynamoDB: %s", err)
-
-        # Cross-tenant threat intel (opt-in, pattern-only -- see
-        # services/threat_intel.py's module docstring for the full design).
-        # This is *this* async task, already a fire-and-forget
-        # asyncio.create_task() from every caller -- adds no latency to the
-        # WAF's actual block response. Never raises: a missing host or a
-        # DynamoDB hiccup here must never take down the alert store.
-        host = data.get("host")
-        if host:
-            try:
-                await asyncio.to_thread(
-                    threat_intel.record_pattern_hit_for_domain, host, rule_id, attack_type
-                )
-            except Exception as e:
-                logger.warning("threat_intel pattern recording failed for %s: %s", host, e)
 
     except Exception as e:
         logger.error("record_alert failed: %s", e)

@@ -27,7 +27,6 @@ status: PARTIAL
 | Multi-tenancy | ข้อมูล log/alert/origin แยกตามเจ้าของ, สิทธิ์ owner/editor/viewer ต่อ origin | 12 | VERIFIED |
 | Authentication | อีเมล/รหัสผ่าน (Argon2) + Google OAuth, JWT | 11 | VERIFIED |
 | IP access list / rate limit | กฎ IP และ rate limit ต่อ path (SQLite + nginx `auth_request`) | 43 | VERIFIED (โค้ด) |
-| Threat intel ข้ามลูกค้า | บันทึกรูปแบบการโจมตีแบบไม่ระบุตัวตน (opt-in) | 15 | VERIFIED (โค้ด) |
 | Public status page | `/status` แสดงสถานะ edge | 30 | VERIFIED |
 | GeoDNS | เลือก edge ตามประเทศของผู้ใช้ | 22 | PARTIAL — ไม่ได้อยู่ในเส้นทาง DNS สาธารณะ |
 
@@ -37,6 +36,7 @@ status: PARTIAL
 - ระบบสำรองของเครื่อง Main (HA / failover)
 - การบล็อกอัตโนมัติจากผล ML โดยไม่ผ่านการอนุมัติ
 - การป้องกัน BOLA/IDOR ให้เว็บของลูกค้า (เคยมีโมดูลทดลองแต่ไม่ได้อยู่ในเส้นทาง request จึงลบออกเมื่อ 2026-10-21 ต้องแก้ในโค้ดของแอปลูกค้า)
+- Threat intel ข้ามลูกค้า (แชร์ pattern การโจมตีแบบ opt-in) ลบออกเมื่อ 2026-10-26 เพราะไม่ได้ใช้งาน ตาราง `threat_patterns` และคอลัมน์ `users.share_threat_intel` ยังอยู่ในฐานข้อมูลแต่ไม่มีโค้ดเขียนหรืออ่านแล้ว
 
 ## แหล่งอ้างอิง (Evidence)
 - `dashboard/frontend/src/App.tsx`, `components/layout/Sidebar.tsx`

@@ -9,9 +9,6 @@ export interface User {
   auth_provider: 'local' | 'google' | 'telegram'
   created_at: string
   last_login: string
-  // Cross-tenant threat intel opt-in (services/threat_intel.py) -- per-user,
-  // read fresh server-side on every share/read, never cached client-side.
-  share_threat_intel?: boolean
   // Confirmed the emailed code (or signed up with Google). Until then adding
   // sites, team invitations, agent tokens and AI are refused (lib/emailGate.ts).
   email_verified?: boolean

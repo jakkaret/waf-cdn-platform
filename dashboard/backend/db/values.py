@@ -4,7 +4,6 @@ used with DynamoDB/SQLite. Each table keeps the timestamp format it had:
     iso_z_us     isoformat()+'Z' with microseconds  users, alerts, origins, domains
     iso_z_s      '%Y-%m-%dT%H:%M:%SZ'                pending_rules, threshold_proposals
     iso_offset   isoformat() '+00:00'               audit_logs, ssl_certificates,
-                                                    threat_patterns.updated_at,
                                                     postmortems.created_at
     naive_utc    '%Y-%m-%d %H:%M:%S'                postmortems.start_time/end_time
     date_text    'YYYY-MM-DD'                       status_history_days.date_bucket

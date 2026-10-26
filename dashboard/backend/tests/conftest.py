@@ -105,8 +105,6 @@ from api import domains as domains_module  # noqa: E402
 from api import managed_rules as managed_rules_module  # noqa: E402
 from api import alerts as alerts_module  # noqa: E402
 from api import tunnels as tunnels_module  # noqa: E402
-from api import threat_intel as threat_intel_api_module  # noqa: E402
-import services.threat_intel as threat_intel_module  # noqa: E402
 import services.public_status as public_status_module  # noqa: E402
 
 

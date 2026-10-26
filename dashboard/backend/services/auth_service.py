@@ -216,13 +216,6 @@ class AuthService:
         _invalidate_alert_recipients()
         return archived
 
-    def set_threat_intel_opt_in(self, user_id: str, enabled: bool) -> None:
-        """services/threat_intel.py reads this field fresh (never cached) on
-        every write and read, so opting out here takes effect on the very
-        next attack -- see that module's docstring for why that direction
-        matters more than opt-in lag would."""
-        self._pg.set_field(user_id, "share_threat_intel", bool(enabled))
-
     def register_local(self, email: str, username: str, password: str, role: str = "viewer") -> Dict:
         existing = self.get_user_by_email(email)
         if existing:

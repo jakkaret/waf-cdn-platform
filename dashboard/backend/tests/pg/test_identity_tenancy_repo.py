@@ -54,7 +54,8 @@ def test_user_shape_and_lookups():
     users = _users()
     u = users.create("Mixed@Example.com", "mixed", "$argon2id$x", "admin", "local", None, None)
     assert set(u) >= {"user_id", "email", "username", "role", "password_hash", "auth_provider",
-                      "share_threat_intel", "created_at", "last_login"}
+                      "created_at", "last_login"}
+    assert "share_threat_intel" not in u
     assert uuid.UUID(u["user_id"]) and u["role"] == "admin" and u["auth_provider"] == "local"
     _parse(u["created_at"]) and _parse(u["last_login"])
     assert u["created_at"].endswith("Z")
@@ -264,11 +265,6 @@ def test_hostname_views_keep_their_filters():
     _domain(store, gone, "archived.example.com", True)
     active = {h for h, _o in store.verified_hostnames_active()}
     assert active == {"verified.example.com", "tun.example.com"}
-    owners = store.hostname_owner_map()
-    # threat-intel attribution keeps unverified and archived hosts
-    assert set(owners) == {"verified.example.com", "unverified.example.com", "archived.example.com",
-                           "tun.example.com"}
-    assert set(owners.values()) == {owner}
 
 
 # -------------------------------------------------------------------- ssl

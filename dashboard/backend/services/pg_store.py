@@ -517,15 +517,6 @@ class PgStore:
                       "ORDER BY source, hostname")
         return [(r["hostname"], str(r["origin_id"])) for r in rows]
 
-    def hostname_owner_map(self) -> Dict[str, str]:
-        """host -> owning admin_user_id for every BYO and tunnel hostname,
-        verified or not, whatever the origin status (threat-intel
-        attribution). A BYO row wins over a tunnel row for the same host."""
-        rows = pool.q("SELECT h.hostname, h.source, o.admin_user_id FROM origin_hostnames h "
-                      "JOIN origins o ON o.id = h.origin_id WHERE o.admin_user_id IS NOT NULL "
-                      "ORDER BY (h.source = 'byo'), h.hostname")
-        return {_norm_host(r["hostname"]): str(r["admin_user_id"]) for r in rows}
-
     # ------------------------------------------------------------------
     # ssl certificates
     # ------------------------------------------------------------------
@@ -754,37 +745,6 @@ class PgStore:
         return result
 
     # ------------------------------------------------------------------
-    # threat intel
-    # ------------------------------------------------------------------
-    def record_threat_hit(self, rule_id: str, bucket: str, attack_type: str, tenant_hash: str,
-                          expires_at: int = None, updated_at: str = None) -> None:
-        """+1 the (rule, hour) counter and add the tenant hash, atomically."""
-        with pool.transaction():
-            pool.exec_(
-                "INSERT INTO threat_patterns (rule_id, bucket_start, attack_type, hit_count, updated_at) "
-                "VALUES (%s, to_timestamp(%s, 'YYYYMMDDHH24')::timestamp AT TIME ZONE 'UTC', %s, 1, "
-                "COALESCE(%s, now())) ON CONFLICT (rule_id, bucket_start) DO UPDATE SET "
-                "hit_count = threat_patterns.hit_count + 1, attack_type = EXCLUDED.attack_type, "
-                "updated_at = EXCLUDED.updated_at",
-                (str(rule_id), bucket, attack_type, parse_ts(updated_at)),
-            )
-            pool.exec_(
-                "INSERT INTO threat_pattern_contributors (rule_id, bucket_start, tenant_hash) "
-                "VALUES (%s, to_timestamp(%s, 'YYYYMMDDHH24')::timestamp AT TIME ZONE 'UTC', %s) "
-                "ON CONFLICT DO NOTHING", (str(rule_id), bucket, tenant_hash))
-
-    def list_threat_patterns(self) -> List[Dict]:
-        rows = pool.q(
-            "SELECT p.rule_id, p.attack_type, to_char(p.bucket_start AT TIME ZONE 'UTC', 'YYYYMMDDHH24') AS time_bucket, "
-            "p.hit_count, p.updated_at, COALESCE((SELECT array_agg(c.tenant_hash) FROM threat_pattern_contributors c "
-            "WHERE c.rule_id = p.rule_id AND c.bucket_start = p.bucket_start), '{}') AS tenant_hashes "
-            "FROM threat_patterns p ORDER BY p.bucket_start")
-        return [{"pattern_key": f"{r['rule_id']}#{r['time_bucket']}", "rule_id": r["rule_id"],
-                 "attack_type": r["attack_type"], "time_bucket": r["time_bucket"],
-                 "hit_count": int(r["hit_count"]), "tenant_hashes": set(r["tenant_hashes"]),
-                 "updated_at": iso_offset(r["updated_at"])} for r in rows]
-
-    # ------------------------------------------------------------------
     # audit log (append-only)
     # ------------------------------------------------------------------
     def put_audit_event(self, item: Dict) -> None:
@@ -813,7 +773,7 @@ class PgStore:
 # ----------------------------------------------------------------------
 _USER_SELECT = (
     "SELECT u.user_id, u.email, u.username, u.role, u.password_hash, u.auth_provider, "
-    "u.avatar_url, u.telegram_chat_id, u.share_threat_intel, u.created_at, u.last_login, "
+    "u.avatar_url, u.telegram_chat_id, u.created_at, u.last_login, "
     "u.token_version, u.email_verified_at, "
     "i.provider_user_id AS provider_id "
     "FROM users u LEFT JOIN user_identities i "
@@ -838,7 +798,6 @@ class PgUserRepository:
             "role": row["role"],
             "password_hash": row["password_hash"] or "",
             "auth_provider": row["auth_provider"],
-            "share_threat_intel": bool(row["share_threat_intel"]),
             "token_version": int(row.get("token_version") or 0),
             "email_verified": row.get("email_verified_at") is not None,
             "created_at": iso_z_us(row["created_at"]),
@@ -997,7 +956,7 @@ class PgUserRepository:
             _USER_SELECT + "WHERE u.telegram_chat_id IS NOT NULL ORDER BY u.created_at")]
 
     def set_field(self, user_id: str, column: str, value: Any) -> bool:
-        if column not in ("role", "telegram_chat_id", "share_threat_intel", "avatar_url"):
+        if column not in ("role", "telegram_chat_id", "avatar_url"):
             raise ValueError(f"unknown user field: {column}")
         uid = as_uuid(user_id)
         if uid is None:
