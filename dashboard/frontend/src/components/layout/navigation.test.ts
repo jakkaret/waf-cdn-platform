@@ -41,12 +41,12 @@ describe('visibleSections', () => {
 
   it('hides operator-only pages from a regular user', () => {
     const visible = paths(visibleSections(NAV_SECTIONS, false))
-    expect(visible).not.toContain('/ml-rules')
     expect(visible).not.toContain('/ip-rules') // a site's own list is on its origin page
     expect(visible).not.toContain('/rate-limits')
     expect(visible).not.toContain('/users')
     expect(visible).toContain('/support') // every member can reach support
-    expect(visible).toHaveLength(11)
+    expect(visible).toContain('/ml-rules') // filtered to the user's own origins server-side
+    expect(visible).toHaveLength(12)
   })
 
   it('drops a group whose children are all hidden', () => {

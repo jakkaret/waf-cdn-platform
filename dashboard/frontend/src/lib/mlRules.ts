@@ -1,6 +1,7 @@
 // Pure helpers behind the ML anomaly rules page and the AI analyst's
 // suggestion toast. Kept out of the components so every branch is unit-tested.
-import type { MLPendingRule, MLRuleBacktest, MLRuleGenerator } from '../types'
+import type { MLPendingRule, MLRuleBacktest, MLRuleGenerator, Origin } from '../types'
+import { canEditOrigin, originRoleOf } from './roles'
 
 export const GENERATOR_LABEL: Record<MLRuleGenerator, string> = {
   'gen3-detector': 'Gen3 detector',
@@ -59,15 +60,92 @@ export function backtestView(backtest?: MLRuleBacktest | null): BacktestView {
   return { tone, label: `ชน ${matched.toLocaleString()} request`, detail: `match ${matched.toLocaleString()} จาก ${sample}` }
 }
 
-// The text an admin confirms before deploying, or null when no warning is needed.
+// The risk a reviewer confirms before deploying, or null when no warning is
+// needed. Where the rule takes effect is approveScope's job.
 export function approveWarning(rule: Pick<MLPendingRule, 'backtest' | 'generator' | 'created_by'>): string | null {
   if (!canBacktest(rule)) return null
   const view = backtestView(rule.backtest)
-  if (view.tone === 'none') return 'กฎนี้ยังไม่ได้ทดสอบกับ traffic จริง ถ้าอนุมัติ กฎจะมีผลกับทุก origin ทันที'
+  if (view.tone === 'none') return 'กฎนี้ยังไม่ได้ทดสอบกับ traffic จริง'
   if (view.tone === 'warn' || view.tone === 'danger') {
-    return `${view.detail} ถ้าอนุมัติ request แบบนี้จะถูกบล็อก (403) ทุก origin`
+    return `${view.detail} ถ้าอนุมัติ request แบบนี้จะถูกบล็อก (403)`
   }
   return null
+}
+
+type ScopeFields = Pick<MLPendingRule, 'origin_id' | 'origin_label' | 'deploy_scope'>
+
+export const GLOBAL_SCOPE_LABEL = 'Global (platform)'
+
+// A rule with an origin_id is deployed for that origin only (the backend
+// guards it on TX:waf_origin_id); one without is platform-wide.
+export function deployScopeOf(rule: ScopeFields): 'origin' | 'global' {
+  if (rule.deploy_scope === 'origin' || rule.deploy_scope === 'global') return rule.deploy_scope
+  return rule.origin_id ? 'origin' : 'global'
+}
+
+export function ruleOriginLabel(rule: ScopeFields): string {
+  if (deployScopeOf(rule) === 'global') return GLOBAL_SCOPE_LABEL
+  return rule.origin_label || rule.origin_id || 'origin'
+}
+
+// Where approving these rules takes effect, for the confirm dialog.
+export function approveScope(rules: ScopeFields[]): string {
+  const n = rules.length
+  const subject = n === 1 ? 'กฎนี้' : `กฎ ${n} ข้อ`
+  const global = rules.filter((r) => deployScopeOf(r) === 'global').length
+  const labels = Array.from(new Set(rules.filter((r) => deployScopeOf(r) === 'origin').map(ruleOriginLabel)))
+  if (global === n) return `${subject}จะมีผลกับ ModSecurity ของทุก origin ทันที`
+  if (global === 0) {
+    return labels.length === 1
+      ? `${subject}จะมีผลเฉพาะ ${labels[0]}`
+      : `${subject}จะมีผลเฉพาะ origin ของแต่ละกฎ (${labels.join(', ')})`
+  }
+  return `${subject}: ${global} ข้อมีผลกับทุก origin ส่วนที่เหลือมีผลเฉพาะ ${labels.join(', ')}`
+}
+
+// Approve/reject and backtest rights come from the backend per rule. A
+// backend without the flags (before per-origin review) meant admin only.
+export function canReviewRule(rule: Pick<MLPendingRule, 'status' | 'can_review'>, isAdmin: boolean): boolean {
+  return rule.status === 'pending' && (rule.can_review ?? isAdmin)
+}
+
+export function canBacktestRule(
+  rule: Pick<MLPendingRule, 'generator' | 'created_by' | 'can_backtest'>,
+  isAdmin: boolean,
+): boolean {
+  return canBacktest(rule) && (rule.can_backtest ?? isAdmin)
+}
+
+export interface OriginOption {
+  id: string
+  label: string
+}
+
+// The origins present in a queue, for the origin filter. Global rules use id "".
+export function ruleOriginOptions(rules: ScopeFields[]): OriginOption[] {
+  const byId = new Map<string, string>()
+  for (const r of rules) {
+    const id = deployScopeOf(r) === 'global' ? '' : r.origin_id || ''
+    if (!byId.has(id)) byId.set(id, ruleOriginLabel(r))
+  }
+  return Array.from(byId, ([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label))
+}
+
+type AnalystOrigin = Pick<Origin, 'origin_id' | 'label' | 'status' | 'admin_user_id' | 'editor_user_ids' | 'viewer_user_ids'>
+
+// Origins the AI analyst may file proposals for: the caller is Owner or
+// Editor, and the origin is not archived.
+export function analystOriginChoices(origins: AnalystOrigin[], userId: string | undefined): OriginOption[] {
+  return origins
+    .filter((o) => o.status !== 'archived' && canEditOrigin(originRoleOf(o, userId)))
+    .map((o) => ({ id: o.origin_id, label: o.label || o.origin_id }))
+}
+
+// "" = no origin (platform admin queue). An admin starts there as before;
+// anyone else starts on their first editable origin.
+export function defaultAnalystOrigin(choices: OriginOption[], isAdmin: boolean): string {
+  if (isAdmin) return ''
+  return choices[0]?.id ?? ''
 }
 
 export type RuleSort = 'hits' | 'newest'
@@ -78,6 +156,8 @@ export interface RuleFilters {
   attackType: string
   search: string
   sort: RuleSort
+  // An OriginOption id ("" = global); 'all' or absent = every origin.
+  origin?: string
 }
 
 export function filterAndSortRules(rules: MLPendingRule[], f: RuleFilters): MLPendingRule[] {
@@ -86,8 +166,12 @@ export function filterAndSortRules(rules: MLPendingRule[], f: RuleFilters): MLPe
     if (f.status !== 'all' && r.status !== f.status) return false
     if (f.generator !== 'all' && generatorOf(r) !== f.generator) return false
     if (f.attackType !== 'all' && r.attack_type !== f.attackType) return false
+    if (f.origin !== undefined && f.origin !== 'all') {
+      const id = deployScopeOf(r) === 'global' ? '' : r.origin_id || ''
+      if (id !== f.origin) return false
+    }
     if (!q) return true
-    return [r.rule_id, r.attack_type, r.pattern, r.source_url, r.detector, r.reject_reason, r.cve_id,
+    return [r.rule_id, r.attack_type, r.pattern, r.source_url, r.detector, r.reject_reason, r.cve_id, r.origin_label,
       r.deployed_rule_id != null ? String(r.deployed_rule_id) : '']
       .some((v) => (v || '').toLowerCase().includes(q))
   })
@@ -118,6 +202,8 @@ export interface SuggestionSummary {
   created: number
   merged: number
   reason: string
+  // Echo of the request's origin_id ("" = platform admin queue).
+  origin_id?: string
 }
 
 const REASON_TEXT: Record<string, string> = {
@@ -126,14 +212,20 @@ const REASON_TEXT: Record<string, string> = {
   generator_error: 'ตัวสร้างกฎตอบกลับผิดพลาด ลองใหม่อีกครั้ง',
 }
 
-// One line for the AI analyst after predict-and-suggest.
-export function describeSuggestion(s?: SuggestionSummary | null): { queued: boolean; text: string } {
+// One line for the AI analyst after predict-and-suggest. originLabel names
+// the origin the proposal went to; null = the platform admin queue;
+// undefined = say nothing about where.
+export function describeSuggestion(
+  s?: SuggestionSummary | null,
+  originLabel?: string | null,
+): { queued: boolean; text: string } {
   if (!s) return { queued: false, text: 'วิเคราะห์เสร็จแล้ว' }
   if (s.created + s.merged === 0) return { queued: false, text: REASON_TEXT[s.reason] || 'ไม่มีกฎที่เสนอ' }
   const parts = []
   if (s.created) parts.push(`เสนอกฎใหม่ ${s.created} ข้อ`)
   if (s.merged) parts.push(`เพิ่มหลักฐานให้กฎที่รออนุมัติ ${s.merged} ข้อ`)
-  return { queued: true, text: parts.join(' และ ') }
+  const where = originLabel ? ` สำหรับ ${originLabel}` : originLabel === null ? ' ในคิวของผู้ดูแลแพลตฟอร์ม' : ''
+  return { queued: true, text: parts.join(' และ ') + where }
 }
 
 // The SecRule exactly as approve will deploy it: the backend fills every

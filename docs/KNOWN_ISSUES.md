@@ -108,6 +108,11 @@ the router prefix is `/api/ml-rules` (`api/ml_rules.py`), so the real path is
 `POST /api/ml-rules/{rule_id}/approve` (still `require_admin`). The safety
 statement itself (no auto-deploy path) remains true. CLAUDE.md corrected.
 
+Update 2026-10-26: the endpoint is no longer admin-only. The Owner or an Editor
+of a rule's origin may approve it too, and that rule is deployed scoped to the
+origin (`TX:waf_origin_id` chain). Rules without an origin stay admin-only and
+global. Still no auto-deploy path.
+
 ## 10. Cross-tenant data in five viewer endpoints — RESOLVED 2026-09-28
 
 Access-control audit of every endpoint a non-admin can call. Logs, analytics,

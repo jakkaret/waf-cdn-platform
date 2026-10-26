@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -6,8 +7,15 @@ from services.dynamodb_service import DynamoDBService
 from services.pg_store import PgPendingRuleRepository
 from services.rule_manager import RuleManager
 
+logger = logging.getLogger(__name__)
+
 # Newest request examples kept on a pending rule (record_hit).
 MAX_EXAMPLES = 5
+# Approved ML/CVE rules one origin may have deployed (scoped to it). Same
+# default as tenant rules (services/tenant_rules.MAX_RULES_PER_ORIGIN): every
+# rule runs on the shared WAF, so one origin's Owner/Editors cannot grow the
+# rule set without bound. Global rules (no origin) are not capped.
+MAX_APPROVED_RULES_PER_ORIGIN = int(os.getenv("ML_RULES_PER_ORIGIN", "50"))
 
 
 def _default_generator(created_by: str) -> str:
@@ -28,6 +36,21 @@ def _example(rule_data: Dict[str, Any], seen_at: str) -> Dict[str, Any]:
         example["requested_by"] = str(rule_data["requested_by"])[:80]
         example["requested_by_id"] = str(rule_data.get("requested_by_id") or "")[:64]
     return example
+
+
+def remove_deployed_rule_files(deployed_rule_ids: List[int]) -> None:
+    """Remove ml-<id>.conf for approved rules whose origin was deleted
+    (PgStore.hard_delete_origin returns their ids; call it after commit).
+    Each removal is nginx -t + reload like any rule change; one that fails is
+    logged and left for the admin (Security rules page), not retried."""
+    if not deployed_rule_ids:
+        return
+    manager = RuleManager()
+    for deployed_rule_id in deployed_rule_ids:
+        try:
+            manager.delete_rule(f"ml-{int(deployed_rule_id)}")
+        except Exception:
+            logger.exception("could not remove ml-%s.conf of a deleted origin", deployed_rule_id)
 
 
 def with_defaults(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -73,14 +96,16 @@ class MLRuleService:
             # 2026-09-23: which origin's exposure prompted this proposal.
             # The CVE scanner knows it exactly (cve_feed.match_cves_to_origins
             # matches a CVE's keywords against one origin's tech_stack_tags).
-            # The ML anomaly path does not: /api/ml/analyze receives only
-            # url/method/body, with no Host, so it stores "" rather than
-            # guessing -- an empty value here means "not attributable",
-            # never "belongs to everyone".
+            # The ML analyst stores the origin its Owner/Editor picked
+            # (api/ml.py predict_and_suggest), or "" when none was picked --
+            # an empty value here means "not attributable", never "belongs
+            # to everyone".
             #
-            # Attribution only. Approving a rule deploys it to ModSecurity
-            # for every origin, so this does not make the queue per-tenant
-            # and the endpoints stay admin-only (see api/ml_rules.py).
+            # 2026-10-26: the origin also decides who reviews the rule and
+            # where it runs. A rule with an origin is shown to that origin's
+            # members, may be approved by its Owner/Editors, and is deployed
+            # scoped to that origin only (approve_rule). A rule without one
+            # stays in the platform admin's queue and deploys globally.
             "origin_id": rule_data.get("origin_id", ""),
             "origin_label": rule_data.get("origin_label", ""),
             # 2026-10-13: which generator wrote the rule ("rf-regex" = the
@@ -99,9 +124,10 @@ class MLRuleService:
 
         return with_defaults(self._pg.create(item))
 
-    def find_pending_by_dedup_key(self, dedup_key: str) -> Optional[Dict[str, Any]]:
-        """The pending rule a new proposal with this key should merge into, if any."""
-        found = self._pg.find_pending_by_dedup_key(dedup_key)
+    def find_pending_by_dedup_key(self, dedup_key: str, origin_id: str = "") -> Optional[Dict[str, Any]]:
+        """The pending rule a new proposal with this key should merge into, if
+        any: only one of the same origin ("" = the global queue)."""
+        found = self._pg.find_pending_by_dedup_key(dedup_key, origin_id)
         return with_defaults(found) if found else None
 
     def record_hit(self, rule: Dict[str, Any], rule_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -115,10 +141,11 @@ class MLRuleService:
         self._pg.save_backtest(rule["rule_id"], result)
         return {**rule, "backtest": result}
 
-    def list_rules(self, status: str = None) -> List[Dict[str, Any]]:
-        """List rules (newest first), optionally filtered by status."""
+    def list_rules(self, status: str = None, origin_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """List rules (newest first), optionally filtered by status and, when
+        origin_ids is given, to rules of those origins only."""
         try:
-            return [with_defaults(i) for i in self._pg.list(status)]
+            return [with_defaults(i) for i in self._pg.list(status, origin_ids)]
         except Exception as e:
             print(f"Error fetching rules: {e}")
             return []
@@ -138,7 +165,7 @@ class MLRuleService:
         return max(ids) if ids else 0
 
     def approve_rule(self, rule_id: str, approved_by: str, on_approved=None,
-                     on_deploy_failed=None) -> Dict[str, Any]:
+                     on_deploy_failed=None, expected_origin_id: Optional[str] = None) -> Dict[str, Any]:
         """Approve and deploy a pending rule, in three steps (nothing slow
         inside the transaction):
         1. one short transaction: lock, allocate the next ModSecurity id
@@ -150,16 +177,24 @@ class MLRuleService:
            pending and calls on_deploy_failed(rule, error) (the approve event
            cannot be deleted: audit_logs is append-only), removes a file it
            wrote, then re-raises.
+
+        Where the rule runs comes from the locked row, not from the caller: a
+        rule with an origin_id is written scoped to that origin
+        (rule_manager.scope_ml_rule_to_origin), whoever approves it; one
+        without stays global. expected_origin_id is the origin the caller was
+        authorised for ("" = global); the row must still have it.
         """
         from db import pool
         with pool.transaction():
-            rule = self._pg.reserve_approval(rule_id, approved_by, self._max_rule_id_on_disk())
+            rule = self._pg.reserve_approval(rule_id, approved_by, self._max_rule_id_on_disk(),
+                                             expected_origin_id=expected_origin_id,
+                                             max_per_origin=MAX_APPROVED_RULES_PER_ORIGIN)
             if on_approved:
                 on_approved(rule)
         modsec_rule_id = rule["deployed_rule_id"]
         try:
             secrule_code = rule["secrule_template"].replace("{RULE_ID}", str(modsec_rule_id))
-            self.rule_manager.write_ml_rule(modsec_rule_id, secrule_code)
+            self.rule_manager.write_ml_rule(modsec_rule_id, secrule_code, origin_id=rule.get("origin_id") or "")
         except Exception as exc:
             try:
                 with pool.transaction():

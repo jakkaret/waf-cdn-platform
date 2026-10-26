@@ -13,8 +13,11 @@ Limits the admin should know, and the API returns with the result:
     only ever overstates the risk;
   - it is a sample: the newest SAMPLE_LIMIT allowed requests of the window.
 
-Every tenant's traffic is in the sample (an approved rule applies to every origin), so the
-result carries counts and URL paths only: no host, no query string, no client IP.
+A global rule (no origin) is backtested on every tenant's traffic, since an approved one
+applies to every origin; a rule with an origin is deployed for that origin only, so its
+sample is that origin's own hosts (tenant_service.origin_traffic_filter) and nobody else's
+traffic reaches the result. Either way the result carries counts and URL paths only: no
+host, no query string, no client IP.
 """
 import logging
 from datetime import datetime, timezone
@@ -31,16 +34,18 @@ MAX_EXAMPLE_PATHS = 5
 SUPPORTED_GENERATORS = ("gen3-detector", "rf-regex")
 
 
-def allowed_requests_sample(ch, days: int, limit: int = SAMPLE_LIMIT) -> list[dict]:
-    """Newest requests of the window the WAF did not block, as {method, url}."""
+def allowed_requests_sample(ch, days: int, limit: int = SAMPLE_LIMIT, scope_clause: str = "") -> list[dict]:
+    """Newest requests of the window the WAF did not block, as {method, url}.
+    scope_clause: a WHERE fragment built by tenant_service (never user text)."""
     if not getattr(ch, "connected", False):
         raise RuntimeError("ClickHouse is not connected")
+    scope = f"\n          AND ({scope_clause})" if scope_clause else ""
     query = f"""
         SELECT method, url
         FROM access_logs
         WHERE timestamp > now() - INTERVAL {int(days)} DAY
           AND alert = 0
-          AND status_code NOT IN (403, 429)
+          AND status_code NOT IN (403, 429){scope}
         ORDER BY timestamp DESC
         LIMIT {int(limit)}
     """
@@ -51,13 +56,21 @@ def _path_only(url: str) -> str:
     return (urlsplit(url).path or "/")[:120]
 
 
+def can_backtest(rule: dict) -> bool:
+    return (rule.get("generator") or "rf-regex") in SUPPORTED_GENERATORS
+
+
 async def run_backtest(rule: dict, ch, ml_url: str, ml_headers: dict, days: int = DEFAULT_DAYS) -> dict:
     """Backtest result to store on the rule. Raises ValueError for a rule the ML service cannot evaluate."""
     generator = rule.get("generator") or "rf-regex"
     if generator not in SUPPORTED_GENERATORS:
         raise ValueError(f"backtest is not available for {generator} rules")
     days = max(1, min(int(days), MAX_DAYS))
-    sample = allowed_requests_sample(ch, days)
+    scope_clause = ""
+    if rule.get("origin_id"):
+        from services.tenant_service import origin_traffic_filter
+        scope_clause = origin_traffic_filter(rule["origin_id"])
+    sample = allowed_requests_sample(ch, days, scope_clause=scope_clause)
     spec = {"generator": generator, "detector": rule.get("detector", ""), "pattern": rule.get("pattern", "")}
 
     matched, scanned, indexes = 0, 0, []

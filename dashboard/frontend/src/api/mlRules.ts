@@ -1,12 +1,18 @@
 import { api } from './axios'
-import { MLPendingRule, MLRuleBacktest } from '../types'
+import { MLPendingRule, MLRuleBacktest, MLRuleQueue } from '../types'
+
+// A platform admin gets every rule; anyone else only the rules of origins
+// they are Owner, Editor or Viewer of.
+const listQueue = async (status?: string): Promise<MLRuleQueue> => {
+  const params = status ? { status } : {}
+  const res = await api.get<MLRuleQueue>('/ml-rules/', { params })
+  return res.data
+}
 
 export const mlRulesApi = {
-  listRules: async (status?: string) => {
-    const params = status ? { status } : {}
-    const res = await api.get<{ rules: MLPendingRule[] }>('/ml-rules/', { params })
-    return res.data.rules
-  },
+  listQueue,
+
+  listRules: async (status?: string): Promise<MLPendingRule[]> => (await listQueue(status)).rules,
 
   getRule: async (id: string) => {
     const res = await api.get<MLPendingRule>(`/ml-rules/${id}`)

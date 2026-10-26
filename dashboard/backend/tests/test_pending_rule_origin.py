@@ -8,14 +8,14 @@ whose problem a proposal was. That is part of why the endpoints had to
 be locked to admin outright (b414134) -- there was no field to scope on.
 
 The CVE scanner does know: cve_feed.match_cves_to_origins() matches a
-CVE's keywords against one specific origin's tech_stack_tags. The ML
-anomaly path genuinely does not -- /api/ml/analyze takes url/method/body
-with no Host -- so these tests also pin that it stores an empty value
-rather than inventing one.
+CVE's keywords against one specific origin's tech_stack_tags. A proposal
+asked for without an origin (the ML analyst with no origin picked) stores
+an empty value rather than inventing one.
 
-Attribution does not make the queue per-tenant: approving a rule deploys
-it to ModSecurity for every origin. The admin-only gate is unchanged and
-asserted in test_ml_rules_access_scope.py.
+Since 2026-10-26 the origin also scopes the rule: that origin's members see
+it, its Owner/Editors review it, and an approved one runs for that origin
+only (tests/test_ml_rules_origin_scope.py). An empty origin keeps the rule
+in the platform admin's global queue (tests/test_ml_rules_access_scope.py).
 
 MLRuleService binds DynamoDBService and RuleManager into its own module
 namespace at import, so conftest's fake_infrastructure (which patches the
@@ -82,3 +82,13 @@ def test_origin_attribution_is_persisted_not_just_returned(service):
     fetched = service.get_rule_detail(created["rule_id"])
     assert fetched is not None
     assert fetched["origin_id"] == ORIGIN_XYZ
+
+
+def test_listing_by_origin_never_includes_unattributed_rules(service):
+    abc = service.create_pending_rule({"pattern": "@rx a", "origin_id": ORIGIN_ABC})
+    service.create_pending_rule({"pattern": "@rx x", "origin_id": ORIGIN_XYZ})
+    service.create_pending_rule({"pattern": "@rx none"})
+    assert [r["rule_id"] for r in service.list_rules(origin_ids=[ORIGIN_ABC])] == [abc["rule_id"]]
+    assert service.list_rules(origin_ids=[]) == []
+    assert service.list_rules(origin_ids=["", "not-a-uuid"]) == []
+    assert len(service.list_rules()) == 3

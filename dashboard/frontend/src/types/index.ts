@@ -323,7 +323,20 @@ export interface MLPendingRule {
   last_seen_at?: string
   backtest?: MLRuleBacktest
   cve_id?: string
+  // Per-origin review (2026-10-26, api/ml_rules.py): "" means a platform-wide
+  // rule that only a platform admin sees. The can_* flags are per caller.
+  origin_id?: string
   origin_label?: string
+  deploy_scope?: MLRuleDeployScope
+  can_review?: boolean
+  can_backtest?: boolean
+}
+
+export type MLRuleDeployScope = 'origin' | 'global'
+
+export interface MLRuleQueue {
+  rules: MLPendingRule[]
+  is_admin?: boolean
 }
 
 export type MLRuleGenerator = 'gen3-detector' | 'rf-regex' | 'cve'

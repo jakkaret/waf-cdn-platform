@@ -59,6 +59,31 @@ def test_write_ml_rule_refuses_before_writing(tmp_path):
     assert (tmp_path / "ml-1000600.conf").exists()
 
 
+def test_scoped_write_ml_rule_refuses_before_writing_and_keeps_the_file_name(tmp_path):
+    """An origin's rule (2026-10-26) is checked like a global one, then
+    written as a TX:waf_origin_id chain under the same ml-<id>.conf name the
+    edge bundle already ships (every *.conf in the rules directory)."""
+    rm = RuleManager.__new__(RuleManager)
+    rm.rules_dir = str(tmp_path)
+    rm.test_nginx = lambda: None
+    rm.reload_nginx = lambda: None
+    with pytest.raises(ValueError):
+        rm.write_ml_rule(1000600, GOOD, origin_id="bad id")
+    with pytest.raises(ValueError):
+        rm.write_ml_rule(1000600, GOOD.replace("deny,", "deny,ctl:ruleEngine=Off,"), origin_id="o-1")
+    assert list(tmp_path.iterdir()) == []
+    assert rm.write_ml_rule(1000600, GOOD, origin_id="o-1") is True
+    text = (tmp_path / "ml-1000600.conf").read_text()
+    assert 'SecRule TX:waf_origin_id "@streq o-1"' in text and text.count("SecRule ") == 2
+    assert '    SecRule REQUEST_URI|REQUEST_BODY "@rx (?i)union\\s+select" "t:none"' in text
+
+    # The Rules page reports the chained link's match and the origin, not the guard.
+    listed = next(r for r in rm.list_rules() if r["id"] == "ml-1000600")
+    assert listed["variable"] == "REQUEST_URI|REQUEST_BODY"
+    assert listed["operator"] == "@rx (?i)union\\s+select" and listed["origin_id"] == "o-1"
+    assert listed["severity"] == "CRITICAL" and listed["action"] == "BLOCK"
+
+
 def test_cve_template_keeps_regex_backslashes_and_escapes_the_message():
     """The CVE auto-patch builds its rule with these two helpers now: the
     operator keeps \\s (doubling it made the rule match a literal "\\s"), and a

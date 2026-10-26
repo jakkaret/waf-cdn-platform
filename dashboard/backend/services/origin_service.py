@@ -367,7 +367,8 @@ def discard_new_origin(origin_id: str, admin_user_id: str) -> None:
     """Hard-delete an origin that a multi-step flow created moments ago and
     then could not finish (api/onboarding.py /connect). Not an archive: the
     row never held anything the user saw."""
-    db.hard_delete_origin(origin_id)
+    from services.ml_rule_service import remove_deployed_rule_files
+    remove_deployed_rule_files(db.hard_delete_origin(origin_id))
     invalidate_tenant_cache(admin_user_id)
     _invalidate_origins_caches()
     from services import shield_sync

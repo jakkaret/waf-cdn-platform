@@ -158,6 +158,13 @@ def build_tenant_origin_filter(origin: Optional[str], user_domains: List[str], i
     return _hosts_clause(user_domains)
 
 
+def origin_traffic_filter(origin_id: str) -> str:
+    """ClickHouse WHERE fragment for one origin's own traffic: its DNS-verified
+    domains and tunnel hosts only (what the WAF host map attributes to it).
+    "1=0" when the origin is unknown or has no verified host -- fail closed."""
+    return _hosts_clause(_origin_scope_hosts(str(origin_id or "")) or [])
+
+
 def _hosts_clause(hosts: List[str]) -> str:
     clauses = [build_domain_pattern_sql(h) for h in hosts]
     clauses = [c for c in clauses if c]

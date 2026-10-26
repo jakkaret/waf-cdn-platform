@@ -168,6 +168,21 @@ def is_origin_admin(origin: dict, user_id: Optional[str]) -> bool:
     return origin.get("admin_user_id") == user_id or user_id in (origin.get("editor_user_ids") or set())
 
 
+def origin_role(origin: dict, user_id: Optional[str]) -> Optional[str]:
+    """"owner" | "editor" | "viewer" for a member of the origin, else None.
+    Membership only: support grants are not roles (verify_origin_* honour
+    them per request and log each use)."""
+    if not origin or not user_id:
+        return None
+    if origin.get("admin_user_id") == user_id:
+        return "owner"
+    if user_id in (origin.get("editor_user_ids") or set()):
+        return "editor"
+    if user_id in (origin.get("viewer_user_ids") or set()):
+        return "viewer"
+    return None
+
+
 verify_origin_admin = verify_origin_ownership
 
 

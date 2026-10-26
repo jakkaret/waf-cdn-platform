@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import {
@@ -8,7 +9,9 @@ import {
   ChevronRight,
   Copy,
   FlaskConical,
+  Globe,
   RefreshCw,
+  Server,
   Search,
   ShieldCheck,
   Sparkles,
@@ -24,13 +27,19 @@ import { MLPendingRule, MLRuleGenerator } from '../types'
 import {
   GENERATOR_HINT,
   GENERATOR_LABEL,
+  approveScope,
   approveWarning,
   backtestView,
   canBacktest,
+  canBacktestRule,
+  canReviewRule,
+  deployScopeOf,
   filterAndSortRules,
   generatorOf,
   legacyPendingCount,
   renderSecRule,
+  ruleOriginLabel,
+  ruleOriginOptions,
   timeAgo,
   type BacktestTone,
   type RuleFilters,
@@ -39,7 +48,7 @@ import {
 const PAGE_SIZE = 15
 // One empty list for "no data yet". `= []` in the destructuring made a new
 // array on every render, so the prune effect below set state on every
-// render while the query was loading or failing (a non-operator gets 403):
+// render while the query was loading or failing:
 // "Maximum update depth exceeded".
 const NO_RULES: MLPendingRule[] = []
 
@@ -75,16 +84,16 @@ const pillBase = 'inline-flex items-center rounded-full border px-2 py-px text-[
 
 interface PendingApproval {
   ids: string[]
-  message: string
+  scope: string
+  warning: string | null
 }
 
 export const MLRules: React.FC = () => {
   const { user } = useAuthStore()
-  const canReview = isOperator(user)
   const queryClient = useQueryClient()
 
   const [filters, setFilters] = useState<RuleFilters>({
-    status: 'pending', generator: 'all', attackType: 'all', search: '', sort: 'hits',
+    status: 'pending', generator: 'all', attackType: 'all', search: '', sort: 'hits', origin: 'all',
   })
   const [page, setPage] = useState(1)
   const [expanded, setExpanded] = useState<string[]>([])
@@ -96,12 +105,21 @@ export const MLRules: React.FC = () => {
   const [busy, setBusy] = useState(false)
   const [confirmLegacy, setConfirmLegacy] = useState(false)
 
-  const { data: rules = NO_RULES, isLoading, isFetching, isError, refetch } = useQuery({
+  // A platform admin gets the whole queue; anyone else only the rules of
+  // origins they belong to, each flagged with what they may do to it.
+  const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: ['ml-rules'],
-    queryFn: () => mlRulesApi.listRules(),
+    queryFn: () => mlRulesApi.listQueue(),
     refetchInterval: 10000,
   })
+  const rules = data?.rules ?? NO_RULES
+  const isAdmin = data?.is_admin ?? isOperator(user)
+  const canReview = (rule: MLPendingRule) => canReviewRule(rule, isAdmin)
+  const mayBacktest = (rule: MLPendingRule) => canBacktestRule(rule, isAdmin)
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['ml-rules'] })
+
+  const originOptions = useMemo(() => ruleOriginOptions(rules), [rules])
+  const reviewable = useMemo(() => rules.filter((r) => canReviewRule(r, isAdmin)), [rules, isAdmin])
 
   const counts = useMemo(() => {
     const by = (s: string) => rules.filter((r) => r.status === s).length
@@ -129,24 +147,32 @@ export const MLRules: React.FC = () => {
   const visible = useMemo(() => filterAndSortRules(rules, filters), [rules, filters])
   const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
   const pageRules = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const pendingOnPage = pageRules.filter((r) => r.status === 'pending')
+  // Only rules the caller may approve or reject are selectable.
+  const pendingOnPage = pageRules.filter(canReview)
 
-  // The queue polls every 10 s; another admin can shrink it under the
+  // The queue polls every 10 s; another reviewer can shrink it under the
   // current page or review a selected rule. Clamp and prune, never act on a
   // rule that is no longer pending.
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
   }, [page, totalPages])
   useEffect(() => {
-    const pending = new Set(rules.filter((r) => r.status === 'pending').map((r) => r.rule_id))
-    setSelected((prev) => prev.filter((id) => pending.has(id)))
-  }, [rules])
+    const open = new Set(reviewable.map((r) => r.rule_id))
+    setSelected((prev) => prev.filter((id) => open.has(id)))
+  }, [reviewable])
+  // The selected origin left the queue (rules reviewed away, membership removed).
+  useEffect(() => {
+    if (filters.origin !== 'all' && !originOptions.some((o) => o.id === filters.origin)) {
+      setFilters((f) => ({ ...f, origin: 'all' }))
+    }
+  }, [filters.origin, originOptions])
 
   const setFilter = <K extends keyof RuleFilters>(key: K, value: RuleFilters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }))
     setPage(1)
   }
-  const filtersActive = filters.generator !== 'all' || filters.attackType !== 'all' || filters.search.trim() !== ''
+  const filtersActive =
+    filters.generator !== 'all' || filters.attackType !== 'all' || filters.search.trim() !== '' || filters.origin !== 'all'
 
   const cveScan = useMutation({
     mutationFn: () => mlRulesApi.runCveScan(),
@@ -191,6 +217,7 @@ export const MLRules: React.FC = () => {
     const results = await Promise.allSettled(ids.map((id) => mlRulesApi.approveRule(id)))
     const ok = results.filter((r) => r.status === 'fulfilled').length
     if (ok) toast.success(ids.length === 1 ? 'อนุมัติแล้ว กฎมีผลกับ ModSecurity ทันที' : `อนุมัติแล้ว ${ok} กฎ`)
+    // e.g. 403 "Owner or Editor of this origin required" after a role change.
     if (ok < ids.length) {
       const first = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
       toast.error(first?.reason?.response?.data?.detail || `อนุมัติไม่สำเร็จ ${ids.length - ok} กฎ`)
@@ -201,19 +228,19 @@ export const MLRules: React.FC = () => {
     refresh()
   }
 
+  // Always confirm: the dialog says where the rule takes effect (one origin
+  // or every origin) and any backtest risk.
   const requestApprove = (ids: string[]) => {
-    const targets = rules.filter((r) => ids.includes(r.rule_id))
-    if (targets.length === 1) {
-      const warning = approveWarning(targets[0])
-      if (!warning) return approveIds(ids)
-      return setApproval({ ids, message: warning })
-    }
+    const targets = rules.filter((r) => ids.includes(r.rule_id) && canReview(r))
+    if (targets.length === 0) return
     const risky = targets.filter((r) => approveWarning(r) !== null).length
     setApproval({
-      ids,
-      message:
-        `กฎ ${targets.length} ข้อจะมีผลกับ ModSecurity ของทุก origin ทันที` +
-        (risky ? ` ในนี้มี ${risky} ข้อที่ยังไม่ได้ทดสอบหรือชน traffic ปกติ` : ''),
+      ids: targets.map((r) => r.rule_id),
+      scope: approveScope(targets),
+      warning:
+        targets.length === 1
+          ? approveWarning(targets[0])
+          : risky ? `ในนี้มี ${risky} ข้อที่ยังไม่ได้ทดสอบหรือชน traffic ปกติ` : null,
     })
   }
 
@@ -223,7 +250,10 @@ export const MLRules: React.FC = () => {
     const results = await Promise.allSettled(rejecting.map((id) => mlRulesApi.rejectRule(id, rejectReason.trim())))
     const ok = results.filter((r) => r.status === 'fulfilled').length
     if (ok) toast.success(rejecting.length === 1 ? 'ปฏิเสธกฎแล้ว' : `ปฏิเสธแล้ว ${ok} กฎ`)
-    if (ok < rejecting.length) toast.error(`ปฏิเสธไม่สำเร็จ ${rejecting.length - ok} กฎ`)
+    if (ok < rejecting.length) {
+      const first = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
+      toast.error(first?.reason?.response?.data?.detail || `ปฏิเสธไม่สำเร็จ ${rejecting.length - ok} กฎ`)
+    }
     setSelected((s) => s.filter((id) => !rejecting.includes(id)))
     setRejecting(null)
     setRejectReason('')
@@ -250,12 +280,14 @@ export const MLRules: React.FC = () => {
     const isTesting = testing.includes(rule.rule_id)
     const hits = rule.hit_count ?? 1
     const panelId = `rule-panel-${rule.rule_id}`
+    const reviewer = canReview(rule)
+    const globalScope = deployScopeOf(rule) === 'global'
 
     return (
       <li key={rule.rule_id} className={`border-b border-[var(--bg-border-subtle)] last:border-b-0 ${selected.includes(rule.rule_id) ? 'bg-[var(--accent-subtle)]' : ''}`}>
         <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 px-4 py-3.5 xl:grid-cols-[auto_minmax(0,1fr)_8.5rem_12rem_16.5rem] xl:items-center">
           <div className="pt-0.5 xl:pt-0">
-            {pending && canReview ? (
+            {reviewer ? (
               <input
                 type="checkbox"
                 aria-label={`เลือกกฎ ${rule.attack_type}`}
@@ -283,6 +315,13 @@ export const MLRules: React.FC = () => {
               />
               <span className="text-[14px] font-semibold text-[var(--text-primary)]">{rule.attack_type}</span>
               <span className={`${pillBase} ${GENERATOR_PILL[gen]}`} title={GENERATOR_HINT[gen]}>{GENERATOR_LABEL[gen]}</span>
+              <span
+                className={`${pillBase} gap-1 border-[var(--bg-border)] bg-[var(--bg-primary)] text-[var(--text-secondary)]`}
+                title={globalScope ? 'กฎนี้มีผลกับทุก origin' : `กฎนี้มีผลเฉพาะ ${ruleOriginLabel(rule)}`}
+              >
+                {globalScope ? <Globe size={11} aria-hidden="true" /> : <Server size={11} aria-hidden="true" />}
+                <span className="max-w-[14rem] truncate">{ruleOriginLabel(rule)}</span>
+              </span>
               {rule.status === 'approved' && (
                 <span className={`${pillBase} border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300`}>
                   ใช้งานอยู่ #{rule.deployed_rule_id}
@@ -320,7 +359,7 @@ export const MLRules: React.FC = () => {
           </div>
 
           <div className="col-start-2 xl:col-start-auto flex flex-wrap xl:flex-nowrap items-center gap-2 xl:justify-end">
-            {canReview && canBacktest(rule) && (
+            {mayBacktest(rule) && (
               <Button
                 variant="secondary"
                 size="sm"
@@ -331,7 +370,12 @@ export const MLRules: React.FC = () => {
                 ทดสอบ
               </Button>
             )}
-            {pending && canReview && (
+            {pending && !reviewer && (
+              <span className="text-[12px] text-[var(--text-muted)]" title="อนุมัติหรือปฏิเสธได้เฉพาะ Owner หรือ Editor ของ origin นี้">
+                รอ Owner/Editor อนุมัติ
+              </span>
+            )}
+            {reviewer && (
               <>
                 <Button variant="ghost" size="sm" onClick={() => { setRejectReason(''); setRejecting([rule.rule_id]) }}>
                   ปฏิเสธ
@@ -348,7 +392,9 @@ export const MLRules: React.FC = () => {
           <div id={panelId} className="grid gap-4 px-4 pb-4 md:pl-[3.25rem] lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
             <section className="min-w-0">
               <div className="flex items-center justify-between gap-2 mb-1.5">
-                <h3 className="m-0 text-[12.5px] font-medium text-[var(--text-secondary)]">SecRule ที่จะติดตั้ง</h3>
+                <h3 className="m-0 text-[12.5px] font-medium text-[var(--text-secondary)]">
+                  {rule.deploy_scope === 'origin' ? 'SecRule (ส่วนที่ใช้ตรวจ request)' : 'SecRule ที่จะติดตั้ง'}
+                </h3>
                 <button
                   type="button"
                   onClick={() => copyRule(rule)}
@@ -362,6 +408,14 @@ export const MLRules: React.FC = () => {
                   ? renderSecRule(rule)
                   : 'ไม่มี SecRule template'}
               </pre>
+              {/* What approve writes is a two-link chain (rule_manager.scope_ml_rule_to_origin):
+                  the origin guard first, then this rule as the chained link. */}
+              {rule.deploy_scope === 'origin' && (
+                <p className="mt-2 mb-0 text-[12px] leading-relaxed text-[var(--text-muted)]">
+                  ตอนติดตั้ง ระบบจะครอบกฎนี้ด้วยเงื่อนไข <code className="font-mono">TX:waf_origin_id</code> ให้ทำงานเฉพาะ
+                  request ของ {rule.origin_label || 'origin นี้'} (กฎแรกของ chain เช็ค origin แล้วค่อยเช็คกฎด้านบน)
+                </p>
+              )}
               <p className="mt-2 mb-0 text-[12px] leading-relaxed text-[var(--text-muted)]">{GENERATOR_HINT[gen]}</p>
             </section>
 
@@ -419,10 +473,14 @@ export const MLRules: React.FC = () => {
     <div className="animate-fade-in pb-12">
       <TopBar
         title="ML anomaly rules"
-        subtitle="กฎที่ ML เสนอจาก request ที่ตรวจพบ ทุกกฎต้องผ่านการอนุมัติก่อนถึงจะมีผลกับ ModSecurity"
+        subtitle={
+          isAdmin
+            ? 'กฎที่ ML เสนอจาก request ที่ตรวจพบ ทุกกฎต้องผ่านการอนุมัติก่อนถึงจะมีผลกับ ModSecurity'
+            : 'กฎที่ ML เสนอสำหรับ origin ที่คุณเป็นสมาชิก Owner หรือ Editor อนุมัติแล้วกฎจะมีผลเฉพาะ origin นั้น'
+        }
         action={
           <div className="flex items-center gap-2">
-            {canReview && (
+            {isAdmin && (
               <Button variant="secondary" onClick={() => cveScan.mutate()} isLoading={cveScan.isPending} icon={<Bug size={14} />}>
                 สแกน CVE
               </Button>
@@ -438,7 +496,7 @@ export const MLRules: React.FC = () => {
         }
       />
 
-      {canReview && legacyPending > 0 && (
+      {isAdmin && legacyPending > 0 && (
         <div className="mb-4 flex flex-col gap-3 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="m-0 text-[13px] leading-relaxed text-[var(--text-secondary)]">
             <strong className="font-medium text-[var(--text-primary)]">มีกฎแบบเก่ารออนุมัติ {legacyPending} กฎ</strong>{' '}
@@ -491,6 +549,12 @@ export const MLRules: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-b border-[var(--bg-border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5">
+          {originOptions.length > 1 && (
+            <select aria-label="Origin" className={selectClass} value={filters.origin} onChange={(e) => setFilter('origin', e.target.value)}>
+              <option value="all">ทุก origin</option>
+              {originOptions.map((o) => <option key={o.id || 'global'} value={o.id}>{o.label}</option>)}
+            </select>
+          )}
           <select aria-label="ตัวสร้างกฎ" className={selectClass} value={filters.generator} onChange={(e) => setFilter('generator', e.target.value as RuleFilters['generator'])}>
             <option value="all">ทุกตัวสร้างกฎ</option>
             {(Object.keys(GENERATOR_LABEL) as MLRuleGenerator[]).map((g) => (
@@ -509,7 +573,7 @@ export const MLRules: React.FC = () => {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => { setFilters((f) => ({ ...f, generator: 'all', attackType: 'all', search: '' })); setPage(1) }}
+              onClick={() => { setFilters((f) => ({ ...f, generator: 'all', attackType: 'all', search: '', origin: 'all' })); setPage(1) }}
             >
               ล้างตัวกรอง
             </Button>
@@ -517,7 +581,7 @@ export const MLRules: React.FC = () => {
           <span className="ml-auto text-[12.5px] text-[var(--text-muted)]">{visible.length.toLocaleString()} กฎ</span>
         </div>
 
-        {canReview && selected.length > 0 && (
+        {selected.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 border-b border-[var(--accent-border)] bg-[var(--accent-subtle)] px-3.5 py-2.5">
             <span className="text-[13px] font-medium text-[var(--text-primary)]">เลือก {selected.length} กฎ</span>
             <Button variant="ghost" size="sm" onClick={() => setSelected([])}>ยกเลิกการเลือก</Button>
@@ -527,7 +591,8 @@ export const MLRules: React.FC = () => {
                 size="sm"
                 icon={<FlaskConical size={13} />}
                 isLoading={testing.length > 0}
-                onClick={() => runBacktest(rules.filter((r) => selected.includes(r.rule_id) && canBacktest(r)).map((r) => r.rule_id))}
+                disabled={!rules.some((r) => selected.includes(r.rule_id) && mayBacktest(r))}
+                onClick={() => runBacktest(rules.filter((r) => selected.includes(r.rule_id) && mayBacktest(r)).map((r) => r.rule_id))}
               >
                 ทดสอบที่เลือก
               </Button>
@@ -541,7 +606,7 @@ export const MLRules: React.FC = () => {
 
         {pageRules.length > 0 && (
           <div className="hidden xl:grid grid-cols-[auto_minmax(0,1fr)_8.5rem_12rem_16.5rem] items-center gap-x-3 border-b border-[var(--bg-border-subtle)] px-4 py-2 text-[12px] font-medium text-[var(--text-muted)]">
-            {canReview && pendingOnPage.length > 0 ? (
+            {pendingOnPage.length > 0 ? (
               <input
                 type="checkbox"
                 aria-label="เลือกกฎที่รออนุมัติในหน้านี้"
@@ -580,9 +645,19 @@ export const MLRules: React.FC = () => {
               <>
                 <ShieldCheck size={28} className="mx-auto text-emerald-500" aria-hidden="true" />
                 <p className="mt-3 mb-1 text-[14px] font-medium text-[var(--text-primary)]">ไม่มีกฎรออนุมัติ</p>
-                <p className="m-0 mx-auto max-w-md text-[12.5px] leading-relaxed text-[var(--text-muted)]">
-                  กฎใหม่มาจากหน้า AI security analyst เมื่อ Gen 3 ตรวจพบการโจมตี และจากปุ่มสแกน CVE
-                </p>
+                {isAdmin ? (
+                  <p className="m-0 mx-auto max-w-md text-[12.5px] leading-relaxed text-[var(--text-muted)]">
+                    กฎใหม่มาจากหน้า AI security analyst เมื่อ Gen 3 ตรวจพบการโจมตี และจากปุ่มสแกน CVE
+                  </p>
+                ) : (
+                  <p className="m-0 mx-auto max-w-md text-[12.5px] leading-relaxed text-[var(--text-muted)]">
+                    กฎที่เสนอจะขึ้นที่นี่เมื่อคุณวิเคราะห์ request ของ origin ที่คุณเป็น Owner หรือ Editor ในหน้า{' '}
+                    <Link to="/ml-analyst" className="font-medium text-[var(--accent)] hover:text-[var(--accent-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded">
+                      AI security analyst
+                    </Link>{' '}
+                    แล้ว Gen 3 ตรวจพบการโจมตี คุณเห็นเฉพาะกฎของ origin ที่คุณเป็นสมาชิก
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -618,7 +693,10 @@ export const MLRules: React.FC = () => {
         onClose={() => !busy && setApproval(null)}
         title={approval && approval.ids.length > 1 ? `อนุมัติ ${approval.ids.length} กฎ` : 'อนุมัติกฎนี้'}
       >
-        <p className="m-0 text-[13.5px] leading-relaxed text-[var(--text-primary)]">{approval?.message}</p>
+        <p className="m-0 text-[13.5px] font-medium leading-relaxed text-[var(--text-primary)]">{approval?.scope}</p>
+        {approval?.warning && (
+          <p className="mt-2 mb-0 text-[13px] leading-relaxed text-amber-700 dark:text-amber-400">{approval.warning}</p>
+        )}
         <div className="mt-5 flex justify-end gap-2.5 border-t border-[var(--bg-border-subtle)] pt-4">
           <Button variant="ghost" size="lg" onClick={() => setApproval(null)} disabled={busy}>ยกเลิก</Button>
           <Button variant="brand" size="lg" onClick={() => approval && approveIds(approval.ids)} isLoading={busy} icon={<Check size={14} />}>

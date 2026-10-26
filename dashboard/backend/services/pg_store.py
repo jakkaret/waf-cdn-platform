@@ -74,6 +74,10 @@ class DomainAlreadyClaimed(ValueError):
     """A tunnel hostname is already claimed by another origin."""
 
 
+class OriginNotFound(ValueError):
+    """A rule proposal names an origin that does not exist (any more)."""
+
+
 class PgStore:
     backend = "postgres"
     # Alerts whose Host matched no registered domain (origin_id NULL).
@@ -302,10 +306,39 @@ class PgStore:
         return pool.exec_("UPDATE origins SET status = 'active', archived_at = NULL, deleted_at = NULL, "
                           "updated_at = now() WHERE id = %s", (oid,)) > 0
 
-    def hard_delete_origin(self, origin_id: str) -> None:
+    def hard_delete_origin(self, origin_id: str) -> List[int]:
+        """Delete an origin for good (quick tunnel removal, an onboarding
+        origin discarded moments after it was made).
+
+        Its ML/CVE rule proposals are dealt with first, in the same
+        transaction, because the foreign key would otherwise set their
+        origin_id to NULL and turn them into global ones: a pending proposal
+        would join the global queue with this origin's examples (or collide
+        with a global pending row of the same dedup key and fail the delete),
+        and an approve would deploy it for every origin. Proposals never
+        deployed are deleted. An approved rule's row is kept as a rejected
+        tombstone so its ModSecurity id is never handed out again
+        (reserve_approval allocates above every recorded id).
+
+        Returns the ModSecurity ids of those approved rules: the caller removes
+        their ml-<id>.conf after commit (ml_rule_service.remove_deployed_rule_files),
+        since a rule scoped to an origin that no longer exists never fires and
+        would only grow the shared rule set."""
         oid = as_uuid(origin_id)
-        if oid is not None:
+        if oid is None:
+            return []
+        with pool.transaction():
+            # Lock the origin first: a proposal being stored for it
+            # concurrently either commits before this point (and is cleaned up
+            # below) or waits and then fails its foreign key check.
+            pool.q1("SELECT id FROM origins WHERE id = %s FOR UPDATE", (oid,))
+            pool.exec_("DELETE FROM pending_rules WHERE origin_id = %s AND deployed_rule_id IS NULL", (oid,))
+            deployed = pool.q("UPDATE pending_rules SET status = 'rejected', reviewed_by = 'system', "
+                              "reviewed_at = now(), reject_reason = %s WHERE origin_id = %s "
+                              "AND deployed_rule_id IS NOT NULL RETURNING deployed_rule_id",
+                              ("origin deleted: rule file removed", oid))
             pool.exec_("DELETE FROM origins WHERE id = %s", (oid,))
+        return sorted(int(r["deployed_rule_id"]) for r in deployed)
 
     # ------------------------------------------------------------------
     # domains
@@ -1025,35 +1058,53 @@ class PgPendingRuleRepository:
             rule["reviewed_at"] = iso_z_s(row["reviewed_at"])
         if row.get("deployed_rule_id") is not None:
             rule["deployed_rule_id"] = int(row["deployed_rule_id"])
+        # How approval wrote ml-<id>.conf ('origin' | 'global', migration 0018).
+        if row.get("deploy_scope") is not None:
+            rule["deploy_scope"] = row["deploy_scope"]
         return rule
 
     def create(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        """Insert a proposal. A pending row with the same dedup_key absorbs
-        it instead (hit_count+1, newest examples first, at most 5) -- one
-        statement, so two concurrent proposals cannot both insert."""
+        """Insert a proposal. A pending row with the same dedup_key and the
+        same origin (both global counts as the same) absorbs it instead
+        (hit_count+1, newest examples first, at most 5) -- one statement, so
+        two concurrent proposals cannot both insert. Never merges across
+        origins: migration 0017 keys the unique index on (dedup_key, origin_id).
+
+        An origin_id that names no origin (not a uuid, or deleted meanwhile)
+        raises OriginNotFound: the proposal is never stored without its
+        origin, where it would join -- or merge into -- the global queue."""
         from psycopg.types.json import Jsonb
-        row = pool.q1(
-            "INSERT INTO pending_rules (rule_id, created_at, status, pattern, variable, attack_type, severity, "
-            "secrule_template, source_url, source_method, created_by, cve_id, origin_id, origin_label, generator, "
-            "detector, dedup_key, hit_count, examples, last_seen_at) VALUES (%(rule_id)s, COALESCE(%(created_at)s, now()), "
-            "'pending', %(pattern)s, %(variable)s, %(attack_type)s, %(severity)s, %(secrule_template)s, %(source_url)s, "
-            "%(source_method)s, %(created_by)s, %(cve_id)s, (SELECT id FROM origins WHERE id = %(origin_id)s), "
-            "%(origin_label)s, %(generator)s, %(detector)s, %(dedup_key)s, 1, %(examples)s, COALESCE(%(created_at)s, now())) "
-            "ON CONFLICT (dedup_key) WHERE status = 'pending' AND dedup_key IS NOT NULL DO UPDATE SET "
-            "hit_count = pending_rules.hit_count + 1, "
-            "examples = (SELECT COALESCE(jsonb_agg(e ORDER BY n), '[]'::jsonb) FROM "
-            "  jsonb_array_elements(EXCLUDED.examples || pending_rules.examples) WITH ORDINALITY AS t(e, n) WHERE n <= 5), "
-            "last_seen_at = EXCLUDED.last_seen_at RETURNING *",
-            {
-                "rule_id": as_uuid(item.get("rule_id")),
-                "created_at": parse_ts(item.get("created_at")),
-                **{k: str(item.get(k) or "") for k in _PENDING_TEXT},
-                "cve_id": item.get("cve_id") or None,
-                "origin_id": as_uuid(item.get("origin_id")),
-                "dedup_key": item.get("dedup_key") or None,
-                "examples": Jsonb(list(item.get("examples") or [])[:5]),
-            },
-        )
+        origin_id = as_uuid(item.get("origin_id")) if item.get("origin_id") else None
+        if item.get("origin_id") and origin_id is None:
+            raise OriginNotFound("Origin not found")
+        try:
+            row = pool.q1(
+                "INSERT INTO pending_rules (rule_id, created_at, status, pattern, variable, attack_type, severity, "
+                "secrule_template, source_url, source_method, created_by, cve_id, origin_id, origin_label, generator, "
+                "detector, dedup_key, hit_count, examples, last_seen_at) VALUES (%(rule_id)s, COALESCE(%(created_at)s, now()), "
+                "'pending', %(pattern)s, %(variable)s, %(attack_type)s, %(severity)s, %(secrule_template)s, %(source_url)s, "
+                "%(source_method)s, %(created_by)s, %(cve_id)s, %(origin_id)s, "
+                "%(origin_label)s, %(generator)s, %(detector)s, %(dedup_key)s, 1, %(examples)s, COALESCE(%(created_at)s, now())) "
+                "ON CONFLICT (dedup_key, origin_id) WHERE status = 'pending' AND dedup_key IS NOT NULL DO UPDATE SET "
+                "hit_count = pending_rules.hit_count + 1, "
+                "examples = (SELECT COALESCE(jsonb_agg(e ORDER BY n), '[]'::jsonb) FROM "
+                "  jsonb_array_elements(EXCLUDED.examples || pending_rules.examples) WITH ORDINALITY AS t(e, n) WHERE n <= 5), "
+                "last_seen_at = EXCLUDED.last_seen_at RETURNING *",
+                {
+                    "rule_id": as_uuid(item.get("rule_id")),
+                    "created_at": parse_ts(item.get("created_at")),
+                    **{k: str(item.get(k) or "") for k in _PENDING_TEXT},
+                    "cve_id": item.get("cve_id") or None,
+                    # The foreign key checks the origin exists (and holds it
+                    # until commit), instead of a sub-select that turned a
+                    # missing origin into NULL, i.e. a global proposal.
+                    "origin_id": origin_id,
+                    "dedup_key": item.get("dedup_key") or None,
+                    "examples": Jsonb(list(item.get("examples") or [])[:5]),
+                },
+            )
+        except ForeignKeyConflict as exc:
+            raise OriginNotFound("Origin not found") from exc
         return self.to_rule(row)
 
     def get(self, rule_id: str) -> Optional[Dict[str, Any]]:
@@ -1062,18 +1113,40 @@ class PgPendingRuleRepository:
             return None
         return self.to_rule(pool.q1("SELECT * FROM pending_rules WHERE rule_id = %s", (rid,)))
 
-    def find_pending_by_dedup_key(self, dedup_key: str) -> Optional[Dict[str, Any]]:
+    def find_pending_by_dedup_key(self, dedup_key: str, origin_id: str = "") -> Optional[Dict[str, Any]]:
+        """The pending row with this key for this origin ("" = the global queue)."""
         if not dedup_key:
             return None
-        return self.to_rule(pool.q1("SELECT * FROM pending_rules WHERE status = 'pending' AND dedup_key = %s",
-                                    (dedup_key,)))
+        oid = as_uuid(origin_id) if origin_id else None
+        if origin_id and oid is None:
+            return None   # not an origin id: never fall back to the global row
+        return self.to_rule(pool.q1("SELECT * FROM pending_rules WHERE status = 'pending' AND dedup_key = %s "
+                                    "AND origin_id IS NOT DISTINCT FROM %s::uuid", (dedup_key, oid)))
 
-    def list(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list(self, status: Optional[str] = None, origin_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Newest first. origin_ids=None lists every row; a list keeps only
+        rows of those origins (an empty list, or one with no valid id, lists
+        nothing -- never the global rows)."""
+        where, params = [], []
         if status:
-            rows = pool.q("SELECT * FROM pending_rules WHERE status = %s ORDER BY created_at DESC", (status,))
-        else:
-            rows = pool.q("SELECT * FROM pending_rules ORDER BY created_at DESC")
+            where.append("status = %s")
+            params.append(status)
+        if origin_ids is not None:
+            ids = [i for i in (as_uuid(o) for o in origin_ids) if i]
+            if not ids:
+                return []
+            where.append("origin_id = ANY(%s::uuid[])")
+            params.append(ids)
+        clause = f" WHERE {' AND '.join(where)}" if where else ""
+        rows = pool.q(f"SELECT * FROM pending_rules{clause} ORDER BY created_at DESC", tuple(params))
         return [self.to_rule(r) for r in rows]
+
+    def count_approved_for_origin(self, origin_id: str) -> int:
+        oid = as_uuid(origin_id)
+        if oid is None:
+            return 0
+        return int(pool.q1("SELECT count(*) AS n FROM pending_rules WHERE status = 'approved' AND origin_id = %s",
+                           (oid,))["n"])
 
     def record_hit(self, rule_id: str, example: Dict[str, Any], seen_at: str) -> Optional[Dict[str, Any]]:
         from psycopg.types.json import Jsonb
@@ -1092,11 +1165,20 @@ class PgPendingRuleRepository:
         if rid is not None:
             pool.exec_("UPDATE pending_rules SET backtest = %s WHERE rule_id = %s", (Jsonb(result), rid))
 
-    def reserve_approval(self, rule_id: str, approved_by: str, max_file_rule_id: int) -> Dict[str, Any]:
+    def reserve_approval(self, rule_id: str, approved_by: str, max_file_rule_id: int,
+                         expected_origin_id: Optional[str] = None,
+                         max_per_origin: Optional[int] = None) -> Dict[str, Any]:
         """Inside the caller's transaction: lock, check pending, allocate the
         next ModSecurity id above both the files on disk and every id ever
         recorded, and mark the rule approved. Raises ValueError like the
-        DynamoDB path did."""
+        DynamoDB path did.
+
+        expected_origin_id: the origin ("" = global) the caller was
+        authorised for; a row that no longer has it (its origin was deleted
+        and the foreign key set it to NULL) is refused, so a rule an origin
+        member approved can never be deployed for every origin.
+        max_per_origin: cap on approved rules of the row's origin, counted
+        under the same lock."""
         rid = as_uuid(rule_id)
         if rid is None:
             raise ValueError("Rule not found")
@@ -1106,16 +1188,24 @@ class PgPendingRuleRepository:
             raise ValueError("Rule not found")
         if row["status"] != "pending":
             raise ValueError(f"Rule is already {row['status']}")
+        row_origin = str(row["origin_id"]) if row["origin_id"] else ""
+        if expected_origin_id is not None and row_origin != (as_uuid(expected_origin_id) or expected_origin_id):
+            raise ValueError("The rule's origin changed; reload the list and try again")
+        if row_origin and max_per_origin is not None and self.count_approved_for_origin(row_origin) >= max_per_origin:
+            raise ValueError(f"an origin can have at most {max_per_origin} approved ML rules")
         top = pool.q1("SELECT max(deployed_rule_id) AS m FROM pending_rules")["m"] or 0
         new_id = max(int(max_file_rule_id), int(top), _FIRST_ML_RULE_ID_MINUS_ONE) + 1
+        # The scope approve_rule writes the file with (it follows the locked
+        # row's origin), kept so the queue reports how the rule really runs.
         row = pool.q1("UPDATE pending_rules SET status = 'approved', reviewed_by = %s, reviewed_at = now(), "
-                      "deployed_rule_id = %s WHERE rule_id = %s RETURNING *", (approved_by, new_id, rid))
+                      "deployed_rule_id = %s, deploy_scope = %s WHERE rule_id = %s RETURNING *",
+                      (approved_by, new_id, "origin" if row_origin else "global", rid))
         return self.to_rule(row)
 
     def undo_approval(self, rule_id: str, deployed_rule_id: int) -> None:
         """Compensation when the deploy after commit failed."""
         pool.exec_("UPDATE pending_rules SET status = 'pending', deployed_rule_id = NULL, reviewed_by = NULL, "
-                   "reviewed_at = NULL WHERE rule_id = %s AND deployed_rule_id = %s",
+                   "reviewed_at = NULL, deploy_scope = NULL WHERE rule_id = %s AND deployed_rule_id = %s",
                    (as_uuid(rule_id), int(deployed_rule_id)))
 
     def reject(self, rule_id: str, rejected_by: str, reason: str) -> Dict[str, Any]:

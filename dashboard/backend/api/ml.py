@@ -2,10 +2,13 @@ import hmac
 import ipaddress
 import logging
 import os
+from typing import Optional
+
 import httpx
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
-from services.rbac import require_viewer_or_above
+from services.rbac import ARCHIVED_ORIGIN_STATUSES, is_origin_admin, require_viewer_or_above
 from services.gemini_service import gemini_service
+from services.pg_store import OriginNotFound
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -70,6 +73,13 @@ class PredictRequest(BaseModel):
     url: str
     method: str = "GET"
     body: str = ""
+
+
+class SuggestRequest(PredictRequest):
+    # The origin the proposals are for (2026-10-26). Its Owner/Editors review
+    # them and an approved one runs for that origin only. Empty = the
+    # platform admin's global queue, as before.
+    origin_id: Optional[str] = None
 
 
 def _ml_headers(extra: dict | None = None) -> dict:
@@ -214,7 +224,8 @@ async def _gen3_verdict(client, req: PredictRequest) -> dict:
     on the ML host the analyst has nothing to show, so this answers 503 rather
     than falling back to the RF score.
     """
-    res = await client.post(f"{ML_SERVICE_URL}/predict-gen3", json=req.dict(), headers=_ml_headers(), timeout=10.0)
+    body = {"url": req.url, "method": req.method, "body": req.body}
+    res = await client.post(f"{ML_SERVICE_URL}/predict-gen3", json=body, headers=_ml_headers(), timeout=10.0)
     if res.status_code != 200:
         raise HTTPException(status_code=503, detail=f"Gen 3 model unavailable on the ML service ({res.status_code})")
     data = res.json()
@@ -246,16 +257,53 @@ async def _proposed_rules(client, req: PredictRequest, gen3: dict) -> tuple[list
     return rules, "" if rules else "gen3_no_detector"
 
 
+def _suggest_origin(origin_id: str, current_user: dict) -> dict:
+    """The origin a caller asks proposals for: its Owner or an Editor (the
+    people who may approve them), or the platform admin. Checked before the
+    quota is spent. 403 for anyone else, whether or not the origin exists."""
+    from services.dynamodb_service import DynamoDBService
+    origin = DynamoDBService().get_origin_by_id(origin_id)
+    live = bool(origin) and origin.get("status") not in ARCHIVED_ORIGIN_STATUSES
+    if current_user.get("role") == "admin":
+        if not live:
+            raise HTTPException(status_code=404, detail="Origin not found")
+        return origin
+    if not live or not is_origin_admin(origin, current_user.get("user_id")):
+        raise HTTPException(status_code=403, detail="Owner or Editor of this origin required")
+    return origin
+
+
+def _own_examples_only(rule: dict, current_user: dict) -> dict:
+    """A global pending rule merges proposals from everyone who analysed a
+    request without an origin, and its examples carry their URLs and names
+    (ml_rule_service._example). A non-admin caller gets back only the
+    examples they submitted; the platform admin's queue keeps all of them.
+    The stored backtest goes too: an admin ran it over every origin's
+    traffic, and its example_paths are other tenants' URL paths."""
+    uid = str(current_user.get("user_id") or "")
+    mine = [e for e in rule.get("examples") or [] if uid and str(e.get("requested_by_id") or "") == uid]
+    own = {k: v for k, v in rule.items() if k != "backtest"}
+    return {**own, "examples": mine}
+
+
 @router.post("/predict-and-suggest")
-async def predict_and_suggest(req: PredictRequest, current_user: dict = Depends(require_viewer_or_above)):
-    """Score a request with Gen 3 and queue rule proposals for admin review.
+async def predict_and_suggest(req: SuggestRequest, current_user: dict = Depends(require_viewer_or_above)):
+    """Score a request with Gen 3 and queue rule proposals for review (an origin's Owner/Editors, or the platform admin).
 
     Response: `gen3` (score, threshold, detectors), `suggested_rule` (first
     proposal, or None), `suggested_rules` and `suggestion` = {engine, created,
-    merged, reason}. `reason` says why nothing was proposed: gen3_not_attack,
+    merged, reason, origin_id}. `reason` says why nothing was proposed: gen3_not_attack,
     gen3_no_detector (flagged on structural features only), generator_error.
     No Gemini call: Gemini described the RandomForest attribution, which is no longer used here.
+
+    With `origin_id` (2026-10-26) the proposals belong to that origin: the
+    caller must be its Owner or an Editor (or the platform admin), they merge
+    only into a pending rule of the same origin, and an approved one runs for
+    that origin only. Without it they go to the global queue, as before.
     """
+    origin_id = str(getattr(req, "origin_id", None) or "").strip()
+    origin = _suggest_origin(origin_id, current_user) if origin_id else None
+    origin_id = str(origin["id"]) if origin else ""
     _check_suggest_quota(str(current_user.get("user_id") or current_user.get("sub") or "unknown"))
     try:
         async with httpx.AsyncClient() as client:
@@ -270,20 +318,29 @@ async def predict_and_suggest(req: PredictRequest, current_user: dict = Depends(
                 for rule_data in rules:
                     rule_data = {**rule_data,
                                  "requested_by": current_user.get("username") or current_user.get("email", ""),
-                                 "requested_by_id": current_user.get("user_id", "")}
-                    existing = rule_service.find_pending_by_dedup_key(rule_data.get("dedup_key", ""))
+                                 "requested_by_id": current_user.get("user_id", ""),
+                                 # Same label the CVE scan stores (cve_feed.match_cves_to_origins).
+                                 "origin_id": origin_id,
+                                 "origin_label": origin.get("label", "") if origin else ""}
+                    existing = rule_service.find_pending_by_dedup_key(rule_data.get("dedup_key", ""), origin_id)
                     if existing:
                         suggested.append(rule_service.record_hit(existing, rule_data))
                         merged += 1
                     else:
-                        suggested.append(rule_service.create_pending_rule(rule_data, created_by="ml-auto"))
+                        try:
+                            suggested.append(rule_service.create_pending_rule(rule_data, created_by="ml-auto"))
+                        except OriginNotFound:   # deleted since _suggest_origin checked it
+                            raise HTTPException(status_code=404, detail="Origin not found")
                         created += 1
+            if not origin_id and current_user.get("role") != "admin":
+                suggested = [_own_examples_only(r, current_user) for r in suggested]
 
             return {
                 "gen3": gen3,
                 "suggested_rule": suggested[0] if suggested else None,
                 "suggested_rules": suggested,
-                "suggestion": {"engine": "gen3", "created": created, "merged": merged, "reason": reason},
+                "suggestion": {"engine": "gen3", "created": created, "merged": merged, "reason": reason,
+                               "origin_id": origin_id},
             }
 
     except httpx.RequestError as e:

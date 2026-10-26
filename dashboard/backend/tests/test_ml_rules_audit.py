@@ -55,6 +55,9 @@ def _patch_audit_log_db(monkeypatch, fake_infrastructure):
 @pytest.fixture()
 def fake_rule_service(monkeypatch):
     fake = MagicMock()
+    # The endpoints read the rule first to check who may review it; these
+    # are global-queue rules (no origin), reviewed by the platform admin.
+    fake.get_rule_detail.side_effect = lambda rule_id: {"rule_id": rule_id, "origin_id": "", "status": "pending"}
     monkeypatch.setattr(ml_rules_module, "rule_service", fake)
     return fake
 
@@ -68,7 +71,8 @@ def test_approving_a_rule_writes_a_real_audit_event(
     client, register_user, auth_header, fake_rule_service,
 ):
     admin_h = _admin(client, register_user, auth_header)
-    def _approve(rule_id, approved_by, on_approved=None, on_deploy_failed=None):
+    def _approve(rule_id, approved_by, on_approved=None, on_deploy_failed=None, expected_origin_id=None):
+        assert expected_origin_id == ""   # checked against the global queue
         # The service records the audit event itself (same transaction as the
         # status change), through the on_approved callback the endpoint gives it.
         rule = {"rule_id": "rule-1", "attack_type": "SQLi", "deployed_rule_id": 990123}

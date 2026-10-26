@@ -6,6 +6,7 @@ import { systemApi } from '../api/system'
 import { analyticsApi } from '../api/analytics'
 import { aiSummaryApi } from '../api/aiSummary'
 import { mlRulesApi } from '../api/mlRules'
+import { canReviewRule } from '../lib/mlRules'
 import { useOriginFilterStore } from '../store/originFilterStore'
 import { useAuthStore } from '../store/authStore'
 import { TopBar } from '../components/layout/TopBar'
@@ -100,8 +101,9 @@ export const Dashboard: React.FC = () => {
 
   // "Needs Attention" summary data -- real counts, no new backend
   // endpoints. unread_count already backs the notification bell/mark-all-
-  // read feature (tenant-scoped since 09234bf); pending ML rule count is
-  // admin-only since the review queue itself is admin-only (b414134).
+  // read feature (tenant-scoped since 09234bf). The pending ML rule queue is
+  // filtered server-side to the caller's origins (admin: every rule); the
+  // count below is the rules this user may approve or reject.
   const { data: notificationFeed } = useQuery({
     queryKey: ['notifications-feed-dashboard'],
     queryFn: () => aiSummaryApi.getNotificationFeed(1),
@@ -112,7 +114,6 @@ export const Dashboard: React.FC = () => {
     queryKey: ['ml-rules-pending-dashboard'],
     queryFn: () => mlRulesApi.listRules('pending'),
     refetchInterval: 15000,
-    enabled: isAdmin,
   })
 
   // Edge/hub health for the infrastructure cards, from /api/system/status.
@@ -269,7 +270,8 @@ export const Dashboard: React.FC = () => {
           handle first, always visible regardless of which tab is active ═══ */}
       {(() => {
         const unreadCount = notificationFeed?.unread_count ?? 0
-        const pendingRuleCount = pendingMlRules?.length ?? 0
+        // Viewers see an origin's pending rules but cannot act on them.
+        const pendingRuleCount = (pendingMlRules ?? []).filter((r) => canReviewRule(r, isAdmin)).length
         // Until /system/status answers, selectNode() reports every node as
         // UNKNOWN/offline -- that is "not loaded yet", not an outage, so it
         // must not raise a false alarm on first paint.
@@ -314,14 +316,16 @@ export const Dashboard: React.FC = () => {
                   <span className="text-[var(--text-muted)]">unread alert{unreadCount === 1 ? '' : 's'}</span>
                 </Link>
               )}
-              {isAdmin && pendingRuleCount > 0 && (
+              {pendingRuleCount > 0 && (
                 <Link
                   to="/ml-rules"
                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-amber-300/50 dark:border-amber-500/20 text-[12px] font-mono hover:border-amber-400 dark:hover:border-amber-500/40 transition-colors"
                 >
                   <FlaskConical size={13} className="text-amber-600 dark:text-amber-400" />
                   <span className="font-semibold text-[var(--text-primary)]">{pendingRuleCount}</span>
-                  <span className="text-[var(--text-muted)]">rule{pendingRuleCount === 1 ? '' : 's'} awaiting review</span>
+                  <span className="text-[var(--text-muted)]">
+                    ML rule{pendingRuleCount === 1 ? '' : 's'} awaiting {isAdmin ? 'review' : 'your review'}
+                  </span>
                 </Link>
               )}
               {offlineNodes.length > 0 && (

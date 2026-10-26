@@ -226,7 +226,9 @@ def remove(origin_id: str, actor: Optional[Dict[str, Any]], reason: str) -> Opti
                      "owner_user_id": tunnel["owner_id"], "owner_username": tunnel["owner_username"],
                      "reason": reason},
         )
-        db.hard_delete_origin(origin_id)
+        deployed_ml_rules = db.hard_delete_origin(origin_id)
+    from services.ml_rule_service import remove_deployed_rule_files
+    remove_deployed_rule_files(deployed_ml_rules)   # approved ML rules scoped to it, after commit
     invalidate_tenant_cache(tunnel["owner_id"])
     origin_service._invalidate_origins_caches()
     logger.info("quick tunnel %s removed (%s)", tunnel["domain_name"], reason)

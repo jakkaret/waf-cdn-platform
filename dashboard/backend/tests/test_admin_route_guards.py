@@ -12,9 +12,10 @@ from api import settings as settings_module, threshold_proposals as tp_module
 from services.rate_limiter import limiter
 
 ADMIN_ONLY = [
-    ("POST", "/api/ml-rules/abc/approve"),
-    ("POST", "/api/ml-rules/abc/reject"),
+    # approve/reject/backtest are open to an origin's Owner/Editors for that
+    # origin's rules (2026-10-26): see MEMBER_SCOPED below.
     ("DELETE", "/api/ml-rules/abc"),
+    ("POST", "/api/ml-rules/reject-legacy"),
     ("POST", "/api/ml-rules/cve-scan"),
     ("GET", "/api/rate-limits/rules"),
     ("GET", "/api/rate-limits/throttled"),
@@ -45,6 +46,13 @@ ADMIN_SAFE = [
     ("POST", "/api/ip-rules/"),
     ("POST", "/api/ip-rules/bulk-delete"),
     ("POST", "/api/ml-rules/abc/reject"),
+]
+# Routes a non-admin reaches only for rules of their own origins; anything
+# else is a 404 so a rule's existence does not leak (tests/test_ml_rules_origin_scope.py).
+MEMBER_SCOPED = [
+    ("POST", "/api/ml-rules/abc/approve"),
+    ("POST", "/api/ml-rules/abc/reject"),
+    ("POST", "/api/ml-rules/abc/backtest"),
 ]
 
 
@@ -88,7 +96,13 @@ def test_admin_passes_the_gate(client, tokens, method, path):
     assert _call(client, method, path, admin).status_code not in (401, 403)
 
 
-@pytest.mark.parametrize("method,path", ADMIN_ONLY)
+@pytest.mark.parametrize("method,path", ADMIN_ONLY + MEMBER_SCOPED)
 def test_unauthenticated_gets_401(client, method, path):
     client.cookies.clear()
     assert client.request(method, path, json={}).status_code == 401
+
+
+@pytest.mark.parametrize("method,path", MEMBER_SCOPED)
+def test_a_rule_outside_the_callers_origins_is_404(client, tokens, method, path):
+    _, viewer = tokens
+    assert _call(client, method, path, viewer).status_code == 404

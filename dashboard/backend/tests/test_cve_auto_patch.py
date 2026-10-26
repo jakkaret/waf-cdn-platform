@@ -247,6 +247,59 @@ def test_scan_skips_a_cve_that_already_has_a_proposal_in_the_queue(
     fake_rule_service.create_pending_rule.assert_not_called()
 
 
+# 2026-10-26: an approved CVE rule runs for its own origin only, so dedup is
+# per (CVE, origin): every origin the CVE matches gets its own proposal.
+
+def _created_origins(fake_rule_service):
+    return sorted(c.args[0]["origin_id"] for c in fake_rule_service.create_pending_rule.call_args_list)
+
+
+def test_a_cve_matching_two_origins_gets_a_proposal_for_each(
+    client, register_user, auth_header, fake_rule_service, fake_cve_fetch, fake_gemini_pattern,
+):
+    admin_h = _admin(client, register_user, auth_header)
+    fake_rule_service.db.list_origins.return_value = [_origin("origin-1", tags=["wordpress"]),
+                                                      _origin("origin-2", tags=["wordpress"])]
+    fake_cve_fetch([_cve(cve_id="CVE-2026-9001", vendor="wordpress", product="wordpress")])
+    fake_gemini_pattern(r"/wp-exploit")
+
+    body = client.post("/api/ml-rules/cve-scan", headers=admin_h).json()
+    assert body["proposals_created"] == 2 and body["skipped_duplicate"] == 0
+    assert _created_origins(fake_rule_service) == ["origin-1", "origin-2"]
+
+
+def test_one_origins_proposal_or_rejection_does_not_suppress_another_origins(
+    client, register_user, auth_header, fake_rule_service, fake_cve_fetch, fake_gemini_pattern,
+):
+    admin_h = _admin(client, register_user, auth_header)
+    fake_rule_service.db.list_origins.return_value = [_origin("origin-1", tags=["wordpress"]),
+                                                      _origin("origin-2", tags=["wordpress"])]
+    fake_rule_service.list_rules.return_value = [
+        {"rule_id": "r1", "cve_id": "CVE-2026-9001", "status": "rejected", "origin_id": "origin-1"}]
+    fake_cve_fetch([_cve(cve_id="CVE-2026-9001", vendor="wordpress", product="wordpress")])
+    fake_gemini_pattern(r"/wp-exploit")
+
+    body = client.post("/api/ml-rules/cve-scan", headers=admin_h).json()
+    assert body["proposals_created"] == 1 and body["skipped_duplicate"] == 1
+    assert _created_origins(fake_rule_service) == ["origin-2"]
+
+
+def test_a_cve_rule_approved_globally_before_scoping_still_covers_every_origin(
+    client, register_user, auth_header, fake_rule_service, fake_cve_fetch, fake_gemini_pattern,
+):
+    admin_h = _admin(client, register_user, auth_header)
+    fake_rule_service.db.list_origins.return_value = [_origin("origin-1", tags=["wordpress"]),
+                                                      _origin("origin-2", tags=["wordpress"])]
+    fake_rule_service.list_rules.return_value = [
+        {"rule_id": "r1", "cve_id": "CVE-2026-9001", "status": "approved", "origin_id": "origin-1",
+         "deploy_scope": "global"}]
+    fake_cve_fetch([_cve(cve_id="CVE-2026-9001", vendor="wordpress", product="wordpress")])
+    fake_gemini_pattern(r"/wp-exploit")
+
+    body = client.post("/api/ml-rules/cve-scan", headers=admin_h).json()
+    assert body["proposals_created"] == 0 and body["skipped_duplicate"] == 2
+
+
 def test_scan_never_writes_a_proposal_whose_gemini_pattern_fails_to_compile(
     client, register_user, auth_header, fake_rule_service, fake_cve_fetch, fake_gemini_pattern,
 ):

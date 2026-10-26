@@ -1,13 +1,15 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, ArrowRight, CheckCircle2, ScanSearch, ShieldQuestion } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { TopBar } from '../components/layout/TopBar'
 import { Button } from '../components/ui/Button'
 import { api } from '../api/axios'
+import { getOrigins } from '../api/origins'
 import { useAuthStore } from '../store/authStore'
 import { isOperator } from '../lib/permissions'
-import { describeSuggestion, SuggestionSummary } from '../lib/mlRules'
+import { analystOriginChoices, defaultAnalystOrigin, describeSuggestion, SuggestionSummary } from '../lib/mlRules'
 import { detectorNote, formatPercent, Gen3Verdict, SAMPLE_REQUESTS, scoreBar, verdictView } from '../lib/mlAnalyst'
 
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE']
@@ -15,6 +17,8 @@ const METHODS = ['GET', 'POST', 'PUT', 'DELETE']
 interface AnalysisResult {
   gen3: Gen3Verdict | null
   suggestion: SuggestionSummary | null
+  // The origin the request was analysed for ("" = platform admin queue).
+  originId: string
 }
 
 const SEVERITY_TEXT: Record<string, string> = {
@@ -27,13 +31,30 @@ const sectionTitle = 'm-0 mb-2 text-[12.5px] font-medium text-[var(--text-second
 
 export const MLAnalyst: React.FC = () => {
   const { user } = useAuthStore()
-  const canReview = isOperator(user)
+  const isAdmin = isOperator(user)
   const [url, setUrl] = useState('')
   const [method, setMethod] = useState('GET')
   const [body, setBody] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [gen3Missing, setGen3Missing] = useState(false)
+
+  // Same key and response shape as the Origins page, so the cache is shared.
+  const { data: originsRes, isLoading: originsLoading, isError: originsError } = useQuery({
+    queryKey: ['origins'],
+    queryFn: () => getOrigins(),
+  })
+  const choices = useMemo(
+    () => analystOriginChoices(originsRes?.data?.origins ?? [], user?.user_id),
+    [originsRes, user?.user_id],
+  )
+  // null until the user picks; a pick that is no longer editable falls back.
+  const [picked, setPicked] = useState<string | null>(null)
+  const originId =
+    picked !== null && (picked === '' ? isAdmin : choices.some((c) => c.id === picked))
+      ? picked
+      : defaultAnalystOrigin(choices, isAdmin)
+  const labelOf = (id: string) => choices.find((c) => c.id === id)?.label ?? id
 
   const handlePredict = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -45,12 +66,20 @@ export const MLAnalyst: React.FC = () => {
     setResult(null)
     setGen3Missing(false)
     try {
-      // gen3 = score, threshold, detectors; suggestion = {engine, created, merged, reason}.
+      // gen3 = score, threshold, detectors; suggestion = {engine, created, merged, reason, origin_id}.
       // No Gen 3 model on the ML host answers 503 (shown as the error toast).
-      const response = await api.post('/ml/predict-and-suggest', { url, method, body })
+      // With origin_id the proposal goes to that origin's Owner/Editor queue
+      // and deploys for that origin only; without, to the platform admin queue.
+      const response = await api.post('/ml/predict-and-suggest', {
+        url,
+        method,
+        body,
+        ...(originId ? { origin_id: originId } : {}),
+      })
       setResult({
         gen3: response.data.gen3 ?? null,
         suggestion: response.data.suggestion ?? null,
+        originId: response.data.suggestion?.origin_id ?? originId,
       })
     } catch (error: any) {
       // "Gen 3 model unavailable" (api/ml.py _gen3_verdict): the ML host runs an older
@@ -72,7 +101,11 @@ export const MLAnalyst: React.FC = () => {
   const gen3 = result?.gen3 ?? null
   const verdict = verdictView(gen3)
   const bar = verdict ? scoreBar(verdict.score, verdict.threshold) : null
-  const suggestion = result ? describeSuggestion(result.suggestion) : null
+  const suggestion = result
+    ? describeSuggestion(result.suggestion, result.originId ? labelOf(result.originId) : null)
+    : null
+  // The review queue lists the admin's queue, or the rules of the user's origin.
+  const canOpenQueue = isAdmin || !!result?.originId
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -85,6 +118,39 @@ export const MLAnalyst: React.FC = () => {
         {/* Request form */}
         <form onSubmit={handlePredict} className="dash-card p-5 space-y-4">
           <h2 className="m-0 text-[14px] font-semibold text-[var(--text-primary)]">Request ที่จะวิเคราะห์</h2>
+
+          <div>
+            {isAdmin || choices.length > 0 ? (
+              <>
+                <label htmlFor="analyst-origin" className={`block ${sectionTitle}`}>เสนอกฎให้ origin</label>
+                <select
+                  id="analyst-origin"
+                  value={originId}
+                  onChange={(e) => setPicked(e.target.value)}
+                  className="w-full dash-input h-9 text-[13px] cursor-pointer"
+                >
+                  {isAdmin && <option value="">ไม่ระบุ origin (global)</option>}
+                  {choices.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+                <p className="mt-1.5 mb-0 text-[12px] leading-relaxed text-[var(--text-muted)]">
+                  {originId
+                    ? 'กฎที่เสนอจะรอ Owner หรือ Editor ของ origin นี้อนุมัติ และมีผลเฉพาะ origin นี้'
+                    : 'กฎที่เสนอจะเข้าคิวของผู้ดูแลแพลตฟอร์ม และถ้าอนุมัติจะมีผลกับทุก origin'}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className={sectionTitle}>เสนอกฎให้ origin</p>
+                <p className="m-0 text-[12.5px] leading-relaxed text-[var(--text-muted)]">
+                  {originsLoading
+                    ? 'กำลังโหลด origin...'
+                    : originsError
+                    ? 'โหลดรายการ origin ไม่สำเร็จ ลองรีเฟรชหน้านี้อีกครั้ง'
+                    : 'คุณยังไม่ได้เป็น Owner หรือ Editor ของ origin ไหน วิเคราะห์ได้ตามปกติ แต่กฎที่เสนอจะเข้าคิวของผู้ดูแลแพลตฟอร์ม'}
+                </p>
+              </>
+            )}
+          </div>
 
           <fieldset className="m-0 p-0 border-0">
             <legend className={sectionTitle}>Method</legend>
@@ -150,7 +216,15 @@ export const MLAnalyst: React.FC = () => {
             </div>
           </div>
 
-          <Button type="submit" className="w-full h-9" isLoading={loading} icon={<ScanSearch size={15} />}>
+          {/* Wait for the origin list (and refuse when it failed to load) so a user's
+              proposal is not filed to the platform queue by accident. */}
+          <Button
+            type="submit"
+            className="w-full h-9"
+            isLoading={loading}
+            disabled={(originsLoading || originsError) && !isAdmin}
+            icon={<ScanSearch size={15} />}
+          >
             วิเคราะห์ request
           </Button>
         </form>
@@ -272,7 +346,7 @@ export const MLAnalyst: React.FC = () => {
                   }`}
                 >
                   <span>{suggestion.text}</span>
-                  {suggestion.queued && canReview && (
+                  {suggestion.queued && canOpenQueue && (
                     <Link
                       to="/ml-rules"
                       className="inline-flex items-center gap-1 font-medium text-[var(--accent)] hover:text-[var(--accent-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded"

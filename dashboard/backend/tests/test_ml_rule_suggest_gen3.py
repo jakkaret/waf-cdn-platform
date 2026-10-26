@@ -7,7 +7,7 @@ Scenario: an analysed request queues rule proposals for admin review.
     (the queue had ~268 near-identical rows, one per flagged request).
   - When nothing is proposed, the response says why.
   - An admin can backtest a pending rule on recent allowed traffic; the result holds counts
-    and URL paths only, and a viewer cannot run it.
+    and URL paths only, and a non-admin cannot run it on a global rule.
   - An admin can reject every pending rule left by the retired RandomForest path in one call.
 
 The ML service and ClickHouse are faked; MLRuleService runs for real on an in-memory table.
@@ -163,7 +163,7 @@ def test_gen3_attack_queues_detector_rules_then_merges_the_repeat(suggest, table
     routes = {"/predict-gen3": GEN3_ATTACK, "/generate-rule-gen3": _Resp(200, {"rules": [gen3_rule()]})}
     out, calls = suggest(routes)
     assert calls == ["/predict-gen3", "/generate-rule-gen3"]  # no RandomForest call at all
-    assert out["suggestion"] == {"engine": "gen3", "created": 1, "merged": 0, "reason": ""}
+    assert out["suggestion"] == {"engine": "gen3", "created": 1, "merged": 0, "reason": "", "origin_id": ""}
     assert out["suggested_rule"]["generator"] == "gen3-detector"
     assert out["gen3"]["is_attack"] is True
 
@@ -263,11 +263,16 @@ def rules_client() -> TestClient:
     return TestClient(app)
 
 
-def test_viewer_cannot_backtest(rules_client, register_user, auth_header):
+def test_a_non_admin_cannot_backtest_a_global_rule(rules_client, register_user, auth_header, monkeypatch, table):
+    # A global rule is replayed against every tenant's traffic: admin only. A
+    # non-admin is told it does not exist (origin rules: test_ml_rules_origin_scope.py).
+    service = MLRuleService()
+    monkeypatch.setattr(ml_rules_module, "rule_service", service)
+    rule = service.create_pending_rule(gen3_rule(), created_by="ml-auto")
     register_user(email="bt-admin@example.com", username="bt_admin")  # first user -> admin
     viewer = register_user(email="bt-viewer@example.com", username="bt_viewer", role="viewer")
-    resp = rules_client.post("/api/ml-rules/some-rule/backtest", headers=auth_header(viewer["access_token"]))
-    assert resp.status_code == 403
+    resp = rules_client.post(f"/api/ml-rules/{rule['rule_id']}/backtest", headers=auth_header(viewer["access_token"]))
+    assert resp.status_code == 404
 
 
 def test_admin_backtest_stores_the_result(rules_client, register_user, auth_header, monkeypatch, table):

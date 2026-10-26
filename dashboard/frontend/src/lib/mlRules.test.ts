@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import type { MLPendingRule } from '../types'
+import type { MLPendingRule, Origin } from '../types'
 import {
+  GLOBAL_SCOPE_LABEL,
+  analystOriginChoices,
+  approveScope,
   approveWarning,
   backtestView,
   canBacktest,
+  canBacktestRule,
+  canReviewRule,
+  defaultAnalystOrigin,
+  deployScopeOf,
   describeSuggestion,
+  ruleOriginLabel,
+  ruleOriginOptions,
   legacyPendingCount,
   filterAndSortRules,
   generatorOf,
@@ -87,6 +96,106 @@ describe('filterAndSortRules', () => {
     expect(ids({ search: 'cve-2026' })).toEqual(['c'])
     expect(ids({ search: '  B ' })).toEqual(['b'])
   })
+  it('filters by origin, "" being the global rules', () => {
+    const mixed = [
+      rule({ rule_id: 'g' }),
+      rule({ rule_id: 'o1', origin_id: 'o1', origin_label: 'shop.example.com' }),
+      rule({ rule_id: 'o2', origin_id: 'o2', origin_label: 'blog.example.com' }),
+    ]
+    const by = (origin?: string) => filterAndSortRules(mixed, { ...base, origin }).map((r) => r.rule_id).sort()
+    expect(by(undefined)).toEqual(['g', 'o1', 'o2'])
+    expect(by('all')).toEqual(['g', 'o1', 'o2'])
+    expect(by('o1')).toEqual(['o1'])
+    expect(by('')).toEqual(['g'])
+    expect(filterAndSortRules(mixed, { ...base, search: 'blog.' }).map((r) => r.rule_id)).toEqual(['o2'])
+  })
+})
+
+describe('deploy scope', () => {
+  it('uses deploy_scope, else infers it from origin_id', () => {
+    expect(deployScopeOf({ deploy_scope: 'global', origin_id: 'o1' })).toBe('global')
+    expect(deployScopeOf({ origin_id: 'o1' })).toBe('origin')
+    expect(deployScopeOf({ origin_id: '' })).toBe('global')
+    expect(deployScopeOf({})).toBe('global')
+  })
+  it('labels the origin, or the platform for global rules', () => {
+    expect(ruleOriginLabel({ origin_id: 'o1', origin_label: 'shop.example.com' })).toBe('shop.example.com')
+    expect(ruleOriginLabel({ origin_id: 'o1' })).toBe('o1')
+    expect(ruleOriginLabel({ origin_id: '', origin_label: 'ignored' })).toBe(GLOBAL_SCOPE_LABEL)
+  })
+})
+
+describe('approveScope', () => {
+  const shop = { origin_id: 'o1', origin_label: 'shop.example.com', deploy_scope: 'origin' as const }
+  const blog = { origin_id: 'o2', origin_label: 'blog.example.com', deploy_scope: 'origin' as const }
+  const global = { origin_id: '', deploy_scope: 'global' as const }
+  it('names the one origin an origin rule affects', () => {
+    expect(approveScope([shop])).toBe('กฎนี้จะมีผลเฉพาะ shop.example.com')
+    expect(approveScope([shop, shop])).toBe('กฎ 2 ข้อจะมีผลเฉพาะ shop.example.com')
+  })
+  it('says a global rule affects every origin', () => {
+    expect(approveScope([global])).toMatch(/^กฎนี้จะมีผลกับ ModSecurity ของทุก origin/)
+    expect(approveScope([global, global])).toMatch(/^กฎ 2 ข้อจะมีผลกับ ModSecurity ของทุก origin/)
+  })
+  it('lists the origins of a mixed selection', () => {
+    expect(approveScope([shop, blog])).toContain('shop.example.com, blog.example.com')
+    const mixed = approveScope([global, shop])
+    expect(mixed).toContain('1 ข้อมีผลกับทุก origin')
+    expect(mixed).toContain('shop.example.com')
+  })
+})
+
+describe('canReviewRule / canBacktestRule', () => {
+  it('follows the per-rule flags', () => {
+    expect(canReviewRule({ status: 'pending', can_review: true }, false)).toBe(true)
+    expect(canReviewRule({ status: 'pending', can_review: false }, true)).toBe(false)
+    expect(canReviewRule({ status: 'approved', can_review: true }, true)).toBe(false)
+    expect(canBacktestRule({ generator: 'gen3-detector', can_backtest: true }, false)).toBe(true)
+    expect(canBacktestRule({ generator: 'gen3-detector', can_backtest: false }, true)).toBe(false)
+  })
+  it('falls back to admin-only without the flags, and never backtests CVE patches', () => {
+    expect(canReviewRule({ status: 'pending' }, true)).toBe(true)
+    expect(canReviewRule({ status: 'pending' }, false)).toBe(false)
+    expect(canBacktestRule({ generator: 'gen3-detector' }, false)).toBe(false)
+    expect(canBacktestRule({ created_by: 'cve-auto', can_backtest: true }, true)).toBe(false)
+  })
+})
+
+describe('ruleOriginOptions', () => {
+  it('lists each origin once, sorted by label, global as ""', () => {
+    expect(
+      ruleOriginOptions([
+        { origin_id: 'o2', origin_label: 'shop' },
+        { origin_id: '' },
+        { origin_id: 'o1', origin_label: 'blog' },
+        { origin_id: 'o2', origin_label: 'shop' },
+      ]),
+    ).toEqual([
+      { id: 'o1', label: 'blog' },
+      { id: '', label: GLOBAL_SCOPE_LABEL },
+      { id: 'o2', label: 'shop' },
+    ])
+  })
+})
+
+describe('analystOriginChoices / defaultAnalystOrigin', () => {
+  const origin = (origin_id: string, over: Partial<Origin> = {}) => ({
+    origin_id, label: `${origin_id}.example.com`, status: 'active' as Origin['status'], admin_user_id: 'owner',
+    editor_user_ids: ['editor'], viewer_user_ids: ['viewer'], ...over,
+  })
+  it('keeps origins the user owns or edits, not viewed or archived ones', () => {
+    const origins = [origin('a'), origin('b', { status: 'archived' }), origin('c', { admin_user_id: 'other', editor_user_ids: [] })]
+    expect(analystOriginChoices(origins, 'owner').map((c) => c.id)).toEqual(['a'])
+    expect(analystOriginChoices(origins, 'editor').map((c) => c.id)).toEqual(['a'])
+    expect(analystOriginChoices(origins, 'viewer')).toEqual([])
+    expect(analystOriginChoices(origins, undefined)).toEqual([])
+  })
+  it('starts an admin on global and anyone else on their first origin', () => {
+    const choices = [{ id: 'a', label: 'a' }, { id: 'b', label: 'b' }]
+    expect(defaultAnalystOrigin(choices, true)).toBe('')
+    expect(defaultAnalystOrigin(choices, false)).toBe('a')
+    expect(defaultAnalystOrigin([], false)).toBe('')
+  })
 })
 
 describe('timeAgo', () => {
@@ -112,6 +221,12 @@ describe('describeSuggestion', () => {
     expect(describeSuggestion({ engine: 'gen3', created: 0, merged: 0, reason: 'gen3_no_detector' }).text).toMatch(/detector/)
     expect(describeSuggestion({ engine: 'gen3', created: 0, merged: 0, reason: 'something_new' }).text).toBe('ไม่มีกฎที่เสนอ')
     expect(describeSuggestion(undefined).queued).toBe(false)
+  })
+  it('says where a queued proposal went', () => {
+    const s = { engine: 'gen3' as const, created: 1, merged: 0, reason: '' }
+    expect(describeSuggestion(s, 'shop.example.com').text).toBe('เสนอกฎใหม่ 1 ข้อ สำหรับ shop.example.com')
+    expect(describeSuggestion(s, null).text).toBe('เสนอกฎใหม่ 1 ข้อ ในคิวของผู้ดูแลแพลตฟอร์ม')
+    expect(describeSuggestion({ ...s, created: 0 }, 'shop.example.com').text).toBe('ไม่มีกฎที่เสนอ')
   })
 })
 

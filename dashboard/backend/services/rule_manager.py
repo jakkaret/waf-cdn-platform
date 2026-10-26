@@ -88,9 +88,11 @@ _DIRECTIVE_RE = re.compile(r"^\s*(Sec\w+|Include\w*)\b", re.IGNORECASE | re.MULT
 _BAD_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
-def validate_ml_rule_text(text: str, rule_id: int) -> None:
+def validate_ml_rule_text(text: str, rule_id: int) -> tuple:
     """Fail closed unless `text` is exactly one SecRule with the allocated id
-    that denies, and nothing else (P4.2). ValueError says what is wrong."""
+    that denies, and nothing else (P4.2). ValueError says what is wrong.
+    Returns (variables, operator, actions) as written in the rule, quoting
+    and escapes untouched."""
     if _BAD_CHARS.search(text):
         raise ValueError("rule contains control characters")
     # Validate exactly what _write_ml_rule writes (re-audit 2026-10-17): no
@@ -116,6 +118,86 @@ def validate_ml_rule_text(text: str, rule_id: int) -> None:
         raise ValueError("rule uses an action that is not allowed for generated rules")
     if not re.search(r"(?:^|,)\s*deny\b", actions) or not re.search(r"(?:^|,)\s*phase:\s*[12]\b", actions):
         raise ValueError("generated rules must deny in phase 1 or 2")
+    return m.group(1), m.group(2), actions
+
+
+# Same shape as services/tenant_rules.py accepts (origin ids are uuids).
+_ORIGIN_ID_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# Actions a scoped rule keeps on its first link (the one that carries the id,
+# phase and disruptive action of a chain) and on the chained link (only the
+# transformations, which apply to that link's own variables). Anything else
+# is refused instead of guessed at: a rule that cannot be scoped is never
+# deployed for every origin by mistake.
+_SCOPED_HEAD_ACTIONS = {"id", "phase", "deny", "status", "severity", "log", "nolog", "auditlog",
+                        "noauditlog", "msg", "tag", "logdata", "rev", "ver", "maturity", "accuracy"}
+_SCOPED_LINK_ACTIONS = {"t"}
+# The chained link scope_ml_rule_to_origin writes after the guard's actions:
+# its variables and operator, what list_rules reports for a scoped rule.
+_CHAINED_LINK_RE = re.compile(r'\s*SecRule\s+(\S+)\s+"((?:[^"\\]|\\.)*)"')
+
+
+def _split_actions(actions: str) -> List[str]:
+    """Split a SecRule action list on the commas outside single-quoted values
+    (msg:'a, b'). A backslash and the character after it stay together, so an
+    escaped quote (escape_secrule_message) neither opens nor closes a value."""
+    parts, current, quoted, i = [], [], False, 0
+    while i < len(actions):
+        ch = actions[i]
+        if ch == "\\" and i + 1 < len(actions):
+            current.append(actions[i:i + 2])
+            i += 2
+            continue
+        if ch == "'":
+            quoted = not quoted
+        elif ch == "," and not quoted:
+            parts.append("".join(current).strip())
+            current = []
+            i += 1
+            continue
+        current.append(ch)
+        i += 1
+    if quoted:
+        raise ValueError("rule actions have an unclosed quote")
+    parts.append("".join(current).strip())
+    return [p for p in parts if p]
+
+
+def scope_ml_rule_to_origin(text: str, rule_id: int, origin_id: str) -> str:
+    """Rewrite an approved ML/CVE rule so it fires only for one origin's traffic.
+
+    The rule is first checked exactly like a global one (validate_ml_rule_text),
+    then rebuilt as the same two-link chain services/tenant_rules.py writes:
+
+        SecRule TX:waf_origin_id "@streq <origin_id>" "<id, phase, deny, msg...>,chain"
+            SecRule <original variables> "<original operator>" "<original t:...>"
+
+    tx.waf_origin_id is set in phase 1 by managed-00-hostmap.conf for requests
+    whose Host is one of the origin's verified domains, so it is known before
+    any phase 2 rule runs. A request no origin claimed has no tx.waf_origin_id,
+    and a missing variable never matches: the rule stays silent rather than
+    applying to everyone. The variables, operator (quoting and escapes as the
+    generator wrote them) and transformations are carried over unchanged; a
+    rule without transformations gets "t:none" (CRS's SecDefaultAction sets
+    none, so the match is the same) because the chained link needs an
+    explicit action list -- without one libmodsecurity reads the next file's
+    first line as this rule's actions (see services/tenant_rules.render).
+    """
+    if not _ORIGIN_ID_OK.match(str(origin_id or "")):
+        raise ValueError("bad origin id")
+    variables, operator, actions = validate_ml_rule_text(text, rule_id)
+    head, link = [], []
+    for action in _split_actions(actions):
+        name = action.split(":", 1)[0].strip().lower()
+        if name in _SCOPED_LINK_ACTIONS:
+            link.append(action)
+        elif name in _SCOPED_HEAD_ACTIONS:
+            head.append(action)
+        else:
+            raise ValueError(f"action '{name}' cannot be scoped to an origin")
+    head += ["tag:'ml-rule'", f"tag:'origin:{origin_id}'", "chain"]
+    return (f'SecRule TX:waf_origin_id "@streq {origin_id}" \\\n'
+            f'    "{",".join(head)}"\n'
+            f'    SecRule {variables} "{operator}" "{",".join(link) or "t:none"}"')
 
 
 _ALLOWED_NGINX_COMMANDS = {
@@ -252,6 +334,7 @@ class RuleManager:
             msg = "N/A"
             action = "BLOCK"
             deception_template = "auto"
+            origin_id = ""
 
             sec_rule_match = re.search(
                 r'SecRule\s+(\S+)\s+"((?:[^"\\]|\\.)*)"\s+\\\s*"((?:[^"\\]|\\.)*)"',
@@ -268,6 +351,17 @@ class RuleManager:
             if sec_rule_match:
                 variable = sec_rule_match.group(1)
                 raw_operator = sec_rule_match.group(2)
+                actions = sec_rule_match.group(3)
+                # An ML rule scoped to one origin (scope_ml_rule_to_origin)
+                # starts with the TX:waf_origin_id guard; what it matches is
+                # the chained link, so report that and the origin. The id,
+                # msg, severity and status stay on the guard's action list.
+                if variable == "TX:waf_origin_id" and re.search(r"(?:^|,)\s*chain\s*$", actions):
+                    link = _CHAINED_LINK_RE.match(content, sec_rule_match.end())
+                    if link:
+                        oid = re.search(r"tag:'origin:([A-Za-z0-9_-]+)'", actions)
+                        origin_id = oid.group(1) if oid else raw_operator.replace("@streq", "", 1).strip()
+                        variable, raw_operator = link.group(1), link.group(2)
                 # Operators are written with only the double quote escaped
                 # (escape_secrule_operator) -- backslashes are left intact, so
                 # reversing only \" reconstructs a regex like \s+ correctly.
@@ -322,6 +416,8 @@ class RuleManager:
                 "message": msg,
                 "action": action,
                 "deception_template": deception_template,
+                # "" for a rule that runs for every origin.
+                "origin_id": origin_id,
             })
 
         return rules
@@ -438,15 +534,25 @@ class RuleManager:
 
         return True
 
-    def write_ml_rule(self, rule_id: int, secrule_code: str) -> bool:
-        validate_ml_rule_text(secrule_code, rule_id)  # fail closed before anything is written
+    def write_ml_rule(self, rule_id: int, secrule_code: str, origin_id: str = "") -> bool:
+        """Write ml-<id>.conf. With an origin_id the rule is scoped to that
+        origin (scope_ml_rule_to_origin); without one it applies to every
+        origin. The file name is the same either way, so rule sync and the
+        edge bundle (every *.conf in the rules directory) are unchanged."""
+        # fail closed before anything is written
+        if origin_id:
+            secrule_code = scope_ml_rule_to_origin(secrule_code, rule_id, origin_id)
+        else:
+            validate_ml_rule_text(secrule_code, rule_id)
         with RULES_LOCK:
-            return self._write_ml_rule(rule_id, secrule_code)
+            return self._write_ml_rule(rule_id, secrule_code, origin_id)
 
-    def _write_ml_rule(self, rule_id: int, secrule_code: str) -> bool:
+    def _write_ml_rule(self, rule_id: int, secrule_code: str, origin_id: str = "") -> bool:
         filename = f"ml-{rule_id}.conf"
         header = f"# ------------------------------------------------------------------------\n"
         header += f"# ML Auto-Generated & Approved WAF Rule (ID: {rule_id})\n"
+        if origin_id:
+            header += f"# Scoped to origin {origin_id}: fires only for requests the host map attributed to it\n"
         header += f"# ------------------------------------------------------------------------\n"
         rule_text = header + secrule_code + "\n"
         filepath = os.path.join(self.rules_dir, filename)
