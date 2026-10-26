@@ -502,6 +502,34 @@ def test_inspect_short_circuits_a_taken_domain(client, tenant, monkeypatch):
     assert r.json() == {"domain": "shop.example.com", "already_registered": True}
 
 
+def test_a_deleted_sites_domain_can_be_connected_again(client, tenant, monkeypatch):
+    """Deleting a site archives its origin; the domain must not stay "already
+    registered" for good (seen on prod 2026-10-26 with demo1/demo2)."""
+    monkeypatch.setattr(onboarding_module, "verify_domain_dns", lambda d, t: True)
+    first = _connect(client, tenant)
+    assert client.delete(f"/api/origins/{first}", headers=tenant["headers"]).status_code == 200
+    monkeypatch.setattr(site_connect, "inspect_domain", lambda d: {"domain": d})
+    limiter_stub = MagicMock()
+    limiter_stub.is_allowed.return_value = (True, 1, 0)
+    monkeypatch.setattr(onboarding_module, "_inspect_limiter", limiter_stub)
+    r = client.post("/api/onboarding/inspect", headers=tenant["headers"], json={"domain": "shop.example.com"})
+    assert r.json()["already_registered"] is False
+    r = client.post("/api/onboarding/connect", headers=tenant["headers"],
+                    json={"domain": "shop.example.com", "mode": "agent", "port": 3000})
+    assert r.status_code == 200 and r.json()["verified"] is True
+    [row] = nss.db.list_domains()
+    assert row["origin_id"] == r.json()["origin_id"] != first and row["dns_verified"] is True
+
+
+def test_another_accounts_live_site_still_blocks_the_domain(client, tenant, register_user, auth_header, monkeypatch):
+    monkeypatch.setattr(onboarding_module, "verify_domain_dns", lambda d, t: True)
+    _connect(client, tenant)
+    other = register_user(email="other@example.com", username="other")
+    r = client.post("/api/onboarding/connect", headers=auth_header(other["access_token"]),
+                    json={"domain": "shop.example.com", "mode": "agent", "port": 3000})
+    assert r.status_code == 400
+
+
 def test_inspect_is_rate_limited_per_user(client, tenant, monkeypatch):
     limiter_stub = MagicMock()
     limiter_stub.is_allowed.return_value = (False, 0, 120)

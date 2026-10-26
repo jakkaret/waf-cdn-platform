@@ -58,6 +58,15 @@ class DuplicateDomain(ValueError):
     """A domain with this name is already registered."""
 
 
+def _release_archived_name(name: str) -> None:
+    """An archived origin gives its names up: drop its rows for `name` so a new
+    origin can verify it (the verified-name unique index would refuse it).
+    Call inside the transaction that claims the name. Restoring that origin
+    later brings it back without this domain."""
+    pool.exec_("DELETE FROM domains d USING origins o WHERE d.origin_id = o.id "
+               "AND o.status IN ('archived', 'deleted') AND d.domain_name = %s", (name,))
+
+
 class DomainAlreadyClaimed(ValueError):
     """A tunnel hostname is already claimed by another origin."""
 
@@ -363,6 +372,7 @@ class PgStore:
                              (row["domain_name"],))
             if tunnel and tunnel["origin_id"] != row["origin_id"]:
                 raise DomainAlreadyClaimed(f"Domain '{row['domain_name']}' is another origin's tunnel host")
+            _release_archived_name(row["domain_name"])
             try:
                 pool.exec_("UPDATE domains SET dns_verified = true, "
                            "ssl_status = CASE WHEN ssl_status = 'none' THEN 'pending' ELSE ssl_status END, "
@@ -442,15 +452,19 @@ class PgStore:
         if not name or oid is None:
             raise ValueError("domain needs a hostname and an existing origin")
         did = as_uuid(item.get("id"))
+        verified = bool(item.get("dns_verified", False))
         try:
-            row = pool.q1(
-                "INSERT INTO domains (id, origin_id, domain_name, verification_token, dns_verified, "
+            with pool.transaction():
+                if verified:
+                    _release_archived_name(name)
+                row = pool.q1(
+                    "INSERT INTO domains (id, origin_id, domain_name, verification_token, dns_verified, "
                 "ssl_status, created_at, updated_at) VALUES (COALESCE(%s::uuid, gen_random_uuid()), "
-                "%s, %s, %s, %s, %s, COALESCE(%s, now()), COALESCE(%s, now())) RETURNING *",
-                (did, oid, name, item.get("verification_token") or "", bool(item.get("dns_verified", False)),
-                 item.get("ssl_status") or "none", parse_ts(item.get("created_at")),
-                 parse_ts(item.get("updated_at"))),
-            )
+                    "%s, %s, %s, %s, %s, COALESCE(%s, now()), COALESCE(%s, now())) RETURNING *",
+                    (did, oid, name, item.get("verification_token") or "", verified,
+                     item.get("ssl_status") or "none", parse_ts(item.get("created_at")),
+                     parse_ts(item.get("updated_at"))),
+                )
         except UniqueConflict as exc:
             raise DuplicateDomain(f"Domain name {name} is already registered.") from exc
         except ForeignKeyConflict as exc:

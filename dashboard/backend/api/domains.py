@@ -6,7 +6,10 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 import uuid
 from datetime import datetime
-from services.rbac import get_current_user, require_admin, verify_origin_ownership, verify_origin_edit_access, require_verified_email
+from services.rbac import (
+    ARCHIVED_ORIGIN_STATUSES, get_current_user, require_admin, verify_origin_ownership,
+    verify_origin_edit_access, require_verified_email,
+)
 from services import audit_log
 from services.txn import atomic
 from services.dynamodb_service import DynamoDBService, DuplicateDomain
@@ -493,22 +496,31 @@ def dns_instructions_for(domain_name: str, verification_token: str) -> dict:
     }
 
 
+def _origin_live(origin_id: Optional[str]) -> bool:
+    origin = db.get_origin_by_id(origin_id) if origin_id else None
+    return bool(origin) and origin.get("status") not in ARCHIVED_ORIGIN_STATUSES
+
+
 def domain_registered(domain_name: str, owner_id: Optional[str] = None) -> bool:
     """Taken for good: verified by an origin, or another origin's tunnel host.
     An unverified row reserves nothing any more (P3.5, C4/H40) -- except for
-    the account that added it, which does not get a second copy."""
-    if db.get_verified_domain(domain_name) is not None or db.tunnel_domain_origin(domain_name):
+    the account that added it, which does not get a second copy. A deleted
+    (archived) origin holds nothing, so its name can be connected again."""
+    verified = db.get_verified_domain(domain_name)
+    if verified is not None and _origin_live(verified.get("origin_id")):
+        return True
+    if _origin_live(db.tunnel_domain_origin(domain_name)):
         return True
     return bool(owner_id) and user_holds_domain(domain_name, owner_id)
 
 
 def user_holds_domain(domain_name: str, user_id: str) -> bool:
-    """Any row (verified or not) for this name on an origin `user_id` owns."""
+    """Any row (verified or not) for this name on a live origin `user_id` owns."""
     for row in db.list_domains():
         if row.get("domain_name") != domain_name:
             continue
         origin = db.get_origin_by_id(row.get("origin_id")) or {}
-        if origin.get("admin_user_id") == user_id:
+        if origin.get("admin_user_id") == user_id and origin.get("status") not in ARCHIVED_ORIGIN_STATUSES:
             return True
     return False
 

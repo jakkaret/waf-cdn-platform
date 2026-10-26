@@ -190,6 +190,33 @@ def _domain(store, oid, name, verified):
                                 "created_at": datetime.utcnow().isoformat() + "Z"})
 
 
+def test_archived_origin_gives_up_its_verified_name(store):
+    owner = _user()["user_id"]
+    old = _origin(store, owner)
+    _domain(store, old, "shop.example.com", True)
+    assert store.delete_origin(old)
+    # the verified-name unique index would refuse this without the release
+    new = _origin(store, owner)
+    d = _domain(store, new, "shop.example.com", False)
+    store.claim_verified_domain(d["id"])
+    assert [x["origin_id"] for x in store.list_domains() if x["domain_name"] == "shop.example.com"] == [new]
+    # a verified insert (auto-verified own subdomain) releases it the same way
+    other = _origin(store, owner)
+    _domain(store, other, "app.example.com", True)
+    assert store.delete_origin(other)
+    _domain(store, new, "app.example.com", True)
+    assert {x["origin_id"] for x in store.list_domains() if x["domain_name"] == "app.example.com"} == {new}
+
+
+def test_live_origin_keeps_its_verified_name(store):
+    from services.dynamodb_service import DomainAlreadyClaimed
+    a = _origin(store, _user()["user_id"])
+    _domain(store, a, "shop.example.com", True)
+    d = _domain(store, _origin(store, _user()["user_id"]), "shop.example.com", False)
+    with pytest.raises(DomainAlreadyClaimed):
+        store.claim_verified_domain(d["id"])
+
+
 def test_domain_crud_parity(store):
     from services.dynamodb_service import DuplicateDomain
     oid = _origin(store, _user()["user_id"])
