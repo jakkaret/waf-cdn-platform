@@ -13,6 +13,7 @@ import {
   deleteTenantRule,
   getDecoys,
   setDecoy,
+  applyRecommendedDecoys,
   TenantRule,
   TenantRuleInput,
 } from '../api/wafRules'
@@ -70,12 +71,22 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
 
   const decoyMutation = useMutation({
     mutationFn: ({ key, enabled }: { key: string; enabled: boolean }) => setDecoy(originId, key, enabled),
-    onSuccess: (_res, vars) => {
-      queryClient.invalidateQueries({ queryKey: decoysKey })
+    onSuccess: (res, vars) => {
+      queryClient.setQueryData(decoysKey, res.data.decoys)
       queryClient.invalidateQueries({ queryKey: rulesKey })
       toast.success(vars.enabled ? 'Decoy turned on' : 'Decoy turned off')
     },
     onError: (e) => toast.error(errText(e, 'Failed to change decoy')),
+  })
+
+  const applyRecommendedMutation = useMutation({
+    mutationFn: () => applyRecommendedDecoys(originId),
+    onSuccess: (res) => {
+      queryClient.setQueryData(decoysKey, res.data.decoys)
+      queryClient.invalidateQueries({ queryKey: rulesKey })
+      toast.success('Turned on the recommended decoys')
+    },
+    onError: (e) => toast.error(errText(e, 'Failed to apply recommended decoys')),
   })
 
   const modeMutation = useMutation({
@@ -160,6 +171,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
 
   // Decoy-path rules show as checkboxes in their own section, not in the list.
   const customRules = (rules ?? []).filter((r) => !r.decoy)
+  const recommendedCount = (decoys ?? []).filter((d) => d.recommended && !d.enabled).length
 
   return (
     <div className="space-y-6">
@@ -271,33 +283,62 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
 
       {/* ── Decoy paths ─────────────────────────────────────────────── */}
       <section className="space-y-3">
-        <div>
-          <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">Decoy Paths</h2>
-          <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-            One-click honeypots for URLs bots and scanners probe on every site. When on, the path returns believable
-            fake content instead of reaching your server, and the hit is logged. Turn one on only if your site does
-            not really serve that path.
-          </p>
-        </div>
-        <div className="dash-card p-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
-          {(decoys ?? []).map((d) => (
-            <label
-              key={d.key}
-              className={`flex items-center gap-2.5 py-1.5 text-[12px] font-mono ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
+        <div className="flex justify-between items-start gap-3">
+          <div>
+            <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">Decoy Paths</h2>
+            <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
+              One-click honeypots for URLs bots and scanners probe on every site. When on, the path returns
+              believable fake content instead of reaching your server, and the hit is logged. Recommendations use
+              this origin's tech-stack tags — a path your stack really uses is warned against, not recommended.
+            </p>
+          </div>
+          {canEdit && recommendedCount > 0 && (
+            <Button
+              variant="secondary"
+              onClick={() => applyRecommendedMutation.mutate()}
+              disabled={applyRecommendedMutation.isPending}
+              isLoading={applyRecommendedMutation.isPending}
             >
-              <input
-                type="checkbox"
-                checked={d.enabled}
-                disabled={!canEdit || decoyMutation.isPending}
-                onChange={(e) => decoyMutation.mutate({ key: d.key, enabled: e.target.checked })}
-              />
-              <span className={d.enabled ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}>
-                {d.label}
-              </span>
-              {d.enabled && <Badge color="warning">DECEIVE</Badge>}
-            </label>
-          ))}
+              Turn on {recommendedCount} recommended
+            </Button>
+          )}
         </div>
+        {(['universal', 'stack'] as const).map((tier) => {
+          const rows = (decoys ?? []).filter((d) => d.tier === tier)
+          if (rows.length === 0) return null
+          return (
+            <div key={tier} className="dash-card p-4">
+              <h3 className="text-[11px] font-bold font-mono uppercase text-[var(--text-muted)] mb-2">
+                {tier === 'universal' ? 'Safe for any site' : 'Depends on your stack'}
+              </h3>
+              <div className="space-y-2.5">
+                {rows.map((d) => (
+                  <div key={d.key} className="flex items-start gap-2.5 text-[12px] font-mono">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      aria-label={d.label}
+                      checked={d.enabled}
+                      disabled={!canEdit || decoyMutation.isPending}
+                      onChange={(e) => decoyMutation.mutate({ key: d.key, enabled: e.target.checked })}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={d.enabled ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}>
+                          {d.label}
+                        </span>
+                        {d.enabled && <Badge color="warning">DECEIVE</Badge>}
+                        {!d.enabled && d.recommended && <Badge color="success">Recommended</Badge>}
+                        {!d.enabled && d.collision && <Badge color="danger">Your stack uses this</Badge>}
+                      </div>
+                      <p className="text-[11px] text-[var(--text-muted)] m-0 mt-0.5">{d.reason}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
       </section>
 
       {/* ── This origin's own rules ─────────────────────────────────── */}

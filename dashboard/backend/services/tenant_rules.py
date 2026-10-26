@@ -59,29 +59,72 @@ TEMPLATES = {"auto", "path_traversal", "sqli"}
 # every site. An origin owner turns one on and it becomes a DECEIVE rule
 # (tagged decoy:<key> so it is listed apart from hand-written rules). Opt-in
 # per origin, because a site that really serves one of these would break.
-# Each entry: the operator the rule uses and a one-line reason for the UI.
+# Each entry:
+#   path, operator  the generated rule's target
+#   label           one line for the UI
+#   tier            "universal" = no normal site serves this over HTTP, so it
+#                     is safe to recommend for any origin;
+#                   "stack"     = a real path for some stacks, so recommend it
+#                     only when the origin's tech stack does not list `collides`.
+#   collides        (stack tier) tech-stack keywords that make this path real,
+#                     so it is warned against instead of recommended.
 DECOY_PATHS = {
-    "wp-login": {"path": "/wp-login.php", "operator": "@beginsWith /wp-login.php",
-                 "label": "WordPress login (/wp-login.php)"},
-    "wp-admin": {"path": "/wp-admin", "operator": "@beginsWith /wp-admin",
-                 "label": "WordPress admin (/wp-admin)"},
-    "xmlrpc": {"path": "/xmlrpc.php", "operator": "@beginsWith /xmlrpc.php",
-               "label": "WordPress XML-RPC (/xmlrpc.php)"},
-    "phpmyadmin": {"path": "/phpmyadmin", "operator": "@contains phpmyadmin",
-                   "label": "phpMyAdmin console"},
     "dotenv": {"path": "/.env", "operator": "@endsWith /.env",
-               "label": "Environment file (.env)"},
+               "label": "Environment file (.env)", "tier": "universal"},
     "git": {"path": "/.git/", "operator": "@contains /.git/",
-            "label": "Exposed .git directory"},
+            "label": "Exposed .git directory", "tier": "universal"},
     "aws-credentials": {"path": "/.aws/credentials", "operator": "@endsWith /.aws/credentials",
-                        "label": "AWS credentials file"},
+                        "label": "AWS credentials file", "tier": "universal"},
     "sql-backup": {"path": "/backup.sql", "operator": "@endsWith .sql",
-                   "label": "Database backup (*.sql)"},
+                   "label": "Database backup (*.sql)", "tier": "universal"},
     "config-php": {"path": "/config.php.bak", "operator": "@endsWith config.php.bak",
-                   "label": "PHP config backup (config.php.bak)"},
+                   "label": "PHP config backup (config.php.bak)", "tier": "universal"},
     "server-status": {"path": "/server-status", "operator": "@beginsWith /server-status",
-                      "label": "Apache server-status"},
+                      "label": "Apache server-status", "tier": "universal"},
+    "wp-login": {"path": "/wp-login.php", "operator": "@beginsWith /wp-login.php",
+                 "label": "WordPress login (/wp-login.php)", "tier": "stack",
+                 "collides": ("wordpress", "woocommerce", "wp")},
+    "wp-admin": {"path": "/wp-admin", "operator": "@beginsWith /wp-admin",
+                 "label": "WordPress admin (/wp-admin)", "tier": "stack",
+                 "collides": ("wordpress", "woocommerce", "wp")},
+    "xmlrpc": {"path": "/xmlrpc.php", "operator": "@beginsWith /xmlrpc.php",
+               "label": "WordPress XML-RPC (/xmlrpc.php)", "tier": "stack",
+               "collides": ("wordpress", "woocommerce", "wp")},
+    "phpmyadmin": {"path": "/phpmyadmin", "operator": "@contains phpmyadmin",
+                   "label": "phpMyAdmin console", "tier": "stack",
+                   "collides": ("phpmyadmin", "pma")},
 }
+
+
+def _tag_hit(tech_stack_tags, keywords) -> Optional[str]:
+    """The tech-stack keyword a tag matches, else None. Same loose match as
+    cve_feed: case-insensitive, either direction ('wordpress 6.1' hits 'wordpress')."""
+    for tag in tech_stack_tags or []:
+        t = str(tag).strip().lower()
+        for kw in keywords:
+            if kw in t or t in kw:
+                return kw
+    return None
+
+
+def recommend_decoy(key: str, tech_stack_tags) -> dict:
+    """Whether to pre-tick this decoy for an origin with these tech-stack tags,
+    with a one-line why. Universal paths are always recommended; a stack path
+    is recommended only when the owner declared a stack that does not include
+    the colliding keyword, and is warned against when it does."""
+    meta = DECOY_PATHS[key]
+    if meta["tier"] == "universal":
+        return {"recommended": True, "collision": False,
+                "reason": "No normal site serves this over HTTP; safe for any site."}
+    hit = _tag_hit(tech_stack_tags, meta.get("collides", ()))
+    if hit:
+        return {"recommended": False, "collision": True,
+                "reason": f"Your stack lists \"{hit}\" which uses this path; leave off unless it is unused."}
+    if tech_stack_tags:
+        return {"recommended": True, "collision": False,
+                "reason": "Bots probe this on every site and your declared stack does not use it."}
+    return {"recommended": False, "collision": False,
+            "reason": "Bots probe this on every site; turn on only if your site does not use it."}
 
 _CONTROL = re.compile(r"[\r\n\x00]")
 _ORIGIN_ID_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -292,14 +335,29 @@ class TenantRuleService:
         """Which catalog key -> rule for the decoy rules this origin has on."""
         return {r["decoy"]: r for r in self.list([origin_id]) if r.get("decoy") in DECOY_PATHS}
 
-    def list_decoys(self, origin_id: str) -> List[dict]:
-        """The whole catalog, each with whether this origin has it on."""
+    def list_decoys(self, origin_id: str, tech_stack_tags=None) -> List[dict]:
+        """The whole catalog, each with whether this origin has it on and, from
+        the origin's tech stack, whether it is recommended or warned against."""
         on = self._decoy_rules(origin_id)
-        return [
-            {"key": key, "path": meta["path"], "label": meta["label"],
-             "enabled": key in on, "rule_id": on[key]["id"] if key in on else None}
-            for key, meta in DECOY_PATHS.items()
-        ]
+        out = []
+        for key, meta in DECOY_PATHS.items():
+            rec = recommend_decoy(key, tech_stack_tags)
+            out.append({
+                "key": key, "path": meta["path"], "label": meta["label"], "tier": meta["tier"],
+                "enabled": key in on, "rule_id": on[key]["id"] if key in on else None,
+                **rec,
+            })
+        return out
+
+    def apply_recommended(self, origin_id: str, tech_stack_tags, user: dict) -> List[dict]:
+        """Turn on every decoy recommended for this origin's stack that is not
+        already on. Never turns anything off, so a decoy the owner enabled by
+        hand (or one no longer recommended) is left as it is."""
+        with _lock:
+            for d in self.list_decoys(origin_id, tech_stack_tags):
+                if d["recommended"] and not d["enabled"]:
+                    self.set_decoy(origin_id, d["key"], True, user)
+            return self.list_decoys(origin_id, tech_stack_tags)
 
     def set_decoy(self, origin_id: str, key: str, enabled: bool, user: dict) -> dict:
         if key not in DECOY_PATHS:

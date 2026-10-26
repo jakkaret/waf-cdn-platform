@@ -323,6 +323,53 @@ def test_decoy_rules_are_deceive_in_phase_1(service):
     assert "phase:1" in conf and "status:418" in conf and "tag:'action:deceive'" in conf
 
 
+def test_recommend_decoy_by_tech_stack():
+    from services.tenant_rules import recommend_decoy
+    # universal paths: always recommended, never a collision, whatever the stack
+    assert recommend_decoy("dotenv", ["wordpress"]) == {
+        "recommended": True, "collision": False,
+        "reason": "No normal site serves this over HTTP; safe for any site."}
+    # stack path, stack declares WordPress -> warned against, not recommended
+    wp = recommend_decoy("wp-login", ["WordPress 6.4", "php"])
+    assert wp["recommended"] is False and wp["collision"] is True and "wordpress" in wp["reason"].lower()
+    # stack path, stack declared but not WordPress -> recommended
+    assert recommend_decoy("wp-login", ["nginx", "react"])["recommended"] is True
+    # stack path, no tags declared -> not auto-recommended (can't confirm it's safe)
+    none = recommend_decoy("wp-login", [])
+    assert none["recommended"] is False and none["collision"] is False
+
+
+def test_list_decoys_carries_recommendation(service):
+    rows = {d["key"]: d for d in service.list_decoys("origin-a", ["nginx"])}
+    assert rows["dotenv"]["tier"] == "universal" and rows["dotenv"]["recommended"]
+    assert rows["wp-login"]["tier"] == "stack" and rows["wp-login"]["recommended"]
+    warned = {d["key"]: d for d in service.list_decoys("origin-a", ["wordpress"])}
+    assert warned["wp-login"]["collision"] and not warned["wp-login"]["recommended"]
+
+
+def test_apply_recommended_turns_on_only_recommended(service):
+    u = {"user_id": "u1", "username": "alice"}
+    after = {d["key"]: d for d in service.apply_recommended("origin-a", ["wordpress"], u)}
+    # universal all on; wp-* warned against -> left off
+    assert after["dotenv"]["enabled"] and after["git"]["enabled"]
+    assert not after["wp-login"]["enabled"] and not after["wp-admin"]["enabled"]
+    # a second run is a no-op (idempotent), and never turns anything off
+    before_ids = {d["key"]: d["rule_id"] for d in service.list_decoys("origin-a", ["wordpress"]) if d["enabled"]}
+    service.apply_recommended("origin-a", ["wordpress"], u)
+    after_ids = {d["key"]: d["rule_id"] for d in service.list_decoys("origin-a", ["wordpress"]) if d["enabled"]}
+    assert before_ids == after_ids
+
+
+def test_apply_recommended_endpoint_owner_only(client, accounts):
+    origin_id, admin_h, viewer_h, _stranger_h = accounts
+    assert client.post(f"/api/origins/{origin_id}/waf-rules/decoys/apply-recommended", headers=viewer_h).status_code == 403
+    resp = client.post(f"/api/origins/{origin_id}/waf-rules/decoys/apply-recommended", headers=admin_h)
+    assert resp.status_code == 200, resp.text
+    decoys = {d["key"]: d for d in resp.json()["decoys"]}
+    # the test origin has no tech-stack tags -> only universal decoys turn on
+    assert decoys["dotenv"]["enabled"] and not decoys["wp-login"]["enabled"]
+
+
 def test_decoy_endpoints_owner_only(client, accounts):
     origin_id, admin_h, viewer_h, stranger_h = accounts
     assert client.get(f"/api/origins/{origin_id}/waf-rules/decoys", headers=viewer_h).status_code == 200

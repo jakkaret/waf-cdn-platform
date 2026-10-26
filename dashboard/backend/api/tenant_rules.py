@@ -46,8 +46,9 @@ async def list_rules(origin: dict = Depends(verify_origin_access)):
 
 @router.get("/decoys")
 async def list_decoys(origin: dict = Depends(verify_origin_access)):
-    """The decoy-path catalog with each entry's on/off state for this origin."""
-    return {"decoys": _service.list_decoys(origin["id"])}
+    """The decoy-path catalog with each entry's on/off state for this origin,
+    plus whether it is recommended or warned against for the origin's stack."""
+    return {"decoys": _service.list_decoys(origin["id"], origin.get("tech_stack_tags"))}
 
 
 class DecoyIn(BaseModel):
@@ -58,11 +59,25 @@ class DecoyIn(BaseModel):
 async def set_decoy(key: str, body: DecoyIn, origin: dict = Depends(verify_origin_edit_access),
                     current_user: dict = Depends(get_current_user)):
     try:
-        return _service.set_decoy(origin["id"], key, body.enabled, current_user)
+        _service.set_decoy(origin["id"], key, body.enabled, current_user)
+        return {"decoys": _service.list_decoys(origin["id"], origin.get("tech_stack_tags"))}
     except TenantRuleError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to apply decoy: {e}")
+
+
+@router.post("/decoys/apply-recommended")
+async def apply_recommended_decoys(origin: dict = Depends(verify_origin_edit_access),
+                                   current_user: dict = Depends(get_current_user)):
+    """Turn on every decoy recommended for this origin's declared stack that is
+    not already on. Leaves on/hand-enabled ones untouched."""
+    try:
+        return {"decoys": _service.apply_recommended(origin["id"], origin.get("tech_stack_tags"), current_user)}
+    except TenantRuleError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to apply decoys: {e}")
 
 
 @router.post("/")

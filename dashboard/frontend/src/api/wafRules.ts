@@ -49,15 +49,22 @@ export interface Decoy {
   key: string
   path: string
   label: string
+  tier: 'universal' | 'stack'
   enabled: boolean
   rule_id: number | null
+  recommended: boolean
+  collision: boolean
+  reason: string
 }
 
 export const getDecoys = (originId: string) =>
   api.get<{ decoys: Decoy[] }>(`/origins/${originId}/waf-rules/decoys`)
 
 export const setDecoy = (originId: string, key: string, enabled: boolean) =>
-  api.put<{ key: string; enabled: boolean }>(`/origins/${originId}/waf-rules/decoys/${key}`, { enabled })
+  api.put<{ decoys: Decoy[] }>(`/origins/${originId}/waf-rules/decoys/${key}`, { enabled })
+
+export const applyRecommendedDecoys = (originId: string) =>
+  api.post<{ decoys: Decoy[] }>(`/origins/${originId}/waf-rules/decoys/apply-recommended`)
 
 // --- Central managed ruleset (api/managed_rules.py) -----------------------
 
