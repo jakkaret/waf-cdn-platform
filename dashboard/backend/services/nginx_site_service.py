@@ -74,7 +74,9 @@ def _deception_locations() -> str:
         rewrite ^ /api/deception/respond break;
         proxy_pass http://host.docker.internal:8000;
         proxy_connect_timeout 1s;
-        proxy_read_timeout 3s;
+        # 10 s emulated time-based SQL injection + generation (matches the
+        # @deception block in nginx/templates/conf.d/default.conf.template)
+        proxy_read_timeout 15s;
         proxy_set_header X-Internal-Deception-Key {key};
         proxy_set_header X-Request-ID $request_id;
         proxy_set_header X-Real-IP $waf_client_ip;
