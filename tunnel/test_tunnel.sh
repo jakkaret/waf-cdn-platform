@@ -8,16 +8,27 @@
 # Requires SSH access to the WAF node; agent-side checks additionally need
 # LAB_SSH to point at a helper that runs a command on the private origin host.
 #
-# Usage: tunnel/test_tunnel.sh
-# Exit:  0 if every test passes.
+# Sites moved from *.waf-it-kku.online to *.originweb.site (2026-10). The old
+# test hosts (vampi/juice.waf-it-kku.online) are gone and have no fixed
+# replacement, so both hosts are now opt-in:
+#   TUNNEL_HOST  a host served by a cloudwaf-tunnel agent with the VAmPI app.
+#                Unset: sections 1, 2, 7 and 8 (and the valid-token checks)
+#                are skipped -- including 8's restart of cloudwaf-tunnel.
+#   FRP_HOST     a host served through frps, e.g. a quick tunnel
+#                (t-xxxxxxxx.tunnel.originweb.site). Unset: its checks in 10
+#                are skipped.
+#
+# Usage: [TUNNEL_HOST=...] [FRP_HOST=...] tunnel/test_tunnel.sh
+# Exit:  0 if every test that ran passes.
 
 set -uo pipefail
 
 MAIN="${MAIN_IP:-178.104.53.123}"
 MAIN_SSH="${MAIN_SSH:-ssh -o BatchMode=yes -o ConnectTimeout=15 root@$MAIN}"
 LAB_SSH="${LAB_SSH:-}"                       # optional helper for the origin host
-TUNNEL_HOST="${TUNNEL_HOST:-vampi.waf-it-kku.online}"
-FRP_HOST="${FRP_HOST:-juice.waf-it-kku.online}"
+TUNNEL_HOST="${TUNNEL_HOST:-}"
+FRP_HOST="${FRP_HOST:-}"
+DASH_HOST="${DASH_HOST:-waf-it-kku.online}"  # the dashboard did not move
 CURL="$(command -v curl)"
 
 pass=0; fail=0; skip=0
@@ -36,27 +47,35 @@ refute(){ [ "$3" != "$2" ] && ok "$1" "$2" || bad "$1" "got=$2 (must not be $3)"
 
 echo "=============================================================="
 echo " CloudWAF private tunnel — test suite"
-echo " $(date '+%Y-%m-%d %H:%M:%S %Z')   tunnel host: $TUNNEL_HOST"
+echo " $(date '+%Y-%m-%d %H:%M:%S %Z')   tunnel host: ${TUNNEL_HOST:-(unset)}   frp host: ${FRP_HOST:-(unset)}"
 echo "=============================================================="
 
 # --------------------------------------------------------------- reachability
 head "1. The private origin is reachable through the tunnel"
 
-expect "public HTTPS reaches the private origin" "$(code "https://$TUNNEL_HOST/")" 200
-if body "https://$TUNNEL_HOST/" | grep -q "VAmPI"; then
-  ok "response body comes from the origin app" "VAmPI"
+if [ -n "$TUNNEL_HOST" ]; then
+  expect "public HTTPS reaches the private origin" "$(code "https://$TUNNEL_HOST/")" 200
+  if body "https://$TUNNEL_HOST/" | grep -q "VAmPI"; then
+    ok "response body comes from the origin app" "VAmPI"
+  else
+    bad "response body comes from the origin app" "marker not found"
+  fi
+  expect "an origin API path is proxied" "$(code "https://$TUNNEL_HOST/users/v1")" 200
+  expect "unknown origin path returns the origin's own 404" "$(code "https://$TUNNEL_HOST/definitely-not-here")" 404
 else
-  bad "response body comes from the origin app" "marker not found"
+  skipt "private origin checks (4)" "set TUNNEL_HOST to run"
 fi
-expect "an origin API path is proxied" "$(code "https://$TUNNEL_HOST/users/v1")" 200
-expect "unknown origin path returns the origin's own 404" "$(code "https://$TUNNEL_HOST/definitely-not-here")" 404
 
 head "2. Requests really traverse the WAF before the tunnel"
-expect "SQLi is blocked before reaching the tunnel"  "$(code "https://$TUNNEL_HOST/?id=1%27%20UNION%20SELECT%201,2,3--")" 403
-expect "XSS is blocked"                              "$(code "https://$TUNNEL_HOST/?q=%3Cscript%3Ealert(1)%3C/script%3E")" 403
-expect "path traversal is blocked"                   "$(code "https://$TUNNEL_HOST/?f=../../../../etc/passwd")" 403
-expect "command injection is blocked"                "$(code "https://$TUNNEL_HOST/?cmd=;cat%20/etc/passwd")" 403
-expect "custom rule still applies on this host"      "$(code "https://$TUNNEL_HOST/testattack")" 403
+if [ -n "$TUNNEL_HOST" ]; then
+  expect "SQLi is blocked before reaching the tunnel"  "$(code "https://$TUNNEL_HOST/?id=1%27%20UNION%20SELECT%201,2,3--")" 403
+  expect "XSS is blocked"                              "$(code "https://$TUNNEL_HOST/?q=%3Cscript%3Ealert(1)%3C/script%3E")" 403
+  expect "path traversal is blocked"                   "$(code "https://$TUNNEL_HOST/?f=../../../../etc/passwd")" 403
+  expect "command injection is blocked"                "$(code "https://$TUNNEL_HOST/?cmd=;cat%20/etc/passwd")" 403
+  expect "custom rule still applies on this host"      "$(code "https://$TUNNEL_HOST/testattack")" 403
+else
+  skipt "WAF-before-tunnel checks (5)" "set TUNNEL_HOST to run"
+fi
 
 head "3. The origin is not reachable except through the WAF"
 # Probe from the WAF node, which sits on the public internet. Probing from a
@@ -72,20 +91,22 @@ fi
 # ---------------------------------------------------------------- credentials
 head "4. Agent credentials"
 
+# Through the dashboard: the backend's :8000 is no longer reachable from the
+# internet (scripts/smoke_test.sh gate T4).
 verify() {
-  "$CURL" -s -m 12 -o /dev/null -w '%{http_code}' -X POST \
+  "$CURL" -sk -m 12 -o /dev/null -w '%{http_code}' -X POST \
     -H 'Content-Type: application/json' -d "$1" \
-    "http://$MAIN:8000/api/tunnel/verify-agent" 2>/dev/null
+    "https://$DASH_HOST/api/tunnel/verify-agent" 2>/dev/null
 }
 expect "empty token is rejected"            "$(verify '{"token":"","domains":["x.example.com"]}')" 401
 expect "malformed token is rejected"        "$(verify '{"token":"not-a-token","domains":["x.example.com"]}')" 401
 expect "unknown origin id is rejected"      "$(verify '{"token":"cwt_00000000-0000-0000-0000-000000000000_deadbeef","domains":["x.example.com"]}')" 401
-expect "right origin, wrong secret rejected" "$(verify '{"token":"cwt_dc2cb510-4f78-41be-8846-21b49ba42563_wrongsecret","domains":["'"$TUNNEL_HOST"'"]}')" 401  # gitleaks:allow (deliberately wrong secret)
+expect "right origin, wrong secret rejected" "$(verify '{"token":"cwt_dc2cb510-4f78-41be-8846-21b49ba42563_wrongsecret","domains":["'"${TUNNEL_HOST:-nobody.originweb.site}"'"]}')" 401  # gitleaks:allow (deliberately wrong secret)
 expect "issuing a token needs authentication" \
-  "$("$CURL" -s -m 12 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
-     -d '{"origin_id":"x","domains":["y"]}' "http://$MAIN:8000/api/tunnel/issue-token")" 401
+  "$("$CURL" -sk -m 12 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+     -d '{"origin_id":"x","domains":["y"]}' "https://$DASH_HOST/api/tunnel/issue-token")" 401
 
-if [ -n "${TUNNEL_TOKEN:-}" ]; then
+if [ -n "${TUNNEL_TOKEN:-}" ] && [ -n "$TUNNEL_HOST" ]; then
   good_body="$(printf '{"token":"%s","domains":["%s"]}' "$TUNNEL_TOKEN" "$TUNNEL_HOST")"
   wrong_body="$(printf '{"token":"%s","domains":["attacker-controlled.example.com"]}' "$TUNNEL_TOKEN")"
   got="$(verify "$good_body")"
@@ -93,8 +114,8 @@ if [ -n "${TUNNEL_TOKEN:-}" ]; then
   got="$(verify "$wrong_body")"
   expect "valid token, undelegated domain rejected" "$got" 401
 else
-  skipt "valid token accepted" "set TUNNEL_TOKEN to run"
-  skipt "valid token, undelegated domain rejected" "set TUNNEL_TOKEN to run"
+  skipt "valid token accepted" "set TUNNEL_TOKEN and TUNNEL_HOST to run"
+  skipt "valid token, undelegated domain rejected" "set TUNNEL_TOKEN and TUNNEL_HOST to run"
 fi
 
 # ------------------------------------------------------------------ transport
@@ -105,14 +126,16 @@ if echo | openssl s_client -connect "$MAIN:8050" -servername "$MAIN" 2>/dev/null
 else
   bad "agent listener speaks TLS" "no certificate"
 fi
-proto="$(echo | openssl s_client -connect "$MAIN:8050" 2>/dev/null | grep -m1 'Protocol' | awk '{print $3}')"
+# "Protocol  : TLSv1.3" (LibreSSL, OpenSSL 1.1) or "New, TLSv1.3, Cipher is ..." (OpenSSL 3).
+proto="$(echo | openssl s_client -connect "$MAIN:8050" 2>/dev/null | grep -Eo 'TLSv1(\.[0-3])?' | command head -n 1)"
 case "$proto" in
   TLSv1.2|TLSv1.3) ok "negotiated protocol is modern" "$proto" ;;
   *)               bad "negotiated protocol is modern" "${proto:-unknown}" ;;
 esac
 # A plaintext client must not get a usable HTTP session out of the TLS listener.
 # (`nc -w` rather than `timeout`, which is absent on macOS.)
-plain="$(printf 'GET / HTTP/1.0\r\n\r\n' | nc -w 6 "$MAIN" 8050 2>/dev/null | head -c 64)"
+# `command head`: this script defines its own head() for section titles.
+plain="$(printf 'GET / HTTP/1.0\r\n\r\n' | nc -w 6 "$MAIN" 8050 2>/dev/null | command head -c 64)"
 if printf '%s' "$plain" | grep -q "HTTP/"; then
   bad "plaintext client gets no HTTP session from the TLS port" "server spoke HTTP"
 else
@@ -127,7 +150,9 @@ expect "tunnel vhost port is closed from outside" "$vhost" 000
 head "7. Status reporting reflects reality"
 
 state="$($MAIN_SSH 'cat /var/lib/cloudwaf-tunnel/state.json' 2>/dev/null)"
-if [ -n "$state" ]; then
+if [ -z "$TUNNEL_HOST" ]; then
+  skipt "agent state checks (3)" "set TUNNEL_HOST to run"
+elif [ -n "$state" ]; then
   agents="$(printf '%s' "$state" | python3 -c 'import sys,json;print(json.load(sys.stdin)["agent_count"])' 2>/dev/null)"
   [ "${agents:-0}" -ge 1 ] && ok "server reports a connected agent" "count=$agents" \
                            || bad "server reports a connected agent" "count=${agents:-none}"
@@ -147,39 +172,54 @@ else
   bad "state file is readable" "not found"
 fi
 expect "status endpoint requires authentication" \
-  "$("$CURL" -s -m 12 -o /dev/null -w '%{http_code}' "http://$MAIN:8000/api/tunnel/status")" 401
+  "$("$CURL" -sk -m 12 -o /dev/null -w '%{http_code}' "https://$DASH_HOST/api/tunnel/status")" 401
 
 # ----------------------------------------------------------------- resilience
 head "8. Resilience"
 
-if [ -n "$LAB_SSH" ]; then
-  $LAB_SSH "systemctl restart cloudwaf-agent" >/dev/null 2>&1
-  sleep 8
-  expect "origin recovers after an agent restart" "$(code "https://$TUNNEL_HOST/")" 200
+if [ -z "$TUNNEL_HOST" ]; then
+  # No agent to watch: do not restart cloudwaf-tunnel for nothing.
+  skipt "agent and server restart checks (2)" "set TUNNEL_HOST to run"
 else
-  skipt "origin recovers after an agent restart" "set LAB_SSH to run"
-fi
+  if [ -n "$LAB_SSH" ]; then
+    $LAB_SSH "systemctl restart cloudwaf-agent" >/dev/null 2>&1
+    sleep 8
+    expect "origin recovers after an agent restart" "$(code "https://$TUNNEL_HOST/")" 200
+  else
+    skipt "origin recovers after an agent restart" "set LAB_SSH to run"
+  fi
 
-$MAIN_SSH 'systemctl restart cloudwaf-tunnel' >/dev/null 2>&1
-sleep 12
-after="$(code "https://$TUNNEL_HOST/" 30)"
-if [ "$after" = "200" ]; then
-  ok "agent reconnects after a server restart" "200"
-else
-  sleep 10
+  $MAIN_SSH 'systemctl restart cloudwaf-tunnel' >/dev/null 2>&1
+  sleep 12
   after="$(code "https://$TUNNEL_HOST/" 30)"
-  expect "agent reconnects after a server restart" "$after" 200
+  if [ "$after" = "200" ]; then
+    ok "agent reconnects after a server restart" "200"
+  else
+    sleep 10
+    after="$(code "https://$TUNNEL_HOST/" 30)"
+    expect "agent reconnects after a server restart" "$after" 200
+  fi
 fi
 
 head "9. Behaviour when no agent serves a hostname"
-unknown="$($MAIN_SSH "curl -s -m 8 -o /dev/null -w '%{http_code}' -H 'Host: nobody.waf-it-kku.online' http://172.18.0.1:8060/" 2>/dev/null)"
+unknown="$($MAIN_SSH "curl -s -m 8 -o /dev/null -w '%{http_code}' -H 'Host: nobody.originweb.site' http://172.18.0.1:8060/" 2>/dev/null)"
 expect "unregistered hostname returns 502, not a hang" "$unknown" 502
 
 # ------------------------------------------------------- no collateral damage
 head "10. The FRP-backed hosts are unaffected"
-expect "FRP host still serves"        "$(code "https://$FRP_HOST/")" 200
-expect "FRP host still filtered"      "$(code "https://$FRP_HOST/?id=1%27%20UNION%20SELECT%201,2,3--")" 403
-expect "dashboard still serves"       "$(code "https://waf-it-kku.online/")" 200
+if [ -n "$FRP_HOST" ]; then
+  # The app behind a quick tunnel may answer / with a redirect: any 2xx/3xx
+  # means the request went through frps to the origin.
+  frp="$(code "https://$FRP_HOST/")"
+  case "$frp" in
+    2??|3??) ok "FRP host still serves" "$frp" ;;
+    *)       bad "FRP host still serves" "got=$frp want=2xx/3xx" ;;
+  esac
+  expect "FRP host still filtered"      "$(code "https://$FRP_HOST/?id=1%27%20UNION%20SELECT%201,2,3--")" 403
+else
+  skipt "FRP host checks (2)" "set FRP_HOST to run"
+fi
+expect "dashboard still serves"       "$(code "https://$DASH_HOST/")" 200
 
 echo
 echo "=============================================================="

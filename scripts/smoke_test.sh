@@ -19,7 +19,8 @@ EDGE_IP="${EDGE_IP:-45.154.26.91}"
 ASIA_IP="${ASIA_IP:-57.158.25.236}"
 MAIN_IP="${MAIN_IP:-178.104.53.123}"
 DASH_HOST="${DASH_HOST:-waf-it-kku.online}"
-SITE_HOST="${SITE_HOST:-dvwa.waf-it-kku.online}"
+# Sites moved to *.originweb.site (2026-10); the dashboard stays on DASH_HOST.
+SITE_HOST="${SITE_HOST:-demo4.originweb.site}"
 TIMEOUT="${TIMEOUT:-15}"
 
 CURL="$(command -v curl)"
@@ -98,7 +99,9 @@ health_region="$("$CURL" -sk -m "$TIMEOUT" "https://$SITE_HOST/healthz" 2>/dev/n
 check inv "Edge healthz reports its region" edge-th "${health_region:-missing}"
 
 # Normal paths do go through `location /`, which sets the edge headers.
-edge_hdrs="$("$CURL" -sk -m "$TIMEOUT" -D - -o /dev/null "https://$SITE_HOST/latest" 2>/dev/null)"
+# "/" rather than a path like /latest: a WAF 403 carries no edge headers, so
+# these checks must not depend on the over-broad-rule guard above.
+edge_hdrs="$("$CURL" -sk -m "$TIMEOUT" -D - -o /dev/null "https://$SITE_HOST/" 2>/dev/null)"
 region="$(printf '%s' "$edge_hdrs" | grep -i '^x-edge-region:' | tr -d '\r' | awk '{print $2}')"
 check inv "Edge sets X-Edge-Region header"  edge-th "${region:-missing}"
 cache_hdr="$(printf '%s' "$edge_hdrs" | grep -ic '^x-cache-status:' || true)"
