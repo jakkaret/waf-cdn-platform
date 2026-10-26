@@ -1,364 +1,59 @@
-import React, { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, CheckCircle2, ScanSearch, ShieldQuestion } from 'lucide-react'
-import { toast } from 'react-hot-toast'
+import React from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { TopBar } from '../components/layout/TopBar'
-import { Button } from '../components/ui/Button'
-import { api } from '../api/axios'
-import { getOrigins } from '../api/origins'
-import { useAuthStore } from '../store/authStore'
-import { isOperator } from '../lib/permissions'
-import { analystOriginChoices, defaultAnalystOrigin, describeSuggestion, SuggestionSummary } from '../lib/mlRules'
-import { detectorNote, formatPercent, Gen3Verdict, SAMPLE_REQUESTS, scoreBar, verdictView } from '../lib/mlAnalyst'
+import { MLInsights } from '../components/ml/MLInsights'
+import { ManualAnalyzer } from '../components/ml/ManualAnalyzer'
 
-const METHODS = ['GET', 'POST', 'PUT', 'DELETE']
+// AI Security Analyst. Opens on ML Insights: Gen 3 scores of the origin's real
+// traffic, nothing to type in. Scoring one request by hand (and proposing a
+// rule from it) is the second tab, ?tab=analyze.
 
-interface AnalysisResult {
-  gen3: Gen3Verdict | null
-  suggestion: SuggestionSummary | null
-  // The origin the request was analysed for ("" = platform admin queue).
-  originId: string
-}
+const TABS = [
+  { id: 'insights', label: 'ML Insights' },
+  { id: 'analyze', label: 'วิเคราะห์ request เอง' },
+] as const
 
-const SEVERITY_TEXT: Record<string, string> = {
-  CRITICAL: 'text-[var(--danger)]',
-  HIGH: 'text-[var(--warning)]',
-  MEDIUM: 'text-[var(--text-secondary)]',
-}
-
-const sectionTitle = 'm-0 mb-2 text-[12.5px] font-medium text-[var(--text-secondary)]'
+type TabId = (typeof TABS)[number]['id']
 
 export const MLAnalyst: React.FC = () => {
-  const { user } = useAuthStore()
-  const isAdmin = isOperator(user)
-  const [url, setUrl] = useState('')
-  const [method, setMethod] = useState('GET')
-  const [body, setBody] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<AnalysisResult | null>(null)
-  const [gen3Missing, setGen3Missing] = useState(false)
-
-  // Same key and response shape as the Origins page, so the cache is shared.
-  const { data: originsRes, isLoading: originsLoading, isError: originsError } = useQuery({
-    queryKey: ['origins'],
-    queryFn: () => getOrigins(),
-  })
-  const choices = useMemo(
-    () => analystOriginChoices(originsRes?.data?.origins ?? [], user?.user_id),
-    [originsRes, user?.user_id],
-  )
-  // null until the user picks; a pick that is no longer editable falls back.
-  const [picked, setPicked] = useState<string | null>(null)
-  const originId =
-    picked !== null && (picked === '' ? isAdmin : choices.some((c) => c.id === picked))
-      ? picked
-      : defaultAnalystOrigin(choices, isAdmin)
-  const labelOf = (id: string) => choices.find((c) => c.id === id)?.label ?? id
-
-  const handlePredict = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!url.trim()) {
-      toast.error('ใส่ URL หรือ path ของ request ก่อน')
-      return
-    }
-    setLoading(true)
-    setResult(null)
-    setGen3Missing(false)
-    try {
-      // gen3 = score, threshold, detectors; suggestion = {engine, created, merged, reason, origin_id}.
-      // No Gen 3 model on the ML host answers 503 (shown as the error toast).
-      // With origin_id the proposal goes to that origin's Owner/Editor queue
-      // and deploys for that origin only; without, to the platform admin queue.
-      const response = await api.post('/ml/predict-and-suggest', {
-        url,
-        method,
-        body,
-        ...(originId ? { origin_id: originId } : {}),
-      })
-      setResult({
-        gen3: response.data.gen3 ?? null,
-        suggestion: response.data.suggestion ?? null,
-        originId: response.data.suggestion?.origin_id ?? originId,
-      })
-    } catch (error: any) {
-      // "Gen 3 model unavailable" (api/ml.py _gen3_verdict): the ML host runs an older
-      // service without Gen 3; explained in the result panel instead of a toast.
-      const detail: string = error.response?.data?.detail || ''
-      if (error.response?.status === 503 && detail.startsWith('Gen 3 model unavailable')) setGen3Missing(true)
-      else toast.error(error.response?.data?.detail || error.message || 'วิเคราะห์ไม่สำเร็จ')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fillSample = (s: (typeof SAMPLE_REQUESTS)[number]) => {
-    setMethod(s.method)
-    setUrl(s.url)
-    setBody(s.body)
-  }
-
-  const gen3 = result?.gen3 ?? null
-  const verdict = verdictView(gen3)
-  const bar = verdict ? scoreBar(verdict.score, verdict.threshold) : null
-  const suggestion = result
-    ? describeSuggestion(result.suggestion, result.originId ? labelOf(result.originId) : null)
-    : null
-  // The review queue lists the admin's queue, or the rules of the user's origin.
-  const canOpenQueue = isAdmin || !!result?.originId
+  const [params, setParams] = useSearchParams()
+  const tab: TabId = params.get('tab') === 'analyze' ? 'analyze' : 'insights'
+  const select = (id: TabId) => setParams(id === 'insights' ? {} : { tab: id }, { replace: true })
 
   return (
     <div className="space-y-6 animate-fade-in">
       <TopBar
         title="AI Security Analyst"
-        subtitle="ทดสอบ HTTP request กับโมเดล Gen 3 ผลใช้วิเคราะห์เท่านั้น ไม่บล็อก traffic จริง"
+        subtitle={
+          tab === 'insights'
+            ? 'ML Insights: คะแนนจากโมเดล Gen 3 ของ traffic จริงทุก request ใช้วิเคราะห์เท่านั้น ไม่บล็อก traffic'
+            : 'ทดสอบ HTTP request กับโมเดล Gen 3 ผลใช้วิเคราะห์เท่านั้น ไม่บล็อก traffic จริง'
+        }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] gap-5 items-start">
-        {/* Request form */}
-        <form onSubmit={handlePredict} className="dash-card p-5 space-y-4">
-          <h2 className="m-0 text-[14px] font-semibold text-[var(--text-primary)]">Request ที่จะวิเคราะห์</h2>
-
-          <div>
-            {isAdmin || choices.length > 0 ? (
-              <>
-                <label htmlFor="analyst-origin" className={`block ${sectionTitle}`}>เสนอกฎให้ origin</label>
-                <select
-                  id="analyst-origin"
-                  value={originId}
-                  onChange={(e) => setPicked(e.target.value)}
-                  className="w-full dash-input h-9 text-[13px] cursor-pointer"
-                >
-                  {isAdmin && <option value="">ไม่ระบุ origin (global)</option>}
-                  {choices.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                </select>
-                <p className="mt-1.5 mb-0 text-[12px] leading-relaxed text-[var(--text-muted)]">
-                  {originId
-                    ? 'กฎที่เสนอจะรอ Owner หรือ Editor ของ origin นี้อนุมัติ และมีผลเฉพาะ origin นี้'
-                    : 'กฎที่เสนอจะเข้าคิวของผู้ดูแลแพลตฟอร์ม และถ้าอนุมัติจะมีผลกับทุก origin'}
-                </p>
-              </>
-            ) : (
-              <>
-                <p className={sectionTitle}>เสนอกฎให้ origin</p>
-                <p className="m-0 text-[12.5px] leading-relaxed text-[var(--text-muted)]">
-                  {originsLoading
-                    ? 'กำลังโหลด origin...'
-                    : originsError
-                    ? 'โหลดรายการ origin ไม่สำเร็จ ลองรีเฟรชหน้านี้อีกครั้ง'
-                    : 'คุณยังไม่ได้เป็น Owner หรือ Editor ของ origin ไหน วิเคราะห์ได้ตามปกติ แต่กฎที่เสนอจะเข้าคิวของผู้ดูแลแพลตฟอร์ม'}
-                </p>
-              </>
-            )}
-          </div>
-
-          <fieldset className="m-0 p-0 border-0">
-            <legend className={sectionTitle}>Method</legend>
-            <div className="inline-flex rounded-md border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5">
-              {METHODS.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  aria-pressed={method === m}
-                  onClick={() => setMethod(m)}
-                  className={`h-8 px-3 rounded text-[12.5px] font-mono font-medium transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
-                    method === m
-                      ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm'
-                      : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                  }`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-
-          <div>
-            <label htmlFor="analyst-url" className={`block ${sectionTitle}`}>URL / path พร้อม query</label>
-            <input
-              id="analyst-url"
-              type="text"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="/products?id=1' OR '1'='1"
-              spellCheck={false}
-              className="w-full dash-input h-9 font-mono text-[12.5px]"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="analyst-body" className={`block ${sectionTitle}`}>
-              Body <span className="text-[var(--text-muted)] font-normal">(ไม่บังคับ: JSON, form หรือข้อความ)</span>
-            </label>
-            <textarea
-              id="analyst-body"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder='{"username": "admin\" OR 1=1 --"}'
-              spellCheck={false}
-              className="w-full dash-input font-mono text-[12.5px] h-28 resize-y"
-            />
-          </div>
-
-          <div>
-            <p className={sectionTitle}>ตัวอย่าง</p>
-            <div className="flex flex-wrap gap-1.5">
-              {SAMPLE_REQUESTS.map((s) => (
-                <button
-                  key={s.label}
-                  type="button"
-                  onClick={() => fillSample(s)}
-                  className="h-7 rounded-full border border-[var(--bg-border)] bg-[var(--bg-surface)] px-2.5 text-[12px] text-[var(--text-secondary)] hover:border-[var(--bg-border-hover)] hover:text-[var(--text-primary)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Wait for the origin list (and refuse when it failed to load) so a user's
-              proposal is not filed to the platform queue by accident. */}
-          <Button
-            type="submit"
-            className="w-full h-9"
-            isLoading={loading}
-            disabled={(originsLoading || originsError) && !isAdmin}
-            icon={<ScanSearch size={15} />}
+      <div role="tablist" aria-label="AI Security Analyst" className="flex gap-1 border-b border-[var(--bg-border)]">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            id={`analyst-tab-${t.id}`}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            aria-controls={`analyst-panel-${t.id}`}
+            onClick={() => select(t.id)}
+            className={`-mb-px h-9 px-3 border-b-2 text-[13px] font-medium transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded-t ${
+              tab === t.id
+                ? 'border-[var(--accent)] text-[var(--text-primary)]'
+                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+            }`}
           >
-            วิเคราะห์ request
-          </Button>
-        </form>
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-        {/* Result */}
-        <section className="dash-card p-5 min-h-[20rem]" aria-live="polite">
-          {!result && !loading && (
-            <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center">
-              <ShieldQuestion size={36} className="text-[var(--text-dim)]" aria-hidden="true" />
-              {gen3Missing ? (
-                <>
-                  <p className="mt-3 mb-1 text-[14px] font-medium text-[var(--text-primary)]">ML service ยังไม่มีโมเดล Gen 3</p>
-                  <p className="m-0 max-w-sm text-[12.5px] text-[var(--text-muted)]">
-                    หน้านี้ใช้ Gen 3 อย่างเดียว ต้อง deploy ML service เวอร์ชันที่มี Gen 3 ก่อน แล้วลองใหม่
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="mt-3 mb-1 text-[14px] font-medium text-[var(--text-primary)]">ยังไม่มีผลวิเคราะห์</p>
-                  <p className="m-0 max-w-sm text-[12.5px] text-[var(--text-muted)]">
-                    ใส่ request ทางซ้าย หรือเลือกตัวอย่าง แล้วกด "วิเคราะห์ request"
-                  </p>
-                </>
-              )}
-            </div>
-          )}
-
-          {loading && (
-            <div className="flex min-h-[18rem] items-center justify-center gap-2 text-[13px] text-[var(--text-muted)]">
-              <span className="h-4 w-4 rounded-full border-2 border-[var(--bg-border)] border-t-[var(--accent)] animate-spin" />
-              กำลังวิเคราะห์...
-            </div>
-          )}
-
-          {result && verdict && (
-            <div className="space-y-5 animate-fade-in">
-              {/* Verdict */}
-              <div>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5">
-                    <span
-                      className={`flex h-9 w-9 items-center justify-center rounded-lg ${
-                        verdict.isAttack ? 'bg-[var(--danger-subtle)] text-[var(--danger)]' : 'bg-[var(--success-subtle)] text-[var(--success)]'
-                      }`}
-                      aria-hidden="true"
-                    >
-                      {verdict.isAttack ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
-                    </span>
-                    <h2 className={`m-0 text-[17px] font-semibold ${verdict.isAttack ? 'text-[var(--danger)]' : 'text-[var(--success)]'}`}>
-                      {verdict.title}
-                    </h2>
-                  </div>
-                  <span
-                    className="rounded-full border border-[var(--bg-border)] bg-[var(--bg-primary)] px-2.5 py-0.5 text-[12px] text-[var(--text-secondary)]"
-                    title={gen3?.feature_set}
-                  >
-                    Gen 3 · shadow
-                  </span>
-                </div>
-
-                {bar && (
-                  <div className="mt-4">
-                    <div className="flex items-baseline justify-between text-[12.5px]">
-                      <span className="text-[var(--text-secondary)]">คะแนนการโจมตี</span>
-                      <span className="tabular-nums">
-                        <strong className="text-[15px] text-[var(--text-primary)]">{formatPercent(verdict.score)}</strong>
-                        {verdict.threshold !== null && (
-                          <span className="text-[var(--text-muted)]"> · เกณฑ์ {formatPercent(verdict.threshold)}</span>
-                        )}
-                      </span>
-                    </div>
-                    <div className="relative mt-1.5 h-2 rounded-full bg-[var(--bg-border)]">
-                      <div
-                        className={`h-full rounded-full ${verdict.isAttack ? 'bg-[var(--danger)]' : 'bg-[var(--success)]'}`}
-                        style={{ width: `${bar.score}%` }}
-                      />
-                      {bar.threshold !== null && (
-                        <span
-                          className="absolute -top-1 h-4 w-0.5 rounded bg-[var(--text-primary)]"
-                          style={{ left: `calc(${bar.threshold}% - 1px)` }}
-                          aria-hidden="true"
-                        />
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Detectors */}
-              {gen3 && (
-                <div>
-                  <h3 className={sectionTitle}>สิ่งที่ตรวจพบ</h3>
-                  {gen3.detectors && gen3.detectors.length > 0 && (
-                    <ul className="m-0 mb-2 p-0 list-none divide-y divide-[var(--bg-border-subtle)] rounded-lg border border-[var(--bg-border)]">
-                      {gen3.detectors.map((d) => (
-                        <li key={d.detector} className="flex items-center justify-between gap-3 px-3 py-2">
-                          <span className="min-w-0">
-                            <span className="block text-[13px] font-medium text-[var(--text-primary)]">{d.attack_type}</span>
-                            <span className="block truncate font-mono text-[11.5px] text-[var(--text-muted)]">{d.detector}</span>
-                          </span>
-                          <span className={`shrink-0 text-[12px] font-medium ${SEVERITY_TEXT[d.severity] ?? 'text-[var(--text-secondary)]'}`}>
-                            {d.severity}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <p className="m-0 text-[12.5px] text-[var(--text-muted)]">{detectorNote(gen3)}</p>
-                </div>
-              )}
-
-              {/* Rule suggestion outcome */}
-              {suggestion && (
-                <div
-                  className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-[13px] ${
-                    suggestion.queued
-                      ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--text-primary)]'
-                      : 'border-[var(--bg-border)] bg-[var(--bg-primary)] text-[var(--text-secondary)]'
-                  }`}
-                >
-                  <span>{suggestion.text}</span>
-                  {suggestion.queued && canOpenQueue && (
-                    <Link
-                      to="/ml-rules"
-                      className="inline-flex items-center gap-1 font-medium text-[var(--accent)] hover:text-[var(--accent-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded"
-                    >
-                      เปิด ML anomaly rules <ArrowRight size={14} />
-                    </Link>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </section>
+      <div role="tabpanel" id={`analyst-panel-${tab}`} aria-labelledby={`analyst-tab-${tab}`}>
+        {tab === 'insights' ? <MLInsights /> : <ManualAnalyzer />}
       </div>
     </div>
   )
