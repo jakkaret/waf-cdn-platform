@@ -69,24 +69,19 @@ def test_throttled_clients_hidden_from_viewers(client, accounts, monkeypatch):
     assert client.get("/api/rate-limits/throttled", headers=admin_h).json()["throttled_clients"][0]["ip"] == "198.51.100.9"
 
 
-def test_threshold_proposal_evidence_is_scoped(client, accounts, monkeypatch):
+def test_threshold_proposals_are_listed_per_origin_member(client, accounts, monkeypatch):
+    """Proposals belong to one origin: a member sees only their origins'
+    proposals, and an admin who is not a member sees none of them."""
     admin_h, viewer_h = accounts
-    proposal = {
-        "id": "p1",
-        "evidence": {
-            "origins": [{"origin": "mine.example.com", "requests": 500}, {"origin": "other.example.net", "requests": 900}],
-            "corroborating_origins": ["mine.example.com", "other.example.net"],
-        },
-    }
-    monkeypatch.setattr(proposals_module.store, "list", lambda status=None: [proposal])
-    monkeypatch.setattr(proposals_module.store, "get", lambda pid: proposal)
-    for resp in (client.get("/api/threshold-proposals/", headers=viewer_h).json()["proposals"][0],
-                 client.get("/api/threshold-proposals/p1", headers=viewer_h).json()):
-        assert [o["origin"] for o in resp["evidence"]["origins"]] == ["mine.example.com"]
-        assert resp["evidence"]["corroborating_origins"] == ["mine.example.com"]
-        assert resp["evidence"]["hidden_origin_count"] == 1
-    full = client.get("/api/threshold-proposals/p1", headers=admin_h).json()
-    assert len(full["evidence"]["origins"]) == 2
+    mine = client.get("/api/threshold-proposals/origins", headers=viewer_h).json()["origins"]
+    assert [o["hosts"] for o in mine] == [["mine.example.com"]]
+    assert mine[0]["role"] == "owner"
+    assert client.get("/api/threshold-proposals/origins", headers=admin_h).json()["origins"] == []
+    seen = []
+    monkeypatch.setattr(proposals_module.store, "list", lambda status=None, origin_ids=None: seen.append(origin_ids) or [])
+    client.get("/api/threshold-proposals/", headers=admin_h)
+    client.get("/api/threshold-proposals/", headers=viewer_h)
+    assert seen == [[], [mine[0]["origin_id"]]]
 
 
 def test_cdn_stats_filters_on_host_not_url(client, accounts, monkeypatch):

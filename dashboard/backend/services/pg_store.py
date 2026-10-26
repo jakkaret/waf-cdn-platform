@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 _ORIGIN_COLUMNS = {
     "admin_user_id", "label", "ip", "port", "status", "connection_mode", "origin_scheme",
     "is_tunnel", "tunnel_name", "tech_stack_tags", "managed_ruleset_mode",
-    "managed_ruleset_version", "created_at", "updated_at", "archived_at", "deleted_at",
+    "managed_ruleset_version", "anomaly_threshold", "created_at", "updated_at", "archived_at", "deleted_at",
 }
 _ORIGIN_TS = {"created_at", "updated_at", "archived_at", "deleted_at"}
 # Stored in child tables, written in the same transaction as the origin row.
@@ -114,6 +114,8 @@ class PgStore:
             origin["is_tunnel"] = True
         if row.get("managed_ruleset_version") is not None:
             origin["managed_ruleset_version"] = int(row["managed_ruleset_version"])
+        if row.get("anomaly_threshold") is not None:
+            origin["anomaly_threshold"] = int(row["anomaly_threshold"])
         if row.get("tech_stack_tags"):
             origin["tech_stack_tags"] = list(row["tech_stack_tags"])
         for key in ("archived_at", "deleted_at"):
@@ -141,7 +143,7 @@ class PgStore:
             return int(value)
         if key == "is_tunnel":
             return bool(value)
-        if key == "managed_ruleset_version" and value is not None:
+        if key in ("managed_ruleset_version", "anomaly_threshold") and value is not None:
             return int(value)
         return value
 
@@ -1252,6 +1254,7 @@ class PgThresholdProposalRepository:
             "current_threshold": row["current_threshold"], "proposed_threshold": row["proposed_threshold"],
             "lookback_hours": row["lookback_hours"], "reason": row["reason"], "evidence": row["evidence"],
             "created_by": row["created_by"], "created_at": iso_z_s(row["created_at"]),
+            "origin_id": str(row["origin_id"]) if row.get("origin_id") else None,
         }
         for key in _THRESHOLD_OPTIONAL_TEXT:
             if row.get(key) is not None:
@@ -1266,10 +1269,11 @@ class PgThresholdProposalRepository:
     def create(self, proposal: Dict[str, Any], created_by: str) -> Dict[str, Any]:
         from psycopg.types.json import Jsonb
         row = pool.q1(
-            "INSERT INTO threshold_proposals (current_threshold, proposed_threshold, lookback_hours, reason, "
-            "evidence, created_by) VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
-            (int(proposal["current_threshold"]), int(proposal["proposed_threshold"]),
-             int(proposal["lookback_hours"]), proposal["reason"], Jsonb(proposal.get("evidence") or {}), created_by))
+            "INSERT INTO threshold_proposals (origin_id, current_threshold, proposed_threshold, lookback_hours, "
+            "reason, evidence, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *",
+            (as_uuid(proposal.get("origin_id")), int(proposal["current_threshold"]),
+             int(proposal["proposed_threshold"]), int(proposal["lookback_hours"]), proposal["reason"],
+             Jsonb(proposal.get("evidence") or {}), created_by))
         return self.to_proposal(row)
 
     def get(self, proposal_id: str) -> Optional[Dict[str, Any]]:
@@ -1278,11 +1282,20 @@ class PgThresholdProposalRepository:
             return None
         return self.to_proposal(pool.q1("SELECT * FROM threshold_proposals WHERE proposal_id = %s", (pid,)))
 
-    def list(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list(self, status: Optional[str] = None, origin_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """origin_ids=None: every proposal; a list: only those origins' (an
+        empty list matches nothing, and pre-origin proposals never match)."""
+        where, params = [], []
         if status:
-            rows = pool.q("SELECT * FROM threshold_proposals WHERE status = %s ORDER BY created_at DESC", (status,))
-        else:
-            rows = pool.q("SELECT * FROM threshold_proposals ORDER BY created_at DESC")
+            where.append("status = %s")
+            params.append(status)
+        if origin_ids is not None:
+            where.append("origin_id = ANY(%s)")
+            params.append([u for u in (as_uuid(o) for o in origin_ids) if u is not None])
+        query = "SELECT * FROM threshold_proposals"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        rows = pool.q(query + " ORDER BY created_at DESC", tuple(params))
         return [self.to_proposal(r) for r in rows]
 
     def transition(self, proposal_id: str, from_status: str, sets: str, params: tuple) -> Optional[Dict[str, Any]]:

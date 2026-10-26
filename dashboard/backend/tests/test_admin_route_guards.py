@@ -32,10 +32,6 @@ ADMIN_ONLY = [
     ("PUT", "/api/rules/abc"),
     ("DELETE", "/api/rules/abc"),
     ("POST", "/api/rules/sync"),
-    ("POST", "/api/threshold-proposals/generate"),
-    ("POST", "/api/threshold-proposals/abc/approve"),
-    ("POST", "/api/threshold-proposals/abc/reject"),
-    ("POST", "/api/threshold-proposals/abc/rollback"),
 ]
 # Probes safe to run as admin (body validation fails first / unknown id => no side effects)
 ADMIN_SAFE = [
@@ -53,6 +49,12 @@ MEMBER_SCOPED = [
     ("POST", "/api/ml-rules/abc/approve"),
     ("POST", "/api/ml-rules/abc/reject"),
     ("POST", "/api/ml-rules/abc/backtest"),
+    # tuning proposals belong to one origin and only its Owner decides
+    # (2026-10-27, tests/test_threshold_proposal_api.py)
+    ("POST", "/api/threshold-proposals/generate?origin_id=abc"),
+    ("POST", "/api/threshold-proposals/abc/approve"),
+    ("POST", "/api/threshold-proposals/abc/reject"),
+    ("POST", "/api/threshold-proposals/abc/rollback"),
 ]
 
 

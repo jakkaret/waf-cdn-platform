@@ -6,7 +6,9 @@ WAF loads after CRS in alphabetical order and control-api bundles to the
 edges every few seconds):
 
   managed-00-hostmap.conf   one rule per origin, matched on the Host header:
-                            sets tx.waf_origin_id (used by per-origin rules)
+                            sets tx.waf_origin_id (used by per-origin rules),
+                            the origin's own anomaly threshold when its Owner
+                            approved one (services/threshold_proposal_service),
                             and switches off managed rules that are not part
                             of the version that origin is on (ctl:ruleRemoveById)
   managed-05-honeytokens.conf
@@ -246,6 +248,19 @@ def _ctl(ids: List[int]) -> str:
     return "".join(f",ctl:ruleRemoveById={i}" for i in ids)
 
 
+def _threshold(origin: dict) -> str:
+    """Per-origin inbound anomaly threshold. This file loads after CRS and
+    after 00-modsecurity-override.conf, so in phase 1 it overrides the
+    platform value before CRS evaluates blocking in phase 2."""
+    value = origin.get("anomaly_threshold")
+    if value is None:
+        return ""
+    value = int(value)
+    if not 3 <= value <= 10:
+        raise ManagedRulesetError(f"anomaly_threshold {value} out of range for origin {origin.get('id')}")
+    return f",setvar:tx.inbound_anomaly_score_threshold={value}"
+
+
 def render_hostmap(origins: List[dict], hosts_by_origin: Dict[str, List[str]], catalog: dict) -> str:
     """One phase-1 rule per origin that owns verified hosts, then a fallback
     for requests no origin claimed (lab hosts, direct IP): latest version."""
@@ -262,7 +277,7 @@ def render_hostmap(origins: List[dict], hosts_by_origin: Dict[str, List[str]], c
             f'SecRule REQUEST_HEADERS:Host "@rx {_host_regex(hosts)}" '
             f'"id:{HOSTMAP_ID_BASE + n},phase:1,pass,nolog,t:none,t:lowercase,'
             f"setvar:tx.waf_origin_id={oid},setvar:tx.managed_version={version}"
-            f'{_ctl(_removals(catalog, version))}"'
+            f'{_threshold(origin)}{_ctl(_removals(catalog, version))}"'
         )
     latest = latest_version(catalog)
     lines.append(

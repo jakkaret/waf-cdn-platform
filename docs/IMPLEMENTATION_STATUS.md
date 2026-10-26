@@ -32,7 +32,7 @@ status: VERIFIED
 | ML inference | VERIFIED | `/health` | accuracy 0.8047 < เป้า |
 | ML → pending rules อัตโนมัติ | PARTIAL | analyzer ไม่บันทึก | ผ่านหน้า Analyst เท่านั้น |
 | ML rule approval → deploy | VERIFIED | `ml_rule_service.approve_rule` | |
-| Threshold proposals | VERIFIED | code | admin approve/rollback |
+| Threshold proposals | VERIFIED | code | ต่อ origin, Owner ของ origin approve/rollback (2026-10-27) |
 | BOLA guard | REMOVED (2026-10-21) | migration 0010 | ไม่เคยอยู่ในเส้นทาง request และตรวจ token ของเว็บลูกค้าไม่ได้ การตรวจสิทธิ์รายชิ้นของ API แพลตฟอร์มอยู่ที่ `services/rbac.py` |
 | IP rules / rate limit | VERIFIED (โค้ด) | code + nginx auth_request | |
 | Public status page | VERIFIED | `/api/status/public` 200 | |

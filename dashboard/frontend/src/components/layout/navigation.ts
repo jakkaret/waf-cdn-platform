@@ -19,10 +19,11 @@ import {
 //
 // `access` decides who sees an entry. "operator" entries are hidden from
 // regular users. It mirrors today's visibility; role-3 plan Phase 6 moves the
-// platform-wide pages (rules, IP list, rate limits, tuning proposals,
-// settings) to "operator" together with the backend guards. ML anomaly rules
-// is "member": the backend lists only the rules of the caller's origins and
-// lets their Owner or Editor review them.
+// platform-wide pages (rules, IP list, rate limits, settings) to "operator"
+// together with the backend guards. ML anomaly rules is "member": the backend
+// lists only the rules of the caller's origins and lets their Owner or Editor
+// review them. Tuning proposals is "member": each proposal belongs to one
+// origin and only that origin's Owner decides it.
 
 export type NavAccess = 'member' | 'operator'
 

@@ -137,6 +137,25 @@ def test_render_hostmap_skips_an_origin_with_no_verified_hosts(source_dir, catal
     assert "waf_origin_id=o1" not in text
 
 
+def test_render_hostmap_sets_an_origins_own_threshold_only_on_its_rule(source_dir, catalog_path):
+    mr.publish(source_dir, catalog_path)
+    catalog = mr.load_catalog(catalog_path)
+    origins = [{"id": "o1", "anomaly_threshold": 8}, {"id": "o2"}]
+    hosts = {"o1": ["a.example.com"], "o2": ["b.example.com"]}
+    lines = mr.render_hostmap(origins, hosts, catalog).splitlines()
+    o1 = next(l for l in lines if "waf_origin_id=o1" in l)
+    o2 = next(l for l in lines if "waf_origin_id=o2" in l)
+    assert "setvar:tx.inbound_anomaly_score_threshold=8" in o1
+    assert "inbound_anomaly_score_threshold" not in o2
+    assert "phase:1" in o1
+
+
+def test_render_hostmap_refuses_an_out_of_range_threshold(source_dir, catalog_path):
+    catalog = mr.load_catalog(catalog_path)
+    with pytest.raises(mr.ManagedRulesetError):
+        mr.render_hostmap([{"id": "o1", "anomaly_threshold": 50}], {"o1": ["a.example.com"]}, catalog)
+
+
 def test_effective_version_manual_pin_is_clamped_to_latest(source_dir, catalog_path):
     mr.publish(source_dir, catalog_path)
     catalog = mr.load_catalog(catalog_path)

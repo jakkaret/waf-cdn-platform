@@ -10,7 +10,7 @@ status: VERIFIED
 
 Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/api/system/*`, ไฟล์ static) อยู่นอกขอบเขตของไฟล์นี้
 
-พบทั้งหมด **170 endpoints** ใน **28 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 29 รายการ
+พบทั้งหมด **171 endpoints** ใน **28 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 29 รายการ
 
 ## `api/ai_summary.py`
 
@@ -349,11 +349,12 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 | Method | Path | Handler | Auth | คำอธิบาย (docstring) |
 |---|---|---|---|---|
 | GET | `/api/threshold-proposals/` | `list_proposals` | viewer+ |  |
-| POST | `/api/threshold-proposals/generate` | `generate_proposal` | admin | Analyzes recent ClickHouse block-rate evidence and, if it clears the |
+| POST | `/api/threshold-proposals/generate` | `generate_proposal` | viewer+ | Owner of the origin only: analyses its own block rate and, if it clears the bar (see |
+| GET | `/api/threshold-proposals/origins` | `list_tunable_origins` | viewer+ | Origins the caller belongs to, with the threshold the WAF applies to each. |
 | GET | `/api/threshold-proposals/{proposal_id}` | `get_proposal` | viewer+ |  |
-| POST | `/api/threshold-proposals/{proposal_id}/approve` | `approve_proposal` | admin |  |
-| POST | `/api/threshold-proposals/{proposal_id}/reject` | `reject_proposal` | admin |  |
-| POST | `/api/threshold-proposals/{proposal_id}/rollback` | `rollback_proposal` | admin | Reverts an approved proposal's threshold change back to whatever was |
+| POST | `/api/threshold-proposals/{proposal_id}/approve` | `approve_proposal` | viewer+ | Owner of the proposal's origin only: applies the threshold to that origin. |
+| POST | `/api/threshold-proposals/{proposal_id}/reject` | `reject_proposal` | viewer+ | Owner of the proposal's origin only. |
+| POST | `/api/threshold-proposals/{proposal_id}/rollback` | `rollback_proposal` | viewer+ | Owner of the proposal's origin only: puts back the origin's threshold |
 
 ## `api/tunnel.py`
 

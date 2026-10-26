@@ -1,5 +1,6 @@
 // F-026: the client must match api/threshold_proposals.py -- reject carries a
-// JSON body, ids are proposal_id, generate returns { proposal }.
+// JSON body, ids are proposal_id, generate returns { proposal }, and every
+// list/generate call names the origin (proposals are per origin, 2026-10-27).
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const post = vi.fn()
@@ -20,10 +21,17 @@ describe('thresholdProposalsApi', () => {
     expect(post).toHaveBeenCalledWith('/threshold-proposals/p-1/reject', { reason: '' })
   })
 
-  it('returns the single proposal from generate', async () => {
+  it('generates for one origin and returns the single proposal', async () => {
     post.mockResolvedValue({ data: { proposal: { proposal_id: 'p-2', status: 'pending' } } })
-    const res = await thresholdProposalsApi.generateProposal()
+    const res = await thresholdProposalsApi.generateProposal('o-1')
+    expect(post).toHaveBeenCalledWith('/threshold-proposals/generate', null, { params: { origin_id: 'o-1' } })
     expect(res.proposal?.proposal_id).toBe('p-2')
+  })
+
+  it('lists the proposals of one origin', async () => {
+    get.mockResolvedValue({ data: { proposals: [] } })
+    await thresholdProposalsApi.getProposals('o-1')
+    expect(get).toHaveBeenCalledWith('/threshold-proposals/', { params: { origin_id: 'o-1' } })
   })
 
   it('exposes rollback for approved proposals', async () => {

@@ -26,7 +26,7 @@ status: VERIFIED
 | `/api/analytics` | `api/analytics.py` | 1 | สถิติ dashboard |
 | `/api/cdn` | `api/cdn.py` | 6 | สถานะ edge, log ของ CDN, `logs/ingest` จาก edge |
 | `/api/ml`, `/api/ml-rules` | `api/ml.py`, `api/ml_rules.py` | 4 + 6 | proxy ไป ML service, กฎที่ ML เสนอ |
-| `/api/threshold-proposals` | `api/threshold_proposals.py` | 6 | ข้อเสนอปรับ threshold (self-tuning) |
+| `/api/threshold-proposals` | `api/threshold_proposals.py` | 7 | ข้อเสนอปรับ threshold ของแต่ละ origin (Owner ตัดสิน) |
 | `/api/ip-rules`, `/api/rate-limits`, `/api/limiter` | 3 ไฟล์ | 4 + 6 + 1 | IP list, rate limit, จุดตรวจของ nginx `auth_request` |
 | `/api/tunnels`, `/api/tunnel` | 2 ไฟล์ | 5 + 3 | สร้าง/ดู tunnel, hook ของ frps, ยืนยัน agent |
 | `/api/settings` | `api/settings.py` | 3 | ตั้งค่า WAF (paranoia, threshold) |
