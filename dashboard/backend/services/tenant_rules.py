@@ -139,11 +139,17 @@ def validate(rule: dict) -> dict:
         "enabled": bool(rule.get("enabled", True)),
     }
     # Internal marker set only by the decoy-path helper, never by the rule
-    # builder: names which catalog entry a DECEIVE rule came from.
+    # builder. A decoy rule is hidden from the Custom Rules list, so it must
+    # stay exactly what the catalog defines -- its path, REQUEST_FILENAME and
+    # DECEIVE -- or a hand-edit could hide an arbitrary rule behind the marker.
     decoy = rule.get("decoy")
     if decoy is not None:
-        if decoy not in DECOY_PATHS:
+        meta = DECOY_PATHS.get(decoy)
+        if meta is None:
             raise TenantRuleError("unknown decoy")
+        if clean["variable"] != "REQUEST_FILENAME" or clean["operator"] != meta["operator"] \
+                or clean["action"] != "DECEIVE":
+            raise TenantRuleError("a decoy rule must keep its catalog path, REQUEST_FILENAME and DECEIVE")
         clean["decoy"] = decoy
     return clean
 
@@ -263,6 +269,10 @@ class TenantRuleService:
             current = self.get(origin_id, rule_id)
             if not current:
                 raise KeyError(rule_id)
+            if current.get("decoy"):
+                # A decoy rule changes only through set_decoy; editing it here
+                # would let someone repurpose a rule that stays hidden from the list.
+                raise TenantRuleError("this is a decoy path; turn it on or off from Decoy Paths")
             clean = validate({**current, **rule})
             clean.update(created_by=current.get("created_by"), created_at=current.get("created_at"),
                          updated_by=user.get("username") or user.get("user_id"),
@@ -295,13 +305,18 @@ class TenantRuleService:
         if key not in DECOY_PATHS:
             raise TenantRuleError("unknown decoy")
         meta = DECOY_PATHS[key]
-        existing = self._decoy_rules(origin_id).get(key)
-        if enabled and not existing:
-            self.create(origin_id, {
-                "variable": "REQUEST_FILENAME", "operator": meta["operator"],
-                "message": f"Decoy path: {meta['label']}", "action": "DECEIVE",
-                "severity": "HIGH", "decoy": key,
-            }, user)
-        elif not enabled and existing:
-            self.delete(origin_id, existing["id"])
+        # RULES_LOCK is reentrant, so holding it across the existence check and
+        # the create/delete (which take it again) keeps a double toggle from
+        # racing into two rules or a half-removed one.
+        with _lock:
+            existing = [r["id"] for r in self.list([origin_id]) if r.get("decoy") == key]
+            if enabled and not existing:
+                self.create(origin_id, {
+                    "variable": "REQUEST_FILENAME", "operator": meta["operator"],
+                    "message": f"Decoy path: {meta['label']}", "action": "DECEIVE",
+                    "severity": "HIGH", "decoy": key,
+                }, user)
+            elif not enabled:
+                for rid in existing:  # remove every rule tagged with this key, not just one
+                    self.delete(origin_id, rid)
         return {"key": key, "enabled": enabled}

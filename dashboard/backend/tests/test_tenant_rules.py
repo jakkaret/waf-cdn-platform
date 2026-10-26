@@ -281,6 +281,41 @@ def test_unknown_decoy_is_rejected(service):
         service.set_decoy("origin-a", "not-a-decoy", True, {"user_id": "u1", "username": "alice"})
 
 
+def test_a_decoy_rule_cannot_be_hand_edited(service):
+    """The edit path must refuse a decoy rule, or it could be repurposed into
+    an arbitrary rule that stays hidden from the Custom Rules list."""
+    service.set_decoy("origin-a", "wp-login", True, {"user_id": "u1", "username": "alice"})
+    rid = next(d["rule_id"] for d in service.list_decoys("origin-a") if d["key"] == "wp-login")
+    with pytest.raises(TenantRuleError, match="decoy"):
+        service.update("origin-a", rid, {"variable": "REQUEST_URI", "operator": "@contains /x",
+                                         "message": "repurposed", "action": "BLOCK"},
+                       {"user_id": "u1", "username": "alice"})
+
+
+def test_validate_rejects_a_decoy_marker_with_a_mismatched_shape():
+    from services.tenant_rules import DECOY_PATHS
+    # right marker, but variable/operator/action not the catalog's -> refused
+    with pytest.raises(TenantRuleError, match="catalog path"):
+        validate({"variable": "REQUEST_URI", "operator": "@contains /anything",
+                  "message": "sneaky", "action": "BLOCK", "decoy": "wp-login"})
+    # the canonical shape passes
+    ok = validate({"variable": "REQUEST_FILENAME", "operator": DECOY_PATHS["wp-login"]["operator"],
+                   "message": "m", "action": "DECEIVE", "decoy": "wp-login"})
+    assert ok["decoy"] == "wp-login"
+
+
+def test_disable_removes_every_rule_tagged_with_the_key(service):
+    u = {"user_id": "u1", "username": "alice"}
+    service.set_decoy("origin-a", "git", True, u)
+    # a second rule sharing the key (e.g. from a past race) must also be cleared
+    meta = __import__("services.tenant_rules", fromlist=["DECOY_PATHS"]).DECOY_PATHS["git"]
+    service.create("origin-a", {"variable": "REQUEST_FILENAME", "operator": meta["operator"],
+                                "message": "dup", "action": "DECEIVE", "decoy": "git"}, u)
+    assert len([r for r in service.list(["origin-a"]) if r.get("decoy") == "git"]) == 2
+    service.set_decoy("origin-a", "git", False, u)
+    assert [r for r in service.list(["origin-a"]) if r.get("decoy") == "git"] == []
+
+
 def test_decoy_rules_are_deceive_in_phase_1(service):
     service.set_decoy("origin-a", "git", True, {"user_id": "u1", "username": "alice"})
     rid = next(d["rule_id"] for d in service.list_decoys("origin-a") if d["key"] == "git")
