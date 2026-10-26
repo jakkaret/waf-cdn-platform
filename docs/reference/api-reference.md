@@ -10,7 +10,7 @@ status: VERIFIED
 
 Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/api/system/*`, ไฟล์ static) อยู่นอกขอบเขตของไฟล์นี้
 
-พบทั้งหมด **172 endpoints** ใน **29 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 30 รายการ
+พบทั้งหมด **170 endpoints** ใน **28 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 29 รายการ
 
 ## `api/ai_summary.py`
 
@@ -178,7 +178,7 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 |---|---|---|---|---|
 | POST | `/api/ml/capture` | `capture_telemetry_relay` | public | Docker-to-loopback relay for privacy-scoped lab telemetry. |
 | POST | `/api/ml/predict` | `predict_anomaly` | viewer+ |  |
-| POST | `/api/ml/predict-and-suggest` | `predict_and_suggest` | viewer+ | Score a request with Gen 3 and queue rule proposals for admin review. |
+| POST | `/api/ml/predict-and-suggest` | `predict_and_suggest` | viewer+ | Score a request with Gen 3 and queue rule proposals for review (an origin's Owner/Editors, or the platform admin). |
 | GET | `/api/ml/shadow/decision` | `shadow_decision` | public | Internal Docker-to-loopback relay for the Nginx shadow hook. |
 
 ## `api/ml_rules.py`
@@ -187,14 +187,14 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 
 | Method | Path | Handler | Auth | คำอธิบาย (docstring) |
 |---|---|---|---|---|
-| GET | `/api/ml-rules/` | `list_ml_rules` | admin | Admin-only (2026-09-22, diagnosing-bugs skill applied to the tenant- |
+| GET | `/api/ml-rules/` | `list_ml_rules` | viewer+ | Platform admin: every rule. Anyone else: the rules of origins they are Owner, Editor or Viewer of. |
 | POST | `/api/ml-rules/cve-scan` | `run_cve_scan` | admin | CVE Auto-Patch (2026-09-22). Admin-triggered, deliberately NOT a |
 | POST | `/api/ml-rules/reject-legacy` | `reject_legacy_ml_rules` | admin | Reject every pending "rf-regex" rule in one call (the queue's ~268 RF leftovers). |
-| DELETE | `/api/ml-rules/{rule_id}` | `delete_ml_rule` | admin |  |
-| GET | `/api/ml-rules/{rule_id}` | `get_ml_rule` | admin | Admin-only -- see list_ml_rules above for why. |
-| POST | `/api/ml-rules/{rule_id}/approve` | `approve_ml_rule` | admin |  |
-| POST | `/api/ml-rules/{rule_id}/backtest` | `backtest_ml_rule` | admin | How many requests the WAF let through in the last `days` this rule would |
-| POST | `/api/ml-rules/{rule_id}/reject` | `reject_ml_rule` | admin |  |
+| DELETE | `/api/ml-rules/{rule_id}` | `delete_ml_rule` | admin | Delete a rule (and its ml-<id>.conf when deployed). Platform admin only. |
+| GET | `/api/ml-rules/{rule_id}` | `get_ml_rule` | viewer+ | Platform admin, or a member of the rule's origin; anyone else gets 404 (see list_ml_rules). |
+| POST | `/api/ml-rules/{rule_id}/approve` | `approve_ml_rule` | viewer+ | Approve and deploy: platform admin, or Owner/Editor of the rule's origin (deployed for that origin only). |
+| POST | `/api/ml-rules/{rule_id}/backtest` | `backtest_ml_rule` | viewer+ | How many requests the WAF let through in the last `days` this rule would |
+| POST | `/api/ml-rules/{rule_id}/reject` | `reject_ml_rule` | viewer+ | Reject: platform admin, or Owner/Editor of the rule's origin. |
 
 ## `api/onboarding.py`
 
@@ -217,7 +217,7 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 | POST | `/api/origins` | `create_origin` | login |  |
 | GET | `/api/origins/quota` | `get_quota` | login | Return quota usage for the current user (origins used / max). |
 | DELETE | `/api/origins/{origin_id}` | `delete_origin` | origin owner |  |
-| GET | `/api/origins/{origin_id}` | `get_origin` | origin read |  |
+| GET | `/api/origins/{origin_id}` | `get_origin` | origin read, login |  |
 | PUT | `/api/origins/{origin_id}` | `update_origin` | origin edit, login |  |
 | GET | `/api/origins/{origin_id}/audit-log` | `get_origin_audit_log` | origin read | Team Workspace (2026-09-22): owner, editor, or viewer may read the |
 | GET | `/api/origins/{origin_id}/captcha` | `get_captcha_config` | origin edit |  |
@@ -341,15 +341,6 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 | GET | `/api/origins/{origin_id}/waf-rules/options` | `get_options` | origin read | Fixed choices the rule builder UI renders -- nothing here is free text |
 | DELETE | `/api/origins/{origin_id}/waf-rules/{rule_id}` | `delete_rule` | origin edit |  |
 | PUT | `/api/origins/{origin_id}/waf-rules/{rule_id}` | `update_rule` | origin edit, login |  |
-
-## `api/threat_intel.py`
-
-สถานะการลงทะเบียน: ลงทะเบียนใน main.py
-
-| Method | Path | Handler | Auth | คำอธิบาย (docstring) |
-|---|---|---|---|---|
-| PATCH | `/api/threat-intel/opt-in` | `set_opt_in` | login | Per-user, not global (unlike api/settings.py's system-wide config) -- |
-| GET | `/api/threat-intel/trending` | `get_trending` | login | Reciprocity gate lives in services/threat_intel.py itself: only a |
 
 ## `api/threshold_proposals.py`
 
