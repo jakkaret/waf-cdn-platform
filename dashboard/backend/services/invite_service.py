@@ -3,8 +3,9 @@
 Adding a viewer or editor no longer grants access to whichever account holds
 that email address: anyone could have registered it first, and registration
 does not verify mailboxes. Instead an invitation link goes to the mailbox, and
-access is granted to the signed-in user who opens it. The token is the proof
-of mailbox access, so only its SHA-256 is stored.
+access is granted when it is opened by the signed-in account registered (and
+email-verified) under that same address. The token is the proof of mailbox
+access, so only its SHA-256 is stored.
 """
 import hashlib
 import logging
@@ -45,25 +46,47 @@ def create_invite(origin_id: str, email: str, role: str, invited_by: str) -> str
     return token
 
 
+class InviteForAnotherAddress(Exception):
+    """The link is valid but was sent to a different address than the signed-in
+    account's. `masked` is that address with the local part hidden."""
+
+    def __init__(self, masked: str):
+        super().__init__(masked)
+        self.masked = masked
+
+
+def mask_email(email: str) -> str:
+    local, _, domain = (email or "").partition("@")
+    return f"{local[:1]}***@{domain}" if domain else "***"
+
+
 def accept_invite(token: str, user_id: str) -> Optional[Tuple[str, str]]:
     """Grant the invited role to user_id. Returns (origin_id, role), or None if
-    the token is unknown, expired or already used. One use per invitation."""
+    the token is unknown, expired or already used. One use per invitation.
+
+    Only the account whose (verified) email is the invited address may accept:
+    a link forwarded to, or opened by, someone signed in as another account is
+    refused with InviteForAnotherAddress and stays usable by the right person."""
     with pool.transaction():
         # The invitation is only as good as its source: the origin must still
         # be live and the inviter must still be its Owner (only the Owner
         # manages the team). Archiving the origin voids pending links.
         row = pool.q1(
-            "UPDATE origin_invites i SET accepted_at = now(), accepted_by = %s "
-            "FROM origins o "
+            "SELECT i.invite_id, i.origin_id, i.role, i.invited_by, i.email FROM origin_invites i "
+            "JOIN origins o ON o.id = i.origin_id "
             "WHERE i.token_hash = %s AND i.accepted_at IS NULL AND i.expires_at > now() "
-            "AND o.id = i.origin_id AND o.status NOT IN ('archived', 'deleted') "
-            "AND i.invited_by IS NOT NULL "
-            "AND o.admin_user_id = i.invited_by "
-            "RETURNING i.origin_id, i.role, i.invited_by",
-            (user_id, _hash(token or "")),
+            "AND o.status NOT IN ('archived', 'deleted') "
+            "AND i.invited_by IS NOT NULL AND o.admin_user_id = i.invited_by "
+            "FOR UPDATE OF i",
+            (_hash(token or ""),),
         )
         if not row:
             return None
+        user = pool.q1("SELECT lower(email) AS email FROM users WHERE user_id = %s", (user_id,))
+        if not user or user["email"] != row["email"]:
+            raise InviteForAnotherAddress(mask_email(row["email"]))
+        pool.exec_("UPDATE origin_invites SET accepted_at = now(), accepted_by = %s WHERE invite_id = %s",
+                   (user_id, row["invite_id"]))
         pool.exec_(
             "INSERT INTO origin_members (origin_id, user_id, role, granted_by) VALUES (%s, %s, %s, %s) "
             "ON CONFLICT DO NOTHING",

@@ -1,5 +1,7 @@
 """N9/H64: sharing an origin needs the mailbox, not just an account that was
-registered under the address first."""
+registered under the address first. 2026-10-26: and the account that opens the
+link must be the invited address -- a link opened while signed in as someone
+else is refused and stays usable by the right person."""
 import pytest
 
 from db import pool
@@ -30,21 +32,43 @@ def test_account_holding_the_email_gets_no_access_from_the_invite(client, setup,
     assert [m["to"] for m in invite_mailbox] == ["victim@example.com"]
 
 
-def test_whoever_opens_the_emailed_link_gets_the_role(client, setup, invite_mailbox):
+def test_the_invited_address_gets_the_role(client, setup, invite_mailbox):
     h, origin_id = setup
-    client.post(f"/api/origins/{origin_id}/editors", json={"email": "victim@example.com"}, headers=h["owner"])
+    client.post(f"/api/origins/{origin_id}/editors", json={"email": "real-person@example.com"}, headers=h["owner"])
     token = invite_mailbox[0]["token"]
     r = client.post("/api/invites/accept", json={"token": token}, headers=h["real"])
     assert r.status_code == 200 and r.json()["role"] == "editor"
     assert client.get(f"/api/origins/{origin_id}", headers=h["real"]).status_code == 200
+
+
+def test_another_account_opening_the_link_is_refused(client, setup, invite_mailbox):
+    """The link reached real-person's mailbox but is opened while signed in as
+    someone else (a forwarded mail, a shared computer): no access, and the
+    invitation is not used up."""
+    h, origin_id = setup
+    client.post(f"/api/origins/{origin_id}/editors", json={"email": "real-person@example.com"}, headers=h["owner"])
+    token = invite_mailbox[0]["token"]
+    r = client.post("/api/invites/accept", json={"token": token}, headers=h["squatter"])
+    assert r.status_code == 403
+    assert "r***@example.com" in r.json()["detail"] and "real-person" not in r.json()["detail"]
     assert client.get(f"/api/origins/{origin_id}", headers=h["squatter"]).status_code in (403, 404)
+    assert pool.q1("SELECT accepted_at FROM origin_invites")["accepted_at"] is None
+    assert client.post("/api/invites/accept", json={"token": token}, headers=h["real"]).status_code == 200
+
+
+def test_address_match_ignores_case(client, setup, invite_mailbox):
+    h, origin_id = setup
+    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "Real-Person@Example.com"}, headers=h["owner"])
+    assert client.post("/api/invites/accept", json={"token": invite_mailbox[0]["token"]},
+                       headers=h["real"]).status_code == 200
 
 
 def test_link_works_once(client, setup, invite_mailbox):
     h, origin_id = setup
-    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"}, headers=h["owner"])
+    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "real-person@example.com"}, headers=h["owner"])
     token = invite_mailbox[0]["token"]
     assert client.post("/api/invites/accept", json={"token": token}, headers=h["real"]).status_code == 200
+    assert client.post("/api/invites/accept", json={"token": token}, headers=h["real"]).status_code == 404
     assert client.post("/api/invites/accept", json={"token": token}, headers=h["squatter"]).status_code == 404
 
 
@@ -118,15 +142,3 @@ def test_owner_can_cancel_a_pending_invite(client, setup, invite_mailbox):
     inv = client.get(f"/api/origins/{origin_id}/invites", headers=h["owner"]).json()["invites"][0]
     assert client.delete(f"/api/origins/{origin_id}/invites/{inv['invite_id']}", headers=h["owner"]).status_code == 200
     assert client.post("/api/invites/accept", json={"token": invite_mailbox[0]["token"]}, headers=h["real"]).status_code == 404
-
-
-def test_removing_a_member_cancels_pending_links_to_the_address_they_used(client, setup, invite_mailbox):
-    # realperson accepted a link sent to victim@example.com; a second link to the
-    # same address is still pending. Removing realperson must void it too.
-    h, origin_id = setup
-    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"}, headers=h["owner"])
-    client.post(f"/api/origins/{origin_id}/viewers", json={"email": "victim@example.com"}, headers=h["owner"])
-    assert client.post("/api/invites/accept", json={"token": invite_mailbox[0]["token"]}, headers=h["real"]).status_code == 200
-    real_id = client.get("/api/auth/me", headers=h["real"]).json()["user_id"]
-    client.delete(f"/api/origins/{origin_id}/viewers/{real_id}", headers=h["owner"])
-    assert client.post("/api/invites/accept", json={"token": invite_mailbox[1]["token"]}, headers=h["real"]).status_code == 404
