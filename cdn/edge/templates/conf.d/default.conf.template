@@ -66,6 +66,17 @@ server {
         return 200 '{"status": "ok", "region": "${EDGE_REGION}", "timestamp": "$time_iso8601"}\n';
     }
 
+    # This edge AND its path to Main (WireGuard -> waf-nginx). GeoDNS checks
+    # this one: an edge that cannot reach Main must not get visitors.
+    location = /healthz/deep {
+        access_log off;
+        proxy_cache off;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 2s;
+        proxy_set_header Host localhost;
+        proxy_pass http://website_origin/healthz;
+    }
+
     # --- FORCE_HTTPS redirect (conditional) ---
     if ($force_https) {
         return 301 https://$host$request_uri;
@@ -222,6 +233,17 @@ server {
         access_log off;
         add_header Content-Type application/json;
         return 200 '{"status": "ok", "region": "${EDGE_REGION}", "timestamp": "$time_iso8601"}\n';
+    }
+
+    # This edge AND its path to Main (WireGuard -> waf-nginx). GeoDNS checks
+    # this one: an edge that cannot reach Main must not get visitors.
+    location = /healthz/deep {
+        access_log off;
+        proxy_cache off;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 2s;
+        proxy_set_header Host localhost;
+        proxy_pass http://website_origin/healthz;
     }
 
     # --- Dynamic Content (default) — cache 10 min, strict rate limit ---

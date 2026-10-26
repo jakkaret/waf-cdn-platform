@@ -1,0 +1,23 @@
+; cdn.waf-it-kku.online -- delegated from Hostinger (NS ns1/ns2.waf-it-kku.online),
+; served by PowerDNS on both edges. Every customer CNAME points at
+; waf-token-<id>.cdn.waf-it-kku.online, so the wildcard decides which edge a
+; visitor reaches.
+;
+; Visitors in Thailand go to edge-th, everyone else to edge-asia (Hong Kong).
+; ifurlup() checks /healthz/deep on each edge (the edge AND its WireGuard path
+; to Main) in the background; an edge that fails drops out of the answer and
+; the other set takes over. Both down: both addresses are returned.
+; Bump the serial on every change.
+$ORIGIN cdn.waf-it-kku.online.
+$TTL 60
+@   3600 IN SOA ns1.waf-it-kku.online. hostmaster.waf-it-kku.online. (
+        2026102601 ; serial
+        3600       ; refresh
+        600        ; retry
+        604800     ; expire
+        60 )       ; negative TTL
+@   3600 IN NS  ns1.waf-it-kku.online.
+@   3600 IN NS  ns2.waf-it-kku.online.
+
+@   60 IN LUA A ";if country('TH') then return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'45.154.26.91'}, {'57.158.25.236'}}, {stringmatch='OK'}) else return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'57.158.25.236'}, {'45.154.26.91'}}, {stringmatch='OK'}) end"
+*   60 IN LUA A ";if country('TH') then return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'45.154.26.91'}, {'57.158.25.236'}}, {stringmatch='OK'}) else return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'57.158.25.236'}, {'45.154.26.91'}}, {stringmatch='OK'}) end"

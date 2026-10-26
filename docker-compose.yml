@@ -88,6 +88,23 @@ services:
     networks:
       - waf-net
 
+  # Shared certificate storage for the edges' Caddy (cdn/edge/Caddyfile).
+  # Every edge reads and writes the same certificates and ACME challenge
+  # tokens here, so whichever edge Let's Encrypt reaches can answer the
+  # HTTP-01 challenge and every edge serves every site. A Redis of its own (not
+  # waf-redis): an edge can reach only this one, over WireGuard (10.88.0.1).
+  caddy-storage:
+    image: redis:7.4-alpine
+    container_name: waf-caddy-storage
+    ports:
+      - "10.88.0.1:6380:6379"
+    environment:
+      CADDY_STORAGE_PASSWORD: "${CADDY_STORAGE_PASSWORD:?set CADDY_STORAGE_PASSWORD in .env}"
+    command: ["sh", "-c", "exec docker-entrypoint.sh redis-server --requirepass \"$$CADDY_STORAGE_PASSWORD\" --appendonly yes --protected-mode yes"]
+    volumes:
+      - caddy_storage_data:/data
+    restart: unless-stopped
+
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: waf-clickhouse
@@ -205,6 +222,7 @@ services:
 
 volumes:
   redis_data:
+  caddy_storage_data:
   caddy_data:
   caddy_config:
   clickhouse_data:

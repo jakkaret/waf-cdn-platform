@@ -1,0 +1,25 @@
+# PowerDNS on an edge: /opt/geodns-pdns on the edge, started with
+#   PDNS_LOCAL_ADDRESS=<this edge's own interface address> docker compose up -d
+# (edge-th 45.154.26.91, edge-asia 172.16.0.4 -- Azure maps its public IP to
+# it). Port 53 is bound to that address only: systemd-resolved keeps
+# 127.0.0.53 for the machine itself.
+name: geodns
+services:
+  pdns:
+    image: powerdns/pdns-auth-49:4.9.17
+    container_name: geodns-pdns
+    network_mode: host
+    entrypoint: ["pdns_server"]
+    command:
+      - --config-dir=/etc/powerdns
+      - --local-address=${PDNS_LOCAL_ADDRESS:?set PDNS_LOCAL_ADDRESS}
+      - --local-port=53
+      - --socket-dir=/tmp
+      - --guardian=no
+      - --daemon=no
+    user: "0:0"
+    cap_drop: ["ALL"]
+    cap_add: ["NET_BIND_SERVICE", "SETUID", "SETGID"]
+    volumes:
+      - ./:/etc/powerdns:ro
+    restart: unless-stopped

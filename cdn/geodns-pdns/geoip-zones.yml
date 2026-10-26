@@ -1,0 +1,3 @@
+# The geoip backend is loaded only for its database (country() and
+# pickclosest() in the LUA records); it serves no zone itself.
+domains: []
