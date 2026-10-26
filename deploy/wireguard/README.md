@@ -55,6 +55,10 @@ spoofed from the internet:
 - `DOCKER-USER` (in the CLOUDWAF block of `/etc/ufw/after.rules`): from
   10.88.0.2/10.88.0.3 on wg0 to 8070 and 8080, everything else from wg0 dropped
 - ufw: `allow in on wg0 from 10.88.0.2|10.88.0.3 to any port 8000 proto tcp`
+- `DOCKER-USER`: from 10.88.0.2/10.88.0.3 on wg0 to the edges' shared Caddy
+  certificate storage (waf-caddy-storage, 10.88.0.1:6380; the rule matches the
+  container port 6379 after DNAT plus the original destination via conntrack).
+  Added by `allow-caddy-storage.sh` (idempotent, also writes after.rules).
 
 Since both edges were switched, the public path is closed
 (`close-public-path.sh`): no rule lets the edges' public IPs reach 8080, 8070

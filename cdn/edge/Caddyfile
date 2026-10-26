@@ -1,0 +1,55 @@
+# Edge Caddy: TLS for every customer domain, then the edge's nginx (WAF + cache).
+# Deployed to /root/edge_node/edge/Caddyfile (edge-th) and
+# /opt/edge_node/edge/Caddyfile (edge-asia); image cdn/edge/caddy/Dockerfile.
+{
+	email admin@waf-it-kku.online
+	# Certificates and ACME challenge tokens live in one Redis on Main
+	# (waf-caddy-storage, over WireGuard), shared by every edge. Let's Encrypt
+	# checks a domain at whichever edge GeoDNS sends it to; with shared
+	# storage that edge can answer for a challenge another edge started, and
+	# a certificate issued once is served by all edges.
+	# skip_connection_check: start even while Main is unreachable (the
+	# certificates already loaded keep working; new ones wait for storage).
+	storage redis {
+		host 10.88.0.1
+		port 6380
+		password {$CADDY_STORAGE_PASSWORD}
+		encryption_key {$CADDY_STORAGE_KEY}
+		key_prefix "caddy"
+		skip_connection_check true
+	}
+	on_demand_tls {
+		ask http://10.88.0.1:8000/api/domains/check-ssl-allowed
+	}
+}
+
+:443 {
+	tls {
+		on_demand
+	}
+	# Virtual-patch security headers for every proxied (legacy) origin. The
+	# backend apps set none of these; adding them here protects them without
+	# touching the origin. SAMEORIGIN (not DENY) so a legacy app that frames
+	# its own pages keeps working; no CSP here (needs per-app tuning).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	reverse_proxy cdn-edge-node:80
+}
+
+:80 {
+	# /healthz: this edge is up. /healthz/deep: it can also reach Main through
+	# WireGuard -- what GeoDNS (cdn/geodns-pdns) checks before sending
+	# visitors here.
+	@health path /healthz /healthz/deep
+	handle @health {
+		reverse_proxy cdn-edge-node:80
+	}
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}
