@@ -1,5 +1,5 @@
 import { api } from './axios'
-import { DnsInstructions } from '../types'
+import { DnsInstructions, OriginAdjusted } from '../types'
 
 export type ConnectionMode = 'direct' | 'agent'
 
@@ -29,6 +29,7 @@ export interface ConnectResult {
   connection_mode: ConnectionMode
   verified: boolean
   dns_instructions: DnsInstructions | null
+  origin_adjusted?: OriginAdjusted | null
 }
 
 export type ConnectionStatus = 'connected' | 'waiting_agent' | 'waiting_dns' | 'configuring' | 'error' | 'unknown'

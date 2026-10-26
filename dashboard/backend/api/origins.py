@@ -12,7 +12,7 @@ from services.otp_config import (
     get_origin_config as get_otp_origin_config,
     save_origin_config as save_otp_origin_config,
 )
-from services import audit_log, invite_service, shield_sync
+from services import audit_log, invite_service, shield_sync, site_connect
 from services.txn import atomic
 from services.cve_feed import DEFAULT_WINDOW_DAYS, fetch_recent_cves, match_cves_to_origins, select_search_terms
 
@@ -44,6 +44,8 @@ class OriginUpdate(BaseModel):
     _label_ok = field_validator("label")(classmethod(lambda cls, v: _clean_label(v)))
     ip: Optional[str] = None
     port: Optional[int] = Field(None, ge=1, le=65535)
+    # Direct connections only: how the WAF talks to the server.
+    origin_scheme: Optional[Literal["http", "https"]] = None
     # CVE Auto-Patch (2026-09-22): self-declared, admin-set -- no real
     # fingerprinting, deliberately (unreliable, out of scope for this
     # feature). Free-form strings like "nginx", "wordpress", "php 8.1".
@@ -293,6 +295,14 @@ async def get_origin_cves(origin: dict = Depends(verify_origin_access)):
     }
 
 
+def _route_domain(origin: dict) -> str:
+    """The Host the WAF sends to a direct origin: its verified domain when it
+    has one, else the label the connect flow set to the domain."""
+    rows = origin_service.db.list_domains(origin_id=origin.get("id")) or []
+    rows.sort(key=lambda d: not d.get("dns_verified"))
+    return (rows[0].get("domain_name") if rows else "") or str(origin.get("label") or "")
+
+
 @router.put("/{origin_id}")
 async def update_origin(
     origin_id: str,
@@ -301,6 +311,8 @@ async def update_origin(
     current_user: dict = Depends(get_current_user),
 ):
     is_direct = origin.get("connection_mode") == "direct"
+    if payload.origin_scheme is not None and not is_direct:
+        raise HTTPException(status_code=400, detail="Protocol can only be changed on a direct connection")
     if is_direct and payload.ip:
         # Same rule /api/onboarding/connect applies: an edit must not turn a
         # direct route into a hostname or an internal address (SSRF).
@@ -310,6 +322,23 @@ async def update_origin(
                 status_code=400,
                 detail="A direct-mode origin needs a public IP address (not a hostname or one of the WAF's own hosts)",
             )
+    port, scheme, adjusted = payload.port, None, None
+    if is_direct and (payload.ip or payload.port is not None or payload.origin_scheme):
+        port = payload.port if payload.port is not None else int(origin.get("port") or 80)
+        # A standard port without an explicit protocol re-derives it; other
+        # ports keep the one the connect flow detected.
+        scheme = payload.origin_scheme or (
+            ("https" if port == 443 else "http") if port in (80, 443) else origin.get("origin_scheme") or "http")
+        try:
+            target = await asyncio.to_thread(
+                site_connect.direct_target, payload.ip or origin.get("ip") or "", port, scheme,
+                _route_domain(origin))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if target["adjusted"]:
+            adjusted = {"scheme": target["scheme"], "port": target["port"],
+                        "reason": "origin_forces_https", "status": target["status"]}
+        port, scheme = target["port"], target["scheme"]
     try:
         # The change and its audit event commit together (PostgreSQL).
         with atomic():
@@ -317,17 +346,16 @@ async def update_origin(
                 origin_id=origin_id,
                 label=payload.label,
                 ip=payload.ip,
-                port=payload.port,
+                port=port,
                 tech_stack_tags=payload.tech_stack_tags,
             )
-            route_changed = success and is_direct and (payload.ip or payload.port is not None)
-            if route_changed and payload.port in (80, 443):
-                # Re-derive the scheme for the standard ports; other ports keep
-                # the one the connect flow detected.
-                origin_service.db.update_origin(
-                    origin_id, {"origin_scheme": "https" if payload.port == 443 else "http"})
+            route_changed = success and scheme is not None
+            if route_changed:
+                origin_service.db.update_origin(origin_id, {"origin_scheme": scheme})
             if success:
                 changed = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+                if adjusted:
+                    changed.update(port=port, origin_scheme=scheme, adjusted="origin_forces_https")
                 audit_log.write_audit_event(
                     scope_id=origin_id,
                     actor_user_id=current_user.get("user_id"),
@@ -340,7 +368,7 @@ async def update_origin(
             from api.domains import schedule_site_reconcile
             schedule_site_reconcile()
         if success:
-            return {"status": "success", "message": "Origin updated successfully"}
+            return {"status": "success", "message": "Origin updated successfully", "origin_adjusted": adjusted}
         raise HTTPException(status_code=500, detail="Failed to update origin")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

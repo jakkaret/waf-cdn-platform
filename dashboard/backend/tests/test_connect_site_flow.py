@@ -286,11 +286,16 @@ def app() -> FastAPI:
     return test_app
 
 
+def _unreachable(*a):
+    raise OSError("no network in tests")
+
+
 @pytest.fixture(autouse=True)
 def _no_network(monkeypatch):
     monkeypatch.setattr(onboarding_module, "verify_domain_dns", lambda d, t: False)
     monkeypatch.setattr(site_connect, "current_dns", lambda d: {"cname": "", "a": ["203.0.113.10"]})
     monkeypatch.setattr(site_connect, "platform_ips", lambda: {"45.154.26.91"})
+    monkeypatch.setattr(site_connect, "_plain_head", _unreachable)
     monkeypatch.setenv("WAF_CNAME_TARGET", "cdn.waf-it-kku.online")
     onboarding_module._last_verify.clear()
     onboarding_module._last_route.clear()
@@ -934,6 +939,105 @@ def test_rereview6_editing_a_direct_origin_keeps_the_address_rules(client, tenan
     [origin] = _origins()
     assert (origin["port"], origin["origin_scheme"]) == (80, "http")
     assert scheduled == [1]
+
+
+FORCE_HTTPS = (b"HTTP/1.1 308 Permanent Redirect\r\nLocation: https://shop.example.com/\r\n"
+               b"Server: Vercel\r\n\r\n")
+
+
+def _https_answers(monkeypatch, ok=True):
+    monkeypatch.setattr(site_connect, "probe_origin", lambda ip, d, timeout=3.0: (
+        {"reachable": True, "scheme": "https", "port": 443, "status": 200} if ok
+        else {"reachable": False, "scheme": None, "port": None, "status": None}))
+
+
+@pytest.mark.parametrize("location, adjusted", [
+    ("https://shop.example.com/", True),
+    ("https://SHOP.example.com:443/login", True),
+    ("https://www.shop.example.com/", False),   # another host: not a loop through us
+    ("http://shop.example.com/", False),
+    ("/login", False),
+])
+def test_direct_target_moves_a_force_https_server_to_443(location, adjusted, monkeypatch):
+    raw = f"HTTP/1.1 301 Moved\r\nLocation: {location}\r\n\r\n".encode()
+    monkeypatch.setattr(site_connect, "_plain_head", lambda *a: raw)
+    _https_answers(monkeypatch)
+    t = site_connect.direct_target("203.0.113.10", 80, "http", "shop.example.com")
+    assert (t["scheme"], t["port"], t["adjusted"]) == (("https", 443, True) if adjusted else ("http", 80, False))
+
+
+def test_headers_are_read_across_partial_recvs():
+    class Chunks:
+        def __init__(self, parts):
+            self.parts = list(parts)
+
+        def recv(self, n):
+            return self.parts.pop(0) if self.parts else b""
+
+    split = [FORCE_HTTPS[:45], FORCE_HTTPS[45:90], FORCE_HTTPS[90:]]
+    raw = site_connect._read_headers(Chunks(split))
+    assert site_connect._location_from(raw) == "https://shop.example.com/"
+    assert site_connect._read_headers(Chunks([b"HTTP/1.0 200 OK\r\n"])) == b"HTTP/1.0 200 OK\r\n"
+
+
+def test_direct_target_refuses_a_redirect_loop_it_cannot_fix(monkeypatch):
+    monkeypatch.setattr(site_connect, "_plain_head", lambda *a: FORCE_HTTPS)
+    _https_answers(monkeypatch, ok=False)
+    with pytest.raises(ValueError, match="redirect forever"):
+        site_connect.direct_target("203.0.113.10", 80, "http", "shop.example.com")
+
+
+def test_direct_target_only_checks_plain_http_on_80(monkeypatch):
+    monkeypatch.setattr(site_connect, "_plain_head", lambda *a: pytest.fail("probed"))
+    for port, scheme in ((8080, "http"), (443, "https")):
+        assert site_connect.direct_target("203.0.113.10", port, scheme, "shop.example.com")["adjusted"] is False
+    assert site_connect.direct_target("172.18.0.250", 80, "http", "shop.example.com")["adjusted"] is False
+
+
+def test_connect_switches_a_force_https_origin_to_https_443(client, tenant, monkeypatch):
+    monkeypatch.setattr(site_connect, "_plain_head", lambda *a: FORCE_HTTPS)
+    _https_answers(monkeypatch)
+    r = client.post("/api/onboarding/connect", headers=tenant["headers"], json={
+        "domain": "shop.example.com", "mode": "direct", "port": 80, "scheme": "http",
+        "origin_address": "203.0.113.10"})
+    assert r.status_code == 200, r.text
+    assert r.json()["origin_adjusted"] == {"scheme": "https", "port": 443, "reason": "origin_forces_https",
+                                           "status": 308}
+    [origin] = _origins()
+    assert (origin["port"], origin["origin_scheme"]) == (443, "https")
+
+
+def test_connect_refuses_a_force_https_origin_without_443(client, tenant, monkeypatch):
+    monkeypatch.setattr(site_connect, "_plain_head", lambda *a: FORCE_HTTPS)
+    _https_answers(monkeypatch, ok=False)
+    r = client.post("/api/onboarding/connect", headers=tenant["headers"], json={
+        "domain": "shop.example.com", "mode": "direct", "port": 80, "scheme": "http",
+        "origin_address": "203.0.113.10"})
+    assert r.status_code == 400 and "redirect forever" in r.json()["detail"]
+    assert _origins() == []
+
+
+def test_editing_a_direct_origin_sets_protocol_and_catches_the_loop(client, tenant, monkeypatch):
+    origin_id = _connect(client, tenant, mode="direct", port=80, scheme="http", origin_address="203.0.113.10")
+    scheduled = []
+    monkeypatch.setattr(domains_module, "schedule_site_reconcile", lambda: scheduled.append(1))
+    r = client.put(f"/api/origins/{origin_id}", headers=tenant["headers"], json={"port": 8443, "origin_scheme": "https"})
+    assert r.status_code == 200 and r.json()["origin_adjusted"] is None
+    [origin] = _origins()
+    assert (origin["port"], origin["origin_scheme"]) == (8443, "https")
+    monkeypatch.setattr(site_connect, "_plain_head", lambda *a: FORCE_HTTPS)
+    _https_answers(monkeypatch)
+    r = client.put(f"/api/origins/{origin_id}", headers=tenant["headers"], json={"port": 80, "origin_scheme": "http"})
+    assert r.json()["origin_adjusted"]["port"] == 443
+    [origin] = _origins()
+    assert (origin["port"], origin["origin_scheme"]) == (443, "https")
+    assert scheduled == [1, 1]
+
+
+def test_protocol_is_refused_on_an_agent_origin(client, tenant):
+    origin_id = _connect(client, tenant)
+    r = client.put(f"/api/origins/{origin_id}", headers=tenant["headers"], json={"origin_scheme": "https"})
+    assert r.status_code == 400
 
 
 def test_rereview6_progress_flags_an_unroutable_direct_address(client, tenant, monkeypatch):

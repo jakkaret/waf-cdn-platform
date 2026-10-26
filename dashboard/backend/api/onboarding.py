@@ -192,6 +192,8 @@ async def connect_site(payload: ConnectRequest, current_user: dict = Depends(get
     _assert_platform_subdomain_allowed(domain, current_user)
     assert_domain_available(domain, owner_id=user_id)
 
+    port = payload.port
+    adjusted = None
     if payload.mode == "direct":
         address = (payload.origin_address or "").strip().lower()
         if not address:
@@ -210,6 +212,13 @@ async def connect_site(payload: ConnectRequest, current_user: dict = Depends(get
                        "use the agent for anything else",
             )
         scheme = payload.scheme or ("https" if payload.port == 443 else "http")
+        try:
+            target = await asyncio.to_thread(site_connect.direct_target, address, payload.port, scheme, domain)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        scheme, port = target["scheme"], target["port"]
+        if target["adjusted"]:
+            adjusted = {"scheme": scheme, "port": port, "reason": "origin_forces_https", "status": target["status"]}
     else:
         # The agent carries traffic; the address is the domain, which is also
         # what auto_sync_tunnel_origins matches the live tunnel on.
@@ -218,7 +227,7 @@ async def connect_site(payload: ConnectRequest, current_user: dict = Depends(get
 
     try:
         origin = origin_service.create_origin(
-            admin_user_id=user_id, label=domain, ip=address, port=payload.port,
+            admin_user_id=user_id, label=domain, ip=address, port=port,
             connection_mode=payload.mode, origin_scheme=scheme,
         )
     except ValueError as e:
@@ -256,6 +265,7 @@ async def connect_site(payload: ConnectRequest, current_user: dict = Depends(get
         "domain": domain_row,
         "dns_instructions": created.get("dns_instructions") or None,
         "verified": verified,
+        "origin_adjusted": adjusted,
     }
 
 

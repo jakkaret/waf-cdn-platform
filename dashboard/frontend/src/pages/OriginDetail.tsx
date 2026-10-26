@@ -19,6 +19,7 @@ import { LoadingSpinner } from '../components/ui/LoadingSpinner'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ConnectSiteFlow } from '../components/ConnectSiteFlow'
+import { OriginTarget } from '../components/OriginTarget'
 import { DomainStatusCard } from '../components/DomainStatusCard'
 import { Modal } from '../components/ui/Modal'
 import { OriginWafRules } from '../components/OriginWafRules'
@@ -567,7 +568,7 @@ export const OriginDetail: React.FC = () => {
               </Badge>
             </div>
             <p className="text-[12px] font-mono text-[var(--text-muted)] mt-1 m-0">
-              Proxy Upstream: {origin.ip}:{origin.port}
+              Proxy Upstream: {origin.connection_mode === 'direct' ? `${origin.origin_scheme || 'http'}://` : ''}{origin.ip}:{origin.port}
             </p>
           </div>
         </div>
@@ -632,31 +633,7 @@ export const OriginDetail: React.FC = () => {
       <div className="py-2">
         {activeTab === 'overview' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="dash-card p-5 space-y-4">
-              <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)]">
-                Upstream Target Info
-              </h3>
-              <div className="space-y-3 font-mono text-[12px]">
-                <div className="flex justify-between py-1.5 border-b border-[var(--bg-border-subtle)]">
-                  <span className="text-[var(--text-muted)]">Server Label</span>
-                  <span className="font-bold text-[var(--text-primary)]">{origin.label}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-[var(--bg-border-subtle)]">
-                  <span className="text-[var(--text-muted)]">Upstream IP</span>
-                  <span className="text-orange-500 font-bold">{origin.ip}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-[var(--bg-border-subtle)]">
-                  <span className="text-[var(--text-muted)]">Proxy Port</span>
-                  <span className="text-[var(--text-primary)]">{origin.port}</span>
-                </div>
-                <div className="flex justify-between py-1.5">
-                  <span className="text-[var(--text-muted)]">Registered Date</span>
-                  <span className="text-[var(--text-secondary)]">
-                    {formatBkkDateTime(origin.created_at)}
-                  </span>
-                </div>
-              </div>
-            </div>
+            <OriginTarget originId={id!} origin={origin} canEdit={isAdmin} />
 
             <div className="dash-card p-5 space-y-4">
               <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)]">

@@ -149,6 +149,20 @@ export interface Origin {
   // CVE Auto-Patch (2026-09-22): self-declared, admin-set -- no real
   // fingerprinting. Feeds POST /api/ml-rules/cve-scan's matching.
   tech_stack_tags?: string[]
+  // Set by the connect flow. A direct connection proxies to
+  // origin_scheme://ip:port; an agent one goes through the tunnel.
+  connection_mode?: 'direct' | 'agent' | null
+  origin_scheme?: 'http' | 'https' | null
+}
+
+// The backend changed what was asked for: a server that answers http:80 with
+// a redirect to https on the same domain is moved to https:443 (it would
+// otherwise redirect forever behind the WAF).
+export interface OriginAdjusted {
+  scheme: 'http' | 'https'
+  port: number
+  reason: 'origin_forces_https'
+  status: number | null
 }
 
 export interface OriginViewer {

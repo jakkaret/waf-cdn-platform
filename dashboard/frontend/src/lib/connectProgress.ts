@@ -2,6 +2,7 @@
 // an /api/onboarding/inspect result and for each /progress check. Kept out of
 // the components so every branch is unit-tested.
 import type { InspectResult, ProgressDomain, ConnectionMode, CurrentDns } from '../api/onboarding'
+import type { OriginAdjusted } from '../types'
 
 // People paste the site's address as they see it in the browser
 // ("https://shop.example.com/", with a path or port); keep only the hostname.
@@ -161,4 +162,12 @@ export function describeInspect(r: InspectResult): InspectView {
     default:
       return agent('info', 'ยังไม่พบเว็บที่โดเมนนี้ — ใช้ Agent บนเครื่องที่เว็บรันอยู่')
   }
+}
+
+// Toast text when the backend moved a direct route to https:443 because the
+// server forces HTTPS (http:80 would redirect forever behind the WAF).
+export function describeOriginAdjusted(a: OriginAdjusted | null | undefined): string | null {
+  if (!a || a.reason !== 'origin_forces_https') return null
+  const code = a.status ? ` (ตอบ ${a.status})` : ''
+  return `เซิร์ฟเวอร์บังคับใช้ HTTPS${code} — เปลี่ยนเป็น ${a.scheme}:${a.port} ให้แล้ว ไม่งั้นเว็บจะ redirect วนไม่จบ`
 }

@@ -18,7 +18,7 @@ import type { LucideIcon } from 'lucide-react'
 import { Button } from './ui/Button'
 import { onboardingApi, ConnectionMode, InspectResult } from '../api/onboarding'
 import { createDomain } from '../api/domains'
-import { describeInspect, normalizeDomainInput, InspectView } from '../lib/connectProgress'
+import { describeInspect, describeOriginAdjusted, normalizeDomainInput, InspectView } from '../lib/connectProgress'
 
 // One flow for every "connect a site" entry point (Origins → Add Origin, the
 // Onboarding page, and Add Domain on an existing origin). It replaces the old
@@ -103,6 +103,8 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
       }),
     onSuccess: (res) => {
       toast.success(res.verified ? 'เชื่อมต่อแล้ว — DNS ชี้มาที่เราอยู่แล้ว' : 'สร้างแล้ว — ตั้ง DNS 1 record ตามการ์ดของโดเมน')
+      const adjusted = describeOriginAdjusted(res.origin_adjusted)
+      if (adjusted) toast.success(adjusted, { duration: 8000 })
       onDone(res.origin_id)
     },
     onError: (err: any) => toast.error(err.response?.data?.detail || 'เชื่อมต่อไม่สำเร็จ'),

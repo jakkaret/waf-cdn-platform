@@ -165,6 +165,78 @@ def probe_origin(ip: str, domain: str, timeout: float = PROBE_TIMEOUT_SECONDS) -
     return {"reachable": False, "scheme": None, "port": None, "status": None, "errors": attempts}
 
 
+REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+
+
+def _location_from(raw: bytes) -> str:
+    for line in raw.split(b"\r\n\r\n", 1)[0].split(b"\r\n")[1:]:
+        name, _, value = line.partition(b":")
+        if name.strip().lower() == b"location":
+            return value.strip().decode("latin-1", errors="replace")
+    return ""
+
+
+def _forces_https(location: str, domain: str) -> bool:
+    """Whether a redirect Location sends the visitor to https on the same host."""
+    from urllib.parse import urlsplit
+    try:
+        target = urlsplit(location)
+        host, port = (target.hostname or "").lower(), target.port
+    except ValueError:
+        return False
+    return target.scheme == "https" and host == domain.lower() and port in (None, 443)
+
+
+def _plain_head(ip: str, domain: str, timeout: float) -> bytes:
+    """One HEAD over plain HTTP to ip:80; the answer's header block. A single
+    recv() can return part of it (seen with Vercel: the status line only)."""
+    with socket.create_connection((ip, 80), timeout=timeout) as sock:
+        sock.settimeout(timeout)
+        sock.sendall(_head_request(domain))
+        return _read_headers(sock)
+
+
+def _read_headers(sock, limit: int = 8192) -> bytes:
+    raw = b""
+    while b"\r\n\r\n" not in raw and len(raw) < limit:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        raw += chunk
+    return raw
+
+
+def direct_target(ip: str, port: int, scheme: str, domain: str,
+                  timeout: float = PROBE_TIMEOUT_SECONDS) -> dict:
+    """The scheme/port a direct route should use. A server that answers plain
+    HTTP on :80 with a redirect to https://<same domain> (Vercel, Netlify,
+    most hosts with "force HTTPS") would loop forever behind us: we fetch
+    http, it sends the visitor to https, the visitor comes back to us. Such a
+    target is moved to https:443 when that answers, and refused otherwise.
+    Only :80 is checked (same port rule as probe_origin); an unreachable
+    server is left as given -- the route is the customer's call.
+    Returns {"scheme", "port", "adjusted", "status"}."""
+    from services.nginx_site_service import direct_upstream_allowed
+
+    keep = {"scheme": scheme, "port": port, "adjusted": False, "status": None}
+    if scheme != "http" or port != 80 or not direct_upstream_allowed(ip):
+        return keep
+    try:
+        raw = _plain_head(ip, domain, timeout)
+    except OSError:
+        return keep
+    status = _status_from(raw)
+    if status not in REDIRECT_STATUSES or not _forces_https(_location_from(raw), domain):
+        return keep
+    https = probe_origin(ip, domain, timeout=timeout)
+    if https.get("reachable") and https.get("scheme") == "https":
+        return {"scheme": "https", "port": 443, "adjusted": True, "status": status}
+    raise ValueError(
+        f"The server answers http with {status} to https://{domain}/ but does not answer https on port 443, "
+        "so the site would redirect forever. Open port 443 on the server, or turn off its HTTPS redirect."
+    )
+
+
 def inspect_domain(domain: str) -> dict:
     """Recommend how to connect `domain`. Blocking (DNS + sockets)."""
     target = cname_target()

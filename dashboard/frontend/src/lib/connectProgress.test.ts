@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { dnsCheck, connectionCheck, httpsCheck, describeInspect, normalizeDomainInput, liveElsewhere } from './connectProgress'
+import { dnsCheck, connectionCheck, httpsCheck, describeInspect, normalizeDomainInput, liveElsewhere, describeOriginAdjusted } from './connectProgress'
 import type { ProgressDomain } from '../api/onboarding'
 
 const base: ProgressDomain = {
@@ -136,5 +136,17 @@ describe('normalizeDomainInput', () => {
   it('leaves text it cannot read as a URL for the validator to reject', () => {
     expect(normalizeDomainInput('not a domain')).toBe('not a domain')
     expect(normalizeDomainInput('')).toBe('')
+  })
+})
+
+describe('describeOriginAdjusted', () => {
+  it('says why a force-HTTPS server was moved to https:443', () => {
+    expect(describeOriginAdjusted({ scheme: 'https', port: 443, reason: 'origin_forces_https', status: 308 }))
+      .toBe('เซิร์ฟเวอร์บังคับใช้ HTTPS (ตอบ 308) — เปลี่ยนเป็น https:443 ให้แล้ว ไม่งั้นเว็บจะ redirect วนไม่จบ')
+  })
+
+  it('says nothing when nothing was changed', () => {
+    expect(describeOriginAdjusted(null)).toBeNull()
+    expect(describeOriginAdjusted(undefined)).toBeNull()
   })
 })
