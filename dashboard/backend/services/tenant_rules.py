@@ -55,6 +55,34 @@ SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 _SEVERITY_MAP = {"CRITICAL": "CRITICAL", "HIGH": "ERROR", "MEDIUM": "WARNING", "LOW": "NOTICE"}
 TEMPLATES = {"auto", "path_traversal", "sqli"}
 
+# Decoy paths: a curated list of URLs automated scanners and bots probe on
+# every site. An origin owner turns one on and it becomes a DECEIVE rule
+# (tagged decoy:<key> so it is listed apart from hand-written rules). Opt-in
+# per origin, because a site that really serves one of these would break.
+# Each entry: the operator the rule uses and a one-line reason for the UI.
+DECOY_PATHS = {
+    "wp-login": {"path": "/wp-login.php", "operator": "@beginsWith /wp-login.php",
+                 "label": "WordPress login (/wp-login.php)"},
+    "wp-admin": {"path": "/wp-admin", "operator": "@beginsWith /wp-admin",
+                 "label": "WordPress admin (/wp-admin)"},
+    "xmlrpc": {"path": "/xmlrpc.php", "operator": "@beginsWith /xmlrpc.php",
+               "label": "WordPress XML-RPC (/xmlrpc.php)"},
+    "phpmyadmin": {"path": "/phpmyadmin", "operator": "@contains phpmyadmin",
+                   "label": "phpMyAdmin console"},
+    "dotenv": {"path": "/.env", "operator": "@endsWith /.env",
+               "label": "Environment file (.env)"},
+    "git": {"path": "/.git/", "operator": "@contains /.git/",
+            "label": "Exposed .git directory"},
+    "aws-credentials": {"path": "/.aws/credentials", "operator": "@endsWith /.aws/credentials",
+                        "label": "AWS credentials file"},
+    "sql-backup": {"path": "/backup.sql", "operator": "@endsWith .sql",
+                   "label": "Database backup (*.sql)"},
+    "config-php": {"path": "/config.php.bak", "operator": "@endsWith config.php.bak",
+                   "label": "PHP config backup (config.php.bak)"},
+    "server-status": {"path": "/server-status", "operator": "@beginsWith /server-status",
+                      "label": "Apache server-status"},
+}
+
 _CONTROL = re.compile(r"[\r\n\x00]")
 _ORIGIN_ID_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _FILE = re.compile(r"^tenant-([A-Za-z0-9_-]{1,64})-(\d+)\.conf$")
@@ -105,11 +133,19 @@ def validate(rule: dict) -> dict:
     template = str(rule.get("deception_template") or "auto").strip().lower()
     if template not in TEMPLATES:
         raise TenantRuleError("unknown deception template")
-    return {
+    clean = {
         "variable": variable, "operator": f"{op} {value}", "message": message,
         "action": action, "severity": severity, "deception_template": template,
         "enabled": bool(rule.get("enabled", True)),
     }
+    # Internal marker set only by the decoy-path helper, never by the rule
+    # builder: names which catalog entry a DECEIVE rule came from.
+    decoy = rule.get("decoy")
+    if decoy is not None:
+        if decoy not in DECOY_PATHS:
+            raise TenantRuleError("unknown decoy")
+        clean["decoy"] = decoy
+    return clean
 
 
 def render(rule_id: int, origin_id: str, rule: dict) -> str:
@@ -240,3 +276,32 @@ class TenantRuleService:
             if not path.exists():
                 raise KeyError(rule_id)
             self._write_and_test(path, None)
+
+    # -- decoy paths -----------------------------------------------------
+    def _decoy_rules(self, origin_id: str) -> Dict[str, dict]:
+        """Which catalog key -> rule for the decoy rules this origin has on."""
+        return {r["decoy"]: r for r in self.list([origin_id]) if r.get("decoy") in DECOY_PATHS}
+
+    def list_decoys(self, origin_id: str) -> List[dict]:
+        """The whole catalog, each with whether this origin has it on."""
+        on = self._decoy_rules(origin_id)
+        return [
+            {"key": key, "path": meta["path"], "label": meta["label"],
+             "enabled": key in on, "rule_id": on[key]["id"] if key in on else None}
+            for key, meta in DECOY_PATHS.items()
+        ]
+
+    def set_decoy(self, origin_id: str, key: str, enabled: bool, user: dict) -> dict:
+        if key not in DECOY_PATHS:
+            raise TenantRuleError("unknown decoy")
+        meta = DECOY_PATHS[key]
+        existing = self._decoy_rules(origin_id).get(key)
+        if enabled and not existing:
+            self.create(origin_id, {
+                "variable": "REQUEST_FILENAME", "operator": meta["operator"],
+                "message": f"Decoy path: {meta['label']}", "action": "DECEIVE",
+                "severity": "HIGH", "decoy": key,
+            }, user)
+        elif not enabled and existing:
+            self.delete(origin_id, existing["id"])
+        return {"key": key, "enabled": enabled}

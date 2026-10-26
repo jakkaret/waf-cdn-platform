@@ -10,7 +10,7 @@ status: VERIFIED
 
 Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/api/system/*`, ไฟล์ static) อยู่นอกขอบเขตของไฟล์นี้
 
-พบทั้งหมด **171 endpoints** ใน **28 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 29 รายการ
+พบทั้งหมด **173 endpoints** ใน **28 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 29 รายการ
 
 ## `api/ai_summary.py`
 
@@ -338,6 +338,8 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 |---|---|---|---|---|
 | GET | `/api/origins/{origin_id}/waf-rules/` | `list_rules` | origin read |  |
 | POST | `/api/origins/{origin_id}/waf-rules/` | `create_rule` | origin edit, login |  |
+| GET | `/api/origins/{origin_id}/waf-rules/decoys` | `list_decoys` | origin read | The decoy-path catalog with each entry's on/off state for this origin. |
+| PUT | `/api/origins/{origin_id}/waf-rules/decoys/{key}` | `set_decoy` | origin edit, login |  |
 | GET | `/api/origins/{origin_id}/waf-rules/options` | `get_options` | origin read | Fixed choices the rule builder UI renders -- nothing here is free text |
 | DELETE | `/api/origins/{origin_id}/waf-rules/{rule_id}` | `delete_rule` | origin edit |  |
 | PUT | `/api/origins/{origin_id}/waf-rules/{rule_id}` | `update_rule` | origin edit, login |  |

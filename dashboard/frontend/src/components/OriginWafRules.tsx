@@ -11,6 +11,8 @@ import {
   createTenantRule,
   updateTenantRule,
   deleteTenantRule,
+  getDecoys,
+  setDecoy,
   TenantRule,
   TenantRuleInput,
 } from '../api/wafRules'
@@ -59,6 +61,21 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
   const { data: rules, isLoading: rulesLoading } = useQuery({
     queryKey: rulesKey,
     queryFn: async () => (await getTenantRules(originId)).data.rules,
+  })
+  const decoysKey = ['tenant-decoys', originId]
+  const { data: decoys } = useQuery({
+    queryKey: decoysKey,
+    queryFn: async () => (await getDecoys(originId)).data.decoys,
+  })
+
+  const decoyMutation = useMutation({
+    mutationFn: ({ key, enabled }: { key: string; enabled: boolean }) => setDecoy(originId, key, enabled),
+    onSuccess: (_res, vars) => {
+      queryClient.invalidateQueries({ queryKey: decoysKey })
+      queryClient.invalidateQueries({ queryKey: rulesKey })
+      toast.success(vars.enabled ? 'Decoy turned on' : 'Decoy turned off')
+    },
+    onError: (e) => toast.error(errText(e, 'Failed to change decoy')),
   })
 
   const modeMutation = useMutation({
@@ -140,6 +157,9 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
 
   const inputClass = 'w-full dash-input font-mono'
   const labelClass = 'text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block uppercase'
+
+  // Decoy-path rules show as checkboxes in their own section, not in the list.
+  const customRules = (rules ?? []).filter((r) => !r.decoy)
 
   return (
     <div className="space-y-6">
@@ -247,6 +267,37 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
             )}
           </div>
         )}
+      </section>
+
+      {/* ── Decoy paths ─────────────────────────────────────────────── */}
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">Decoy Paths</h2>
+          <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
+            One-click honeypots for URLs bots and scanners probe on every site. When on, the path returns believable
+            fake content instead of reaching your server, and the hit is logged. Turn one on only if your site does
+            not really serve that path.
+          </p>
+        </div>
+        <div className="dash-card p-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
+          {(decoys ?? []).map((d) => (
+            <label
+              key={d.key}
+              className={`flex items-center gap-2.5 py-1.5 text-[12px] font-mono ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
+            >
+              <input
+                type="checkbox"
+                checked={d.enabled}
+                disabled={!canEdit || decoyMutation.isPending}
+                onChange={(e) => decoyMutation.mutate({ key: d.key, enabled: e.target.checked })}
+              />
+              <span className={d.enabled ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}>
+                {d.label}
+              </span>
+              {d.enabled && <Badge color="warning">DECEIVE</Badge>}
+            </label>
+          ))}
+        </div>
       </section>
 
       {/* ── This origin's own rules ─────────────────────────────────── */}
@@ -379,14 +430,14 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                       Loading rules...
                     </td>
                   </tr>
-                ) : !rules || rules.length === 0 ? (
+                ) : customRules.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-[var(--text-muted)] font-mono text-[12px]">
                       No custom rules for this origin.
                     </td>
                   </tr>
                 ) : (
-                  rules.map((rule) => (
+                  customRules.map((rule) => (
                     <tr key={rule.id}>
                       <td className="font-mono font-bold text-orange-500">{rule.id}</td>
                       <td className="font-mono text-[11.5px] max-w-[260px] truncate">

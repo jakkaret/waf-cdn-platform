@@ -14,9 +14,10 @@ export interface TenantRule {
   enabled: boolean
   created_by?: string
   created_at?: string
+  decoy?: string // set when this rule came from a decoy-path toggle, not the rule builder
 }
 
-export type TenantRuleInput = Omit<TenantRule, 'id' | 'origin_id' | 'created_by' | 'created_at'>
+export type TenantRuleInput = Omit<TenantRule, 'id' | 'origin_id' | 'created_by' | 'created_at' | 'decoy'>
 
 export interface TenantRuleOptions {
   variables: Record<string, string> // variable -> human label
@@ -41,6 +42,22 @@ export const updateTenantRule = (originId: string, ruleId: number, rule: TenantR
 
 export const deleteTenantRule = (originId: string, ruleId: number) =>
   api.delete<{ message: string }>(`/origins/${originId}/waf-rules/${ruleId}`)
+
+// --- Decoy paths (one-click DECEIVE for common bot-probed URLs) ------------
+
+export interface Decoy {
+  key: string
+  path: string
+  label: string
+  enabled: boolean
+  rule_id: number | null
+}
+
+export const getDecoys = (originId: string) =>
+  api.get<{ decoys: Decoy[] }>(`/origins/${originId}/waf-rules/decoys`)
+
+export const setDecoy = (originId: string, key: string, enabled: boolean) =>
+  api.put<{ key: string; enabled: boolean }>(`/origins/${originId}/waf-rules/decoys/${key}`, { enabled })
 
 // --- Central managed ruleset (api/managed_rules.py) -----------------------
 

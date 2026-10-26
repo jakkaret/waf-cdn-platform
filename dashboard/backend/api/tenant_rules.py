@@ -44,6 +44,27 @@ async def list_rules(origin: dict = Depends(verify_origin_access)):
     return {"rules": _service.list([origin["id"]])}
 
 
+@router.get("/decoys")
+async def list_decoys(origin: dict = Depends(verify_origin_access)):
+    """The decoy-path catalog with each entry's on/off state for this origin."""
+    return {"decoys": _service.list_decoys(origin["id"])}
+
+
+class DecoyIn(BaseModel):
+    enabled: bool
+
+
+@router.put("/decoys/{key}")
+async def set_decoy(key: str, body: DecoyIn, origin: dict = Depends(verify_origin_edit_access),
+                    current_user: dict = Depends(get_current_user)):
+    try:
+        return _service.set_decoy(origin["id"], key, body.enabled, current_user)
+    except TenantRuleError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to apply decoy: {e}")
+
+
 @router.post("/")
 async def create_rule(rule: TenantRuleIn, origin: dict = Depends(verify_origin_edit_access), current_user: dict = Depends(get_current_user)):
     try:

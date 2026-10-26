@@ -250,3 +250,57 @@ def test_invalid_rule_body_is_rejected_with_400(client, accounts):
     origin_id, admin_h, _viewer_h, _stranger_h = accounts
     resp = client.post(f"/api/origins/{origin_id}/waf-rules/", json={"variable": "TX", "operator": "@rx x", "message": "m"}, headers=admin_h)
     assert resp.status_code == 400
+
+
+# -- decoy paths --------------------------------------------------------
+
+def test_decoy_toggle_creates_and_removes_a_deceive_rule(service):
+    assert all(not d["enabled"] for d in service.list_decoys("origin-a"))
+    service.set_decoy("origin-a", "wp-login", True, {"user_id": "u1", "username": "alice"})
+
+    on = {d["key"]: d for d in service.list_decoys("origin-a")}
+    assert on["wp-login"]["enabled"] and on["wp-login"]["rule_id"]
+    rule = service.get("origin-a", on["wp-login"]["rule_id"])
+    assert rule["action"] == "DECEIVE" and rule["decoy"] == "wp-login"
+    assert "/wp-login.php" in rule["operator"]
+
+    service.set_decoy("origin-a", "wp-login", False, {"user_id": "u1", "username": "alice"})
+    assert all(not d["enabled"] for d in service.list_decoys("origin-a"))
+
+
+def test_decoy_toggle_is_idempotent_and_scoped(service):
+    u = {"user_id": "u1", "username": "alice"}
+    service.set_decoy("origin-a", "dotenv", True, u)
+    service.set_decoy("origin-a", "dotenv", True, u)  # no second rule
+    assert len([r for r in service.list(["origin-a"]) if r.get("decoy")]) == 1
+    assert all(not d["enabled"] for d in service.list_decoys("origin-b"))
+
+
+def test_unknown_decoy_is_rejected(service):
+    with pytest.raises(TenantRuleError, match="unknown decoy"):
+        service.set_decoy("origin-a", "not-a-decoy", True, {"user_id": "u1", "username": "alice"})
+
+
+def test_decoy_rules_are_deceive_in_phase_1(service):
+    service.set_decoy("origin-a", "git", True, {"user_id": "u1", "username": "alice"})
+    rid = next(d["rule_id"] for d in service.list_decoys("origin-a") if d["key"] == "git")
+    conf = (service.dir / f"tenant-origin-a-{rid}.conf").read_text()
+    assert "phase:1" in conf and "status:418" in conf and "tag:'action:deceive'" in conf
+
+
+def test_decoy_endpoints_owner_only(client, accounts):
+    origin_id, admin_h, viewer_h, stranger_h = accounts
+    assert client.get(f"/api/origins/{origin_id}/waf-rules/decoys", headers=viewer_h).status_code == 200
+    assert client.get(f"/api/origins/{origin_id}/waf-rules/decoys", headers=stranger_h).status_code == 403
+
+    assert client.put(f"/api/origins/{origin_id}/waf-rules/decoys/wp-login",
+                      json={"enabled": True}, headers=viewer_h).status_code == 403
+    on = client.put(f"/api/origins/{origin_id}/waf-rules/decoys/wp-login",
+                    json={"enabled": True}, headers=admin_h)
+    assert on.status_code == 200, on.text
+
+    catalog = client.get(f"/api/origins/{origin_id}/waf-rules/decoys", headers=admin_h).json()["decoys"]
+    assert next(d for d in catalog if d["key"] == "wp-login")["enabled"] is True
+    # the decoy rule is not listed among hand-written custom rules
+    rules = client.get(f"/api/origins/{origin_id}/waf-rules/", headers=admin_h).json()["rules"]
+    assert [r for r in rules if r.get("decoy")] and all(r.get("decoy") for r in rules)
