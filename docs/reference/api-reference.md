@@ -10,7 +10,7 @@ status: VERIFIED
 
 Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/api/system/*`, ไฟล์ static) อยู่นอกขอบเขตของไฟล์นี้
 
-พบทั้งหมด **173 endpoints** ใน **28 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 29 รายการ
+พบทั้งหมด **174 endpoints** ใน **28 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 29 รายการ
 
 ## `api/ai_summary.py`
 
@@ -188,13 +188,14 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 | Method | Path | Handler | Auth | คำอธิบาย (docstring) |
 |---|---|---|---|---|
 | GET | `/api/ml-rules/` | `list_ml_rules` | viewer+ | Platform admin: every rule. Anyone else: the rules of origins they are Owner, Editor or Viewer of. |
-| POST | `/api/ml-rules/cve-scan` | `run_cve_scan` | admin | CVE Auto-Patch (2026-09-22). Admin-triggered, deliberately NOT a |
+| POST | `/api/ml-rules/cve-scan` | `run_cve_scan` | viewer+ | CVE Auto-Patch (2026-09-22). Admin-triggered, deliberately NOT a |
 | POST | `/api/ml-rules/reject-legacy` | `reject_legacy_ml_rules` | admin | Reject every pending "rf-regex" rule in one call (the queue's ~268 RF leftovers). |
 | DELETE | `/api/ml-rules/{rule_id}` | `delete_ml_rule` | admin | Delete a rule (and its ml-<id>.conf when deployed). Platform admin only. |
 | GET | `/api/ml-rules/{rule_id}` | `get_ml_rule` | viewer+ | Platform admin, or a member of the rule's origin; anyone else gets 404 (see list_ml_rules). |
 | POST | `/api/ml-rules/{rule_id}/approve` | `approve_ml_rule` | viewer+ | Approve and deploy: platform admin, or Owner/Editor of the rule's origin (deployed for that origin only). |
 | POST | `/api/ml-rules/{rule_id}/backtest` | `backtest_ml_rule` | viewer+ | How many requests the WAF let through in the last `days` this rule would |
 | POST | `/api/ml-rules/{rule_id}/reject` | `reject_ml_rule` | viewer+ | Reject: platform admin, or Owner/Editor of the rule's origin. |
+| POST | `/api/ml-rules/{rule_id}/revoke` | `revoke_ml_rule` | viewer+ | Take an approved rule out of the WAF (its ml-<id>.conf is removed, the row stays). |
 
 ## `api/onboarding.py`
 

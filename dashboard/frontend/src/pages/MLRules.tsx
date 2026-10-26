@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import {
+  Ban,
   Bug,
   Check,
   ChevronLeft,
@@ -18,6 +19,7 @@ import {
   X,
 } from 'lucide-react'
 import { mlRulesApi } from '../api/mlRules'
+import { getOrigins } from '../api/origins'
 import { useAuthStore } from '../store/authStore'
 import { isOperator } from '../lib/permissions'
 import { TopBar } from '../components/layout/TopBar'
@@ -33,11 +35,14 @@ import {
   canBacktest,
   canBacktestRule,
   canReviewRule,
+  canRevokeRule,
+  cveScanOriginChoices,
   deployScopeOf,
   filterAndSortRules,
   generatorOf,
   legacyPendingCount,
   renderSecRule,
+  revokeScope,
   ruleOriginLabel,
   ruleOriginOptions,
   timeAgo,
@@ -58,8 +63,11 @@ const STATUS_TABS: { id: StatusTab; label: string }[] = [
   { id: 'pending', label: 'รออนุมัติ' },
   { id: 'approved', label: 'ใช้งานอยู่' },
   { id: 'rejected', label: 'ปฏิเสธแล้ว' },
+  { id: 'revoked', label: 'ยกเลิกแล้ว' },
   { id: 'all', label: 'ทั้งหมด' },
 ]
+// The CVE-scan dialog's value for "every origin" (platform admin only).
+const ALL_ORIGINS = '__all__'
 
 const BACKTEST_DOT: Record<BacktestTone, string> = {
   none: 'bg-[var(--text-dim)]',
@@ -104,6 +112,10 @@ export const MLRules: React.FC = () => {
   const [approval, setApproval] = useState<PendingApproval | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmLegacy, setConfirmLegacy] = useState(false)
+  const [revoking, setRevoking] = useState<MLPendingRule | null>(null)
+  const [revokeReason, setRevokeReason] = useState('')
+  const [scanOpen, setScanOpen] = useState(false)
+  const [scanTarget, setScanTarget] = useState('')
 
   // A platform admin gets the whole queue; anyone else only the rules of
   // origins they belong to, each flagged with what they may do to it.
@@ -118,12 +130,21 @@ export const MLRules: React.FC = () => {
   const mayBacktest = (rule: MLPendingRule) => canBacktestRule(rule, isAdmin)
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['ml-rules'] })
 
+  // Same key and response shape as the Origins page, so the cache is shared.
+  const { data: originsRes } = useQuery({ queryKey: ['origins'], queryFn: () => getOrigins() })
+  const scanChoices = useMemo(
+    () => cveScanOriginChoices(originsRes?.data?.origins ?? [], user?.user_id),
+    [originsRes, user?.user_id],
+  )
+  const canScan = isAdmin || scanChoices.length > 0
+  const scanPick = scanChoices.find((c) => c.id === scanTarget)
+
   const originOptions = useMemo(() => ruleOriginOptions(rules), [rules])
   const reviewable = useMemo(() => rules.filter((r) => canReviewRule(r, isAdmin)), [rules, isAdmin])
 
   const counts = useMemo(() => {
     const by = (s: string) => rules.filter((r) => r.status === s).length
-    return { pending: by('pending'), approved: by('approved'), rejected: by('rejected'), all: rules.length }
+    return { pending: by('pending'), approved: by('approved'), rejected: by('rejected'), revoked: by('revoked'), all: rules.length }
   }, [rules])
 
   const legacyPending = useMemo(() => legacyPendingCount(rules), [rules])
@@ -174,9 +195,11 @@ export const MLRules: React.FC = () => {
   const filtersActive =
     filters.generator !== 'all' || filters.attackType !== 'all' || filters.search.trim() !== '' || filters.origin !== 'all'
 
+  // "" in the request = every origin (admin); otherwise one origin's tags only.
   const cveScan = useMutation({
-    mutationFn: () => mlRulesApi.runCveScan(),
+    mutationFn: (originId: string) => mlRulesApi.runCveScan(originId || undefined),
     onSuccess: (res) => {
+      setScanOpen(false)
       const searched: string[] = res.keywords_searched || []
       if (searched.length === 0) {
         toast.error('ยังไม่มี origin ที่ตั้ง tech stack tag ไว้ เพิ่ม tag ที่หน้า origin ก่อนสแกน')
@@ -189,8 +212,33 @@ export const MLRules: React.FC = () => {
       )
       refresh()
     },
-    onError: (err: any) => toast.error(err.response?.data?.detail || 'สแกน CVE ไม่สำเร็จ'),
+    onError: (err: any) => toast.error(
+      err.response?.status === 429
+        ? 'สแกน origin นี้ครบจำนวนต่อชั่วโมงแล้ว ลองใหม่ภายหลัง'
+        : err.response?.data?.detail || 'สแกน CVE ไม่สำเร็จ',
+    ),
   })
+
+  const openScan = () => {
+    setScanTarget(isAdmin ? ALL_ORIGINS : (scanChoices.find((c) => c.hasTags) ?? scanChoices[0])?.id ?? '')
+    setScanOpen(true)
+  }
+
+  const revokeRule = async () => {
+    if (!revoking) return
+    setBusy(true)
+    try {
+      await mlRulesApi.revokeRule(revoking.rule_id, revokeReason.trim())
+      toast.success('ยกเลิกการใช้งานแล้ว กฎหยุดทำงานกับ WAF ทันที')
+      setRevoking(null)
+      setRevokeReason('')
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'ยกเลิกการใช้งานไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+      refresh()
+    }
+  }
 
   const runBacktest = async (ids: string[]) => {
     setTesting((t) => [...t, ...ids])
@@ -330,6 +378,11 @@ export const MLRules: React.FC = () => {
               {rule.status === 'rejected' && (
                 <span className={`${pillBase} border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300`}>ปฏิเสธแล้ว</span>
               )}
+              {rule.status === 'revoked' && (
+                <span className={`${pillBase} border-[var(--bg-border)] bg-[var(--bg-primary)] text-[var(--text-secondary)]`}>
+                  ยกเลิกแล้ว #{rule.deployed_rule_id}
+                </span>
+              )}
             </span>
             <span className="mt-1 ml-[23px] block truncate font-mono text-[12.5px] text-[var(--text-secondary)]" title={rule.pattern}>
               {rule.pattern}
@@ -384,6 +437,16 @@ export const MLRules: React.FC = () => {
                   อนุมัติ
                 </Button>
               </>
+            )}
+            {canRevokeRule(rule) && (
+              <Button variant="ghost" size="sm" onClick={() => { setRevokeReason(''); setRevoking(rule) }} icon={<Ban size={13} />}>
+                ยกเลิกการใช้งาน
+              </Button>
+            )}
+            {rule.status === 'approved' && !canRevokeRule(rule) && !isAdmin && globalScope && (
+              <span className="text-[12px] text-[var(--text-muted)]" title="กฎนี้มีผลกับทุก origin จึงยกเลิกได้เฉพาะผู้ดูแลแพลตฟอร์ม">
+                ยกเลิกได้เฉพาะผู้ดูแลแพลตฟอร์ม
+              </span>
             )}
           </div>
         </div>
@@ -458,8 +521,14 @@ export const MLRules: React.FC = () => {
 
               {rule.status !== 'pending' && rule.reviewed_by && (
                 <p className="m-0 text-[12px] text-[var(--text-muted)]">
-                  {rule.status === 'approved' ? 'อนุมัติ' : 'ปฏิเสธ'}โดย {rule.reviewed_by} {timeAgo(rule.reviewed_at)}
+                  {rule.status === 'rejected' ? 'ปฏิเสธ' : 'อนุมัติ'}โดย {rule.reviewed_by} {timeAgo(rule.reviewed_at)}
                   {rule.reject_reason && <span className="block text-[var(--text-secondary)]">เหตุผล: {rule.reject_reason}</span>}
+                </p>
+              )}
+              {rule.status === 'revoked' && rule.revoked_by && (
+                <p className="m-0 text-[12px] text-[var(--text-muted)]">
+                  ยกเลิกการใช้งานโดย {rule.revoked_by} {timeAgo(rule.revoked_at)}
+                  {rule.revoke_reason && <span className="block text-[var(--text-secondary)]">เหตุผล: {rule.revoke_reason}</span>}
                 </p>
               )}
             </section>
@@ -480,8 +549,8 @@ export const MLRules: React.FC = () => {
         }
         action={
           <div className="flex items-center gap-2">
-            {isAdmin && (
-              <Button variant="secondary" onClick={() => cveScan.mutate()} isLoading={cveScan.isPending} icon={<Bug size={14} />}>
+            {canScan && (
+              <Button variant="secondary" onClick={openScan} isLoading={cveScan.isPending} icon={<Bug size={14} />}>
                 สแกน CVE
               </Button>
             )}
@@ -741,6 +810,82 @@ export const MLRules: React.FC = () => {
           <div className="mt-5 flex justify-end gap-2.5 border-t border-[var(--bg-border-subtle)] pt-4">
             <Button variant="ghost" size="lg" type="button" onClick={() => setRejecting(null)} disabled={busy}>ยกเลิก</Button>
             <Button variant="danger" size="lg" type="submit" isLoading={busy} icon={<X size={14} />}>ปฏิเสธ</Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={!!revoking}
+        onClose={() => !busy && setRevoking(null)}
+        title="ยกเลิกการใช้งานกฎนี้"
+        description="ระบบจะเอากฎออกจาก WAF แล้ว reload ทันที กฎยังอยู่ในแท็บยกเลิกแล้วพร้อมบันทึกว่าใครยกเลิกและเพราะอะไร ถ้าต้องการใช้อีกต้องเสนอกฎใหม่"
+      >
+        <form onSubmit={(e) => { e.preventDefault(); revokeRule() }}>
+          {revoking && (
+            <p className="m-0 mb-3 text-[13.5px] font-medium leading-relaxed text-[var(--text-primary)]">
+              {revokeScope(revoking)}: {revoking.attack_type} (#{revoking.deployed_rule_id})
+            </p>
+          )}
+          <label htmlFor="revoke-reason" className="block text-[12.5px] font-medium text-[var(--text-secondary)]">เหตุผล (ไม่บังคับ)</label>
+          <input
+            id="revoke-reason"
+            value={revokeReason}
+            onChange={(e) => setRevokeReason(e.target.value)}
+            placeholder="เช่น block ผู้ใช้จริงที่หน้า /search"
+            maxLength={500}
+            className="dash-input mt-1.5 h-10 w-full text-[13.5px]"
+            autoFocus
+          />
+          <div className="mt-5 flex justify-end gap-2.5 border-t border-[var(--bg-border-subtle)] pt-4">
+            <Button variant="ghost" size="lg" type="button" onClick={() => setRevoking(null)} disabled={busy}>ไม่ยกเลิก</Button>
+            <Button variant="danger" size="lg" type="submit" isLoading={busy} icon={<Ban size={14} />}>ยกเลิกการใช้งาน</Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={scanOpen}
+        onClose={() => !cveScan.isPending && setScanOpen(false)}
+        title="สแกน CVE"
+        description="ค้นหา CVE ล่าสุดจาก NVD ที่ตรงกับ tech stack ของ origin แล้วเสนอเป็นกฎรออนุมัติ ไม่มีกฎไหนมีผลจนกว่าจะมีคนอนุมัติ"
+      >
+        <form onSubmit={(e) => { e.preventDefault(); cveScan.mutate(scanTarget === ALL_ORIGINS ? '' : scanTarget) }}>
+          <label htmlFor="scan-origin" className="block text-[12.5px] font-medium text-[var(--text-secondary)]">สแกนให้</label>
+          <select
+            id="scan-origin"
+            value={scanTarget}
+            onChange={(e) => setScanTarget(e.target.value)}
+            className="dash-input mt-1.5 h-10 w-full text-[13.5px] cursor-pointer"
+          >
+            {isAdmin && <option value={ALL_ORIGINS}>ทุก origin ที่มี tech stack</option>}
+            {scanChoices.map((c) => (
+              <option key={c.id} value={c.id}>{c.label}{c.hasTags ? '' : ' (ยังไม่ได้ตั้ง tech stack)'}</option>
+            ))}
+          </select>
+          {scanPick && !scanPick.hasTags ? (
+            <p className="mt-2 mb-0 text-[12.5px] leading-relaxed text-amber-700 dark:text-amber-400">
+              origin นี้ยังไม่มี tech stack tag เพิ่มได้ที่{' '}
+              <Link to={`/origins/${scanPick.id}`} className="font-medium underline">หน้า origin</Link> ก่อนสแกน
+            </p>
+          ) : (
+            <p className="mt-2 mb-0 text-[12px] leading-relaxed text-[var(--text-muted)]">
+              {scanTarget === ALL_ORIGINS
+                ? 'สแกนทุก origin ครั้งละไม่เกิน 5 กฎ ที่เหลือจะมาในการสแกนครั้งถัดไป'
+                : 'กฎที่ได้เป็นของ origin นี้ และถ้าอนุมัติจะมีผลเฉพาะ origin นี้ แต่ละ origin สแกนได้ 3 ครั้งต่อชั่วโมง'}
+            </p>
+          )}
+          <div className="mt-5 flex justify-end gap-2.5 border-t border-[var(--bg-border-subtle)] pt-4">
+            <Button variant="ghost" size="lg" type="button" onClick={() => setScanOpen(false)} disabled={cveScan.isPending}>ยกเลิก</Button>
+            <Button
+              variant="brand"
+              size="lg"
+              type="submit"
+              isLoading={cveScan.isPending}
+              disabled={!scanTarget || (!!scanPick && !scanPick.hasTags)}
+              icon={<Bug size={14} />}
+            >
+              สแกน
+            </Button>
           </div>
         </form>
       </Modal>

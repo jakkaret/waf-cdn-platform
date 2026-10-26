@@ -209,6 +209,33 @@ class MLRuleService:
             raise
         return with_defaults(rule)
 
+    def revoke_rule(self, rule_id: str, revoked_by: str, reason: str = "", on_revoked=None,
+                    on_remove_failed=None, expected_origin_id: Optional[str] = None) -> Dict[str, Any]:
+        """Take an approved rule out of the WAF, approve_rule in reverse:
+        1. one short transaction: lock, mark revoked and call on_revoked(rule)
+           -- the audit event -- so both commit together;
+        2. after commit: remove ml-<id>.conf (nginx -t + reload; delete_rule
+           puts the file back if nginx refuses the config). A file already
+           gone is fine: the rule is not running either way;
+        3. if step 2 fails: a compensating transaction puts the rule back to
+           approved (it is still running) and calls on_remove_failed(rule,
+           error), then re-raises.
+        The row and its deployed_rule_id stay, so the id is never reused."""
+        from db import pool
+        with pool.transaction():
+            rule = self._pg.reserve_revoke(rule_id, revoked_by, reason, expected_origin_id=expected_origin_id)
+            if on_revoked:
+                on_revoked(rule)
+        try:
+            self.rule_manager.delete_rule(f"ml-{int(rule['deployed_rule_id'])}")
+        except Exception as exc:
+            with pool.transaction():
+                self._pg.undo_revoke(rule_id)
+                if on_remove_failed:
+                    on_remove_failed(rule, exc)
+            raise
+        return with_defaults(rule)
+
     def reject_rule(self, rule_id: str, rejected_by: str, reason: str = "") -> Dict[str, Any]:
         return with_defaults(self._pg.reject(rule_id, rejected_by, reason))
 

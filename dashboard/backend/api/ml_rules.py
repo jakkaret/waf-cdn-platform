@@ -10,7 +10,14 @@ Who sees and reviews what (2026-10-26):
   - A rule without an origin_id (the global queue) is the platform admin's
     only, and deploys for every origin, as before.
   - The platform admin (role "admin") sees and reviews every rule. Deleting
-    rules, the legacy bulk reject and the CVE scan stay admin-only.
+    rules, the legacy bulk reject and the CVE scan of every origin stay
+    admin-only.
+  - 2026-10-27: an approved rule can be revoked (POST /{rule_id}/revoke):
+    its file leaves the WAF, the row stays as a record. The admin may revoke
+    any; an origin's Owner/Editors only one that runs for their origin alone
+    (deploy_scope "origin") -- a rule written for every origin protects other
+    tenants too. An origin's Owner/Editors may also run the CVE scan for their
+    own origin (POST /cve-scan?origin_id=...), rate-limited per origin.
 Rules are only ever deployed through POST /{rule_id}/approve.
 """
 import re
@@ -44,8 +51,17 @@ NOT_FOUND = "Rule not found"
 # the rest of a scan's matches come back on the next scan.
 CVE_SCAN_MAX_PROPOSALS = 5
 CVE_SCAN_DEFAULT_WINDOW_DAYS = DEFAULT_WINDOW_DAYS
+# A scan of one origin by its Owner/Editor (2026-10-27): every scan calls NVD
+# and Gemini, so each origin gets a few per hour, counted per origin (not per
+# user, so an origin's members share it). The platform-wide scan is not capped.
+CVE_SCAN_ORIGIN_LIMIT_PER_HOUR = 3
+_cve_scan_limiter = None
 
 class RuleRejectRequest(BaseModel):
+    reason: Optional[str] = ""
+
+
+class RuleRevokeRequest(BaseModel):
     reason: Optional[str] = ""
 
 
@@ -91,6 +107,14 @@ def _deploy_scope(rule: dict) -> str:
     return "origin" if rule.get("origin_id") else "global"
 
 
+def _may_revoke(rule: dict, is_admin: bool, role: Optional[str]) -> bool:
+    """An approved rule: the admin may revoke any; an origin's Owner/Editors
+    only one written for their origin alone."""
+    if rule.get("status") != "approved":
+        return False
+    return is_admin or (role in REVIEW_ROLES and _deploy_scope(rule) == "origin")
+
+
 def _with_access(rule: dict, is_admin: bool, role: Optional[str]) -> dict:
     """The rule plus what the caller may do with it (the UI shows buttons from these)."""
     oid = rule.get("origin_id") or ""
@@ -101,6 +125,7 @@ def _with_access(rule: dict, is_admin: bool, role: Optional[str]) -> dict:
         "origin_label": rule.get("origin_label") or "",
         "can_review": may_edit and rule.get("status") == "pending",
         "can_backtest": may_edit and rule_backtest.can_backtest(rule),
+        "can_revoke": _may_revoke(rule, is_admin, role),
         "deploy_scope": _deploy_scope(rule),
     }
 
@@ -252,6 +277,57 @@ async def reject_ml_rule(rule_id: str, req: RuleRejectRequest, current_user: dic
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/{rule_id}/revoke")
+async def revoke_ml_rule(rule_id: str, req: RuleRevokeRequest, current_user: dict = Depends(require_viewer_or_above)):
+    """Take an approved rule out of the WAF (its ml-<id>.conf is removed, the row stays).
+
+    Platform admin: any approved rule. Owner/Editor of the rule's origin: one
+    deployed for that origin only. A rule written for every origin (no origin,
+    or approved before rules were scoped) protects other tenants as well, so
+    only the platform admin may take it away."""
+    rule, role = _visible_rule(rule_id, current_user)
+    is_admin = _is_admin(current_user)
+    if rule.get("status") != "approved":
+        raise HTTPException(status_code=400, detail=f"Only an approved rule can be revoked (status is {rule.get('status')})")
+    if not is_admin and role not in REVIEW_ROLES:
+        raise HTTPException(status_code=403, detail="Owner or Editor of this origin required")
+    if not _may_revoke(rule, is_admin, role):
+        raise HTTPException(status_code=403,
+                            detail="This rule runs for every origin; only the platform admin can revoke it")
+    reason = (req.reason or "").strip()[:500]
+
+    def _audit(action: str, r: dict, summary: str) -> None:
+        audit_log.write_audit_event(
+            scope_id=_audit_scope(rule),
+            actor_user_id=current_user.get("user_id"),
+            actor_username=current_user.get("username", ""),
+            action=action,
+            summary=summary,
+            details={
+                "rule_id": rule_id,
+                "attack_type": r.get("attack_type") if isinstance(r, dict) else None,
+                "deployed_rule_id": r.get("deployed_rule_id") if isinstance(r, dict) else None,
+                "deploy_scope": _deploy_scope(rule),
+                "reason": reason,
+            },
+        )
+
+    try:
+        revoked = rule_service.revoke_rule(
+            rule_id, revoked_by=current_user.get("username", "admin"), reason=reason,
+            on_revoked=lambda r: _audit("rule.revoke", r, f"ยกเลิกการใช้งาน ML rule: {rule_id}"
+                                        + (f" ({reason})" if reason else "")),
+            on_remove_failed=lambda r, err: _audit(
+                "rule.revoke_failed", r, f"ลบไฟล์กฎไม่สำเร็จ กฎยังทำงานอยู่: {rule_id} ({err})"),
+            expected_origin_id=rule.get("origin_id") or "",
+        )
+        return {"message": "Rule revoked", "rule": _with_access(revoked, is_admin, role)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/{rule_id}/backtest")
 async def backtest_ml_rule(rule_id: str, days: int = rule_backtest.DEFAULT_DAYS,
                            current_user: dict = Depends(require_viewer_or_above)):
@@ -298,10 +374,45 @@ async def delete_ml_rule(rule_id: str, current_user: dict = Depends(require_admi
     raise HTTPException(status_code=404, detail="Rule not found")
 
 
+def _scan_origin(origin_id: str, user: dict) -> dict:
+    """The origin a single-origin CVE scan is for: the platform admin, or its
+    Owner/Editor. 404 for a non-member or an archived/missing origin (as for
+    its rules), 403 for a Viewer."""
+    origin = _store.get_origin_by_id(origin_id)
+    if not origin or origin.get("status") in ARCHIVED_ORIGIN_STATUSES:
+        raise HTTPException(status_code=404, detail="Origin not found")
+    if _is_admin(user):
+        return origin
+    role = origin_role(origin, user.get("user_id"))
+    if role is None:
+        raise HTTPException(status_code=404, detail="Origin not found")
+    if role not in REVIEW_ROLES:
+        raise HTTPException(status_code=403, detail="Owner or Editor of this origin required")
+    return origin
+
+
+def _check_cve_scan_quota(origin_id: str) -> None:
+    global _cve_scan_limiter
+    if _cve_scan_limiter is None:
+        from services.rate_limiter import RedisRateLimiter
+        _cve_scan_limiter = RedisRateLimiter()
+    # Fail closed like the analyst's quota (api/ml.py): no Redis, no scan.
+    allowed, _, retry_after = _cve_scan_limiter.is_allowed(
+        f"cve-scan:{origin_id}", CVE_SCAN_ORIGIN_LIMIT_PER_HOUR, 3600, fail_open=False
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"CVE scan limit reached for this origin ({CVE_SCAN_ORIGIN_LIMIT_PER_HOUR}/hour). Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
 @router.post("/cve-scan")
 async def run_cve_scan(
     days: Optional[int] = None,
-    current_user: dict = Depends(require_admin),
+    origin_id: Optional[str] = None,
+    current_user: dict = Depends(require_viewer_or_above),
 ):
     """CVE Auto-Patch (2026-09-22). Admin-triggered, deliberately NOT a
     background worker -- this makes a real outbound call to NVD and can
@@ -311,18 +422,35 @@ async def run_cve_scan(
     writes to (created_by="cve-auto"), reviewed the same way, never
     auto-applied. "Proposal drafted" is the only claim made anywhere in
     this path -- protection starts when a human approves it.
+
+    Without origin_id: every origin with tech stack tags, platform admin only.
+    With origin_id (2026-10-27): that origin's tags only, for its Owner/Editor
+    (or the admin), CVE_SCAN_ORIGIN_LIMIT_PER_HOUR per origin; the proposals
+    are that origin's and the scan is recorded in its audit log.
     """
     window_days = days or CVE_SCAN_DEFAULT_WINDOW_DAYS
+    scope_id = AUDIT_SCOPE_GLOBAL
 
-    try:
-        all_origins = rule_service.db.list_origins()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load origins: {e}")
+    if origin_id:
+        origin = _scan_origin(str(origin_id).strip(), current_user)
+        if not origin.get("tech_stack_tags"):
+            raise HTTPException(status_code=400,
+                                detail="This origin has no tech stack tags yet; add them on the origin's page first")
+        scope_id = str(origin["id"])
+        _check_cve_scan_quota(scope_id)
+        tagged_origins = [origin]
+    else:
+        if not _is_admin(current_user):
+            raise HTTPException(status_code=403, detail="Admin access required to scan every origin")
+        try:
+            all_origins = rule_service.db.list_origins()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to load origins: {e}")
 
-    tagged_origins = [
-        o for o in all_origins
-        if o.get("status") not in ("archived", "deleted") and o.get("tech_stack_tags")
-    ]
+        tagged_origins = [
+            o for o in all_origins
+            if o.get("status") not in ("archived", "deleted") and o.get("tech_stack_tags")
+        ]
     keywords_searched, keywords_skipped = select_search_terms(tagged_origins)
     vulnerabilities = await fetch_recent_cves(keywords_searched, days=window_days)
     matches = match_cves_to_origins(vulnerabilities, tagged_origins)
@@ -418,7 +546,7 @@ async def run_cve_scan(
         for rule_data in to_create:
             proposals_created.append(rule_service.create_pending_rule(rule_data, created_by="cve-auto"))
         audit_log.write_audit_event(
-            scope_id=AUDIT_SCOPE_GLOBAL,
+            scope_id=scope_id,
             actor_user_id=current_user.get("user_id"),
             actor_username=current_user.get("username", ""),
             action="cve_scan.run",
@@ -437,6 +565,7 @@ async def run_cve_scan(
 
     return {
         "status": "success",
+        "origin_id": "" if scope_id == AUDIT_SCOPE_GLOBAL else scope_id,
         "cves_scanned": len(vulnerabilities),
         "keywords_searched": keywords_searched,
         "keywords_skipped": keywords_skipped,

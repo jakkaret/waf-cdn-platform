@@ -337,7 +337,7 @@ class PgStore:
             pool.exec_("DELETE FROM pending_rules WHERE origin_id = %s AND deployed_rule_id IS NULL", (oid,))
             deployed = pool.q("UPDATE pending_rules SET status = 'rejected', reviewed_by = 'system', "
                               "reviewed_at = now(), reject_reason = %s WHERE origin_id = %s "
-                              "AND deployed_rule_id IS NOT NULL RETURNING deployed_rule_id",
+                              "AND status = 'approved' RETURNING deployed_rule_id",
                               ("origin deleted: rule file removed", oid))
             pool.exec_("DELETE FROM origins WHERE id = %s", (oid,))
         return sorted(int(r["deployed_rule_id"]) for r in deployed)
@@ -1063,6 +1063,12 @@ class PgPendingRuleRepository:
         # How approval wrote ml-<id>.conf ('origin' | 'global', migration 0018).
         if row.get("deploy_scope") is not None:
             rule["deploy_scope"] = row["deploy_scope"]
+        # Taken out of the WAF after approval (migration 0020).
+        for key in ("revoked_by", "revoke_reason"):
+            if row.get(key) is not None:
+                rule[key] = row[key]
+        if row.get("revoked_at") is not None:
+            rule["revoked_at"] = iso_z_s(row["revoked_at"])
         return rule
 
     def create(self, item: Dict[str, Any]) -> Dict[str, Any]:
@@ -1209,6 +1215,31 @@ class PgPendingRuleRepository:
         pool.exec_("UPDATE pending_rules SET status = 'pending', deployed_rule_id = NULL, reviewed_by = NULL, "
                    "reviewed_at = NULL, deploy_scope = NULL WHERE rule_id = %s AND deployed_rule_id = %s",
                    (as_uuid(rule_id), int(deployed_rule_id)))
+
+    def reserve_revoke(self, rule_id: str, revoked_by: str, reason: str,
+                       expected_origin_id: Optional[str] = None) -> Dict[str, Any]:
+        """Inside the caller's transaction: lock, check approved and mark the
+        rule revoked (its file is removed after commit). deployed_rule_id is
+        kept, so the id stays taken. expected_origin_id as in reserve_approval."""
+        rid = as_uuid(rule_id)
+        if rid is None:
+            raise ValueError("Rule not found")
+        row = pool.q1("SELECT * FROM pending_rules WHERE rule_id = %s FOR UPDATE", (rid,))
+        if not row:
+            raise ValueError("Rule not found")
+        if row["status"] != "approved":
+            raise ValueError(f"Only an approved rule can be revoked (status is {row['status']})")
+        row_origin = str(row["origin_id"]) if row["origin_id"] else ""
+        if expected_origin_id is not None and row_origin != (as_uuid(expected_origin_id) or expected_origin_id):
+            raise ValueError("The rule's origin changed; reload the list and try again")
+        return self.to_rule(pool.q1(
+            "UPDATE pending_rules SET status = 'revoked', revoked_by = %s, revoked_at = now(), revoke_reason = %s "
+            "WHERE rule_id = %s RETURNING *", (revoked_by, reason or None, rid)))
+
+    def undo_revoke(self, rule_id: str) -> None:
+        """Compensation when removing the file after commit failed: the rule is still running."""
+        pool.exec_("UPDATE pending_rules SET status = 'approved', revoked_by = NULL, revoked_at = NULL, "
+                   "revoke_reason = NULL WHERE rule_id = %s AND status = 'revoked'", (as_uuid(rule_id),))
 
     def reject(self, rule_id: str, rejected_by: str, reason: str) -> Dict[str, Any]:
         rid = as_uuid(rule_id)

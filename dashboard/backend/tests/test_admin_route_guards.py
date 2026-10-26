@@ -12,8 +12,9 @@ from api import settings as settings_module, threshold_proposals as tp_module
 from services.rate_limiter import limiter
 
 ADMIN_ONLY = [
-    # approve/reject/backtest are open to an origin's Owner/Editors for that
-    # origin's rules (2026-10-26): see MEMBER_SCOPED below.
+    # approve/reject/backtest/revoke are open to an origin's Owner/Editors for
+    # that origin's rules (2026-10-26/27): see MEMBER_SCOPED below. cve-scan
+    # without an origin_id scans every origin and stays admin-only.
     ("DELETE", "/api/ml-rules/abc"),
     ("POST", "/api/ml-rules/reject-legacy"),
     ("POST", "/api/ml-rules/cve-scan"),
@@ -49,6 +50,7 @@ MEMBER_SCOPED = [
     ("POST", "/api/ml-rules/abc/approve"),
     ("POST", "/api/ml-rules/abc/reject"),
     ("POST", "/api/ml-rules/abc/backtest"),
+    ("POST", "/api/ml-rules/abc/revoke"),
     # tuning proposals belong to one origin and only its Owner decides
     # (2026-10-27, tests/test_threshold_proposal_api.py)
     ("POST", "/api/threshold-proposals/generate?origin_id=abc"),

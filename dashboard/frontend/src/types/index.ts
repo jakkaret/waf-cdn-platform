@@ -306,11 +306,15 @@ export interface MLPendingRule {
   secrule_template: string
   source_url: string
   source_method: string
-  status: 'pending' | 'approved' | 'rejected'
+  // 'revoked' (2026-10-27): was approved, then taken out of the WAF.
+  status: 'pending' | 'approved' | 'rejected' | 'revoked'
   created_at: string
   reviewed_by?: string
   reviewed_at?: string
   reject_reason?: string
+  revoked_by?: string
+  revoked_at?: string
+  revoke_reason?: string
   deployed_rule_id?: number
   // 2026-10-13: Gen3-rules, queue de-duplication and backtest
   // (dashboard/backend/services/ml_rule_service.py, rule_backtest.py)
@@ -330,6 +334,7 @@ export interface MLPendingRule {
   deploy_scope?: MLRuleDeployScope
   can_review?: boolean
   can_backtest?: boolean
+  can_revoke?: boolean
 }
 
 export type MLRuleDeployScope = 'origin' | 'global'

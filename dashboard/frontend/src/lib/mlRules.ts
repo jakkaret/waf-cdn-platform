@@ -109,6 +109,19 @@ export function canReviewRule(rule: Pick<MLPendingRule, 'status' | 'can_review'>
   return rule.status === 'pending' && (rule.can_review ?? isAdmin)
 }
 
+// Revoke (2026-10-27): an approved rule, when the backend says the caller may
+// (admin: any; Owner/Editor: one that runs for their origin only).
+export function canRevokeRule(rule: Pick<MLPendingRule, 'status' | 'can_revoke'>): boolean {
+  return rule.status === 'approved' && rule.can_revoke === true
+}
+
+// What the revoke dialog says will stop.
+export function revokeScope(rule: ScopeFields): string {
+  return deployScopeOf(rule) === 'global'
+    ? 'กฎนี้จะหยุดทำงานกับทุก origin ทันที'
+    : `กฎนี้จะหยุดทำงานกับ ${ruleOriginLabel(rule)} ทันที`
+}
+
 export function canBacktestRule(
   rule: Pick<MLPendingRule, 'generator' | 'created_by' | 'can_backtest'>,
   isAdmin: boolean,
@@ -141,6 +154,22 @@ export function analystOriginChoices(origins: AnalystOrigin[], userId: string | 
     .map((o) => ({ id: o.origin_id, label: o.label || o.origin_id }))
 }
 
+export interface ScanOriginOption extends OriginOption {
+  hasTags: boolean
+}
+
+// Origins the caller may run a CVE scan for (Owner/Editor, not archived).
+// A scan only searches the origin's tech stack tags, so one without tags is
+// listed but cannot be scanned yet.
+export function cveScanOriginChoices(
+  origins: (AnalystOrigin & Pick<Origin, 'tech_stack_tags'>)[],
+  userId: string | undefined,
+): ScanOriginOption[] {
+  return origins
+    .filter((o) => o.status !== 'archived' && canEditOrigin(originRoleOf(o, userId)))
+    .map((o) => ({ id: o.origin_id, label: o.label || o.origin_id, hasTags: (o.tech_stack_tags ?? []).length > 0 }))
+}
+
 // "" = no origin (platform admin queue). An admin starts there as before;
 // anyone else starts on their first editable origin.
 export function defaultAnalystOrigin(choices: OriginOption[], isAdmin: boolean): string {
@@ -151,7 +180,7 @@ export function defaultAnalystOrigin(choices: OriginOption[], isAdmin: boolean):
 export type RuleSort = 'hits' | 'newest'
 
 export interface RuleFilters {
-  status: 'pending' | 'approved' | 'rejected' | 'all'
+  status: 'pending' | 'approved' | 'rejected' | 'revoked' | 'all'
   generator: MLRuleGenerator | 'all'
   attackType: string
   search: string

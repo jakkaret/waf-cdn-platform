@@ -9,6 +9,8 @@ import {
   canBacktest,
   canBacktestRule,
   canReviewRule,
+  canRevokeRule,
+  cveScanOriginChoices,
   defaultAnalystOrigin,
   deployScopeOf,
   describeSuggestion,
@@ -18,6 +20,7 @@ import {
   filterAndSortRules,
   generatorOf,
   renderSecRule,
+  revokeScope,
   timeAgo,
   type RuleFilters,
 } from './mlRules'
@@ -195,6 +198,27 @@ describe('analystOriginChoices / defaultAnalystOrigin', () => {
     expect(defaultAnalystOrigin(choices, true)).toBe('')
     expect(defaultAnalystOrigin(choices, false)).toBe('a')
     expect(defaultAnalystOrigin([], false)).toBe('')
+  })
+  it('lists CVE-scan origins with whether they have tech stack tags', () => {
+    const origins = [origin('a', { tech_stack_tags: ['nginx'] }), origin('b'), origin('c', { status: 'archived', tech_stack_tags: ['php'] })]
+    expect(cveScanOriginChoices(origins, 'editor')).toEqual([
+      { id: 'a', label: 'a.example.com', hasTags: true },
+      { id: 'b', label: 'b.example.com', hasTags: false },
+    ])
+    expect(cveScanOriginChoices(origins, 'viewer')).toEqual([])
+  })
+})
+
+describe('canRevokeRule / revokeScope', () => {
+  it('needs an approved rule the backend lets the caller revoke', () => {
+    expect(canRevokeRule(rule({ status: 'approved', can_revoke: true }))).toBe(true)
+    expect(canRevokeRule(rule({ status: 'approved', can_revoke: false }))).toBe(false)
+    expect(canRevokeRule(rule({ status: 'approved' }))).toBe(false)
+    expect(canRevokeRule(rule({ status: 'revoked', can_revoke: true }))).toBe(false)
+  })
+  it('says where the rule stops', () => {
+    expect(revokeScope(rule({ origin_id: 'o1', origin_label: 'shop', deploy_scope: 'origin' }))).toBe('กฎนี้จะหยุดทำงานกับ shop ทันที')
+    expect(revokeScope(rule({ origin_id: 'o1', origin_label: 'shop', deploy_scope: 'global' }))).toBe('กฎนี้จะหยุดทำงานกับทุก origin ทันที')
   })
 })
 

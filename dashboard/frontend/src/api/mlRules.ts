@@ -29,6 +29,12 @@ export const mlRulesApi = {
     return res.data
   },
 
+  // Takes an approved rule out of the WAF; the rule stays listed as revoked.
+  revokeRule: async (id: string, reason?: string) => {
+    const res = await api.post(`/ml-rules/${id}/revoke`, { reason })
+    return res.data
+  },
+
   // Read-only: how much recent allowed traffic the rule would also match.
   backtestRule: async (id: string, days?: number) => {
     const res = await api.post<{ rule_id: string; backtest: MLRuleBacktest }>(`/ml-rules/${id}/backtest`, undefined, {
@@ -48,12 +54,13 @@ export const mlRulesApi = {
     return res.data
   },
 
-  // CVE Auto-Patch (2026-09-22): admin-triggered, real outbound call to
-  // NVD -- never scheduled/background, so this stays a deliberate click.
-  runCveScan: async (days?: number) => {
-    const res = await api.post('/ml-rules/cve-scan', undefined, {
-      params: days ? { days } : undefined,
-    })
+  // CVE Auto-Patch (2026-09-22): a real outbound call to NVD -- never
+  // scheduled/background, so this stays a deliberate click. No originId:
+  // every origin (platform admin only). With one: that origin's tech stack
+  // only, for its Owner/Editor, a few scans per hour per origin.
+  runCveScan: async (originId?: string, days?: number) => {
+    const params = { ...(days ? { days } : {}), ...(originId ? { origin_id: originId } : {}) }
+    const res = await api.post('/ml-rules/cve-scan', undefined, { params })
     return res.data
   },
 }

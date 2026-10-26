@@ -374,6 +374,142 @@ def test_a_merge_into_the_global_queue_returns_only_the_callers_own_examples(cli
     assert full["backtest"]["example_paths"] == ["/other-tenant/admin"]
 
 
+# ---- revoking an approved rule (2026-10-27) --------------------------------------------------
+
+def _approved(client, h, service, origin_id="", key=None, who="admin"):
+    rid = _rule(service, origin_id, key=key)["rule_id"]
+    r = client.post(f"/api/ml-rules/{rid}/approve", headers=h[who])
+    assert r.status_code == 200, r.text
+    return rid, r.json()["rule"]["deployed_rule_id"]
+
+
+def test_owner_revokes_an_origin_rule_and_its_file_leaves_the_waf(client, team, service, rules_dir):
+    a, _b, h = team
+    rid, deployed = _approved(client, h, service, a, who="owner")
+    rows = {who: client.get(f"/api/ml-rules/{rid}", headers=h[who]).json() for who in ("owner", "editor", "viewer")}
+    assert [rows[w]["can_revoke"] for w in ("owner", "editor", "viewer")] == [True, True, False]
+
+    r = client.post(f"/api/ml-rules/{rid}/revoke", json={"reason": "false positives on /search"}, headers=h["editor"])
+    assert r.status_code == 200, r.text
+    assert r.json()["rule"]["status"] == "revoked" and r.json()["rule"]["can_revoke"] is False
+    assert not (rules_dir / f"ml-{deployed}.conf").exists()
+    row = service.get_rule_detail(rid)
+    assert (row["status"], row["revoked_by"], row["revoke_reason"]) == ("revoked", "mlo_editor", "false positives on /search")
+    assert row["deployed_rule_id"] == deployed and row["revoked_at"]
+    events = [e for e in audit_log.get_audit_log(a, db=audit_log.db) if e["action"] == "rule.revoke"]
+    assert len(events) == 1 and events[0]["details"]["deployed_rule_id"] == deployed
+
+
+def test_who_may_not_revoke(client, team, service):
+    a, b, h = team
+    rid, _ = _approved(client, h, service, a)
+    pending = _rule(service, a, key="still-pending")["rule_id"]
+    r = client.post(f"/api/ml-rules/{rid}/revoke", json={}, headers=h["viewer"])
+    assert r.status_code == 403 and r.json()["detail"] == "Owner or Editor of this origin required"
+    assert client.post(f"/api/ml-rules/{rid}/revoke", json={}, headers=h["stranger"]).status_code == 404
+    assert client.post(f"/api/ml-rules/{rid}/revoke", json={}, headers=h["other_owner"]).status_code == 404
+    assert client.post(f"/api/ml-rules/{pending}/revoke", json={}, headers=h["owner"]).status_code == 400
+    glob, _ = _approved(client, h, service, key="global")
+    assert client.post(f"/api/ml-rules/{glob}/revoke", json={}, headers=h["owner"]).status_code == 404
+    assert service.get_rule_detail(rid)["status"] == "approved"
+
+
+def test_a_rule_written_for_every_origin_is_revoked_by_the_admin_only(client, team, service, rules_dir):
+    a, _b, h = team
+    rid, deployed = _approved(client, h, service, a)
+    # A CVE rule approved before rules were scoped: it carries the origin but runs everywhere.
+    pool.exec_("UPDATE pending_rules SET deploy_scope = 'global' WHERE rule_id = %s", (rid,))
+    assert client.get(f"/api/ml-rules/{rid}", headers=h["owner"]).json()["can_revoke"] is False
+    r = client.post(f"/api/ml-rules/{rid}/revoke", json={}, headers=h["owner"])
+    assert r.status_code == 403 and "every origin" in r.json()["detail"]
+    assert client.post(f"/api/ml-rules/{rid}/revoke", json={}, headers=h["admin"]).status_code == 200
+    assert not (rules_dir / f"ml-{deployed}.conf").exists()
+
+
+def test_a_revoked_rule_frees_the_origin_cap_but_not_its_id(client, team, service, monkeypatch):
+    a, _b, h = team
+    monkeypatch.setattr(ml_rule_service_module, "MAX_APPROVED_RULES_PER_ORIGIN", 1)
+    first, first_id = _approved(client, h, service, a, key="k1", who="owner")
+    assert client.post(f"/api/ml-rules/{first}/revoke", json={}, headers=h["owner"]).status_code == 200
+    _second, second_id = _approved(client, h, service, a, key="k2", who="owner")
+    assert second_id > first_id
+
+
+def test_when_nginx_refuses_the_removal_the_rule_stays_approved(client, team, service, rules_dir, monkeypatch):
+    a, _b, h = team
+    rid, deployed = _approved(client, h, service, a)
+    rm = ml_rule_service_module.RuleManager()
+
+    def refuse():
+        raise RuntimeError("nginx -t failed")
+    monkeypatch.setattr(rm, "test_nginx", refuse)
+    service.rule_manager = rm
+    r = client.post(f"/api/ml-rules/{rid}/revoke", json={}, headers=h["owner"])
+    assert r.status_code == 500
+    assert (rules_dir / f"ml-{deployed}.conf").exists()
+    row = service.get_rule_detail(rid)
+    assert row["status"] == "approved" and "revoked_by" not in row
+    actions = [e["action"] for e in audit_log.get_audit_log(a, db=audit_log.db) if e["action"].startswith("rule.revoke")]
+    assert sorted(actions) == ["rule.revoke", "rule.revoke_failed"]
+
+
+# ---- CVE scan of one origin (2026-10-27) -------------------------------------------------------
+
+@pytest.fixture()
+def cve_feed(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    class _AllowAll:
+        def is_allowed(self, *a, **k):
+            return True, 1, 0
+
+    monkeypatch.setattr(ml_rules_module, "_cve_scan_limiter", _AllowAll())
+    cve = {"cve": {"id": "CVE-2026-7001", "descriptions": [{"lang": "en", "value": "nginx path bug"}],
+                   "configurations": [{"nodes": [{"cpeMatch": [{"criteria": "cpe:2.3:a:nginx:nginx:1.0:*:*:*:*:*:*:*"}]}]}],
+                   "metrics": {}}}
+    monkeypatch.setattr(ml_rules_module, "fetch_recent_cves", AsyncMock(return_value=[cve]))
+    monkeypatch.setattr(ml_rules_module.gemini_service, "draft_cve_rule_pattern", AsyncMock(return_value=r"/nginx-bug"))
+
+
+def test_owner_scans_only_their_origin(client, team, service, db, cve_feed):
+    a, b, h = team
+    for oid in (a, b):
+        db.update_origin(oid, {"tech_stack_tags": ["nginx"]})
+    r = client.post(f"/api/ml-rules/cve-scan?origin_id={a}", headers=h["editor"])
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["origin_id"] == a and body["proposals_created"] == 1
+    assert {p["origin_id"] for p in body["proposals"]} == {a}
+    assert [r["origin_id"] for r in service.list_rules()] == [a]
+    assert [e["action"] for e in audit_log.get_audit_log(a, db=audit_log.db)] == ["cve_scan.run"]
+
+
+def test_who_may_scan_an_origin(client, team, service, db, cve_feed):
+    a, b, h = team
+    db.update_origin(a, {"tech_stack_tags": ["nginx"]})
+    assert client.post(f"/api/ml-rules/cve-scan?origin_id={a}", headers=h["viewer"]).status_code == 403
+    assert client.post(f"/api/ml-rules/cve-scan?origin_id={a}", headers=h["stranger"]).status_code == 404
+    assert client.post(f"/api/ml-rules/cve-scan?origin_id={b}", headers=h["owner"]).status_code == 404
+    assert client.post("/api/ml-rules/cve-scan", headers=h["owner"]).status_code == 403   # every origin: admin only
+    r = client.post(f"/api/ml-rules/cve-scan?origin_id={b}", headers=h["other_owner"])
+    assert r.status_code == 400 and "tech stack" in r.json()["detail"]
+    assert service.list_rules() == []
+
+
+def test_an_origin_scan_is_rate_limited(client, team, db, monkeypatch, cve_feed):
+    a, _b, h = team
+    db.update_origin(a, {"tech_stack_tags": ["nginx"]})
+
+    class _Refuse:
+        def is_allowed(self, key, limit, window, fail_open=True):
+            assert key == f"cve-scan:{a}" and fail_open is False
+            return False, 0, 1200
+
+    monkeypatch.setattr(ml_rules_module, "_cve_scan_limiter", _Refuse())
+    r = client.post(f"/api/ml-rules/cve-scan?origin_id={a}", headers=h["owner"])
+    assert r.status_code == 429 and r.headers["Retry-After"] == "1200"
+
+
 # ---- the scoped rule text ------------------------------------------------------------------
 
 def test_scoping_keeps_operator_escapes_and_a_message_with_commas():
