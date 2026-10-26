@@ -430,6 +430,11 @@ async def startup_event():
     if not hasattr(app.state, "shield_events_task"):
         from services.shield_events import shield_events_worker
         app.state.shield_events_task = asyncio.create_task(shield_events_worker(ch))
+    # Gen 3 verdicts of mirrored traffic (relay /api/ml/capture) -> ClickHouse
+    # ml_verdicts, shown per origin on ML Insights (AI Security Analyst page).
+    if not hasattr(app.state, "ml_verdicts_task"):
+        from services.ml_verdicts import ml_verdicts_worker
+        app.state.ml_verdicts_task = asyncio.create_task(ml_verdicts_worker(ch))
     # Managed (central) ruleset: publishes new versions from
     # modsecurity/managed-rules/ and regenerates managed-00-hostmap.conf /
     # managed-10-rules.conf on an interval so newly-verified domains and

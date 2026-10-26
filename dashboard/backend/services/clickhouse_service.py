@@ -22,6 +22,9 @@ from services.geoip import country_code
 # from growing right back to the same size. 30 days is enough for demo +
 # short-term trend analysis; override via env if that assumption changes.
 ACCESS_LOGS_RETENTION_DAYS = int(os.getenv("ACCESS_LOGS_RETENTION_DAYS", "30"))
+# ml_verdicts keeps every tenant's paths and (redacted) queries: a week covers
+# ML Insights' longest view and the threshold preview, and no more.
+ML_VERDICTS_RETENTION_DAYS = int(os.getenv("ML_VERDICTS_RETENTION_DAYS", "7"))
 
 
 def resolve_edge_node(value) -> str:
@@ -238,6 +241,30 @@ class ClickHouseService:
         except ClickHouseError as e:
             print(f"⚠️ Error initializing ClickHouse tables: {e}")
             self.connected = False
+            return
+        # Gen 3 verdicts of mirrored requests (ML Insights, services/ml_verdicts.py).
+        # Its own try: a failure here leaves ML Insights empty, never the logs.
+        try:
+            self.client.command(f'''
+                CREATE TABLE IF NOT EXISTS ml_verdicts (
+                    timestamp DateTime,
+                    request_id String,
+                    host String,
+                    method LowCardinality(String),
+                    path String,
+                    query String,
+                    score Float32,
+                    threshold Float32,
+                    is_attack UInt8,
+                    detectors Array(LowCardinality(String)),
+                    body_length UInt32,
+                    feature_set LowCardinality(String)
+                ) ENGINE = MergeTree()
+                ORDER BY (host, timestamp)
+                TTL timestamp + INTERVAL {ML_VERDICTS_RETENTION_DAYS} DAY
+            ''')
+        except ClickHouseError as e:
+            print(f"⚠️ Error initializing ClickHouse table ml_verdicts: {e}")
 
     ACCESS_LOG_COLUMNS = [
         'id', 'timestamp', 'client_ip', 'method', 'url', 'status_code',

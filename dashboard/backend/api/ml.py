@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import ipaddress
 import logging
@@ -5,15 +6,20 @@ import os
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Depends, Request, Response
+from fastapi import APIRouter, HTTPException, Depends, Query, Request, Response
+from services import ml_verdicts
+from services.clickhouse_service import ClickHouseService
 from services.rbac import ARCHIVED_ORIGIN_STATUSES, is_origin_admin, require_viewer_or_above
 from services.gemini_service import gemini_service
 from services.pg_store import OriginNotFound
+from services.tenant_service import build_tenant_origin_filter, get_user_origins_and_domains
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ml", tags=["ML Analyst"])
+# ML Insights reads (services/ml_verdicts.py); the batch writer uses main.py's instance.
+ch = ClickHouseService()
 
 
 def _env_float(name: str, default: float) -> float:
@@ -189,15 +195,50 @@ async def capture_telemetry_relay(request: Request):
     })
     try:
         async with httpx.AsyncClient() as client:
-            await client.post(
+            res = await client.post(
                 f"{ML_CAPTURE_URL}/capture",
                 content=body,
                 headers=headers,
                 timeout=ML_FAST_TIMEOUT,
             )
+        # 200 = the Gen 3 verdict of this request (ML Insights); 204 = none.
+        if res.status_code == 200:
+            ml_verdicts.enqueue(res.json())
     except Exception as exc:
         logger.warning("ML capture relay failed open: %s", exc)
     return Response(status_code=204)
+
+
+def _insights_scope(current_user: dict, origin: Optional[str]) -> str:
+    """The tenant clause of the Logs page (api/logs.py): "1=0" when the caller
+    may read nothing, "" for a platform admin's unfiltered view."""
+    is_admin = current_user.get("role", "viewer") == "admin"
+    _ids, _origins, user_domains = get_user_origins_and_domains(current_user.get("user_id"))
+    return build_tenant_origin_filter(origin, user_domains, is_admin)
+
+
+@router.get("/insights")
+async def ml_insights(
+    origin: Optional[str] = Query("ALL", description="An origin id, or ALL"),
+    hours: int = Query(24, ge=1, le=168),
+    limit: int = Query(50, ge=1, le=200),
+    min_score: Optional[float] = Query(None, ge=0.0, le=1.0),
+    current_user: dict = Depends(require_viewer_or_above),
+):
+    """Gen 3 scores of the caller's real traffic (shadow, nothing blocked):
+    totals, score histogram, timeline, detectors and the newest flagged
+    requests. Scoped exactly like the Logs page: an origin's Owner, Editors
+    and Viewers see that origin's hosts only."""
+    scope = _insights_scope(current_user, origin)
+    if scope == "1=0":
+        return ml_verdicts.empty_insights(hours)
+    if not ch.connected:
+        raise HTTPException(status_code=503, detail="analytics store unavailable")
+    try:
+        return await asyncio.to_thread(ml_verdicts.insights, ch, scope, hours, limit, min_score)
+    except Exception as exc:
+        logger.warning("ML insights query failed: %s", exc)
+        raise HTTPException(status_code=503, detail="analytics store unavailable")
 
 @router.post("/predict")
 async def predict_anomaly(req: PredictRequest, current_user: dict = Depends(require_viewer_or_above)):
