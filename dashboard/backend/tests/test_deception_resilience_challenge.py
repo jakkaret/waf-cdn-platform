@@ -45,6 +45,7 @@ from api.deception import (
 # The endpoint has no built-in key any more (a default baked into the
 # source was readable by anyone); tests supply their own through the env.
 DEFAULT_INTERNAL_KEY = os.environ.setdefault("DECEPTION_INTERNAL_KEY", "test-deception-internal-key")
+from services import deception_content
 from services.deception_service import (
     PATH_TRAVERSAL_REGEX,
     PATH_TRAVERSAL_TEMPLATE,
@@ -525,7 +526,8 @@ class TestInformationAndOriginLeakage:
 
         # Must contain predefined synthetic accounts
         assert "root:x:0:0:root:/root:/bin/bash" in body
-        assert "appuser:x:1001:1001" in body
+        admin, uid, *_ = deception_content.site_for("").os_accounts[0]
+        assert f"{admin}:x:{uid}:{uid}" in body
         assert "sysadmin_svc" not in body  # DB user should not be in passwd
 
     def test_synthetic_sqli_does_not_leak_real_env_secrets(
@@ -550,8 +552,11 @@ class TestInformationAndOriginLeakage:
 
         # Verify JSON is purely synthetic structure
         data = resp.json()
-        assert data["database"] == "production_app_db"
-        assert "dummySaltValue" in body
+        assert data["status"] in ("success", "error")
+        site = deception_content.site_for("")
+        for row in data.get("data", []):
+            if row.get("email"):
+                assert row["email"].endswith("@" + site.mail_domain)
 
     def test_zero_origin_forwarding_in_responder(self):
         """

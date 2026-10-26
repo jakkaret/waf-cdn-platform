@@ -25,6 +25,7 @@ Validates:
 """
 
 import ast
+import base64
 import json
 import os
 import re
@@ -45,6 +46,7 @@ from api.deception import (
 # The endpoint has no built-in key any more (a default baked into the
 # source was readable by anyone); tests supply their own through the env.
 DEFAULT_INTERNAL_KEY = os.environ.setdefault("DECEPTION_INTERNAL_KEY", "test-deception-internal-key")
+from services import deception_content
 from services.deception_service import (
     PATH_TRAVERSAL_TEMPLATE,
     SECURE_DECEPTION_HEADERS,
@@ -226,8 +228,19 @@ class TestAdversarialEvasionChallenges:
         # For path traversal vectors, confidence must be > 0 and response must be 200
         assert resp.status_code == 200
         assert resp.template_id == "path_traversal"
-        assert resp.body == PATH_TRAVERSAL_TEMPLATE
-        assert resp.content_type == "text/plain"
+        # The body is the file the payload aims at (hostless profile)
+        target = payload_normalizer.normalize_string(vector).lower()
+        if "php://filter" in target:
+            assert base64.b64decode(resp.body).startswith(b"<?php")
+        elif "shadow" in target:
+            assert resp.body.startswith("root:$6$") and resp.content_type == "text/plain"
+        elif "passwd" in target:
+            assert resp.body == PATH_TRAVERSAL_TEMPLATE and resp.content_type == "text/plain"
+        elif "win.ini" in target:
+            assert "[fonts]" in resp.body and resp.content_type == "text/plain"
+        else:
+            assert "environ" in target
+            assert "DB_PASSWORD=" in resp.body and resp.content_type == "text/plain"
 
     @pytest.mark.parametrize("name,vector", generate_unicode_homoglyphs())
     def test_unicode_homoglyphs_evasion(self, name: str, vector: str):
@@ -252,10 +265,13 @@ class TestAdversarialEvasionChallenges:
         assert resp.status_code == 200
         assert resp.template_id == "sql_injection"
         assert resp.content_type == "application/json"
-        # Validate that synthetic DB json is parseable
+        # Validate that the emulated DB answer is parseable and well-formed
         data = json.loads(resp.body)
-        assert data["database"] == "production_app_db"
-        assert "schema" in data
+        assert data["status"] in ("success", "error")
+        if data["status"] == "success":
+            assert data["count"] == len(data["data"])
+        else:
+            assert data["error"].startswith("SQLSTATE[")
 
     @pytest.mark.parametrize("name,vector", generate_boundary_payloads())
     def test_boundary_and_extreme_inputs(self, name: str, vector: str):
@@ -349,22 +365,22 @@ class TestZeroHostLeakageAndPurity:
 
         # 3. Verify presence of synthetic accounts
         assert "games:x:5:60:games" in resp.body
-        assert "secops:x:1002:1002:Security Operations" in resp.body
-        assert "deployer:x:1004:1004:CI/CD Deployment Service" in resp.body
+        for name, uid, gecos, home, shell in deception_content.site_for("").os_accounts:
+            assert f"{name}:x:{uid}:{uid}:{gecos}:{home}:{shell}" in resp.body
 
     def test_synthetic_sqli_purity(self):
-        """Verifies that SQL injection responses contain only dummy records."""
+        """SQL injection responses carry only the generated profile's rows:
+        realistic-looking bcrypt hashes with no 'dummy' tell."""
         svc = DeceptionService()
         resp = svc.generate_response(uri="/api/login", body="admin' OR 1=1--")
 
-        assert resp.body == SQLI_TEMPLATE
         data = json.loads(resp.body)
-        assert data["database"] == "production_app_db"
-        assert len(data["schema"]["tables"]) == 2
-        # Check that password hashes are explicitly marked dummy
-        app_users = data["schema"]["tables"][0]["rows"]
-        for u in app_users:
-            assert "dummySyntheticHash" in u["password_hash"]
+        site = deception_content.site_for("")
+        assert data["status"] == "success"
+        assert data["data"] == [{c: u[c] for c in site.columns} for u in site.users]
+        for u in data["data"]:
+            assert re.fullmatch(r"\$2y\$10\$[./A-Za-z0-9]{53}", u["password_hash"])
+            assert "dummy" not in u["password_hash"].lower()
             assert u["email"].endswith("@corp.internal")
 
     def test_static_ast_no_io_calls(self):
@@ -468,7 +484,7 @@ class TestFastApiEndpointSecurityAndStress:
         assert response.status_code == 200
         assert "application/json" in response.headers["content-type"]
         data = response.json()
-        assert data["database"] == "production_app_db"
+        assert data["status"] in ("success", "error")
 
     def test_endpoint_large_body_stress(self, client: TestClient):
         headers = {

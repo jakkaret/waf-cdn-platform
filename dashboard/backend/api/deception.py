@@ -3,6 +3,7 @@ FastAPI Router for WAF Dynamic Deception Layer (Honeypot).
 Handles internal honeypot response generation, authentication, and administrative template inspection.
 """
 
+import asyncio
 import hmac
 import logging
 import os
@@ -28,6 +29,13 @@ router = APIRouter(prefix="/api/deception", tags=["Deception"])
 # Internal shared secret for proxy-to-backend authentication
 INTERNAL_DECEPTION_HEADER = "X-Internal-Deception-Key"
 INTERNAL_DECEPTION_KEY_ENV = "DECEPTION_INTERNAL_KEY"
+
+# Time-based SQL injection gets the delay it asked for (capped in
+# deception_content). Held responses are cheap here, but cap how many wait at
+# once so the delay cannot be used to pile up connections; past the cap the
+# response goes out immediately.
+MAX_DELAYED_RESPONSES = 32
+_delay_slots = asyncio.Semaphore(MAX_DELAYED_RESPONSES)
 
 def get_expected_key() -> str:
     """Dynamically resolves the expected key from environment."""
@@ -122,8 +130,6 @@ async def respond_deception(
     except Exception as e:
         logger.debug("Failed reading request body in deception handler: %s", e)
 
-    import asyncio
-    
     # 3. Generate synthetic response via DeceptionService with Fail-Safe Shield
     try:
         dec_response = await asyncio.wait_for(
@@ -137,6 +143,7 @@ async def respond_deception(
                 rule_id=rule_id,
                 template_hint=template_hint,
                 headers=dict(request.headers),
+                host=request.headers.get("X-Original-Host") or "",
             ),
             timeout=1.0
         )
@@ -151,7 +158,12 @@ async def respond_deception(
         )
         dec_response = deception_service.get_fallback_response(request_id=req_id)
 
-    # 4. Enqueue non-blocking fail-safe audit logging
+    # 4. Time-based SQL injection: answer as late as the payload asked
+    if dec_response.delay_seconds > 0 and not _delay_slots.locked():
+        async with _delay_slots:
+            await asyncio.sleep(dec_response.delay_seconds)
+
+    # 5. Enqueue non-blocking fail-safe audit logging
     latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
     log_event = DeceptionLogEvent(
         request_id=req_id,
@@ -173,7 +185,7 @@ async def respond_deception(
     )
     background_tasks.add_task(deception_service.log_deception_event, log_event)
 
-    # 5. Return HTTP 200 synthetic response immediately with anti-cache headers
+    # 6. Return HTTP 200 synthetic response immediately with anti-cache headers
     headers = dict(dec_response.headers)
     headers["X-Request-ID"] = req_id
 

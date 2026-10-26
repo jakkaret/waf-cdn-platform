@@ -9,6 +9,10 @@ edges every few seconds):
                             sets tx.waf_origin_id (used by per-origin rules)
                             and switches off managed rules that are not part
                             of the version that origin is on (ctl:ruleRemoveById)
+  managed-05-honeytokens.conf
+                            one @pm rule over every honeytoken the deception
+                            layer hands out for a verified host; a request
+                            that replays one goes back to the deception layer
   managed-10-rules.conf     every managed rule ever published, by ID
 
 Source of truth for the rules is modsecurity/managed-rules/*.conf in git. No
@@ -44,6 +48,7 @@ CATALOG_PATH = Path(os.getenv("MANAGED_RULES_CATALOG", Path(__file__).resolve().
 UPDATE_INTERVAL_SECONDS = int(os.getenv("MANAGED_RULES_INTERVAL_SECONDS", "900"))
 
 HOSTMAP_FILE = "managed-00-hostmap.conf"
+HONEYTOKEN_FILE = "managed-05-honeytokens.conf"
 RULES_FILE = "managed-10-rules.conf"
 
 MANAGED_ID_MIN, MANAGED_ID_MAX = 3_000_000, 3_099_999
@@ -61,6 +66,7 @@ _ID = re.compile(r"\bid:(\d+)")
 _ORIGIN_ID_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _HOST_OK = re.compile(r"^[a-z0-9.-]{1,253}$")
 
+from services import deception_content
 from services.rule_manager import RULES_LOCK as _lock  # P4.3: one lock for all rule writers
 
 
@@ -300,7 +306,11 @@ def apply(rule_manager, db, catalog_path: Optional[Path] = None) -> bool:
     with _lock:
         catalog = load_catalog(catalog_path)
         origins, hosts = verified_hosts_by_origin(db)
-        wanted = {RULES_FILE: render_rules_file(catalog), HOSTMAP_FILE: render_hostmap(origins, hosts, catalog)}
+        wanted = {
+            RULES_FILE: render_rules_file(catalog),
+            HOSTMAP_FILE: render_hostmap(origins, hosts, catalog),
+            HONEYTOKEN_FILE: deception_content.honeytoken_rule(sorted(h for hs in hosts.values() for h in hs)),
+        }
         rules_dir = Path(rule_manager.rules_dir)
         previous = {}
         changed = False

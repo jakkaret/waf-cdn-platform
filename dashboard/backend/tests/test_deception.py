@@ -29,6 +29,7 @@ from api.deception import (
 # The endpoint has no built-in key any more (a default baked into the
 # source was readable by anyone); tests supply their own through the env.
 DEFAULT_INTERNAL_KEY = os.environ.setdefault("DECEPTION_INTERNAL_KEY", "test-deception-internal-key")
+from services import deception_content
 from services.deception_service import (
     PATH_TRAVERSAL_REGEX,
     SECURE_DECEPTION_HEADERS,
@@ -213,15 +214,23 @@ class TestTemplatesAndHeaders:
         assert resp.media_type == resp.content_type
 
     def test_sql_injection_synthetic_content(self):
+        """A UNION with the right column count reflects its literals as an
+        extra row; the wrong count gets MySQL's column-count error."""
         svc = DeceptionService()
-        resp = svc.generate_response(uri="/search?q=' UNION SELECT 1,2--", method="GET")
+        ncols = deception_content.site_for("").ncols
+        items = ",".join(["0x716b7a71"] + ["NULL"] * (ncols - 1))
+        resp = svc.generate_response(uri=f"/search?q=' UNION ALL SELECT {items}-- -", method="GET")
         assert resp.status_code == 200
         assert "application/json" in resp.content_type
         data = json.loads(resp.body)
         assert data["status"] == "success"
-        assert data["database"] == "production_app_db"
-        assert "schema" in data
-        assert any(t["table_name"] == "app_users" for t in data["schema"]["tables"])
+        assert data["data"][-1]["id"] == "qkzq"
+        assert data["data"][0]["email"].endswith("@corp.internal")
+
+        wrong = ",".join(["NULL"] * (ncols + 1))
+        bad = json.loads(svc.generate_response(uri=f"/search?q=' UNION ALL SELECT {wrong}-- -").body)
+        assert bad["status"] == "error"
+        assert "different number of columns" in bad["error"]
 
     def test_anti_cache_headers_compliance(self):
         svc = DeceptionService()
@@ -308,7 +317,7 @@ class TestDeceptionEndpointSecurity:
         assert resp.headers["content-type"].startswith("application/json")
         data = resp.json()
         assert data["status"] == "success"
-        assert "production_app_db" in resp.text
+        assert data["count"] == len(data["data"]) > 0
 
     def test_post_body_inspection_transparent_relay(self, deception_client: TestClient, valid_auth_headers):
         headers = dict(valid_auth_headers)

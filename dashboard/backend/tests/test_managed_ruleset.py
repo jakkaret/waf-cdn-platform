@@ -205,6 +205,32 @@ def test_apply_rolls_back_on_a_failed_nginx_test(source_dir, catalog_path, tmp_p
     assert not (tmp_path / "rules" / mr.RULES_FILE).exists()
 
 
+def test_apply_writes_honeytokens_for_verified_hosts(source_dir, catalog_path, tmp_path, db):
+    from services import deception_content
+
+    seed_origin(db, {"id": "o1", "status": "active"})
+    seed_domain(db, {"id": "d1", "origin_id": "o1", "domain_name": "verified.example.com", "dns_verified": True})
+    seed_domain(db, {"id": "d2", "origin_id": "o1", "domain_name": "unverified.example.com", "dns_verified": False})
+    mr.publish(source_dir, catalog_path)
+
+    class _RM:
+        rules_dir = str(tmp_path / "rules")
+
+        def test_nginx(self):
+            pass
+
+        def reload_nginx(self):
+            pass
+
+    (tmp_path / "rules").mkdir()
+    mr.apply(_RM(), db, catalog_path)
+    text = (tmp_path / "rules" / mr.HONEYTOKEN_FILE).read_text()
+    verified = deception_content.honeytoken_values(deception_content.site_for("verified.example.com"))
+    unverified = deception_content.honeytoken_values(deception_content.site_for("unverified.example.com"))
+    assert all(t in text for t in verified)
+    assert not any(t in text for t in unverified)
+
+
 # --------------------------------------------------------------------- HTTP
 
 

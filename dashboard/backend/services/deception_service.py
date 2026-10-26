@@ -4,7 +4,6 @@ Handles attack classification, secure synthetic response generation,
 strict anti-caching header enforcement, and fail-safe dual-sink audit logging.
 """
 
-import json
 import logging
 import re
 import threading
@@ -14,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from services import deception_content
 from services.clickhouse_service import ClickHouseService
 from services.payload_normalizer import payload_normalizer
 from services.pii_masker import pii_masker
@@ -43,6 +43,7 @@ class DeceptionResponse:
     headers: Dict[str, str]
     template_id: str
     category: str
+    delay_seconds: float = 0.0  # time-based SQLi: how long the caller holds the response
 
     @property
     def content(self) -> str:
@@ -132,149 +133,90 @@ SECURE_DECEPTION_HEADERS: Dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
-# Predefined In-Memory Synthetic Templates (Zero Leakage - Zero Disk/DB Reads)
+# Synthetic Templates (in memory, per site -- see services/deception_content)
 # ---------------------------------------------------------------------------
 
-PATH_TRAVERSAL_TEMPLATE: str = (
-    "root:x:0:0:root:/root:/bin/bash\n"
-    "daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n"
-    "bin:x:2:2:bin:/bin:/usr/sbin/nologin\n"
-    "sys:x:3:3:sys:/dev:/usr/sbin/nologin\n"
-    "sync:x:4:65534:sync:/bin:/bin/sync\n"
-    "games:x:5:60:games:/usr/games:/usr/sbin/nologin\n"
-    "man:x:6:12:man:/var/cache/man:/usr/sbin/nologin\n"
-    "lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin\n"
-    "mail:x:8:8:mail:/var/mail:/usr/sbin/nologin\n"
-    "news:x:9:9:news:/var/spool/news:/usr/sbin/nologin\n"
-    "uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin\n"
-    "proxy:x:13:13:proxy:/bin:/usr/sbin/nologin\n"
-    "www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\n"
-    "backup:x:34:34:backup:/var/backups:/usr/sbin/nologin\n"
-    "list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin\n"
-    "irc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin\n"
-    "gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin\n"
-    "nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n"
-    "systemd-network:x:100:102:systemd Network Management,,,:/run/systemd:/usr/sbin/nologin\n"
-    "systemd-resolve:x:101:103:systemd Resolver,,,:/run/systemd:/usr/sbin/nologin\n"
-    "syslog:x:102:106::/home/syslog:/usr/sbin/nologin\n"
-    "messagebus:x:103:107::/nonexistent:/usr/sbin/nologin\n"
-    "_apt:x:104:65534::/nonexistent:/usr/sbin/nologin\n"
-    "admin:x:1000:1000:Administrator,,,:/home/admin:/bin/bash\n"
-    "appuser:x:1001:1001:Application Service Account,,,:/home/appuser:/bin/sh\n"
-    "secops:x:1002:1002:Security Operations,,,:/home/secops:/bin/bash\n"
-    "postgres:x:1003:1003:PostgreSQL Database Server,,,:/var/lib/postgresql:/bin/bash\n"
-    "deployer:x:1004:1004:CI/CD Deployment Service,,,:/home/deployer:/bin/bash\n"
-)
+# What a request without a usable Host header gets; also the fail-safe body.
+_DEFAULT_SITE = deception_content.site_for("")
+PATH_TRAVERSAL_TEMPLATE: str = deception_content.passwd(_DEFAULT_SITE)
+SQLI_TEMPLATE: str = deception_content.schema_dump(_DEFAULT_SITE)
 
-SQLI_TEMPLATE: str = json.dumps(
-    {
-        "status": "success",
-        "query_execution_time_ms": 14.2,
-        "database": "production_app_db",
-        "schema": {
-            "tables": [
-                {
-                    "table_name": "app_users",
-                    "columns": [
-                        {"name": "user_id", "type": "INT", "primary_key": True},
-                        {"name": "username", "type": "VARCHAR(64)", "unique": True},
-                        {"name": "email", "type": "VARCHAR(255)", "unique": True},
-                        {"name": "role", "type": "VARCHAR(32)"},
-                        {"name": "password_hash", "type": "VARCHAR(128)"},
-                        {"name": "mfa_enabled", "type": "BOOLEAN"},
-                        {"name": "is_active", "type": "BOOLEAN"},
-                        {"name": "created_at", "type": "TIMESTAMP"},
-                    ],
-                    "rows": [
-                        {
-                            "user_id": 101,
-                            "username": "sysadmin_svc",
-                            "email": "sysadmin@corp.internal",
-                            "role": "SuperAdmin",
-                            "password_hash": "$pbkdf2-sha256$29000$dummySaltValue$dummySyntheticHashKx9281aZ0",
-                            "mfa_enabled": True,
-                            "is_active": True,
-                            "created_at": "2024-01-15T08:30:00Z",
-                        },
-                        {
-                            "user_id": 102,
-                            "username": "billing_auditor",
-                            "email": "auditor@corp.internal",
-                            "role": "FinanceAuditor",
-                            "password_hash": "$pbkdf2-sha256$29000$dummySaltValue$dummySyntheticHashLm8312bY1",
-                            "mfa_enabled": True,
-                            "is_active": True,
-                            "created_at": "2024-02-01T10:15:00Z",
-                        },
-                        {
-                            "user_id": 103,
-                            "username": "customer_support",
-                            "email": "support_lead@corp.internal",
-                            "role": "SupportStaff",
-                            "password_hash": "$pbkdf2-sha256$29000$dummySaltValue$dummySyntheticHashPn4491cW2",
-                            "mfa_enabled": False,
-                            "is_active": True,
-                            "created_at": "2024-03-10T14:45:00Z",
-                        },
-                    ],
-                },
-                {
-                    "table_name": "system_config",
-                    "columns": [
-                        {"name": "config_key", "type": "VARCHAR(64)", "primary_key": True},
-                        {"name": "config_value", "type": "VARCHAR(255)"},
-                        {"name": "is_encrypted", "type": "BOOLEAN"},
-                    ],
-                    "rows": [
-                        {
-                            "config_key": "auth_provider",
-                            "config_value": "internal_oauth2",
-                            "is_encrypted": False,
-                        },
-                        {
-                            "config_key": "session_ttl_seconds",
-                            "config_value": "86400",
-                            "is_encrypted": False,
-                        },
-                        {
-                            "config_key": "maintenance_window",
-                            "config_value": "SUN_0200_UTC",
-                            "is_encrypted": False,
-                        },
-                    ],
-                },
-            ],
-            "total_records": 6,
-            "version": "PostgreSQL 15.4 (Ubuntu 15.4-1.pgdg22.04+1)",
-        },
-    },
-    indent=2,
-)
-
+CATEGORIES: Dict[str, str] = {
+    "path_traversal": "Path Traversal (LFI)",
+    "sql_injection": "SQL Injection (SQLi)",
+    "sensitive_file": "Sensitive File Exposure",
+    "command_injection": "Command Injection (RCE)",
+    "ssrf": "Server-Side Request Forgery (SSRF)",
+    "xss": "Cross-Site Scripting (XSS)",
+    "admin_panel": "Admin Panel Probe",
+    "honeytoken": "Honeytoken Replay",
+}
 
 TEMPLATES_CATALOG: Dict[str, Dict[str, Any]] = {
     "path_traversal": {
-        "id": "path_traversal",
-        "name": "Fabricated Unix System File (/etc/passwd)",
-        "attack_category": "Path Traversal (LFI)",
+        "name": "System file read through traversal (/etc/passwd, shadow, hosts, win.ini, environ)",
         "content_type": "text/plain",
-        "status_code": 200,
-        "description": "Returns a realistic Unix /etc/passwd system file containing mock service accounts.",
-        "sample_preview": "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon...",
+        "description": "Serves the file the payload aims at, generated per site. Unknown targets get /etc/passwd.",
         "body": PATH_TRAVERSAL_TEMPLATE,
     },
     "sql_injection": {
-        "id": "sql_injection",
-        "name": "Fabricated Database Schema & Rows (JSON)",
-        "attack_category": "SQL Injection (SQLi)",
+        "name": "Emulated MySQL behind the endpoint",
         "content_type": "application/json",
-        "status_code": 200,
-        "description": "Returns a mock database schema with tables, columns, and synthetic credential rows.",
-        "sample_preview": '{"status": "success", "database": "production_app_db", ...}',
+        "description": "Error-based, UNION (column count and literal reflection), boolean (true/false probes "
+                       "differ) and time-based (sleep/benchmark/waitfor delay up to 10 s). JSON for API clients, HTML otherwise.",
         "body": SQLI_TEMPLATE,
     },
+    "sensitive_file": {
+        "name": "Exposed secrets (.env, wp-config, .git, .aws/credentials, SQL backup, SSH key)",
+        "content_type": "text/plain",
+        "description": "Plausible config and backup files carrying per-site honeytokens.",
+        "body": deception_content.dotenv(_DEFAULT_SITE),
+    },
+    "command_injection": {
+        "name": "Shell command output (id, whoami, uname, cat, ls, env)",
+        "content_type": "text/html",
+        "description": "Output of the injected command as the www-data user. Network commands stay silent.",
+        "body": "uid=33(www-data) gid=33(www-data) groups=33(www-data)\n",
+    },
+    "ssrf": {
+        "name": "Cloud metadata service (169.254.169.254)",
+        "content_type": "text/plain",
+        "description": "EC2 instance metadata with temporary IAM credentials that are honeytokens.",
+        "body": "ami-id\nhostname\niam/\ninstance-id\nlocal-ipv4\n",
+    },
+    "xss": {
+        "name": "Search page with the payload reflected escaped",
+        "content_type": "text/html",
+        "description": "Never reflects markup raw, so the honeypot cannot become a real XSS on the customer's domain.",
+        "body": "<h2>Search results for &ldquo;&lt;script&gt;&rdquo;</h2>",
+    },
+    "admin_panel": {
+        "name": "Admin / WordPress login that lets anyone in",
+        "content_type": "text/html",
+        "description": "GET shows a login form; any POST lands on a fake dashboard.",
+        "body": "<h2>Administrator login</h2>",
+    },
+    "honeytoken": {
+        "name": "Honeytoken replay",
+        "content_type": "text/html",
+        "description": "A request carried a secret only the honeypot ever handed out. Logged as critical.",
+        "body": "<h2>Dashboard</h2>",
+    },
 }
+for _tid, _t in TEMPLATES_CATALOG.items():
+    _t.update(
+        id=_tid,
+        attack_category=CATEGORIES[_tid],
+        status_code=200,
+        sample_preview=_t["body"][:80] + ("..." if len(_t["body"]) > 80 else ""),
+    )
 
+_HINTS = {
+    "path_traversal": "path_traversal", "traversal": "path_traversal", "lfi": "path_traversal",
+    "sql_injection": "sql_injection", "sqli": "sql_injection",
+    "sensitive_file": "sensitive_file", "command_injection": "command_injection", "rce": "command_injection",
+    "ssrf": "ssrf", "xss": "xss", "admin_panel": "admin_panel",
+}
 
 # ---------------------------------------------------------------------------
 # Deception Service Class
@@ -301,51 +243,65 @@ class DeceptionService:
         uri: str = "/",
         body: str = "",
         template_hint: Optional[str] = None,
+        host: str = "",
+        headers: Optional[Dict[str, str]] = None,
     ) -> AttackClassification:
         """
-        3-Tier attack classification:
-        1. Explicit rule/header hint ('path_traversal', 'sql_injection').
-        2. Normalized payload inspection (ReDoS-safe regex across raw and normalized tokens).
-        3. Contextual heuristic fallback (API vs static/resource patterns).
+        Attack classification, first match wins:
+        0. A honeytoken of this site anywhere in the request.
+        1. Explicit rule/header hint.
+        2. Signatures over raw and normalized input: traversal, SQLi, SSRF,
+           command injection, XSS (ReDoS-safe, inputs bounded at 4 KB).
+        3. Probed paths: sensitive files, admin/login panels.
+        4. Contextual heuristic fallback (API vs static/resource patterns).
         """
-        # Tier 1: Explicit hint
-        hint_clean = (template_hint or "").strip().lower()
-        if hint_clean in ("path_traversal", "traversal", "lfi"):
-            return AttackClassification("Path Traversal (LFI)", "path_traversal", 1.0)
-        if hint_clean in ("sql_injection", "sqli"):
-            return AttackClassification("SQL Injection (SQLi)", "sql_injection", 1.0)
-
-        # Bounded inputs to prevent ReDoS / CPU exhaustion
         safe_uri = (uri or "")[:4096]
         safe_body = (body or "")[:4096]
+
+        # Tier 0: honeytoken replay
+        if host:
+            corpus = safe_uri + " " + safe_body + " " + " ".join(
+                str(v)[:1024] for k, v in (headers or {}).items()
+                if k.lower() in ("authorization", "cookie", "x-api-key", "x-auth-token")
+            )
+            if deception_content.find_honeytoken(deception_content.site_for(host), corpus):
+                return AttackClassification(CATEGORIES["honeytoken"], "honeytoken", 1.0)
+
+        # Tier 1: Explicit hint
+        hint = _HINTS.get((template_hint or "").strip().lower())
+        if hint:
+            return AttackClassification(CATEGORIES[hint], hint, 1.0)
 
         # Normalized representations
         normalized_uri = payload_normalizer.normalize_string(safe_uri)
         normalized_body = payload_normalizer.normalize_string(safe_body)
-
-        # Candidate corpus list: test against both raw and normalized vectors
-        corpus_list = [
-            safe_uri,
-            safe_body,
-            normalized_uri,
-            normalized_body,
-        ]
+        corpus_list = [c for c in (safe_uri, safe_body, normalized_uri, normalized_body) if c]
 
         # Tier 2: Signature pattern matching
-        # Check Path Traversal
-        for corpus in corpus_list:
-            if corpus and PATH_TRAVERSAL_REGEX.search(corpus):
-                return AttackClassification("Path Traversal (LFI)", "path_traversal", 0.95)
+        for regex, tid in (
+            (PATH_TRAVERSAL_REGEX, "path_traversal"),
+            (SQLI_REGEX, "sql_injection"),
+        ):
+            if any(regex.search(c) for c in corpus_list):
+                return AttackClassification(CATEGORIES[tid], tid, 0.95)
+        decoded = normalized_uri + " " + normalized_body
+        if deception_content.ssrf_target(decoded):
+            return AttackClassification(CATEGORIES["ssrf"], "ssrf", 0.9)
+        if deception_content._CMD.search(decoded):
+            return AttackClassification(CATEGORIES["command_injection"], "command_injection", 0.9)
+        if any(deception_content.XSS_REGEX.search(c) for c in corpus_list):
+            return AttackClassification(CATEGORIES["xss"], "xss", 0.9)
 
-        # Check SQL Injection
-        for corpus in corpus_list:
-            if corpus and SQLI_REGEX.search(corpus):
-                return AttackClassification("SQL Injection (SQLi)", "sql_injection", 0.95)
+        # Tier 3: probed paths
+        path = normalized_uri.split("?", 1)[0]
+        if deception_content.file_variant(path):
+            return AttackClassification(CATEGORIES["sensitive_file"], "sensitive_file", 0.85)
+        if deception_content.ADMIN_PATH.search(path):
+            return AttackClassification(CATEGORIES["admin_panel"], "admin_panel", 0.8)
 
-        # Tier 3: Contextual heuristic fallback
+        # Tier 4: Contextual heuristic fallback
         uri_lower = safe_uri.lower()
-        body_lower = safe_body.lower()
-        check_corpus = uri_lower + " " + body_lower
+        check_corpus = uri_lower + " " + safe_body.lower()
 
         # Heuristic SQLi: API/REST routes, database query param keys (form & JSON)
         api_indicators = ["/api/", "/rest/", "/v1/", "/v2/", "/graphql", "/auth", "/login", "/user"]
@@ -354,15 +310,15 @@ class DeceptionService:
             '"q":', '"query":', '"search":', '"id":', '"filter":', '"user":', '"name":', '"select":'
         ]
         if any(ind in check_corpus for ind in api_indicators) or any(ind in check_corpus for ind in query_param_indicators):
-            return AttackClassification("SQL Injection (SQLi)", "sql_injection", 0.70)
+            return AttackClassification(CATEGORIES["sql_injection"], "sql_injection", 0.70)
 
         # Heuristic Path Traversal: file extensions, download paths
         file_ext_indicators = [".php", ".asp", ".aspx", ".jsp", ".txt", ".log", ".conf", ".ini", ".zip", ".tar", ".gz", "/download", "/files/", "/static/"]
         if any(ext in uri_lower for ext in file_ext_indicators):
-            return AttackClassification("Path Traversal (LFI)", "path_traversal", 0.70)
+            return AttackClassification(CATEGORIES["path_traversal"], "path_traversal", 0.70)
 
         # General default fallback: Path Traversal (believable Unix system file)
-        return AttackClassification("Path Traversal (LFI)", "path_traversal", 0.50)
+        return AttackClassification(CATEGORIES["path_traversal"], "path_traversal", 0.50)
 
     def generate_response(
         self,
@@ -375,28 +331,52 @@ class DeceptionService:
         template_hint: Optional[str] = None,
         template_id: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
+        host: str = "",
     ) -> DeceptionResponse:
         """
-        Generates a contextual synthetic deception response based on attack classification.
-        Guarantees HTTP status 200, strictly synthetic content, and anti-caching headers.
+        Generates a contextual synthetic deception response for this site.
+        Guarantees HTTP status 200, strictly synthetic content, and anti-caching
+        headers. delay_seconds is set for time-based SQL injection; the caller
+        sleeps, so generation itself stays fast.
         """
-        active_hint = template_hint or template_id
-        classification = self.classify_attack(uri=uri, body=body, template_hint=active_hint)
-        resolved_template_id = classification.template_id
+        hdrs = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+        host = host or hdrs.get("x-original-host", "")
+        classification = self.classify_attack(
+            uri=uri, body=body, template_hint=template_hint or template_id, host=host, headers=headers,
+        )
+        tid = classification.template_id
+        site = deception_content.site_for(host)
+        ctx = deception_content.Ctx.build(uri, method, body, hdrs.get("accept", ""))
+        delay = 0.0
 
-        template_meta = TEMPLATES_CATALOG.get(resolved_template_id, TEMPLATES_CATALOG["path_traversal"])
+        if tid == "sql_injection":
+            content_type, payload, extra = deception_content.render_sql(site, ctx)
+            delay = deception_content.sql_delay(ctx.text)
+        elif tid in ("path_traversal", "sensitive_file"):
+            variant = deception_content.file_variant(ctx.uri) or deception_content.file_variant(ctx.text) or "passwd"
+            content_type, payload, extra = deception_content.render_file(site, variant, ctx)
+        elif tid == "command_injection":
+            content_type, payload, extra = deception_content.render_command(site, ctx)
+        elif tid == "ssrf":
+            content_type, payload, extra = deception_content.render_ssrf(site, ctx)
+        elif tid == "xss":
+            content_type, payload, extra = deception_content.render_xss(site, ctx)
+        else:  # admin_panel, honeytoken
+            content_type, payload, extra = deception_content.render_admin(site, ctx, logged_in=tid == "honeytoken")
 
         response_headers = dict(SECURE_DECEPTION_HEADERS)
+        response_headers.update(extra)
         if request_id:
             response_headers["X-Request-ID"] = request_id
 
         return DeceptionResponse(
-            status_code=template_meta["status_code"],
-            content_type=template_meta["content_type"],
-            body=template_meta["body"],
+            status_code=200,
+            content_type=content_type,
+            body=payload,
             headers=response_headers,
-            template_id=resolved_template_id,
+            template_id=tid,
             category=classification.category,
+            delay_seconds=delay,
         )
 
     def handle_deception(

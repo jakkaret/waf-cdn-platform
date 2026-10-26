@@ -7,7 +7,7 @@ status: VERIFIED
 
 # บทที่ 17 — Deception Layer (ชั้นหลอกล่อผู้โจมตี)
 
-> ข้อมูลทั้งหมดที่ deception layer ส่งกลับเป็น **ข้อมูลสังเคราะห์ (synthetic)** ที่เขียนไว้ในโค้ด ไม่ได้อ่านจากไฟล์หรือฐานข้อมูลจริงของเครื่องใดๆ และ origin ไม่ถูกติดต่อ
+> ข้อมูลทั้งหมดที่ deception layer ส่งกลับเป็น **ข้อมูลสังเคราะห์ (synthetic)** ที่สร้างในหน่วยความจำ (`services/deception_content.py`) ไม่ได้อ่านจากไฟล์หรือฐานข้อมูลจริงของเครื่องใดๆ และ origin ไม่ถูกติดต่อ
 
 ## 17.1 ภาพรวม
 
@@ -47,24 +47,38 @@ sequenceDiagram
 
 | ชั้น | กลไก | ไฟล์ |
 |---|---|---|
-| Edge | `error_page 418 = @deception_via_main` → proxy คำขอเดิมไป Main (ไม่มี cache, timeout 2s/5s) | edge `default.conf.template` |
+| Edge | `error_page 418 = @deception_via_main` → proxy คำขอเดิมไป Main (ไม่มี cache, timeout 2s/20s) | edge `default.conf.template` |
 | Main | `error_page 418 = @deception` → rewrite เป็น `/api/deception/respond` → FastAPI | `nginx/templates/conf.d/default.conf.template` |
 | Main | header ที่ส่ง: `X-Internal-Deception-Key`, `X-Request-ID`, `X-Real-IP`, `X-Original-URI`, `X-Original-Method`, `X-Original-Host`; ล้าง `X-Deception-Template`, `X-Matched-Rule-ID` ที่ client ส่งมา | เดียวกัน |
-| Main | `proxy_connect_timeout 1s`, `proxy_read_timeout 3s`; ถ้า backend ตอบ 502/504 ใช้ `@deception_static` (body สังเคราะห์แบบคงที่) | เดียวกัน |
+| Main | `proxy_connect_timeout 1s`, `proxy_read_timeout 15s` (เผื่อ time-based SQLi หน่วงได้สูงสุด 10 วินาที); ถ้า backend ตอบ 502/504 ใช้ `@deception_static` (body สังเคราะห์แบบคงที่) | เดียวกัน |
 
 ## 17.4 การสร้าง response
 
-`services/deception_service.py`
-1. **จัดประเภท** (`classify_attack`): hint → regex (path traversal / SQLi ที่จำกัดความยาว input 4096 และ regex ถูกออกแบบไม่ให้ backtrack มาก) → heuristic จาก URL/พารามิเตอร์ → ค่าตั้งต้นเป็น path traversal
-2. **เลือก template** ในหน่วยความจำ:
+`services/deception_service.py` จัดประเภท, `services/deception_content.py` สร้างเนื้อหา
 
-| Template | Content-Type | เนื้อหา |
-|---|---|---|
-| `path_traversal` | text/plain | ไฟล์รูปแบบ `/etc/passwd` ที่มีบัญชีสมมติ |
-| `sql_injection` | application/json | schema และแถวข้อมูลสมมติ (hash ปลอม) |
+1. **ข้อมูลแยกตามเว็บ:** ทุกอย่างสร้างจาก profile ของโดเมน (`X-Original-Host`) ที่ได้จาก `HMAC(DECEPTION_INTERNAL_KEY, host)` เว็บเดียวกันได้ข้อมูลชุดเดิมทุกครั้ง (ขอ passwd แล้วขอ shadow ก็สอดคล้องกัน) เว็บต่างกันได้ข้อมูลต่างกัน และคนที่ไม่มี key เดาไม่ได้ คำขอที่ไม่มี host ใช้ profile คงที่ชุดเดียว
+2. **จัดประเภท** (`classify_attack`) ตามลำดับ: honeytoken ของเว็บนั้นในคำขอ → hint → regex (path traversal, SQLi, SSRF, command injection, XSS; input จำกัด 4096 ตัวอักษร) → path ที่ถูกสุ่มหา (ไฟล์ลับ, หน้า admin) → heuristic จาก URL → ค่าตั้งต้นเป็น path traversal
+3. **เนื้อหาตามประเภท:**
 
-3. ตอบ 200 พร้อม header ห้าม cache: `Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, private, s-maxage=0`, `Pragma`, `Expires: 0`, `Surrogate-Control`, `CDN-Cache-Control`
-4. การจัดประเภทรันใน thread (`asyncio.to_thread`) timeout 1 วินาที ถ้าผิดพลาดใช้ fallback response
+| Template | เนื้อหา |
+|---|---|
+| `path_traversal` / `sensitive_file` | ไฟล์ที่ payload เล็งไว้: `/etc/passwd`, `/etc/shadow`, `/etc/hosts`, `win.ini`, `/proc/self/environ`, `.env`, `wp-config.php` (เรียกตรงได้หน้าว่างแบบ PHP ที่ถูก execute, ไฟล์ `.bak` ได้ source), `.git/HEAD`, `.git/config`, `.aws/credentials`, SSH key, SQL dump (ดาวน์โหลดเป็นไฟล์), `php://filter` ได้ base64 ของ source |
+| `sql_injection` | จำลอง MySQL: quote ไม่ครบได้ syntax error, `ORDER BY n` เกินจำนวนคอลัมน์ได้ `Unknown column`, `UNION SELECT` จำนวนคอลัมน์ไม่ตรงได้ error ถ้าตรงจะสะท้อนค่า literal, `0x…`, `CONCAT`, `database()`, `version()` กลับเป็นแถวใหม่, boolean `1=1` กับ `1=2` ได้ผลต่างกัน, `SLEEP`/`pg_sleep`/`BENCHMARK`/`WAITFOR DELAY` หน่วงจริงสูงสุด 10 วินาที (ไม่หน่วงถ้าเงื่อนไขเป็นเท็จ) ตอบ JSON ให้ API/curl และตาราง HTML ให้ browser |
+| `command_injection` | ผลของคำสั่งในฐานะ `www-data` เช่น `id`, `whoami`, `uname -a`, `cat`, `ls`, `env`; คำสั่ง network (`curl`, `nslookup`, `ping`) เงียบ |
+| `ssrf` | EC2 metadata (`169.254.169.254`) พร้อม IAM credential ชั่วคราวที่เป็น honeytoken; host ภายในอื่นได้หน้า "Welcome to nginx!" |
+| `xss` | หน้าค้นหาที่สะท้อน payload แบบ escape (ห้ามสะท้อนดิบ เพราะจะกลายเป็น XSS จริงบนโดเมนลูกค้า) |
+| `admin_panel` | GET ได้ฟอร์ม login (แบบ WordPress สำหรับ `wp-*`), POST อะไรก็เข้า dashboard ปลอม ไม่ตั้ง cookie |
+| `honeytoken` | dashboard ปลอม และบันทึกเป็น "Honeytoken Replay" |
+
+4. ตอบ 200 พร้อม header ห้าม cache: `Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, private, s-maxage=0`, `Pragma`, `Expires: 0`, `Surrogate-Control`, `CDN-Cache-Control`
+5. การสร้าง response รันใน thread (`asyncio.to_thread`) timeout 1 วินาที ถ้าผิดพลาดใช้ fallback response การหน่วงของ time-based SQLi ทำหลังจากนั้นใน `api/deception.py` รอพร้อมกันได้ไม่เกิน 32 คำขอ เกินนั้นตอบทันที
+
+### Honeytoken
+
+ความลับในของปลอม (รหัส admin, รหัส DB, AWS key, API key, APP_KEY) เป็นค่าที่ไม่มีอยู่ที่อื่น ถ้ามีคำขอที่ถือค่าเหล่านี้กลับมา แปลว่าผู้โจมตีกำลังใช้ของที่ขโมยไป
+- `services/managed_ruleset.apply()` เขียน `managed-05-honeytokens.conf` (rule id 3190001, phase 2, `@pm` ทุก honeytoken ของทุกโดเมนที่ verify แล้ว) ทุก 15 นาทีพร้อม host map และส่งไป edge ด้วย bundle เดียวกัน
+- คำขอที่ตรงได้ 418 แล้วเข้า deception เหมือน DECEIVE (ตรวจ `ARGS`, `REQUEST_HEADERS`, `REQUEST_BODY` จึงจับรหัสใน POST และ `Authorization` ได้)
+- backend ยืนยันว่าเป็น token ของเว็บนั้น แล้วบันทึกประเภท `Honeytoken Replay` ไล่ย้อนได้ว่า IP ไหนเคยได้ของปลอมของเว็บนั้นจาก log `Deception:` ของ host เดียวกัน
 
 ## 17.5 การควบคุมความปลอดภัย
 
@@ -86,8 +100,10 @@ sequenceDiagram
 
 ## 17.7 ข้อจำกัดที่ทราบ
 
-- การเลือก template SQLi อาศัย heuristic จาก argument; marker ที่ไม่มีพารามิเตอร์อาจได้ template path traversal
-- รายละเอียดของ response ยังแตกต่างจาก response ปกติของ origin ในบางจุด (ผลการทดสอบ 2026-09-27)
+- ไม่ใช่ฐานข้อมูลหรือ shell จริง: query ที่ดึงข้อมูลจริงจาก `information_schema` ทีละค่า (เช่นขั้น enumerate ของ sqlmap) ได้ผลไม่สมเหตุสมผล และคำสั่งที่ต้องจำสถานะ (เขียนไฟล์แล้วอ่านกลับ) ไม่ทำงาน
+- การตรวจแบบ out-of-band (DNS/HTTP callback ไปเครื่องผู้โจมตี) ไม่มีวันสำเร็จ และห้ามทำให้สำเร็จ เพราะจะทำให้แพลตฟอร์มยิงออกไปตามคำสั่งผู้โจมตี
+- หน้า HTML ปลอมใช้หน้าตากลางของระบบ ไม่ได้เลียนแบบหน้าจริงของ origin
+- template ที่เลือกในกฎ DECEIVE ไม่ถูกส่งถึง backend (nginx ล้าง `X-Deception-Template`) ระบบจัดประเภทอัตโนมัติเสมอ
 
 ## แหล่งอ้างอิง (Evidence)
 - `api/deception.py`, `services/deception_service.py`, `services/rule_manager.py`, `modsecurity/custom-rules/custom-deceive.conf`
