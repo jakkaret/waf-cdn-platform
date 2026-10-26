@@ -72,6 +72,16 @@ def test_editor_grant_needs_confirmation_and_allows_edit(sc, people):
     assert r.status_code == 200, r.text
 
 
+def test_origin_reports_support_access_level(sc, people):
+    tid = _open(sc, people).json()["ticket_id"]
+    url = f"/api/origins/{people['origin']}"
+    assert _grant(sc, people, tid).status_code == 201
+    assert sc.get(url, headers=people["staff"]["h"]).json()["support_access"] == "viewer"
+    assert _grant(sc, people, tid, level="editor", confirm=True).status_code == 201
+    assert sc.get(url, headers=people["staff"]["h"]).json()["support_access"] == "editor"
+    assert sc.get(url, headers=people["owner"]["h"]).json()["support_access"] is None
+
+
 def test_grant_never_gives_ownership_actions(sc, people):
     tid = _open(sc, people).json()["ticket_id"]
     _grant(sc, people, tid, level="editor", confirm=True)

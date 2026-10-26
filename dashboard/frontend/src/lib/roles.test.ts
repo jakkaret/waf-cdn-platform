@@ -16,6 +16,11 @@ describe('roles', () => {
     expect(originRoleOf(origin, 'x')).toBeNull()
     expect(originRoleOf(null, 'o')).toBeNull()
   })
+  it('gives support staff the level of their grant, never owner', () => {
+    expect(originRoleOf({ ...origin, support_access: 'editor' }, 's')).toBe('editor')
+    expect(originRoleOf({ ...origin, support_access: 'viewer' }, 's')).toBe('viewer')
+    expect(originRoleOf({ ...origin, support_access: null }, 's')).toBeNull()
+  })
   it('owner manages, editor edits, viewer reads', () => {
     expect([canManageOrigin('owner'), canManageOrigin('editor'), canManageOrigin('viewer')]).toEqual([true, false, false])
     expect([canEditOrigin('owner'), canEditOrigin('editor'), canEditOrigin('viewer')]).toEqual([true, true, false])

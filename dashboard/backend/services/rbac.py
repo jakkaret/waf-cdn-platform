@@ -216,6 +216,22 @@ def _support_grant_allows(origin_id: str, current_user: dict, kind: str) -> bool
     return True
 
 
+def support_access_level(origin: dict, current_user: dict) -> Optional[str]:
+    """The level ("viewer" | "editor") support staff hold on this origin
+    through an active grant, so the UI can show what the grant allows. None
+    for members (their own role applies) and for non-staff. Not logged: the
+    read that loaded the origin was already logged by verify_origin_access."""
+    user_id = current_user.get("user_id")
+    if current_user.get("role") != "admin" or not user_id:
+        return None
+    if user_id == origin.get("admin_user_id") or user_id in (origin.get("editor_user_ids") or set()) \
+            or user_id in (origin.get("viewer_user_ids") or set()):
+        return None
+    from services import support_service
+    grant = support_service.active_grant(origin.get("id"))
+    return grant.get("level") if grant else None
+
+
 def verify_origin_edit_access(
     origin_id: str,
     current_user: dict = Depends(get_current_user),

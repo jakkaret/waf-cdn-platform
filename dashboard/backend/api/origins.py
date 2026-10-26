@@ -4,7 +4,7 @@ import ipaddress
 import re
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Literal, Optional
-from services.rbac import get_current_user, verify_origin_ownership, verify_origin_access, verify_origin_edit_access, require_verified_email
+from services.rbac import get_current_user, verify_origin_ownership, verify_origin_access, verify_origin_edit_access, require_verified_email, support_access_level
 import services.origin_service as origin_service
 from services.captcha_config import DEFAULT_CONFIG, get_origin_config, save_origin_config
 from services.otp_config import (
@@ -266,9 +266,12 @@ async def list_origins(
     return {"origins": formatted_origins}
 
 @router.get("/{origin_id}")
-async def get_origin(origin: dict = Depends(verify_origin_access)):
+async def get_origin(origin: dict = Depends(verify_origin_access), current_user: dict = Depends(get_current_user)):
     online_names = await origin_service.get_live_online_proxy_names()
     o = _attach_live_status([origin], online_names)[0]
+    # Support staff are not members; without this the page treats an editor
+    # grant as no role and shows everything read-only.
+    o["support_access"] = await asyncio.to_thread(support_access_level, origin, current_user)
     return o
 
 # A broad tag ("linux") matches hundreds of CVEs; the page shows the highest

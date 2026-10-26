@@ -22,13 +22,21 @@ export function platformRoleLabel(role: string | undefined): string {
   return PLATFORM_ROLE_LABEL[role as PlatformRole] ?? 'User'
 }
 
-type OriginMembers = { admin_user_id?: string; editor_user_ids?: string[]; viewer_user_ids?: string[] }
+type OriginMembers = {
+  admin_user_id?: string
+  editor_user_ids?: string[]
+  viewer_user_ids?: string[]
+  // Set by GET /origins/{id} for support staff holding an active grant.
+  support_access?: 'viewer' | 'editor' | null
+}
 
 export function originRoleOf(origin: OriginMembers | null | undefined, userId: string | undefined): OriginRole | null {
   if (!origin || !userId) return null
   if (origin.admin_user_id === userId) return 'owner'
   if ((origin.editor_user_ids ?? []).includes(userId)) return 'editor'
   if ((origin.viewer_user_ids ?? []).includes(userId)) return 'viewer'
+  // A support grant never makes anyone the owner.
+  if (origin.support_access === 'editor' || origin.support_access === 'viewer') return origin.support_access
   return null
 }
 
