@@ -1,0 +1,41 @@
+; waf-it-kku.online -- the whole zone, served by PowerDNS on both edges
+; (ns1 = edge-th, ns2 = edge-asia; glue at the registry via Hostinger
+; "child nameservers"). Moved from Hostinger on 2026-10-26: Hostinger cannot
+; delegate a subdomain (no NS records below the apex), so the GeoDNS for
+; cdn.waf-it-kku.online needed the zone itself. Records outside the CDN are
+; copied from Hostinger's export of that day; nothing else existed (no MX,
+; TXT, CAA, AAAA).
+;
+; Every customer CNAME points at waf-token-<id>.cdn.waf-it-kku.online, and
+; platform subdomains (app., vampi., ...) hit the "*" record: both go through
+; the GeoDNS rule below. Visitors in Thailand (EDNS Client Subnet, else the
+; resolver's address) get edge-th, everyone else edge-asia (Hong Kong).
+; ifurlup() checks /healthz/deep on each edge -- the edge AND its WireGuard
+; path to Main -- in the background; an edge that fails drops out and the other
+; set answers. Both failing: both addresses are returned.
+;
+; Bump the serial on every change, then `docker restart geodns-pdns` on both edges.
+$ORIGIN waf-it-kku.online.
+$TTL 3600
+@           3600 IN SOA ns1.waf-it-kku.online. hostmaster.waf-it-kku.online. (
+                2026102602 ; serial
+                3600       ; refresh
+                600        ; retry
+                604800     ; expire
+                300 )      ; negative TTL
+@           3600 IN NS  ns1.waf-it-kku.online.
+@           3600 IN NS  ns2.waf-it-kku.online.
+ns1         3600 IN A   45.154.26.91
+ns2         3600 IN A   57.158.25.236
+
+; Main: dashboard and API (its own Caddy)
+@           3600 IN A   178.104.53.123
+www          300 IN CNAME waf-it-kku.online.
+main        3600 IN A   178.104.53.123
+; Old custom GeoDNS container on Main (cdn/geodns); nothing uses it any more.
+ns-geodns   3600 IN A   178.104.53.123
+
+; CDN edges, chosen per visitor
+cdn           60 IN LUA A ";if country('TH') then return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'45.154.26.91'}, {'57.158.25.236'}}, {stringmatch='OK'}) else return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'57.158.25.236'}, {'45.154.26.91'}}, {stringmatch='OK'}) end"
+*.cdn         60 IN LUA A ";if country('TH') then return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'45.154.26.91'}, {'57.158.25.236'}}, {stringmatch='OK'}) else return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'57.158.25.236'}, {'45.154.26.91'}}, {stringmatch='OK'}) end"
+*             60 IN LUA A ";if country('TH') then return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'45.154.26.91'}, {'57.158.25.236'}}, {stringmatch='OK'}) else return ifurlup('http://cdn.waf-it-kku.online/healthz/deep', {{'57.158.25.236'}, {'45.154.26.91'}}, {stringmatch='OK'}) end"

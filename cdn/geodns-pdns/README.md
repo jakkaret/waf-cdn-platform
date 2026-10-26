@@ -1,8 +1,9 @@
 # GeoDNS for the CDN edges (PowerDNS)
 
-Every customer domain is a CNAME to `waf-token-<id>.cdn.waf-it-kku.online`.
-`cdn.waf-it-kku.online` is delegated from the main zone (Hostinger) to
-PowerDNS running on both edges, which picks the edge for each visitor:
+Every customer domain is a CNAME to `waf-token-<id>.cdn.waf-it-kku.online`,
+and platform subdomains (`app.`, `vampi.`, ...) match `*.waf-it-kku.online`.
+PowerDNS on both edges serves the whole `waf-it-kku.online` zone (ns1 =
+edge-th, ns2 = edge-asia) and picks the edge for each visitor:
 
 | Visitor | Answer | When that edge fails |
 |---|---|---|
@@ -23,7 +24,7 @@ answers come from the backup set; then they settle.
 
 - `pdns.conf`: bind backend for the zone, geoip backend only for its database
   (`country()`), LUA records on, EDNS Client Subnet on, no recursion.
-- `zones/cdn.waf-it-kku.online.zone`: the zone. Bump the serial on every change.
+- `zones/waf-it-kku.online.zone`: the whole zone. Bump the serial on every change.
 - `geo/dbip-country-lite.mmdb`: not in git. Copy
   `dashboard/backend/data/geoip/dbip-country-lite.mmdb` from Main (DB-IP Lite,
   CC BY 4.0, the same file the dashboard uses).
@@ -52,18 +53,24 @@ dig @57.158.25.236 x.cdn.waf-it-kku.online +subnet=8.8.8.0/24    # US  -> 57.158
 dig @45.154.26.91 google.com                                      # REFUSED (no recursion)
 ```
 
-## Delegation (Hostinger, main zone `waf-it-kku.online`)
+## Nameservers (moved from Hostinger, 2026-10-26)
 
-Do this only after both edges serve every site (shared Caddy storage,
-`cdn/edge/Caddyfile`), or visitors sent to edge-asia get no certificate.
+Hostinger cannot delegate a subdomain (it has no NS records below the apex),
+so the zone itself moved; the records outside the CDN were copied from
+Hostinger's export of that day.
 
-1. Add `ns1.waf-it-kku.online A 45.154.26.91` and
-   `ns2.waf-it-kku.online A 57.158.25.236`.
-2. Delete the `cdn` and `*.cdn` A records.
-3. Add `cdn NS ns1.waf-it-kku.online.` and `cdn NS ns2.waf-it-kku.online.`
+1. Hostinger, DNS / Nameservers, "child nameservers": `ns1.waf-it-kku.online`
+   45.154.26.91 and `ns2.waf-it-kku.online` 57.158.25.236 (glue at the registry;
+   `whois -h whois.nic.online "nameserver ns1.waf-it-kku.online"`).
+2. "Change nameservers" to `ns1.waf-it-kku.online` and `ns2.waf-it-kku.online`.
 
-Old answers stay in resolvers' caches for up to the old TTL (about 4 hours);
-during that time they still point at edge-th, which keeps working.
+Roll back by changing the nameservers back to `cosmos.dns-parking.com` and
+`nova.dns-parking.com` (the Hostinger zone still holds the old records). The
+`.online` registry hands out the delegation with TTL 900, so either change
+reaches resolvers in about 15 minutes plus Hostinger's processing.
+
+Before a change, compare every name with the zone as it should be, e.g.
+`dig @45.154.26.91 www.waf-it-kku.online` and `dig @57.158.25.236 ...`.
 
 ## Ports
 
