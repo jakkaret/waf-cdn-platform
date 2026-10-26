@@ -162,10 +162,13 @@ def test_verified_hosts_by_origin_excludes_unverified_domains(db):
 
 def test_verified_hosts_by_origin_drops_a_host_claimed_by_two_origins(db):
     # A BYO domain name is unique, so the two claims come from one origin's
-    # verified domain and another origin's tunnel host.
+    # verified domain and another origin's tunnel host. Inserting or claiming
+    # that pair is refused now, so the legacy state is set up behind the
+    # store's back: an unverified row flipped to verified directly.
     seed_origin(db, {"id": "o1", "status": "active"})
     seed_origin(db, {"id": "o2", "status": "active", "tunnel_domains": ["shared.example.com"]})
-    seed_domain(db, {"id": "d1", "origin_id": "o1", "domain_name": "shared.example.com", "dns_verified": True})
+    seed_domain(db, {"id": "d1", "origin_id": "o1", "domain_name": "shared.example.com"})
+    db.update_domain(uid("d1"), {"dns_verified": True})
     _origins, by_origin = mr.verified_hosts_by_origin(db)
     assert "shared.example.com" not in by_origin.get(uid("o1"), [])
     assert "shared.example.com" not in by_origin.get(uid("o2"), [])

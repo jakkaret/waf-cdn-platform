@@ -208,6 +208,23 @@ def test_archived_origin_gives_up_its_verified_name(store):
     assert {x["origin_id"] for x in store.list_domains() if x["domain_name"] == "app.example.com"} == {new}
 
 
+def test_archived_origin_gives_up_its_tunnel_host(store):
+    from services.dynamodb_service import DomainAlreadyClaimed, DuplicateDomain
+    old = _origin(store, _user()["user_id"])
+    assert store.update_origin(old, {"tunnel_token_hash": "a" * 64, "tunnel_domains": ["shop.example.com"]})
+    live = _origin(store, _user()["user_id"])
+    d = _domain(store, live, "shop.example.com", False)
+    with pytest.raises(DomainAlreadyClaimed):  # a live origin's tunnel host still blocks
+        store.claim_verified_domain(d["id"])
+    with pytest.raises(DuplicateDomain):
+        _domain(store, _origin(store, _user()["user_id"]), "shop.example.com", True)
+    assert store.delete_origin(old)
+    store.claim_verified_domain(d["id"])
+    assert store.tunnel_domain_origin("shop.example.com") == ""
+    assert store.restore_origin(old)
+    assert not store.get_origin_by_id(old).get("tunnel_domains")
+
+
 def test_live_origin_keeps_its_verified_name(store):
     from services.dynamodb_service import DomainAlreadyClaimed
     a = _origin(store, _user()["user_id"])

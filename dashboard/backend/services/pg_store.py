@@ -59,12 +59,15 @@ class DuplicateDomain(ValueError):
 
 
 def _release_archived_name(name: str) -> None:
-    """An archived origin gives its names up: drop its rows for `name` so a new
-    origin can verify it (the verified-name unique index would refuse it).
-    Call inside the transaction that claims the name. Restoring that origin
-    later brings it back without this domain."""
+    """An archived origin gives its names up: drop its domain rows and tunnel
+    host for `name` so a new origin can verify it (the verified-name and
+    tunnel-host unique indexes would refuse it, and a restore must not bring
+    back a host another origin now holds). Call inside the transaction that
+    claims the name. Restoring that origin later brings it back without it."""
     pool.exec_("DELETE FROM domains d USING origins o WHERE d.origin_id = o.id "
                "AND o.status IN ('archived', 'deleted') AND d.domain_name = %s", (name,))
+    pool.exec_("DELETE FROM origin_tunnel_domains t USING origins o WHERE t.origin_id = o.id "
+               "AND o.status IN ('archived', 'deleted') AND t.domain_name = %s", (name,))
 
 
 class DomainAlreadyClaimed(ValueError):
@@ -368,11 +371,11 @@ class PgStore:
             row = pool.q1("SELECT origin_id, domain_name FROM domains WHERE id = %s FOR UPDATE", (did,))
             if not row:
                 raise ValueError("unknown domain")
+            _release_archived_name(row["domain_name"])
             tunnel = pool.q1("SELECT origin_id FROM origin_tunnel_domains WHERE domain_name = %s",
                              (row["domain_name"],))
             if tunnel and tunnel["origin_id"] != row["origin_id"]:
                 raise DomainAlreadyClaimed(f"Domain '{row['domain_name']}' is another origin's tunnel host")
-            _release_archived_name(row["domain_name"])
             try:
                 pool.exec_("UPDATE domains SET dns_verified = true, "
                            "ssl_status = CASE WHEN ssl_status = 'none' THEN 'pending' ELSE ssl_status END, "
@@ -457,6 +460,9 @@ class PgStore:
             with pool.transaction():
                 if verified:
                     _release_archived_name(name)
+                    tunnel = pool.q1("SELECT origin_id FROM origin_tunnel_domains WHERE domain_name = %s", (name,))
+                    if tunnel and tunnel["origin_id"] != oid:
+                        raise DuplicateDomain(f"Domain name {name} is another origin's tunnel host.")
                 row = pool.q1(
                     "INSERT INTO domains (id, origin_id, domain_name, verification_token, dns_verified, "
                 "ssl_status, created_at, updated_at) VALUES (COALESCE(%s::uuid, gen_random_uuid()), "
