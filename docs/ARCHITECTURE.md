@@ -118,6 +118,24 @@ The gate does not cover:
 
 Edges do not run the gate.
 
+Rules from ML Insights (2026-10-27): the page where a request was pasted in
+by hand is gone. An origin's Owner or Editor opens a flagged request in ML
+Insights and asks Gen 3 for a rule. This is only offered when Gen 3 flagged the
+request and the gate did not already block it. The rule joins that origin's
+pending queue and is backtested, then approved or rejected through
+`/api/ml-rules`, as before. Nothing is deployed without that approval.
+
+To make this possible, `ml_verdicts` keeps a body sample for requests scoring 50
+or more:
+- secrets and personal data are masked by `services/ml_verdicts.mask_body`
+  (`pii_masker`, plus sensitive multipart fields);
+- the sample is at most 4,096 characters and is deleted with the row after 7 days;
+- only the origin's Owner and Editors can read it
+  (`GET /api/origins/{id}/ml-verdicts/{request_id}`).
+
+Masking is pattern-based, so free text such as names or addresses can still be
+stored.
+
 ## Rule synchronization
 
 Dashboard API -> `scripts/sync_waf_rules.py` -> `docker cp` -> `nginx -t` ->

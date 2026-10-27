@@ -10,7 +10,7 @@ status: VERIFIED
 
 Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/api/system/*`, ไฟล์ static) อยู่นอกขอบเขตของไฟล์นี้
 
-พบทั้งหมด **180 endpoints** ใน **29 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 30 รายการ
+พบทั้งหมด **182 endpoints** ใน **29 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 30 รายการ
 
 ## `api/ai_summary.py`
 
@@ -192,6 +192,8 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 | GET | `/api/origins/{origin_id}/ml-protection` | `get_ml_protection` | origin read |  |
 | PUT | `/api/origins/{origin_id}/ml-protection` | `put_ml_protection` | origin edit, login |  |
 | GET | `/api/origins/{origin_id}/ml-protection/preview` | `preview_ml_protection` | origin read |  |
+| GET | `/api/origins/{origin_id}/ml-verdicts/{request_id}` | `get_ml_verdict` | origin edit | One of this origin's scored requests with its masked body sample |
+| POST | `/api/origins/{origin_id}/ml-verdicts/{request_id}/suggest-rule` | `suggest_rule_from_verdict` | origin edit, login | Ask Gen 3 for a rule from one flagged request of this origin, rescored |
 
 ## `api/ml_rules.py`
 
