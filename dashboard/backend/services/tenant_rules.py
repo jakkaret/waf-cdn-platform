@@ -349,6 +349,18 @@ class TenantRuleService:
             })
         return out
 
+    def enable_universal_decoys(self, origin_id: str, user: dict) -> int:
+        """Turn on the universal decoys (safe for any site) that are not already
+        on. Used to seed a new origin once; returns how many it switched on."""
+        n = 0
+        with _lock:
+            on = set(self._decoy_rules(origin_id))
+            for key, meta in DECOY_PATHS.items():
+                if meta["tier"] == "universal" and key not in on:
+                    self.set_decoy(origin_id, key, True, user)
+                    n += 1
+        return n
+
     def apply_recommended(self, origin_id: str, tech_stack_tags, user: dict) -> List[dict]:
         """Turn on every decoy recommended for this origin's stack that is not
         already on. Never turns anything off, so a decoy the owner enabled by

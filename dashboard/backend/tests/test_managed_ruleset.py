@@ -206,6 +206,40 @@ def test_status_for_origin_shape(source_dir, catalog_path):
 # ------------------------------------------------------------------- apply
 
 
+class _NoopRM:
+    def __init__(self, rules_dir):
+        self.rules_dir = str(rules_dir)
+
+    def test_nginx(self):
+        pass
+
+    def reload_nginx(self):
+        pass
+
+
+def test_seed_decoys_only_for_unseeded_active_origins_with_a_host(tmp_path, db):
+    from services.tenant_rules import TenantRuleService
+    d = tmp_path / "rules"; d.mkdir()
+    rm = _NoopRM(d)
+    # o1: new origin (not seeded) with a verified host -> gets universal decoys
+    seed_origin(db, {"id": "o1", "status": "active", "decoys_seeded": False})
+    seed_domain(db, {"id": "d1", "origin_id": "o1", "domain_name": "new.example.com", "dns_verified": True})
+    # o2: already seeded (existing customer) -> left alone
+    seed_origin(db, {"id": "o2", "status": "active", "decoys_seeded": True})
+    seed_domain(db, {"id": "d2", "origin_id": "o2", "domain_name": "old.example.com", "dns_verified": True})
+    # o3: new but no verified host -> nothing to protect yet, skipped
+    seed_origin(db, {"id": "o3", "status": "active", "decoys_seeded": False})
+
+    assert mr.seed_decoys_for_new_origins(rm, db) == 1
+    svc = TenantRuleService(rm)
+    assert all(x["enabled"] for x in svc.list_decoys(uid("o1")) if x["tier"] == "universal")
+    assert [x for x in svc.list_decoys(uid("o2")) if x["enabled"]] == []
+    assert [x for x in svc.list_decoys(uid("o3")) if x["enabled"]] == []
+    assert db.get_origin_by_id(uid("o1"))["decoys_seeded"] is True
+    # idempotent: o1 now marked seeded, so a second pass seeds nothing
+    assert mr.seed_decoys_for_new_origins(rm, db) == 0
+
+
 def test_apply_rolls_back_on_a_failed_nginx_test(source_dir, catalog_path, tmp_path, db):
     mr.publish(source_dir, catalog_path)
 

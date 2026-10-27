@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 _ORIGIN_COLUMNS = {
     "admin_user_id", "label", "ip", "port", "status", "connection_mode", "origin_scheme",
     "is_tunnel", "tunnel_name", "tech_stack_tags", "managed_ruleset_mode",
-    "managed_ruleset_version", "anomaly_threshold", "created_at", "updated_at", "archived_at", "deleted_at",
+    "managed_ruleset_version", "anomaly_threshold", "decoys_seeded", "created_at", "updated_at", "archived_at", "deleted_at",
 }
 _ORIGIN_TS = {"created_at", "updated_at", "archived_at", "deleted_at"}
 # Stored in child tables, written in the same transaction as the origin row.
@@ -116,6 +116,7 @@ class PgStore:
             origin["managed_ruleset_version"] = int(row["managed_ruleset_version"])
         if row.get("anomaly_threshold") is not None:
             origin["anomaly_threshold"] = int(row["anomaly_threshold"])
+        origin["decoys_seeded"] = bool(row.get("decoys_seeded"))
         if row.get("tech_stack_tags"):
             origin["tech_stack_tags"] = list(row["tech_stack_tags"])
         for key in ("archived_at", "deleted_at"):
@@ -145,6 +146,8 @@ class PgStore:
             return bool(value)
         if key in ("managed_ruleset_version", "anomaly_threshold") and value is not None:
             return int(value)
+        if key == "decoys_seeded":
+            return bool(value)
         return value
 
     def _write_tunnel_fields(self, origin_id: str, data: Dict[str, Any]) -> None:

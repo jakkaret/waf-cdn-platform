@@ -352,6 +352,30 @@ def apply(rule_manager, db, catalog_path: Optional[Path] = None) -> bool:
         return True
 
 
+def seed_decoys_for_new_origins(rule_manager, db) -> int:
+    """Turn on the universal decoy paths once for every active origin that has
+    a verified host and has not been seeded yet, then mark it. Universal decoys
+    are paths no real site serves (.env, .git, ...), so this is a safe baseline
+    the owner can switch off; the decoys_seeded flag keeps it from re-adding a
+    decoy the owner later removed. Existing origins were marked seeded by
+    migration 0020, so only origins created afterwards get this."""
+    from services.tenant_rules import TenantRuleService
+    origins, hosts = verified_hosts_by_origin(db)
+    svc = TenantRuleService(rule_manager)
+    seeded = 0
+    for origin in origins:
+        oid = str(origin.get("id") or "")
+        if origin.get("decoys_seeded") or not hosts.get(oid):
+            continue
+        try:
+            svc.enable_universal_decoys(oid, {"username": "decoy-seed"})
+            db.update_origin(oid, {"decoys_seeded": True})
+            seeded += 1
+        except Exception:
+            logger.exception("failed to seed decoys for origin %s", oid)
+    return seeded
+
+
 # ------------------------------------------------------------------- worker
 
 async def managed_ruleset_worker(rule_manager=None, db=None, interval: int = UPDATE_INTERVAL_SECONDS):
@@ -377,6 +401,9 @@ async def managed_ruleset_worker(rule_manager=None, db=None, interval: int = UPD
             # blocking DynamoDB calls in the Telegram dispatcher, since replaced by PostgreSQL).
             await asyncio.to_thread(publish, SOURCE_DIR, CATALOG_PATH)
             await asyncio.to_thread(apply, rule_manager, db, CATALOG_PATH)
+            # New origins get the universal decoys turned on once (each toggle
+            # writes + reloads, so keep it off the apply() path above).
+            await asyncio.to_thread(seed_decoys_for_new_origins, rule_manager, db)
         except Exception:
             logger.exception("managed ruleset worker tick failed")
         await asyncio.sleep(interval)

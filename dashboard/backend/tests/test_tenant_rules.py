@@ -347,6 +347,19 @@ def test_list_decoys_carries_recommendation(service):
     assert warned["wp-login"]["collision"] and not warned["wp-login"]["recommended"]
 
 
+def test_enable_universal_decoys_only_turns_on_universal(service):
+    u = {"user_id": "u1", "username": "alice"}
+    n = service.enable_universal_decoys("origin-a", u)
+    rows = {d["key"]: d for d in service.list_decoys("origin-a")}
+    universal = [k for k, m in __import__("services.tenant_rules", fromlist=["DECOY_PATHS"]).DECOY_PATHS.items()
+                 if m["tier"] == "universal"]
+    assert n == len(universal)
+    assert all(rows[k]["enabled"] for k in universal)
+    assert not rows["wp-login"]["enabled"] and not rows["phpmyadmin"]["enabled"]
+    # idempotent: a second call turns on nothing more
+    assert service.enable_universal_decoys("origin-a", u) == 0
+
+
 def test_apply_recommended_turns_on_only_recommended(service):
     u = {"user_id": "u1", "username": "alice"}
     after = {d["key"]: d for d in service.apply_recommended("origin-a", ["wordpress"], u)}
