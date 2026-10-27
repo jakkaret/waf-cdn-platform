@@ -259,7 +259,8 @@ class ClickHouseService:
                     detectors Array(LowCardinality(String)),
                     body_length UInt32,
                     feature_set LowCardinality(String),
-                    action LowCardinality(String) DEFAULT ''
+                    action LowCardinality(String) DEFAULT '',
+                    body_sample String DEFAULT ''
                 ) ENGINE = MergeTree()
                 ORDER BY (host, timestamp)
                 TTL timestamp + INTERVAL {ML_VERDICTS_RETENTION_DAYS} DAY
@@ -268,6 +269,9 @@ class ClickHouseService:
             # before it get the column here. "" = log mode.
             self.client.command(
                 "ALTER TABLE ml_verdicts ADD COLUMN IF NOT EXISTS action LowCardinality(String) DEFAULT ''")
+            # Masked body of requests scoring 50+ (services/ml_verdicts.body_sample).
+            self.client.command(
+                "ALTER TABLE ml_verdicts ADD COLUMN IF NOT EXISTS body_sample String DEFAULT ''")
         except ClickHouseError as e:
             print(f"⚠️ Error initializing ClickHouse table ml_verdicts: {e}")
 
@@ -500,17 +504,20 @@ class ClickHouseService:
                 "severities": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"]
             }
 
-    def get_traffic_sample_for_simulation(self, time_range_hours: int = 24, limit: int = 2000) -> list:
+    def get_traffic_sample_for_simulation(self, time_range_hours: int = 24, limit: int = 2000,
+                                          scope_clause: str = "") -> list:
         """Most recent requests for the blast-radius replay
         (services/blast_radius_service.py), with the fields it inspects.
         blast_radius_service called this method but it did not exist: the
         AttributeError was logged and every simulation ran on synthetic
-        traffic only."""
+        traffic only. scope_clause: a host WHERE fragment from tenant_service
+        (never user text), applied before the limit."""
         if not self.connected:
             return []
+        scope = f" AND ({scope_clause})" if scope_clause else ""
         rows = self.client.query(
             "SELECT url, method, status_code, client_ip, user_agent, alert, attack_type, host "
-            "FROM access_logs WHERE timestamp >= now() - INTERVAL {hours:UInt32} HOUR "
+            f"FROM access_logs WHERE timestamp >= now() - INTERVAL {{hours:UInt32}} HOUR{scope} "
             "ORDER BY timestamp DESC LIMIT {limit:UInt32}",
             parameters={"hours": max(1, int(time_range_hours)), "limit": max(1, int(limit))},
         ).result_rows

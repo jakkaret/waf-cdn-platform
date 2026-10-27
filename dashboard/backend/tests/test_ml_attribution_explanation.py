@@ -560,4 +560,6 @@ def test_explanation_never_reaches_an_execution_sink_or_rule_generation():
     for fn in (ml_module._gen3_verdict, ml_module._proposed_rules, ml_module.predict_and_suggest):
         assert "explanation" not in inspect.getsource(fn)
         assert "_attach_explanation" not in inspect.getsource(fn)
-    assert "create_pending_rule" in inspect.getsource(ml_module.predict_and_suggest)
+    # queueing moved into a helper shared with ML Insights' "propose a rule" (2026-10-27)
+    assert "_queue_proposals" in inspect.getsource(ml_module.predict_and_suggest)
+    assert "create_pending_rule" in inspect.getsource(ml_module._queue_proposals)

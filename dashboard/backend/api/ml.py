@@ -203,7 +203,7 @@ async def capture_telemetry_relay(request: Request):
             )
         # 200 = the Gen 3 verdict of this request (ML Insights); 204 = none.
         if res.status_code == 200:
-            ml_verdicts.enqueue(res.json())
+            ml_verdicts.enqueue(res.json(), body=body)
     except Exception as exc:
         logger.warning("ML capture relay failed open: %s", exc)
     return Response(status_code=204)
@@ -251,7 +251,7 @@ async def gate_relay(request: Request):
         logger.warning("ML gate relay failed open: %s", exc)
         return _gate_answer("pass", error="error")
     action = ml_gate.decide(score, policy)
-    ml_verdicts.enqueue({**verdict, "action": action})
+    ml_verdicts.enqueue({**verdict, "action": action}, body=body)
     return _gate_answer(action, score)
 
 
@@ -281,10 +281,30 @@ async def ml_insights(
     if not ch.connected:
         raise HTTPException(status_code=503, detail="analytics store unavailable")
     try:
-        return await asyncio.to_thread(ml_verdicts.insights, ch, scope, hours, limit, min_score)
+        out = await asyncio.to_thread(ml_verdicts.insights, ch, scope, hours, limit, min_score)
     except Exception as exc:
         logger.warning("ML insights query failed: %s", exc)
         raise HTTPException(status_code=503, detail="analytics store unavailable")
+    await asyncio.to_thread(_mark_proposable, out.get("requests") or [], current_user)
+    return out
+
+
+def _mark_proposable(requests: list, current_user: dict) -> None:
+    """Per listed request: origin_id (host map), can_edit (the caller is that
+    origin's Owner or an Editor: may read the masked body and propose a rule)
+    and can_propose (can_edit, Gen 3 flagged it and the inline gate did not
+    already block it -- a rule for a request ML blocks adds nothing)."""
+    from api.ml_rules import REVIEW_ROLES, _member_roles
+    from services.dynamodb_service import DynamoDBService
+    from services.shield_sync import desired_hostmap
+    hostmap = desired_hostmap(DynamoDBService()) if requests else {}
+    roles = _member_roles(current_user.get("user_id"))
+    for r in requests:
+        oid = hostmap.get(str(r.get("host") or ""))
+        can_edit = bool(oid) and roles.get(oid) in REVIEW_ROLES
+        r["origin_id"] = oid
+        r["can_edit"] = can_edit
+        r["can_propose"] = can_edit and bool(r.get("is_attack")) and r.get("action") != "block"
 
 @router.post("/predict")
 async def predict_anomaly(req: PredictRequest, current_user: dict = Depends(require_viewer_or_above)):
@@ -360,6 +380,37 @@ def _suggest_origin(origin_id: str, current_user: dict) -> dict:
     return origin
 
 
+def _queue_proposals(rules: list, origin: Optional[dict], current_user: dict) -> tuple[list, int, int]:
+    """(pending rules, created, merged): each proposed rule joins the pending
+    rule with the same dedup_key in the same origin's queue, or starts one.
+    Never approves anything. Also used by ML Insights' "propose a rule"
+    (api/ml_protection.py)."""
+    suggested, created, merged = [], 0, 0
+    if not rules:
+        return suggested, created, merged
+    from services.ml_rule_service import MLRuleService
+    rule_service = MLRuleService()
+    origin_id = str(origin["id"]) if origin else ""
+    for rule_data in rules:
+        rule_data = {**rule_data,
+                     "requested_by": current_user.get("username") or current_user.get("email", ""),
+                     "requested_by_id": current_user.get("user_id", ""),
+                     # Same label the CVE scan stores (cve_feed.match_cves_to_origins).
+                     "origin_id": origin_id,
+                     "origin_label": origin.get("label", "") if origin else ""}
+        existing = rule_service.find_pending_by_dedup_key(rule_data.get("dedup_key", ""), origin_id)
+        if existing:
+            suggested.append(rule_service.record_hit(existing, rule_data))
+            merged += 1
+        else:
+            try:
+                suggested.append(rule_service.create_pending_rule(rule_data, created_by="ml-auto"))
+            except OriginNotFound:   # deleted since the caller's access check
+                raise HTTPException(status_code=404, detail="Origin not found")
+            created += 1
+    return suggested, created, merged
+
+
 def _own_examples_only(rule: dict, current_user: dict) -> dict:
     """A global pending rule merges proposals from everyone who analysed a
     request without an origin, and its examples carry their URLs and names
@@ -398,27 +449,7 @@ async def predict_and_suggest(req: SuggestRequest, current_user: dict = Depends(
             gen3 = await _gen3_verdict(client, req)
             rules, reason = await _proposed_rules(client, req, gen3)
 
-            suggested, created, merged = [], 0, 0
-            if rules:
-                from services.ml_rule_service import MLRuleService
-                rule_service = MLRuleService()
-                for rule_data in rules:
-                    rule_data = {**rule_data,
-                                 "requested_by": current_user.get("username") or current_user.get("email", ""),
-                                 "requested_by_id": current_user.get("user_id", ""),
-                                 # Same label the CVE scan stores (cve_feed.match_cves_to_origins).
-                                 "origin_id": origin_id,
-                                 "origin_label": origin.get("label", "") if origin else ""}
-                    existing = rule_service.find_pending_by_dedup_key(rule_data.get("dedup_key", ""), origin_id)
-                    if existing:
-                        suggested.append(rule_service.record_hit(existing, rule_data))
-                        merged += 1
-                    else:
-                        try:
-                            suggested.append(rule_service.create_pending_rule(rule_data, created_by="ml-auto"))
-                        except OriginNotFound:   # deleted since _suggest_origin checked it
-                            raise HTTPException(status_code=404, detail="Origin not found")
-                        created += 1
+            suggested, created, merged = _queue_proposals(rules, origin, current_user)
             if not origin_id and current_user.get("role") != "admin":
                 suggested = [_own_examples_only(r, current_user) for r in suggested]
 

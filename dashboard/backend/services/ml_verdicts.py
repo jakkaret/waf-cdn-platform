@@ -16,12 +16,14 @@ keeps one origin's traffic out of another origin's view.
 import asyncio
 import logging
 import os
+import re
 import time
 from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
 from services.clickhouse_service import stored_host
+from services.pii_masker import SENSITIVE_KEY_NAMES, pii_masker
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +32,41 @@ BATCH = 500
 # A ClickHouse outage must not grow the backend's memory: past this, the oldest verdicts go.
 MAX_BUFFER = 20000
 COLUMNS = ["timestamp", "request_id", "host", "method", "path", "query", "score", "threshold",
-           "is_attack", "detectors", "body_length", "feature_set", "action"]
+           "is_attack", "detectors", "body_length", "feature_set", "action", "body_sample"]
 # What the inline gate did; "" = log mode (mirrored, nothing enforced).
 ACTIONS = ("", "pass", "challenge", "block")
 HISTOGRAM_BINS = 20  # 5 points of score each
 # Scores from here up, though below the model threshold, are "worth a look".
 WATCH_FLOOR = 0.5
+# Body kept with a verdict (2026-10-27) so an origin's Owner/Editors can read the
+# payload and turn it into a rule: only from WATCH_FLOOR up, at most this many
+# characters, PII and secrets masked before it is buffered (mask_body), gone with
+# the row after the table TTL (7 days). Never returned by insights().
+BODY_SAMPLE_MAX = 4096
+
+_MULTIPART_SECRET = re.compile(
+    rf'(?i)(name="(?:{SENSITIVE_KEY_NAMES})"[^\r\n]*\r?\n(?:[^\r\n]+\r?\n)*\r?\n)([^\r\n]*)')
+
+
+def mask_body(text: str) -> str:
+    """Secrets and personal data out of a body sample: the platform's PII masker
+    (Thai ID, card numbers, tokens, key=value and JSON secrets, e-mail, Thai
+    mobile numbers) plus the value of a sensitive multipart form field."""
+    if not text:
+        return ""
+    text = _MULTIPART_SECRET.sub(lambda m: m.group(1) + "[MASKED]", text)
+    masked, _types = pii_masker.mask_text(text)
+    return masked
+
+
+def body_sample(body, score) -> str:
+    """The masked sample to store with a verdict of `score`, "" below WATCH_FLOOR."""
+    value = _unit(score)
+    if not body or value is None or value < WATCH_FLOOR:
+        return ""
+    if isinstance(body, (bytes, bytearray)):
+        body = bytes(body[:BODY_SAMPLE_MAX * 4]).decode("utf-8", errors="replace")
+    return mask_body(str(body)[:BODY_SAMPLE_MAX])[:BODY_SAMPLE_MAX]
 
 _buffer: deque = deque(maxlen=MAX_BUFFER)
 
@@ -48,8 +79,10 @@ def _unit(value) -> Optional[float]:
     return v if 0.0 <= v <= 1.0 else None
 
 
-def _row(verdict: dict) -> Optional[list]:
-    """One ml_verdicts row from an ML service verdict; None if it is not one."""
+def _row(verdict: dict, body=None) -> Optional[list]:
+    """One ml_verdicts row from an ML service verdict; None if it is not one.
+    `body`: the request body the verdict is about (masked here, kept only from
+    WATCH_FLOOR up)."""
     if not isinstance(verdict, dict):
         return None
     score = _unit(verdict.get("score"))
@@ -76,15 +109,16 @@ def _row(verdict: dict) -> Optional[list]:
         body_length,
         str(verdict.get("feature_set") or "")[:64],
         verdict.get("action") if verdict.get("action") in ACTIONS else "",
+        body_sample(body, score),
     ]
 
 
-def enqueue(verdict: dict) -> bool:
+def enqueue(verdict: dict, body=None) -> bool:
     """Buffer one verdict for the next batch insert. Never raises."""
     if not ENABLED:
         return False
     try:
-        row = _row(verdict)
+        row = _row(verdict, body)
     except Exception:
         logger.exception("dropping malformed ML verdict")
         return False
@@ -206,7 +240,7 @@ def insights(ch, scope: str, hours: int = 24, limit: int = 50, min_score: Option
         params_list["min_score"] = float(min_score)
     rows = ch.client.query(
         "SELECT toUnixTimestamp(timestamp), request_id, host, method, path, query, score, threshold, "
-        f"is_attack, detectors, body_length, action FROM ml_verdicts WHERE {where} AND {pick} "
+        f"is_attack, detectors, body_length, action, body_sample != '' FROM ml_verdicts WHERE {where} AND {pick} "
         "ORDER BY timestamp DESC, score DESC LIMIT {limit:UInt32}",
         parameters=params_list,
     ).result_rows
@@ -216,12 +250,32 @@ def insights(ch, scope: str, hours: int = 24, limit: int = 50, min_score: Option
             "timestamp": _iso(ts), "request_id": rid, "host": host, "method": method, "path": path,
             "query": query, "score": round(float(score), 4), "threshold": round(float(thr), 4),
             "is_attack": bool(is_attack), "detectors": list(detectors), "body_length": int(body_length),
-            "action": action or None,
+            "action": action or None, "has_body": bool(has_body),
             **seen.get(rid, {"status_code": None, "client_ip": None, "country": None}),
         }
-        for ts, rid, host, method, path, query, score, thr, is_attack, detectors, body_length, action in rows
+        for ts, rid, host, method, path, query, score, thr, is_attack, detectors, body_length, action, has_body in rows
     ]
     return out
+
+
+def get_verdict(ch, scope: str, request_id: str) -> Optional[dict]:
+    """One verdict, masked body sample included, if `scope` (an origin's
+    host clause from tenant_service, never user text) covers its host."""
+    rows = ch.client.query(
+        "SELECT toUnixTimestamp(timestamp), request_id, host, method, path, query, score, threshold, is_attack, "
+        f"detectors, body_length, action, body_sample FROM ml_verdicts WHERE ({scope or '1=0'}) "
+        "AND request_id = {rid:String} ORDER BY timestamp DESC LIMIT 1",
+        parameters={"rid": str(request_id)[:128]},
+    ).result_rows
+    if not rows:
+        return None
+    ts, rid, host, method, path, query, score, thr, is_attack, detectors, body_length, action, sample = rows[0]
+    return {
+        "timestamp": _iso(ts), "request_id": rid, "host": host, "method": method, "path": path, "query": query,
+        "score": round(float(score), 4), "threshold": round(float(thr), 4), "is_attack": bool(is_attack),
+        "detectors": list(detectors), "body_length": int(body_length), "action": action or None,
+        "body_sample": sample or "",
+    }
 
 
 def _access_by_request_id(ch, scope: str, hours: int, request_ids: list) -> dict:

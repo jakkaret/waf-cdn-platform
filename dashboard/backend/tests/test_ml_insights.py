@@ -281,7 +281,7 @@ class _FakeCH:
             rows = [("rid-1", 200, "198.51.100.7", "TH")]
         else:
             rows = [(1790000000, "rid-1", "shop.example.com", "POST", "/api/login", "", 0.99, 0.8749, 1,
-                     ["v_sqli_libinjection"], 88, "block")]
+                     ["v_sqli_libinjection"], 88, "block", 1)]
         return types.SimpleNamespace(result_rows=rows)
 
 
@@ -299,7 +299,7 @@ def test_every_query_carries_the_tenant_scope_and_bound_parameters():
     assert out["detectors"] == [{"detector": "v_sqli_libinjection", "count": 1}]
     req = out["requests"][0]
     assert req["request_id"] == "rid-1" and req["status_code"] == 200 and req["client_ip"] == "198.51.100.7"
-    assert req["action"] == "block"
+    assert req["action"] == "block" and req["has_body"] is True
 
 
 def test_default_list_is_flagged_only_and_min_score_widens_it():
