@@ -150,6 +150,13 @@ def fake_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(nginx_site_module, "_reload_pending", False)
     monkeypatch.setattr(nginx_site_module, "_unreloaded", set())
 
+    # ML gate map (services/ml_gate.py): written into a throwaway directory,
+    # nginx test/reload through the no-op rule_manager above.
+    from services import ml_gate as ml_gate_module
+    monkeypatch.setattr(ml_gate_module, "MAP_DIR", tmp_path / "ml-gate")
+    monkeypatch.setattr(ml_gate_module, "_rule_manager", rules_module.rule_manager)
+    monkeypatch.setattr(ml_gate_module, "_state", {"last_error": None, "applied_at": None})
+
     # Deception layer: its audit logger lazily builds a real ClickHouseService
     # (production credentials). Without this, every test
     # that hits /api/deception/respond wrote fake attack rows into the live

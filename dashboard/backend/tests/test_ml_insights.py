@@ -270,7 +270,7 @@ class _FakeCH:
     def query(self, sql, parameters=None):
         self.calls.append((sql, parameters))
         if "uniqExact(host)" in sql:
-            rows = [(self.total, 1, 1, 1, 1790000000, 0.8749, "gen3-F")]
+            rows = [(self.total, 1, 1, 1, 1790000000, 0.8749, "gen3-F", 1, 0)]
         elif "floor(score" in sql:
             rows = [(0, 2, 0), (19, 1, 1)]
         elif "intDiv(toUnixTimestamp" in sql:
@@ -281,7 +281,7 @@ class _FakeCH:
             rows = [("rid-1", 200, "198.51.100.7", "TH")]
         else:
             rows = [(1790000000, "rid-1", "shop.example.com", "POST", "/api/login", "", 0.99, 0.8749, 1,
-                     ["v_sqli_libinjection"], 88)]
+                     ["v_sqli_libinjection"], 88, "block")]
         return types.SimpleNamespace(result_rows=rows)
 
 
@@ -293,11 +293,13 @@ def test_every_query_carries_the_tenant_scope_and_bound_parameters():
         assert "(host = 'shop.example.com')" in sql
         assert "{hours:UInt32}" in sql and params["hours"] == 24
     assert out["summary"]["total"] == 4 and out["summary"]["threshold"] == 0.8749
+    assert (out["summary"]["blocked"], out["summary"]["challenged"]) == (1, 0)
     assert out["histogram"][0]["count"] == 2 and out["histogram"][19]["flagged"] == 1
     assert len(out["timeline"]) >= 24 and all(p["count"] == 0 for p in out["timeline"])
     assert out["detectors"] == [{"detector": "v_sqli_libinjection", "count": 1}]
     req = out["requests"][0]
     assert req["request_id"] == "rid-1" and req["status_code"] == 200 and req["client_ip"] == "198.51.100.7"
+    assert req["action"] == "block"
 
 
 def test_default_list_is_flagged_only_and_min_score_widens_it():

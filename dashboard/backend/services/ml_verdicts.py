@@ -5,7 +5,9 @@ service scores it with Gen 3 and answers a verdict (ml/ml_api.py
 score_captured: score, detectors, redacted path/query, never the body). The
 relay hands each verdict to enqueue(); the worker below inserts them into
 ClickHouse table ml_verdicts (created in clickhouse_service.init_db) in
-batches. Shadow only: nothing here blocks a request.
+batches. Nothing here blocks a request: a verdict from the inline gate of an
+origin in enforce mode (/api/ml/gate, services/ml_gate.py) carries the action
+the gate took ("pass", "challenge", "block"); a mirrored one carries none.
 
 Readers always pass the tenant clause of services/tenant_service.py
 (build_tenant_origin_filter, the same one the Logs page uses), which is what
@@ -28,7 +30,9 @@ BATCH = 500
 # A ClickHouse outage must not grow the backend's memory: past this, the oldest verdicts go.
 MAX_BUFFER = 20000
 COLUMNS = ["timestamp", "request_id", "host", "method", "path", "query", "score", "threshold",
-           "is_attack", "detectors", "body_length", "feature_set"]
+           "is_attack", "detectors", "body_length", "feature_set", "action"]
+# What the inline gate did; "" = log mode (mirrored, nothing enforced).
+ACTIONS = ("", "pass", "challenge", "block")
 HISTOGRAM_BINS = 20  # 5 points of score each
 # Scores from here up, though below the model threshold, are "worth a look".
 WATCH_FLOOR = 0.5
@@ -71,6 +75,7 @@ def _row(verdict: dict) -> Optional[list]:
         [str(d)[:64] for d in detectors[:16]],
         body_length,
         str(verdict.get("feature_set") or "")[:64],
+        verdict.get("action") if verdict.get("action") in ACTIONS else "",
     ]
 
 
@@ -131,7 +136,7 @@ def empty_insights(hours: int) -> dict:
     return {
         "hours": int(hours), "bucket_seconds": _bucket_seconds(hours),
         "summary": {"total": 0, "flagged": 0, "watch": 0, "hosts": 0, "last_seen": None,
-                    "threshold": None, "feature_set": None},
+                    "threshold": None, "feature_set": None, "blocked": 0, "challenged": 0},
         "histogram": [{"from": i / HISTOGRAM_BINS, "to": (i + 1) / HISTOGRAM_BINS, "count": 0, "flagged": 0}
                       for i in range(HISTOGRAM_BINS)],
         "timeline": [], "detectors": [], "requests": [],
@@ -150,9 +155,10 @@ def insights(ch, scope: str, hours: int = 24, limit: int = 50, min_score: Option
     where = f"({scope or '1=1'}) AND timestamp > now() - INTERVAL {{hours:UInt32}} HOUR"
     params = {"hours": int(hours), "watch": WATCH_FLOOR, "bucket": bucket, "bins": HISTOGRAM_BINS}
 
-    total, flagged, watch, hosts, last_seen, threshold, feature_set = ch.client.query(
+    total, flagged, watch, hosts, last_seen, threshold, feature_set, blocked, challenged = ch.client.query(
         "SELECT count(), countIf(is_attack = 1), countIf(is_attack = 0 AND score >= {watch:Float32}), "
-        "uniqExact(host), toUnixTimestamp(max(timestamp)), argMax(threshold, timestamp), argMax(feature_set, timestamp) "
+        "uniqExact(host), toUnixTimestamp(max(timestamp)), argMax(threshold, timestamp), argMax(feature_set, timestamp), "
+        "countIf(action = 'block'), countIf(action = 'challenge') "
         f"FROM ml_verdicts WHERE {where}",
         parameters=params,
     ).result_rows[0]
@@ -161,6 +167,7 @@ def insights(ch, scope: str, hours: int = 24, limit: int = 50, min_score: Option
     out["summary"] = {
         "total": int(total), "flagged": int(flagged), "watch": int(watch), "hosts": int(hosts),
         "last_seen": _iso(last_seen), "threshold": round(float(threshold), 4), "feature_set": feature_set or None,
+        "blocked": int(blocked), "challenged": int(challenged),
     }
 
     for b, n, f in ch.client.query(
@@ -199,7 +206,7 @@ def insights(ch, scope: str, hours: int = 24, limit: int = 50, min_score: Option
         params_list["min_score"] = float(min_score)
     rows = ch.client.query(
         "SELECT toUnixTimestamp(timestamp), request_id, host, method, path, query, score, threshold, "
-        f"is_attack, detectors, body_length FROM ml_verdicts WHERE {where} AND {pick} "
+        f"is_attack, detectors, body_length, action FROM ml_verdicts WHERE {where} AND {pick} "
         "ORDER BY timestamp DESC, score DESC LIMIT {limit:UInt32}",
         parameters=params_list,
     ).result_rows
@@ -209,9 +216,10 @@ def insights(ch, scope: str, hours: int = 24, limit: int = 50, min_score: Option
             "timestamp": _iso(ts), "request_id": rid, "host": host, "method": method, "path": path,
             "query": query, "score": round(float(score), 4), "threshold": round(float(thr), 4),
             "is_attack": bool(is_attack), "detectors": list(detectors), "body_length": int(body_length),
+            "action": action or None,
             **seen.get(rid, {"status_code": None, "client_ip": None, "country": None}),
         }
-        for ts, rid, host, method, path, query, score, thr, is_attack, detectors, body_length in rows
+        for ts, rid, host, method, path, query, score, thr, is_attack, detectors, body_length, action in rows
     ]
     return out
 

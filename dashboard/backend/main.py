@@ -282,6 +282,7 @@ from api import managed_rules as managed_rules_api
 from api import invites as invites_api
 from api import support as support_api
 from api import site_access as site_access_api
+from api import ml_protection as ml_protection_api
 from api import quick_tunnels as quick_tunnels_api
 app.include_router(ml.router)
 app.include_router(ml_rules.router)
@@ -307,6 +308,7 @@ app.include_router(managed_rules_api.router)
 app.include_router(invites_api.router)
 app.include_router(support_api.router)
 app.include_router(site_access_api.router)
+app.include_router(ml_protection_api.router)
 
 # Error Handlers
 from fastapi import Request
@@ -448,6 +450,12 @@ async def startup_event():
     if not hasattr(app.state, "site_route_task"):
         from services.nginx_site_service import site_route_worker
         app.state.site_route_task = asyncio.create_task(site_route_worker())
+    # Per-host ML gate policy (origins in ML enforce mode) -> nginx map
+    # nginx/ml-gate/hosts.map, rebuilt from the database every minute.
+    if not hasattr(app.state, "ml_gate_task"):
+        from services.ml_gate import ml_gate_worker
+        from services.dynamodb_service import DynamoDBService
+        app.state.ml_gate_task = asyncio.create_task(ml_gate_worker(DynamoDBService()))
     # CAPTCHA/OTP keys, the shield host map and the rate-limit rules in Redis,
     # rebuilt from the database every minute (P2.2, P2.6): a key left by a
     # removed domain is swept and a Redis restart is repaired.

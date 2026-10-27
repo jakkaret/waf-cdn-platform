@@ -258,11 +258,16 @@ class ClickHouseService:
                     is_attack UInt8,
                     detectors Array(LowCardinality(String)),
                     body_length UInt32,
-                    feature_set LowCardinality(String)
+                    feature_set LowCardinality(String),
+                    action LowCardinality(String) DEFAULT ''
                 ) ENGINE = MergeTree()
                 ORDER BY (host, timestamp)
                 TTL timestamp + INTERVAL {ML_VERDICTS_RETENTION_DAYS} DAY
             ''')
+            # What the inline gate did (services/ml_gate.py); tables created
+            # before it get the column here. "" = log mode.
+            self.client.command(
+                "ALTER TABLE ml_verdicts ADD COLUMN IF NOT EXISTS action LowCardinality(String) DEFAULT ''")
         except ClickHouseError as e:
             print(f"⚠️ Error initializing ClickHouse table ml_verdicts: {e}")
 

@@ -7,7 +7,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Depends, Query, Request, Response
-from services import ml_verdicts
+from services import ml_gate, ml_verdicts
 from services.clickhouse_service import ClickHouseService
 from services.rbac import ARCHIVED_ORIGIN_STATUSES, is_origin_admin, require_viewer_or_above
 from services.gemini_service import gemini_service
@@ -207,6 +207,52 @@ async def capture_telemetry_relay(request: Request):
     except Exception as exc:
         logger.warning("ML capture relay failed open: %s", exc)
     return Response(status_code=204)
+
+
+def _gate_answer(action: str, score: Optional[float] = None, error: str = "") -> Response:
+    headers = {"X-WAF-ML-Action": action}
+    if score is not None:
+        headers["X-WAF-ML-Score"] = f"{score:.4f}"
+    if error:
+        headers["X-WAF-ML-Error"] = error
+    return Response(status_code=204, headers=headers)
+
+
+@router.post("/gate", include_in_schema=False)
+async def gate_relay(request: Request):
+    """Inline gate of an origin in enforce mode (nginx/njs/mlgate.js): scores
+    the request with its body and answers the action on X-WAF-ML-Action --
+    "block", "challenge" or "pass". X-ML-Gate is the origin's policy from the
+    nginx map (services/ml_gate.py). Fails open: any error is "pass"."""
+    if not _is_internal_relay_request(request):
+        raise HTTPException(status_code=404, detail="Not found")
+    policy = ml_gate.parse_policy(request.headers.get("X-ML-Gate", ""))
+    if policy is None:
+        return _gate_answer("pass", error="no-policy")
+    if not ML_CAPTURE_URL:
+        return _gate_answer("pass", error="disabled")
+    body = await request.body()
+    headers = _ml_headers({
+        "X-Original-Host": request.headers.get("X-Original-Host", ""),
+        "X-Original-URI": request.headers.get("X-Original-URI", "/"),
+        "X-Original-Method": request.headers.get("X-Original-Method", "GET"),
+        "X-Original-Request-ID": request.headers.get("X-Original-Request-ID", ""),
+        "Content-Type": request.headers.get("Content-Type", ""),
+    })
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(f"{ML_CAPTURE_URL}/capture", content=body, headers=headers,
+                                    timeout=ML_FAST_TIMEOUT)
+        if res.status_code != 200:
+            return _gate_answer("pass", error="unavailable")
+        verdict = res.json()
+        score = float(verdict["score"])
+    except Exception as exc:
+        logger.warning("ML gate relay failed open: %s", exc)
+        return _gate_answer("pass", error="error")
+    action = ml_gate.decide(score, policy)
+    ml_verdicts.enqueue({**verdict, "action": action})
+    return _gate_answer(action, score)
 
 
 def _insights_scope(current_user: dict, origin: Optional[str]) -> str:
