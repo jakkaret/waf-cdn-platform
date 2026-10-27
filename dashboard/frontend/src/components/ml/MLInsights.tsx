@@ -14,8 +14,9 @@ import {
   RANGES, requestTarget, scorePoints, statusView, WATCH_FLOOR,
 } from '../../lib/mlInsights'
 
-// Gen 3 scores of the selected origin's real traffic (nginx mirror -> ML
-// service -> ClickHouse ml_verdicts). Shadow only: nothing here blocks.
+// Gen 3 scores of the selected origin's real traffic (nginx mirror, or the
+// inline gate of an origin in ML enforce mode -> ML service -> ClickHouse
+// ml_verdicts). This page only reads; the setting is Origin -> ML Protection.
 
 const sectionTitle = 'm-0 text-[13px] font-semibold text-[var(--text-primary)]'
 const muted = 'text-[12px] text-[var(--text-muted)]'
@@ -61,7 +62,7 @@ const Tile: React.FC<{ label: string; value: string; sub?: string }> = ({ label,
 
 const RequestRow: React.FC<{ r: InsightRequest; showHost: boolean }> = ({ r, showHost }) => {
   const [open, setOpen] = useState(false)
-  const status = statusView(r.status_code)
+  const status = statusView(r.status_code, r.action)
   const target = requestTarget(r)
   return (
     <>
@@ -183,9 +184,17 @@ export const MLInsights: React.FC = () => {
         <div className="flex max-w-3xl items-start gap-2.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] px-3 py-2.5">
           <Info size={16} className="mt-0.5 shrink-0 text-[var(--accent)]" aria-hidden="true" />
           <p className="m-0 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">
-            <strong className="font-medium text-[var(--text-primary)]">โหมด log:</strong> โมเดล Gen 3 ให้คะแนนทุก request ที่ผ่าน WAF
-            (รวม body) แล้วบันทึกไว้เท่านั้น <strong className="font-medium text-[var(--text-primary)]">ไม่ได้บล็อก</strong> request
-            ที่ถูกตั้งข้อสังเกตอาจไม่ใช่การโจมตีจริงเสมอไป ให้ดูประกอบกับ path และสิ่งที่ตรวจพบ
+            <strong className="font-medium text-[var(--text-primary)]">ค่าเริ่มต้นคือโหมด log:</strong> โมเดล Gen 3 ให้คะแนนทุก request
+            ที่ผ่าน WAF (รวม body) แล้วบันทึกไว้เท่านั้น <strong className="font-medium text-[var(--text-primary)]">ไม่ได้บล็อก</strong>{' '}
+            เจ้าของหรือ Editor เปิดโหมด enforce ได้ที่หน้า Origin แท็บ ML Protection
+            {(summary?.blocked ?? 0) + (summary?.challenged ?? 0) > 0 && (
+              <>
+                {' '}ช่วงนี้ ML บล็อก{' '}
+                <strong className="font-medium text-[var(--text-primary)]">{(summary?.blocked ?? 0).toLocaleString()}</strong> และส่ง
+                challenge <strong className="font-medium text-[var(--text-primary)]">{(summary?.challenged ?? 0).toLocaleString()}</strong> request
+              </>
+            )}
+            {' '}request ที่ถูกตั้งข้อสังเกตอาจไม่ใช่การโจมตีจริงเสมอไป ให้ดูประกอบกับ path และสิ่งที่ตรวจพบ
           </p>
         </div>
         <div className="flex items-center gap-2">

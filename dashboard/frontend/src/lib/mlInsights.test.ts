@@ -40,6 +40,13 @@ describe('statusView', () => {
     expect(statusView(200)).toEqual({ text: '200', tone: 'ok' })
     expect(statusView(null).tone).toBe('unknown')
   })
+
+  it('names the inline gate as the one that blocked or challenged', () => {
+    expect(statusView(403, 'block')).toEqual({ text: '403 ML บล็อก', tone: 'blocked' })
+    expect(statusView(null, 'challenge').text).toBe('ML ส่ง challenge')
+    expect(statusView(200, 'pass')).toEqual({ text: '200', tone: 'ok' })
+    expect(statusView(200, null)).toEqual({ text: '200', tone: 'ok' })
+  })
 })
 
 describe('labels', () => {

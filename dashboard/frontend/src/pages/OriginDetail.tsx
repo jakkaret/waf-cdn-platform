@@ -25,6 +25,7 @@ import { DomainStatusCard } from '../components/DomainStatusCard'
 import { Modal } from '../components/ui/Modal'
 import { OriginWafRules } from '../components/OriginWafRules'
 import { OriginIpAccess } from '../components/OriginIpAccess'
+import { OriginMlProtection } from '../components/OriginMlProtection'
 import { OriginRateLimits } from '../components/OriginRateLimits'
 import { ShieldActivity } from '../components/ShieldActivity'
 import {
@@ -64,6 +65,7 @@ import {
   ExternalLink,
   ListChecks,
   Gauge,
+  Brain,
 } from 'lucide-react'
 import { ORIGIN_ROLE_LABEL, canEditOrigin, canManageOrigin, originRoleOf } from '../lib/roles'
 import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
@@ -92,13 +94,13 @@ export const OriginDetail: React.FC = () => {
   const guard = useVerifiedGuard()
   const [viewerEmailInput, setViewerEmailInput] = useState('')
   const [editorEmailInput, setEditorEmailInput] = useState('')
-  type OriginTab = 'overview' | 'domains' | 'waf' | 'ip-access' | 'rate-limits' | 'shield' | 'team' | 'postmortem'
+  type OriginTab = 'overview' | 'domains' | 'waf' | 'ml' | 'ip-access' | 'rate-limits' | 'shield' | 'team' | 'postmortem'
   const [searchParams] = useSearchParams()
   // ?tab=domains lands a just-connected site on its setup status. The old
   // ?tab=ssl link target is now part of the Domains tab.
   const requestedTab = searchParams.get('tab') === 'ssl' ? 'domains' : searchParams.get('tab')
   const [activeTab, setActiveTab] = useState<OriginTab>(
-    (['overview', 'domains', 'waf', 'ip-access', 'rate-limits', 'shield', 'team', 'postmortem'] as const).includes(requestedTab as OriginTab)
+    (['overview', 'domains', 'waf', 'ml', 'ip-access', 'rate-limits', 'shield', 'team', 'postmortem'] as const).includes(requestedTab as OriginTab)
       ? (requestedTab as OriginTab)
       : 'overview'
   )
@@ -609,6 +611,7 @@ export const OriginDetail: React.FC = () => {
           { id: 'overview', label: 'Pool Overview', icon: <Server size={14} /> },
           { id: 'domains', label: 'Domains & DNS', icon: <Globe size={14} /> },
           { id: 'waf', label: 'WAF Policies', icon: <Shield size={14} /> },
+          { id: 'ml', label: 'ML Protection', icon: <Brain size={14} /> },
           { id: 'ip-access', label: 'IP Access', icon: <ListChecks size={14} /> },
           { id: 'rate-limits', label: 'Rate Limits', icon: <Gauge size={14} /> },
           { id: 'shield', label: 'Bot & Login Shield', icon: <Bot size={14} /> },
@@ -936,6 +939,7 @@ export const OriginDetail: React.FC = () => {
         )}
 
         {activeTab === 'waf' && id && <OriginWafRules originId={id} canEdit={isAdmin} />}
+        {activeTab === 'ml' && id && <OriginMlProtection originId={id} canEdit={isAdmin} />}
         {activeTab === 'ip-access' && id && <OriginIpAccess originId={id} canEdit={isAdmin} />}
         {activeTab === 'rate-limits' && id && <OriginRateLimits originId={id} canEdit={isAdmin} />}
 

@@ -1,6 +1,7 @@
 // ML Insights (AI Security Analyst page): Gen 3 scores of the origin's real
 // traffic, from GET /api/ml/insights (dashboard/backend/services/ml_verdicts.py).
-// Shadow only: the model scores and logs, it blocks nothing.
+// An origin in log mode (the default) is only scored; one in enforce mode
+// (Origin -> ML Protection) also carries what the inline gate did.
 
 export interface InsightsSummary {
   total: number
@@ -10,7 +11,12 @@ export interface InsightsSummary {
   last_seen: string | null
   threshold: number | null
   feature_set: string | null
+  /** Requests the inline gate blocked / sent to the challenge (enforce mode). */
+  blocked?: number
+  challenged?: number
 }
+
+export type GateAction = 'pass' | 'challenge' | 'block'
 
 export interface HistogramBin {
   from: number
@@ -37,6 +43,8 @@ export interface InsightRequest {
   is_attack: boolean
   detectors: string[]
   body_length: number
+  /** null = log mode (scored only). */
+  action?: GateAction | null
   status_code: number | null
   client_ip: string | null
   country: string | null
@@ -102,8 +110,14 @@ export function histogramBars(bins: HistogramBin[], threshold: number | null) {
   }))
 }
 
-// What the WAF answered the request (access_logs), in words.
-export function statusView(code: number | null): { text: string; tone: 'ok' | 'blocked' | 'error' | 'unknown' } {
+// What the WAF answered the request (access_logs), in words. The inline gate's
+// own action wins: its 403/challenge is the ML's doing, not ModSecurity's.
+export function statusView(
+  code: number | null,
+  action?: GateAction | null,
+): { text: string; tone: 'ok' | 'blocked' | 'error' | 'unknown' } {
+  if (action === 'block') return { text: '403 ML บล็อก', tone: 'blocked' }
+  if (action === 'challenge') return { text: 'ML ส่ง challenge', tone: 'error' }
   if (code === null || code === undefined) return { text: 'ยังไม่มีใน log', tone: 'unknown' }
   if (code === 403 || code === 429) return { text: `${code} ถูกบล็อก`, tone: 'blocked' }
   if (code >= 500) return { text: `${code}`, tone: 'error' }
