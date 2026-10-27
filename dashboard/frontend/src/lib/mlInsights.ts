@@ -45,6 +45,13 @@ export interface InsightRequest {
   body_length: number
   /** null = log mode (scored only). */
   action?: GateAction | null
+  /** A masked body sample is stored (score 50 and up). */
+  has_body?: boolean
+  /** The request's origin (host map), and whether the caller is its Owner or an Editor. */
+  origin_id?: string | null
+  can_edit?: boolean
+  /** can_edit, flagged by Gen 3, and not already blocked by the inline gate. */
+  can_propose?: boolean
   status_code: number | null
   client_ip: string | null
   country: string | null
@@ -122,6 +129,28 @@ export function statusView(
   if (code === 403 || code === 429) return { text: `${code} ถูกบล็อก`, tone: 'blocked' }
   if (code >= 500) return { text: `${code}`, tone: 'error' }
   return { text: `${code}`, tone: 'ok' }
+}
+
+// Why an Owner/Editor gets no "propose a rule" button on this request ("" = they do).
+export function proposeHint(r: Pick<InsightRequest, 'can_edit' | 'can_propose' | 'action' | 'is_attack'>): string {
+  if (!r.can_edit || r.can_propose) return ''
+  if (r.action === 'block') return 'ML บล็อก request นี้อยู่แล้ว ไม่ต้องมีกฎเพิ่ม'
+  if (!r.is_attack) return 'คะแนนยังต่ำกว่าเกณฑ์ของโมเดล โมเดลจึงไม่เสนอกฎจาก request นี้'
+  return ''
+}
+
+// Why a pending proposal was not made, from the backend's suggestion.reason.
+export function suggestReasonText(reason: string): string {
+  switch (reason) {
+    case 'gen3_not_attack':
+      return 'เมื่อให้คะแนนใหม่จากข้อมูลที่เก็บไว้ (ซ่อนข้อมูลส่วนตัวแล้ว) คะแนนต่ำกว่าเกณฑ์ จึงไม่มีกฎที่เสนอได้'
+    case 'gen3_no_detector':
+      return 'โมเดลตั้งข้อสังเกตจากโครงสร้างของ request ไม่มี detector ตัวไหนตรง จึงสร้างกฎทั่วไปไม่ได้'
+    case 'generator_error':
+      return 'ตัวสร้างกฎของ ML ตอบผิดพลาด ลองใหม่อีกครั้ง'
+    default:
+      return reason ? `ไม่มีกฎที่เสนอได้ (${reason})` : ''
+  }
 }
 
 export function requestTarget(r: Pick<InsightRequest, 'path' | 'query'>): string {

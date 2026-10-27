@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { detectorLabel, emptyReason, flaggedShare, histogramBars, requestTarget, scorePoints, statusView } from './mlInsights'
+import {
+  detectorLabel, emptyReason, flaggedShare, histogramBars, proposeHint, requestTarget, scorePoints, statusView, suggestReasonText,
+} from './mlInsights'
+
+describe('proposeHint', () => {
+  it('explains a missing propose button to an Owner/Editor only', () => {
+    expect(proposeHint({ can_edit: true, can_propose: true, action: null, is_attack: true })).toBe('')
+    expect(proposeHint({ can_edit: true, can_propose: false, action: 'block', is_attack: true })).toMatch(/บล็อก/)
+    expect(proposeHint({ can_edit: true, can_propose: false, action: null, is_attack: false })).toMatch(/ต่ำกว่าเกณฑ์/)
+    expect(proposeHint({ can_edit: false, can_propose: false, action: null, is_attack: true })).toBe('')
+  })
+
+  it('names why nothing was proposed', () => {
+    expect(suggestReasonText('gen3_no_detector')).toMatch(/detector/)
+    expect(suggestReasonText('')).toBe('')
+  })
+})
 
 const summary = { total: 2000, flagged: 3, watch: 10, hosts: 1, last_seen: null, threshold: 0.8749, feature_set: null }
 

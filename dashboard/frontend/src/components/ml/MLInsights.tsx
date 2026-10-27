@@ -13,6 +13,7 @@ import {
   detectorLabel, emptyReason, flaggedShare, histogramBars, InsightRequest, ListMode, MLInsights as Insights,
   RANGES, requestTarget, scorePoints, statusView, WATCH_FLOOR,
 } from '../../lib/mlInsights'
+import { VerdictActions } from './VerdictActions'
 
 // Gen 3 scores of the selected origin's real traffic (nginx mirror, or the
 // inline gate of an origin in ML enforce mode -> ML service -> ClickHouse
@@ -128,12 +129,15 @@ const RequestRow: React.FC<{ r: InsightRequest; showHost: boolean }> = ({ r, sho
               <dt className="text-[var(--text-muted)]">คะแนน / เกณฑ์</dt>
               <dd className="m-0 tabular-nums text-[var(--text-primary)]">{scorePoints(r.score, 2)} / {scorePoints(r.threshold, 2)}</dd>
               <dt className="text-[var(--text-muted)]">ขนาด body</dt>
-              <dd className="m-0 tabular-nums text-[var(--text-primary)]">{r.body_length.toLocaleString()} bytes (ไม่ได้เก็บเนื้อหา)</dd>
+              <dd className="m-0 tabular-nums text-[var(--text-primary)]">
+                {r.body_length.toLocaleString()} bytes {r.has_body ? '(เก็บแบบซ่อนข้อมูลส่วนตัว เจ้าของและ Editor ดูได้)' : '(ไม่ได้เก็บเนื้อหา)'}
+              </dd>
               <dt className="text-[var(--text-muted)]">ผู้ส่ง</dt>
               <dd className="m-0 text-[var(--text-primary)]">{r.client_ip ?? '-'}{r.country ? ` · ${r.country}` : ''}</dd>
               <dt className="text-[var(--text-muted)]">Request ID</dt>
               <dd className="m-0 font-mono break-all text-[var(--text-secondary)]">{r.request_id || '-'}</dd>
             </dl>
+            <VerdictActions r={r} />
           </td>
         </tr>
       )}
