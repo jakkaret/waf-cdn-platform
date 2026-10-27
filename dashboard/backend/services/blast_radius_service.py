@@ -26,6 +26,19 @@ from services.clickhouse_service import ClickHouseService
 
 logger = logging.getLogger(__name__)
 
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _domain_scope(domain_id: str) -> str:
+    """WHERE fragment on access_logs.host for a blast-radius sample: an
+    origin id gives that origin's verified hosts, anything else that exact
+    host. "1=0" (no rows) when neither matches anything."""
+    from services.tenant_service import build_domain_pattern_sql, origin_traffic_filter
+    value = str(domain_id or "").strip()
+    if _UUID_RE.match(value):
+        return origin_traffic_filter(value)
+    return build_domain_pattern_sql(value.lower().rstrip(".")) or "1=0"
+
 # Realistic Enterprise Baseline Traffic Templates (UUIDs, Thai/Unicode, Base64, and REST paths)
 _BENIGN_TRAFFIC_TEMPLATES = [
     # REST API Endpoints with UUIDs and Alphanumeric IDs
@@ -348,12 +361,17 @@ class BlastRadiusService:
         db_logs = []
         if self.ch_service and self.ch_service.connected:
             try:
+                # One origin's or one domain's traffic is picked by the host
+                # column in the query itself. It used to be a substring of the
+                # domain in url/user_agent on the already-limited sample, which
+                # never matched (url holds no host) and could match another
+                # tenant's requests that merely mentioned the name.
+                scope = _domain_scope(domain_id) if domain_id and domain_id != "ALL" else ""
                 db_logs = self.ch_service.get_traffic_sample_for_simulation(
                     time_range_hours=time_range_hours,
-                    limit=sample_limit
+                    limit=sample_limit,
+                    scope_clause=scope,
                 )
-                if domain_id and domain_id != "ALL":
-                    db_logs = [l for l in db_logs if domain_id.lower() in str(l.get("url", "")).lower() or domain_id.lower() in str(l.get("user_agent", "")).lower()]
             except Exception as e:
                 logger.warning("ClickHouse fetch error during blast radius: %s", e)
 
