@@ -639,6 +639,39 @@ class ClickHouseService:
             print(f"⚠️ Error querying ClickHouse histogram: {e}")
             return []
 
+    def top_offenders(self, n=5, search="", status_filter="ALL", severity_filter="ALL",
+                      method_filter="ALL", origin_clause="", from_ts=None, to_ts=None,
+                      exclude_health=True) -> dict:
+        """Busiest IPs / paths / attack types in the current filter window, for
+        the live panel beside the histogram. Same WHERE clauses as the list and
+        chart, so the three views always agree. One small GROUP BY per
+        dimension; blank keys (no attack_type on allowed traffic) are dropped."""
+        empty = {"top_ips": [], "top_paths": [], "top_types": []}
+        if not self.connected:
+            return empty
+        n = max(1, min(int(n), 50))
+        w = self._log_filter_clauses(search, status_filter, severity_filter, method_filter,
+                                     origin_clause, from_ts, to_ts, exclude_health)
+        where_str = f"WHERE {' AND '.join(w)}" if w else ""
+
+        def _top(col: str, cap: int = 0):
+            q = (f"SELECT {col} AS k, count() AS n FROM access_logs {where_str} "
+                 f"GROUP BY k ORDER BY n DESC, k LIMIT {n}")
+            try:
+                rows = self.client.query(q).result_rows
+            except Exception as e:
+                print(f"⚠️ Error querying ClickHouse top_offenders ({col}): {e}")
+                return []
+            out = []
+            for k, cnt in rows:
+                if not k:
+                    continue
+                out.append([str(k)[:cap] if cap else k, int(cnt)])
+            return out
+
+        return {"top_ips": _top("client_ip"), "top_paths": _top("url", 80),
+                "top_types": _top("attack_type")}
+
     def get_logs(
         self,
         limit: int = 20,

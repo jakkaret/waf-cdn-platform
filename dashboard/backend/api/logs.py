@@ -128,6 +128,32 @@ async def logs_histogram(
     return {"buckets": buckets, "bucket_seconds": bucket_seconds}
 
 
+@router.get("/top")
+async def logs_top_offenders(
+    n: int = Query(5, ge=1, le=50, description="rows per dimension"),
+    search: str = Query("", max_length=256),
+    status: str = Query("ALL", pattern=STATUS_FILTER_PATTERN),
+    severity: str = Query("ALL"),
+    method: str = Query("ALL"),
+    origin: Optional[str] = Query("ALL"),
+    from_ts: Optional[int] = Query(None),
+    to_ts: Optional[int] = Query(None),
+    include_health: bool = Query(False),
+    current_user: dict = Depends(require_viewer_or_above),
+):
+    """Busiest IPs / paths / attack types in the current filter window, so an
+    attack is readable live beside the histogram without opening an incident."""
+    clause = _tenant_clause(current_user, origin)
+    empty = {"top_ips": [], "top_paths": [], "top_types": []}
+    if clause == "1=0" or not ch.connected:
+        return empty
+    return ch.top_offenders(
+        n=n, search=search, status_filter=status, severity_filter=severity,
+        method_filter=method, origin_clause=clause, from_ts=from_ts, to_ts=to_ts,
+        exclude_health=not include_health,
+    )
+
+
 @router.get("/recent")
 async def fetch_recent_logs(
     limit: int = Query(100, ge=1, le=500),

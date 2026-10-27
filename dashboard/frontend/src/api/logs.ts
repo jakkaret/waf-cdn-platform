@@ -19,6 +19,8 @@ export interface LogFilterOptions {
 export interface LogCursor { ts: number; id: string }
 export interface LogStreamResponse { logs: WafLog[]; has_more: boolean; next_cursor: LogCursor | null }
 export interface HistogramBucket { bucket: number; total: number; blocked: number }
+export type TopRow = [string, number]
+export interface TopOffenders { top_ips: TopRow[]; top_paths: TopRow[]; top_types: TopRow[] }
 
 export interface LogStreamParams {
   limit?: number
@@ -93,6 +95,21 @@ export const logsApi = {
       },
     })
     return res.data.buckets || []
+  },
+  getTopOffenders: async (params: Omit<LogStreamParams, 'cursor' | 'limit'> & { n?: number }): Promise<TopOffenders> => {
+    const res = await api.get<TopOffenders>('/logs/top', {
+      params: {
+        n: params.n ?? 5,
+        search: params.search || '',
+        status: params.status_filter || 'ALL',
+        severity: params.severity_filter || 'ALL',
+        method: params.method_filter || 'ALL',
+        origin: params.origin || 'ALL',
+        from_ts: params.from_ts ?? undefined,
+        to_ts: params.to_ts ?? undefined,
+      },
+    })
+    return res.data
   },
   getFilterOptions: async (): Promise<LogFilterOptions> => {
     const res = await api.get<LogFilterOptions>('/logs/filters')

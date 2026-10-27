@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
-import { logsApi, LogCursor, HistogramBucket } from '../api/logs'
+import { logsApi, LogCursor, HistogramBucket, TopOffenders, TopRow } from '../api/logs'
 import { useOriginFilterStore } from '../store/originFilterStore'
 import { TopBar } from '../components/layout/TopBar'
 import { Drawer } from '../components/ui/Drawer'
@@ -88,6 +88,14 @@ export const Logs: React.FC = () => {
     refetchInterval: 15000,
   })
   const histoMax = histogram.reduce((m, b) => Math.max(m, b.total), 1)
+
+  // Live "top offenders" in the current filter window: who/what/which, so an
+  // attack is readable without opening an incident. Same filters as the chart.
+  const { data: top } = useQuery<TopOffenders>({
+    queryKey: ['logs-top', debouncedSearch, statusFilter, severityFilter, methodFilter, selectedOrigin, range.from, range.to],
+    queryFn: () => logsApi.getTopOffenders({ ...commonFilters, n: 5 }),
+    refetchInterval: 15000,
+  })
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value)
@@ -274,6 +282,53 @@ export const Logs: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Top offenders in the current filter window (click a row to drill in).
+          Readable at a glance during an attack, no incident needed. */}
+      {(() => {
+        const cols: Array<{ title: string; rows: TopRow[]; mono?: boolean }> = [
+          { title: 'IP ที่ยิงเยอะสุด', rows: top?.top_ips ?? [], mono: true },
+          { title: 'Path ที่โดนบ่อยสุด', rows: top?.top_paths ?? [], mono: true },
+          { title: 'ประเภทการโจมตี', rows: top?.top_types ?? [] },
+        ]
+        const hasAny = cols.some((c) => c.rows.length > 0)
+        if (!hasAny) return null
+        return (
+          <div className="dash-card p-4 mb-4 font-mono">
+            <div className="text-[11px] text-[var(--text-muted)] mb-3 uppercase tracking-wide">Top offenders · ในช่วงที่กรองอยู่</div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {cols.map((col) => {
+                const max = col.rows.reduce((m, r) => Math.max(m, r[1]), 1)
+                return (
+                  <div key={col.title} className="min-w-0">
+                    <div className="text-[11px] font-semibold text-[var(--text-primary)] mb-2">{col.title}</div>
+                    {col.rows.length === 0 ? (
+                      <div className="text-[11px] text-[var(--text-muted)]">—</div>
+                    ) : (
+                      <div className="flex flex-col gap-1.5">
+                        {col.rows.map(([key, count]) => (
+                          <button
+                            key={key}
+                            onClick={() => setSearch(key)}
+                            title={`${key} — ${count.toLocaleString()} ครั้ง · คลิกเพื่อกรอง`}
+                            className="relative w-full text-left px-2 py-1 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)] hover:border-orange-500 transition-colors cursor-pointer overflow-hidden"
+                          >
+                            <div className="absolute inset-y-0 left-0 bg-orange-500/15" style={{ width: `${Math.round((count / max) * 100)}%` }} />
+                            <div className="relative flex items-center justify-between gap-2">
+                              <span className={`truncate text-[11px] text-[var(--text-primary)] ${col.mono ? 'font-mono' : ''}`}>{key}</span>
+                              <span className="shrink-0 text-[11px] font-semibold text-orange-500 tabular-nums">{count.toLocaleString()}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Filter and Search Bar */}
       <div className="dash-card p-4 mb-4 font-mono">
