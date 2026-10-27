@@ -10,7 +10,7 @@ status: VERIFIED
 
 Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/api/system/*`, ไฟล์ static) อยู่นอกขอบเขตของไฟล์นี้
 
-พบทั้งหมด **176 endpoints** ใน **28 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 29 รายการ
+พบทั้งหมด **180 endpoints** ใน **29 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 30 รายการ
 
 ## `api/ai_summary.py`
 
@@ -177,10 +177,21 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 | Method | Path | Handler | Auth | คำอธิบาย (docstring) |
 |---|---|---|---|---|
 | POST | `/api/ml/capture` | `capture_telemetry_relay` | public | Docker-to-loopback relay for privacy-scoped lab telemetry. |
+| POST | `/api/ml/gate` | `gate_relay` | public | Inline gate of an origin in enforce mode (nginx/njs/mlgate.js): scores |
 | GET | `/api/ml/insights` | `ml_insights` | viewer+ | Gen 3 scores of the caller's real traffic (shadow, nothing blocked): |
 | POST | `/api/ml/predict` | `predict_anomaly` | viewer+ |  |
 | POST | `/api/ml/predict-and-suggest` | `predict_and_suggest` | viewer+ | Score a request with Gen 3 and queue rule proposals for review (an origin's Owner/Editors, or the platform admin). |
 | GET | `/api/ml/shadow/decision` | `shadow_decision` | public | Internal Docker-to-loopback relay for the Nginx shadow hook. |
+
+## `api/ml_protection.py`
+
+สถานะการลงทะเบียน: ลงทะเบียนใน main.py
+
+| Method | Path | Handler | Auth | คำอธิบาย (docstring) |
+|---|---|---|---|---|
+| GET | `/api/origins/{origin_id}/ml-protection` | `get_ml_protection` | origin read |  |
+| PUT | `/api/origins/{origin_id}/ml-protection` | `put_ml_protection` | origin edit, login |  |
+| GET | `/api/origins/{origin_id}/ml-protection/preview` | `preview_ml_protection` | origin read |  |
 
 ## `api/ml_rules.py`
 

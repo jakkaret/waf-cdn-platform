@@ -86,6 +86,38 @@ normal FRP path serves it (config-generator token, `NewProxy` gatekeeper,
   answering from its cache (`max-age=600`) for up to 10 minutes, because the production
   edges have no purge endpoint yet (audit H13).
 
+## Gen 3 ML on the request path (2026-10-27)
+
+On Main's waf-nginx, in `location /` of the tunnel server and of every direct-mode
+site, each request runs through these stages in order:
+
+1. **ModSecurity/CRS.** A CRS block ends the request with 403 here.
+2. **Shield.** Rate limit, CAPTCHA and OTP run via `auth_request` to control-api.
+3. **ML scoring, log mode (the default).** The request goes on to the origin unchanged.
+   `mirror` sends a copy, body included, to `/api/ml/capture`. The Gen 3 verdict is
+   stored in ClickHouse `ml_verdicts`, and ML Insights shows it. Nothing is blocked.
+4. **ML scoring, enforce mode.** This applies only to an origin whose Owner or Editor
+   switched it on (Origin → ML Protection, `waf.origin_ml_protection`).
+   - The njs gate (`nginx/njs/mlgate.js`) sends the body to `/api/ml/gate` before the
+     request goes on.
+   - `block_score` and above: the gate answers 403.
+   - `challenge_score` and above: the gate shows the ML challenge page. A valid CAPTCHA
+     clearance, checked by control-api `/api/ml/clearance`, lets the request through,
+     but only in this band.
+   - Any error or timeout: the request goes through (fail open).
+
+Which hosts enforce comes only from `nginx/ml-gate/hosts.map`, mounted into
+waf-nginx. `services/ml_gate.py` renders it from the database, runs `nginx -t`,
+and reloads nginx. When the file is missing, or a host is not listed in it, that
+host is in log mode.
+
+The gate does not cover:
+- static-looking paths (`.css`, `.js`, `.json`, images, fonts);
+- the four lab servers in `default.conf.template`;
+- the body of a request over 64 KB (the request is scored without it).
+
+Edges do not run the gate.
+
 ## Rule synchronization
 
 Dashboard API -> `scripts/sync_waf_rules.py` -> `docker cp` -> `nginx -t` ->
