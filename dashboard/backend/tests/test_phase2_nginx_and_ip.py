@@ -29,11 +29,21 @@ def test_every_location_that_reaches_an_origin_is_behind_the_shield():
     text = MAIN_TEMPLATE.read_text()
     to_origin = [(h, b) for h, b in _locations(text)
                  if any(f"proxy_pass http://{u}" in b for u in ORIGIN_UPSTREAMS)]
-    assert len(to_origin) == 10  # five server blocks, "/" and the static-file location each
+    # five server blocks, "/" and the static-file location each; the tunnel
+    # server's "/" reaches the origin through its ML gate's @waf_origin
+    assert len(to_origin) == 10
     for header, body in to_origin:
+        assert 'more_set_headers "Cache-Control: $waf_cache_control";' in body, header
+        if header == "@waf_origin":
+            continue  # a named location: entered only from the gated "/" checked below
         assert "auth_request /internal-shield-check;" in body, header
         assert "auth_request_set $shield_protected $upstream_http_x_shield_protected;" in body, header
-        assert 'more_set_headers "Cache-Control: $waf_cache_control";' in body, header
+    gated = [b for h, b in _locations(text) if "js_content mlgate.gate;" in b]
+    assert len(gated) == 1
+    for body in gated:
+        assert "auth_request /internal-shield-check;" in body
+        assert "auth_request_set $shield_protected $upstream_http_x_shield_protected;" in body
+        assert "proxy_pass" not in body
 
 
 def test_shield_protected_responses_are_private_no_store():
