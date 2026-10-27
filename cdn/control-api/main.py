@@ -16,6 +16,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from captcha_engine import captcha_access, issue_challenge, verify_challenge, ChallengeVerifyRequest
 from captcha_engine import _redis as shared_redis
+from captcha_engine import has_clearance
 from otp_engine import otp_access, shield_access, issue_challenge_page, issue_ml_challenge, request_code, verify_code, OtpRequestPayload, OtpVerifyPayload
 
 # 2026-09-22 (overnight session): this service is bound 0.0.0.0:8070 (see
@@ -217,6 +218,15 @@ async def captcha_challenge_route(request: Request):
 @app.post("/cdn-cgi/challenge/verify", include_in_schema=False)
 async def captcha_verify_route(request: Request, payload: ChallengeVerifyRequest):
     return await verify_challenge(request, payload)
+
+@app.get("/api/ml/clearance", include_in_schema=False)
+async def ml_clearance_route(request: Request):
+    # The challenge band of the per-origin inline ML gate (nginx/njs/mlgate.js):
+    # 204 when the visitor already holds a valid CAPTCHA clearance for the
+    # host, 401 when not -- the same check shield_access makes for its own ML
+    # branch (H10). nginx sends the visitor's address, UA and cookie, so a
+    # cookie only counts for the visitor it was issued to.
+    return Response(status_code=204 if has_clearance(request) else 401, headers={"Cache-Control": "no-store"})
 
 @app.api_route("/api/otp/access", methods=["GET", "POST"], include_in_schema=False)
 async def otp_access_route(request: Request):

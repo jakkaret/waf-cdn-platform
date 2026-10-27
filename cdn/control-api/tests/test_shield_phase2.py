@@ -307,6 +307,25 @@ def test_challenge_route_answers_503_when_the_store_is_down(main_app):
     assert resp.status_code == 503 and resp.headers["Cache-Control"] == "no-store"
 
 
+# ------------------------------------------ inline ML gate: challenge band
+
+def _clearance(main_app, cookie=""):
+    headers = {"X-Original-Host": HOST, "X-Original-IP": "198.51.100.7", "X-Original-User-Agent": "pytest"}
+    if cookie:
+        headers["Cookie"] = cookie
+    return main_app.get("/api/ml/clearance", headers=headers)
+
+
+def test_ml_clearance_is_204_only_for_this_visitors_valid_cookie(main_app, redis_):
+    assert _clearance(main_app).status_code == 401
+    good = _clearance(main_app, _captcha_cookie(int(time.time()) + 600))
+    assert good.status_code == 204 and good.headers["Cache-Control"] == "no-store"
+    assert _clearance(main_app, _captcha_cookie(int(time.time()) - 5)).status_code == 401
+    # Issued to another address: not this visitor's clearance.
+    assert _clearance(main_app, _captcha_cookie(int(time.time()) + 600, ip="203.0.113.9")).status_code == 401
+    assert _clearance(main_app, _captcha_cookie(int(time.time()) + 600, ua="other")).status_code == 401
+
+
 # 2026-10-25: a site's own rate limits (origin_id) apply only to that site's
 # hosts, and every bucket is per host as well as per client IP.
 
