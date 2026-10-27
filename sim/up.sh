@@ -40,6 +40,7 @@ docker compose build
 docker compose up -d
 
 echo "waiting for the machines to finish their setup (first run pulls images, ~10-20 min)"
+unhealthy=0
 for node in main edge-th edge-asia lab; do
   printf '  %-10s' "$node"
   for _ in $(seq 1 360); do
@@ -52,10 +53,16 @@ for node in main edge-th edge-asia lab; do
   done
   echo "$status"
   if [ "$status" != healthy ]; then
+    unhealthy=$((unhealthy + 1))
     echo "  last log lines of $node:"
     docker logs --tail 20 "wafsim-$node-1" 2>&1 | sed 's/^/    /'
   fi
 done
+
+if [ "$unhealthy" -gt 0 ]; then
+  echo "$unhealthy machine(s) did not finish their setup; see the logs above" >&2
+  exit 1
+fi
 
 cat <<EOF
 
