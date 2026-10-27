@@ -178,6 +178,17 @@ server {{
         auth_request_set $retry_after $upstream_http_retry_after;
         auth_request_set $shield_type $upstream_http_x_shield_type;
         auth_request_set $shield_protected $upstream_http_x_shield_protected;
+
+        # Gen 3 inline gate (nginx/njs/mlgate.js): scores the request with
+        # its body when this origin is in ML enforce mode, otherwise goes
+        # straight to @waf_origin, which answers (Cache-Control rule there).
+        # Same as the tunnel server's location /.
+        client_body_buffer_size 64k;
+        client_body_in_single_buffer on;
+        js_content mlgate.gate;
+    }}
+
+    location @waf_origin {{
         more_set_headers "Cache-Control: $waf_cache_control";
 
         proxy_pass {upstream_target};

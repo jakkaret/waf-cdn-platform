@@ -18,6 +18,10 @@ services:
       # Copied from the image (H84) so the default server's include is reviewable here.
       - ./nginx/templates/includes/location_common.conf.template:/etc/nginx/templates/includes/location_common.conf.template:ro
       - ./nginx/includes/otp_server.conf:/etc/nginx/includes/otp_server.conf:ro
+      # Gen 3 inline gate: the njs code, and the per-host policy map that
+      # dashboard-backend (services/ml_gate.py) renders on the host.
+      - ./nginx/njs:/etc/nginx/njs:ro
+      - ./nginx/ml-gate:/etc/nginx/ml-gate:ro
       - ./html/403.html:/usr/share/nginx/html/403.html:ro
       - ./nginx/templates/conf/server.key:/etc/nginx/conf/server.key
       - ./nginx/templates/conf/server.crt:/etc/nginx/conf/server.crt

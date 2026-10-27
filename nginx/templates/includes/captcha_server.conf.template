@@ -41,6 +41,11 @@ location = /internal-ml-shadow-allow {
 # hosts in ml/capture_telemetry.py's allowlist.
 location = /internal-ml-capture {
     internal;
+    # A host in ML enforce mode is already scored by the inline gate below
+    # (one verdict per request, with the action it took).
+    if ($ml_gate) {
+        return 204;
+    }
     proxy_method POST;
     proxy_pass http://host.docker.internal:8000/api/ml/capture;
     proxy_set_header X-Internal-ML-Relay "${ML_RELAY_SECRET}";
@@ -52,6 +57,48 @@ location = /internal-ml-capture {
     proxy_set_header Host $host;
     proxy_read_timeout 2s;
     proxy_connect_timeout 1s;
+}
+
+# Gen 3 inline gate (nginx/njs/mlgate.js) of a host in ML enforce mode:
+# njs sends the request body here as a subrequest; dashboard-backend scores it
+# and answers the action on X-WAF-ML-Action. $ml_gate (the origin's bands,
+# from the nginx map) is sent as X-ML-Gate. Only the headers below go out --
+# not the visitor's cookies or authorization. The relay itself fails open
+# within its 0.5 s budget; a hung relay costs at most these timeouts.
+location = /internal-ml-gate {
+    internal;
+    proxy_method POST;
+    proxy_pass http://host.docker.internal:8000/api/ml/gate;
+    proxy_pass_request_headers off;
+    proxy_set_header X-Internal-ML-Relay "${ML_RELAY_SECRET}";
+    proxy_set_header X-ML-Gate $ml_gate;
+    proxy_set_header X-Original-Host $host;
+    proxy_set_header X-Original-URI $request_uri;
+    proxy_set_header X-Original-Method $request_method;
+    proxy_set_header X-Original-Request-ID $request_id;
+    proxy_set_header Content-Type $content_type;
+    proxy_set_header Host $host;
+    proxy_connect_timeout 300ms;
+    proxy_send_timeout 1s;
+    proxy_read_timeout 1s;
+}
+
+# The challenge band: whether this visitor already holds a CAPTCHA clearance
+# (waf_clearance) for the host -- 204 yes, 401 no. Same visitor headers as the
+# shield check, so the clearance is checked against the same address/UA.
+location = /internal-ml-clearance {
+    internal;
+    proxy_method GET;
+    proxy_pass http://control-api:8070/api/ml/clearance;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header X-Original-Host $host;
+    proxy_set_header X-Original-IP $waf_client_ip;
+    proxy_set_header X-Original-User-Agent $http_user_agent;
+    proxy_set_header Cookie $http_cookie;
+    proxy_set_header Host $host;
+    proxy_connect_timeout 300ms;
+    proxy_read_timeout 1s;
 }
 
 location = /internal-captcha-check {

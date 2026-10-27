@@ -86,6 +86,10 @@ dashboard/backend/data/system_settings.json
 # they carry DECEPTION_INTERNAL_KEY.
 nginx/custom_sites/
 
+# Per-host ML gate policy rendered at runtime by services/ml_gate.py.
+nginx/ml-gate/*
+!nginx/ml-gate/README.md
+
 # Database/service passwords created by deploy/postgres/bootstrap.sh -- never commit
 /secrets/
 

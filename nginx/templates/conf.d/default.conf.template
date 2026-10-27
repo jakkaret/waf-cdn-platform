@@ -47,6 +47,18 @@ map $shield_protected $waf_cache_control {
     default $upstream_http_cache_control;
 }
 
+# Gen 3 inline gate (nginx/njs/mlgate.js). services/ml_gate.py renders
+# /etc/nginx/ml-gate/hosts.map from each origin's ML protection setting:
+# "enforce:<challenge>:<block>" for a verified host of an origin in enforce
+# mode, nothing for any other host. Empty $ml_gate = log mode: the gate sends
+# the request straight on without calling ML. The include is a glob, so a
+# missing file is the same as an empty one -- never a block.
+map $host $ml_gate {
+    default "";
+    include /etc/nginx/ml-gate/*.map;
+}
+js_import mlgate from /etc/nginx/njs/mlgate.js;
+
 upstream frp_tunnel_router {
     server 172.18.0.1:8085;
 }
@@ -113,6 +125,19 @@ server {
         auth_request_set $retry_after $upstream_http_retry_after;
         auth_request_set $shield_type $upstream_http_x_shield_type;
         auth_request_set $shield_protected $upstream_http_x_shield_protected;
+
+        # Gen 3 inline gate, after ModSecurity and the shield: a host in ML
+        # enforce mode ($ml_gate set) is scored with its body and may get 403
+        # or the challenge page; every other host goes straight to
+        # @waf_origin, which answers (and sets Cache-Control). Fails open.
+        # Bodies stay in one memory buffer up to 64k so the gate can read
+        # them; a larger one is scored without its body.
+        client_body_buffer_size 64k;
+        client_body_in_single_buffer on;
+        js_content mlgate.gate;
+    }
+
+    location @waf_origin {
         more_set_headers "Cache-Control: $waf_cache_control";
 
         proxy_pass http://frp_tunnel_router;
