@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
 import { logsApi, LogCursor, HistogramBucket } from '../api/logs'
 import { useOriginFilterStore } from '../store/originFilterStore'
@@ -30,8 +31,14 @@ import { BKK_LABEL, bkkDateKey, formatBkkDateTime } from '../lib/time'
 export const Logs: React.FC = () => {
   // Filter-first at scale: a time range narrows the search, and we never
   // deep-page -- a cursor 'load more' walks newest->older in place (F: log UX).
-  const [rangePreset, setRangePreset] = useState<'15m'|'1h'|'24h'|'7d'|'all'>('24h')
-  const [search, setSearch] = useState('')
+  // ?search= comes from "View in traffic logs" links (alerts, dashboard).
+  const [searchParams] = useSearchParams()
+  const linkedSearch = searchParams.get('search') ?? ''
+  const [rangePreset, setRangePreset] = useState<'15m'|'1h'|'24h'|'7d'|'all'>(linkedSearch ? '7d' : '24h')
+  const [search, setSearch] = useState(linkedSearch)
+  useEffect(() => {
+    if (linkedSearch) setSearch(linkedSearch)
+  }, [linkedSearch])
   const debouncedSearch = useDebouncedValue(search)
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [methodFilter, setMethodFilter] = useState('ALL')
@@ -172,8 +179,9 @@ export const Logs: React.FC = () => {
     <div className="animate-fade-in pb-8">
       {/* Top Header Bar */}
       <TopBar
-        title="Traffic Inspection Log"
-        subtitle="Real-time reverse proxy access stream and deep threat inspection"
+        scope
+        title="Traffic logs"
+        subtitle="Every request that reached your sites through the WAF, newest first"
         badge={
           <Badge color="success" dot pulse>
             LIVE TELEMETRY

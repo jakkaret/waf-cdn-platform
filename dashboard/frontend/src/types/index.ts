@@ -59,6 +59,9 @@ export interface WafAlert {
   /** Telegram dispatch outcome; not yet provided by backend. */
   dispatch_status?: string | null
   dispatched?: boolean | null
+  /** Origin the alert's Host resolved to at write time; empty when unattributed. */
+  origin_id?: string | null
+  domain?: string | null
 }
 
 export interface CdnNode {

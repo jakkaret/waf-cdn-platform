@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { alertsApi } from '../api/alerts'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
@@ -35,8 +36,9 @@ import { WafAlert } from '../types'
 import toast from 'react-hot-toast'
 import { getDispatchLabel } from '../lib/alertDispatch'
 import { IncidentList } from '../components/alerts/IncidentList'
-import { NotificationSettings } from '../components/alerts/NotificationSettings'
 import { BKK_LABEL, bkkDateKey, formatBkkDateTime } from '../lib/time'
+import { originTabPath } from '../components/layout/navigation'
+import { alertSeverity, isBlockableIp, logsSearchPath } from '../lib/alertActions'
 
 const ALERTS_FETCH_LIMIT = 200
 
@@ -53,12 +55,10 @@ const formatAlertId = (rawId?: string | null, fallbackIndex?: number): string =>
 }
 
 export const Alerts: React.FC = () => {
-  const queryClient = useQueryClient()
-
-  // Pairing code state
-  const [code, setCode] = useState<string | null>(null)
-  const [botUsername, setBotUsername] = useState<string>('WAF_Project_Bot')
-  const [copiedCode, setCopiedCode] = useState(false)
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  // ?alert=<alert_id> opens that alert's details (notification bell, links).
+  const linkedAlertId = searchParams.get('alert')
 
   // Filter & Pagination States
   const [page, setPage] = useState(1)
@@ -75,11 +75,11 @@ export const Alerts: React.FC = () => {
   const [copiedText, setCopiedText] = useState<string | null>(null)
   const limit = 15
 
-  // Fetch Telegram Connection Status
-  const { data: status, isLoading: isStatusLoading } = useQuery({
+  // Telegram connection (managed on the Notifications page; read here only
+  // for the header link).
+  const { data: status } = useQuery({
     queryKey: ['telegram-status'],
     queryFn: alertsApi.getConnectionStatus,
-    refetchInterval: code ? 3000 : false,
   })
 
   // Fetch Alerts History
@@ -96,57 +96,28 @@ export const Alerts: React.FC = () => {
     refetchInterval: 30000,
   })
 
-  // Connect Mutation
-  const connectMutation = useMutation({
-    mutationFn: alertsApi.startConnection,
-    onSuccess: (data) => {
-      setCode(data.code)
-      if (data.bot_username) {
-        setBotUsername(data.bot_username)
-      }
-      toast.success('Connection token generated! Send code to the Telegram bot.')
-    },
-    onError: () => toast.error('Failed to initiate Telegram connection'),
-  })
-
-  // Disconnect Mutation
-  const disconnectMutation = useMutation({
-    mutationFn: alertsApi.disconnect,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['telegram-status'] })
-      toast.success('Disconnected from Telegram Alert Bot')
-    },
-  })
-
-  // Poll connection code
+  // Open the linked alert once the list has it. An id that is not in the
+  // fetched page (older, or not visible to this account) is reported, not
+  // silently dropped.
+  const [linkMissing, setLinkMissing] = useState(false)
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval>
-    if (code) {
-      interval = setInterval(async () => {
-        try {
-          const res = await alertsApi.pollConnection(code)
-          if (res.status === 'connected') {
-            setCode(null)
-            queryClient.invalidateQueries({ queryKey: ['telegram-status'] })
-            toast.success('Telegram Bot Connected Successfully!')
-          } else if (res.status === 'expired') {
-            setCode(null)
-            toast.error('Verification code expired')
-          }
-        } catch (e) {
-          // ignore
-        }
-      }, 3000)
+    if (!linkedAlertId || isAlertsLoading) return
+    const found = rawAlerts.find((a) => a.alert_id === linkedAlertId)
+    if (found) {
+      setSelectedAlert(found)
+      setLinkMissing(false)
+    } else {
+      setLinkMissing(true)
     }
-    return () => clearInterval(interval)
-  }, [code, queryClient])
+  }, [linkedAlertId, isAlertsLoading, rawAlerts])
 
-  const handleCopyCode = () => {
-    if (!code) return
-    navigator.clipboard.writeText(code)
-    setCopiedCode(true)
-    toast.success('Copied verification code')
-    setTimeout(() => setCopiedCode(false), 2000)
+  const closeAlert = () => {
+    setSelectedAlert(null)
+    if (searchParams.has('alert')) {
+      const p = new URLSearchParams(searchParams)
+      p.delete('alert')
+      setSearchParams(p, { replace: true })
+    }
   }
 
   const handleCopy = (text: string, label: string) => {
@@ -191,9 +162,8 @@ export const Alerts: React.FC = () => {
     // only the fetched page, so a full page is shown as a lower bound ("200+").
     const total = rawAlerts.length
     const totalIsLowerBound = rawAlerts.length >= ALERTS_FETCH_LIMIT
-    const critical = rawAlerts.filter(
-      (a) => String(a.severity).toUpperCase() === 'CRITICAL' || String(a.status).includes('403')
-    ).length
+    // Recorded severity only: a 403 is the WAF's answer, not a threat level.
+    const critical = rawAlerts.filter((a) => alertSeverity(a.severity) === 'CRITICAL').length
     const tracked = rawAlerts.some((a) => getDispatchLabel(a).label !== 'Not tracked')
     const dispatched = tracked ? rawAlerts.filter((a) => getDispatchLabel(a).state === 'sent').length : null
     return { total, totalIsLowerBound, critical, dispatched }
@@ -218,7 +188,7 @@ export const Alerts: React.FC = () => {
 
       // 2. Severity filter
       if (severityFilter !== 'ALL') {
-        const sev = (alert.severity || (alert.status === '403' ? 'CRITICAL' : 'HIGH')).toUpperCase()
+        const sev = alertSeverity(alert.severity) ?? 'NONE'
         if (sev !== severityFilter) return false
       }
 
@@ -302,7 +272,7 @@ export const Alerts: React.FC = () => {
         `"${(a.url || '').replace(/"/g, '""')}"`,
         `"${a.status || ''}"`,
         `"${(a.message || '').replace(/"/g, '""')}"`,
-        `"${a.severity || 'CRITICAL'}"`,
+        `"${alertSeverity(a.severity) ?? ''}"`,
         `"${a.rule_id || ''}"`,
       ].join(',')),
     ]
@@ -315,12 +285,12 @@ export const Alerts: React.FC = () => {
   }
 
   const getSeverityBadge = (severity?: string | null) => {
-    const s = (severity || 'CRITICAL').toUpperCase()
-    if (s === 'CRITICAL') return <Badge color="danger">CRITICAL</Badge>
-    if (s === 'HIGH') return <Badge color="warning">HIGH</Badge>
-    if (s === 'MEDIUM') return <Badge color="info">MEDIUM</Badge>
-    if (s === 'LOW') return <Badge color="success">LOW</Badge>
-    return <Badge color="gray">{s}</Badge>
+    const s = alertSeverity(severity)
+    if (s === 'CRITICAL') return <Badge color="danger">Critical</Badge>
+    if (s === 'HIGH') return <Badge color="warning">High</Badge>
+    if (s === 'MEDIUM') return <Badge color="info">Medium</Badge>
+    if (s === 'LOW') return <Badge color="gray">Low</Badge>
+    return <Badge color="gray">Not recorded</Badge>
   }
 
   const isAnyFilterActive = Boolean(
@@ -331,129 +301,43 @@ export const Alerts: React.FC = () => {
     <div className="animate-fade-in pb-12">
       {/* Top Header Bar */}
       <TopBar
-        title="Security Alert Center"
-        subtitle="Real-time Telegram bot incident dispatch and critical attack notifications • Bangkok time (UTC+7)"
-        badge={
-          status?.connected ? (
-            <Badge color="success" dot pulse>
-              BOT CONNECTED
-            </Badge>
-          ) : (
-            <Badge color="warning" dot>
-              NOT CONNECTED
-            </Badge>
-          )
-        }
+        title="Alerts"
+        subtitle={`Requests the WAF flagged on your sites, grouped into attack incidents. Times are ${BKK_LABEL}.`}
         action={
           <div className="flex items-center gap-2">
-            <button
+            <Link
+              to="/notifications"
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[12.5px] font-medium text-[var(--text-primary)]"
+            >
+              <Send size={13} aria-hidden="true" />
+              {status?.connected ? 'Telegram connected' : 'Set up Telegram'}
+            </Link>
+            <Button
+              variant="secondary"
               onClick={() => refetchAlerts()}
               disabled={isAlertsFetching}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--bg-surface)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] text-[12px] font-mono font-medium text-[var(--text-primary)] rounded-md hover:bg-[var(--bg-hover)] shadow-sm transition-all cursor-pointer"
+              icon={<RefreshCw size={13} className={isAlertsFetching ? 'animate-spin motion-reduce:animate-none' : ''} />}
             >
-              <RefreshCw size={13} className={isAlertsFetching ? 'animate-spin text-orange-500' : 'text-[var(--text-muted)]'} />
-              <span>Refresh</span>
-            </button>
-            <button
+              Refresh
+            </Button>
+            <Button
+              variant="secondary"
               onClick={exportToCSV}
               disabled={filteredAlerts.length === 0}
-              className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 text-[12px] font-mono font-semibold rounded-md disabled:opacity-40 shadow-sm transition-all cursor-pointer"
+              icon={<Download size={13} />}
             >
-              <Download size={13} />
-              <span>Export CSV</span>
-            </button>
+              Export CSV
+            </Button>
           </div>
         }
       />
 
-      {/* ═══ Section 1: Telegram Alert Control Bar & KPI Strip ═══ */}
-      {/* Telegram Control Banner (Compact & tight, no excess whitespace) */}
-      <div className="dash-card p-3.5 sm:p-4 bg-[var(--bg-surface)]">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-600 dark:text-sky-400 shrink-0">
-              <Send size={15} />
-            </div>
-            <div className="min-w-0 flex items-center gap-2.5 flex-wrap">
-              <h3 className="text-[13.5px] font-bold text-[var(--text-primary)] font-mono m-0">
-                Telegram Incident Dispatch Bot
-              </h3>
-              <Badge color={status?.connected ? 'success' : 'warning'} size="sm" dot>
-                {status?.connected ? 'ACTIVE DISPATCH' : 'DISCONNECTED'}
-              </Badge>
-              {status?.connected ? (
-                <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-mono flex items-center gap-1">
-                  <CheckCircle2 size={12} />
-                  Chat ID: {status.chat_id}
-                </span>
-              ) : (
-                <span className="text-[11px] text-[var(--text-muted)] font-mono hidden md:inline">
-                  Real-time critical security dispatch
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-            {!status?.connected && !code && (
-              <Button
-                variant="brand"
-                size="sm"
-                onClick={() => connectMutation.mutate()}
-                isLoading={connectMutation.isPending}
-                icon={<Send size={12} />}
-              >
-                Connect Telegram
-              </Button>
-            )}
-
-            {status?.connected && (
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => disconnectMutation.mutate()}
-                isLoading={disconnectMutation.isPending}
-              >
-                Disconnect
-              </Button>
-            )}
-          </div>
+      {linkedAlertId && linkMissing && (
+        <div role="status" className="mb-4 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] px-4 py-3 text-[12.5px] text-[var(--text-secondary)]">
+          The linked alert is not among the latest {ALERTS_FETCH_LIMIT} alerts visible to your account. Search its IP below, or open{' '}
+          <Link to="/logs" className="text-[var(--accent)] hover:underline">Traffic logs</Link>.
         </div>
-
-        {/* Verification Code Box (Inline & Compact) */}
-        {code && (
-          <div className="mt-3 pt-3 border-t border-[var(--bg-border-subtle)] flex flex-wrap items-center gap-2.5 animate-fade-in text-[11.5px] font-mono">
-            <span className="text-[var(--text-muted)]">Verification Token:</span>
-            <div className="flex items-center gap-1.5 font-bold text-sky-600 dark:text-sky-400 bg-sky-500/10 border border-sky-500/25 px-2.5 py-0.5 rounded">
-              <span>{code}</span>
-              <button
-                onClick={handleCopyCode}
-                className="p-0.5 text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-white transition-colors cursor-pointer"
-                title="Copy code"
-              >
-                {copiedCode ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
-              </button>
-            </div>
-
-            <a
-              href={`https://t.me/${botUsername}?start=${code}`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-sky-500 hover:bg-sky-600 text-white rounded text-[11px] font-semibold transition-all shadow-sm"
-            >
-              <span>Open @{botUsername}</span>
-              <ExternalLink size={11} />
-            </a>
-
-            <span className="text-[11px] text-[var(--text-muted)] flex items-center gap-1 ml-auto">
-              <RefreshCw size={11} className="animate-spin text-sky-500" />
-              Waiting for bot handshake...
-            </span>
-          </div>
-        )}
-      </div>
-
-      <NotificationSettings />
+      )}
 
       <IncidentList />
 
@@ -462,13 +346,15 @@ export const Alerts: React.FC = () => {
         <div className="dash-card p-4 sm:p-4.5 flex items-center justify-between">
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] block font-mono mb-1">
-              Total Incident Alerts
+              Alerts listed
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-[24px] font-bold font-mono text-[var(--text-primary)] leading-none">
                 {alertMetrics.total}{alertMetrics.totalIsLowerBound ? '+' : ''}
               </span>
-              <span className="text-[11px] font-mono text-[var(--text-muted)]">Events recorded</span>
+              <span className="text-[11px] text-[var(--text-muted)]">
+                {alertMetrics.totalIsLowerBound ? `latest ${ALERTS_FETCH_LIMIT} loaded` : 'one per flagged request'}
+              </span>
             </div>
           </div>
           <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-orange-500/10">
@@ -479,13 +365,13 @@ export const Alerts: React.FC = () => {
         <div className="dash-card p-4 sm:p-4.5 flex items-center justify-between bg-red-50/40 dark:bg-red-950/[0.08] border-red-200/60 dark:border-red-500/15">
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-red-600/80 dark:text-red-400/80 block font-mono mb-1">
-              Critical Severity Threats
+              Critical severity
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-[24px] font-bold font-mono text-red-600 dark:text-red-400 leading-none">
                 {alertMetrics.critical}
               </span>
-              <span className="text-[11px] font-mono text-red-600/70 dark:text-red-400/70">Immediate blocks</span>
+              <span className="text-[11px] text-red-700/80 dark:text-red-400/80">of the alerts listed</span>
             </div>
           </div>
           <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-red-500/10">
@@ -558,6 +444,7 @@ export const Alerts: React.FC = () => {
                 <option value="HIGH">High</option>
                 <option value="MEDIUM">Medium</option>
                 <option value="LOW">Low</option>
+                <option value="NONE">Not recorded</option>
               </select>
 
               {/* Status Filter */}
@@ -693,14 +580,14 @@ export const Alerts: React.FC = () => {
           <table className="dash-table border-collapse w-full">
             <thead>
               <tr className="border-b border-[var(--bg-border)]">
-                <th className="w-44 border-r border-[var(--bg-border)]">Timestamp ({BKK_LABEL})</th>
-                <th className="w-28 border-r border-[var(--bg-border)]">Alert ID</th>
+                <th className="w-44 border-r border-[var(--bg-border)]">Time ({BKK_LABEL})</th>
                 <th className="w-36 border-r border-[var(--bg-border)]">Source IP</th>
-                <th className="border-r border-[var(--bg-border)]">Target URI</th>
-                <th className="border-r border-[var(--bg-border)]">Detection Reason</th>
                 <th className="w-28 border-r border-[var(--bg-border)]">Severity</th>
-                <th className="w-36 border-r border-[var(--bg-border)]">Dispatch Status</th>
-                <th className="text-right w-20">Inspect</th>
+                <th className="border-r border-[var(--bg-border)]">Detection reason</th>
+                <th className="hidden lg:table-cell border-r border-[var(--bg-border)]">Target URI</th>
+                <th className="hidden xl:table-cell w-28 border-r border-[var(--bg-border)]">Alert ID</th>
+                <th className="hidden xl:table-cell w-36 border-r border-[var(--bg-border)]">Telegram</th>
+                <th className="text-right w-20"><span className="sr-only">Details</span></th>
               </tr>
             </thead>
             <tbody>
@@ -730,7 +617,7 @@ export const Alerts: React.FC = () => {
               ) : (
                 paginatedAlerts.map((alert: WafAlert, idx: number) => {
                   const alertId = formatAlertId(alert.alert_id, (page - 1) * limit + idx + 1)
-                  const isCritical = String(alert.severity).toUpperCase() === 'CRITICAL' || String(alert.status).includes('403')
+                  const isCritical = alertSeverity(alert.severity) === 'CRITICAL'
                   // formatAlertId strips the trailing IP suffix for display,
                   // so two alerts from different attacking IPs in the same
                   // second (plausible in a distributed attack) can format
@@ -753,28 +640,11 @@ export const Alerts: React.FC = () => {
                         {formatBkkDateTime(alert.timestamp)}
                       </td>
 
-                      {/* Alert ID */}
-                      <td className="border-r border-[var(--bg-border-subtle)]">
-                        <span className="font-mono font-bold text-[11px] text-orange-600 dark:text-orange-400">
-                          {alertId}
-                        </span>
-                      </td>
-
                       {/* Source IP */}
                       <td className="border-r border-[var(--bg-border-subtle)]">
-                        <span className="font-mono font-bold text-[12px] text-[var(--text-primary)]">
+                        <span className="font-mono font-semibold text-[12px] text-[var(--text-primary)]">
                           {alert.ip}
                         </span>
-                      </td>
-
-                      {/* Target URI */}
-                      <td className="font-mono text-[11.5px] max-w-[260px] truncate text-[var(--text-primary)] border-r border-[var(--bg-border-subtle)]" title={alert.url}>
-                        {alert.url || '/'}
-                      </td>
-
-                      {/* Message / Reason */}
-                      <td className="text-[12px] text-[var(--text-secondary)] max-w-[300px] truncate border-r border-[var(--bg-border-subtle)]" title={alert.message}>
-                        {alert.message}
                       </td>
 
                       {/* Severity */}
@@ -782,12 +652,32 @@ export const Alerts: React.FC = () => {
                         {getSeverityBadge(alert.severity)}
                       </td>
 
+                      {/* Message / Reason (the rule id stays visible) */}
+                      <td className="text-[12.5px] text-[var(--text-secondary)] max-w-[300px] border-r border-[var(--bg-border-subtle)]" title={alert.message}>
+                        <span className="block truncate">{alert.message || '—'}</span>
+                        {alert.rule_id && (
+                          <span className="block font-mono text-[11px] text-[var(--text-muted)]">Rule {alert.rule_id}</span>
+                        )}
+                      </td>
+
+                      {/* Target URI */}
+                      <td className="hidden lg:table-cell font-mono text-[11.5px] max-w-[260px] truncate text-[var(--text-primary)] border-r border-[var(--bg-border-subtle)]" title={alert.url}>
+                        {alert.url || '/'}
+                      </td>
+
+                      {/* Alert ID */}
+                      <td className="hidden xl:table-cell border-r border-[var(--bg-border-subtle)]">
+                        <span className="font-mono text-[11px] text-[var(--text-muted)] truncate block max-w-[110px]" title={alertId}>
+                          {alertId}
+                        </span>
+                      </td>
+
                       {/* Dispatch Status -- fallback matches alertMetrics'
                           own `dispatched` KPI, which never counts an empty
                           status as dispatched; showing the literal text
                           "DISPATCHED" here for the same empty status
                           contradicted that count. */}
-                      <td className="border-r border-[var(--bg-border-subtle)]">
+                      <td className="hidden xl:table-cell border-r border-[var(--bg-border-subtle)]">
                         {(() => {
                           const d = getDispatchLabel(alert)
                           const tone =
@@ -815,9 +705,10 @@ export const Alerts: React.FC = () => {
                             e.stopPropagation()
                             setSelectedAlert(alert)
                           }}
-                          className="px-2 py-1 text-[11px] font-mono font-semibold rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] text-[var(--text-secondary)] hover:text-orange-600 dark:hover:text-orange-400 hover:border-orange-500/30 transition-colors cursor-pointer"
+                          aria-label={`Details of the alert from ${alert.ip}`}
+                          className="px-2 py-1 text-[12px] font-medium rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--bg-border-hover)] transition-colors cursor-pointer"
                         >
-                          Inspect
+                          Details
                         </button>
                       </td>
                     </tr>
@@ -915,17 +806,46 @@ export const Alerts: React.FC = () => {
       {/* ═══ Alert Detail Inspector ═══ */}
       <Drawer
         open={!!selectedAlert}
-        onClose={() => setSelectedAlert(null)}
+        onClose={closeAlert}
         size="lg"
         title={
           <span className="inline-flex items-center gap-2">
-            <ShieldAlert size={16} className="text-red-500 shrink-0" aria-hidden="true" />
-            <span>Incident Alert Inspector &amp; Payload Analysis</span>
+            <ShieldAlert size={16} className="text-red-600 dark:text-red-400 shrink-0" aria-hidden="true" />
+            <span>Alert details</span>
           </span>
         }
       >
         {selectedAlert && (
-          <div className="space-y-4 font-mono text-[12px]">
+          <div className="space-y-4 text-[12.5px]">
+              {/* Next steps from this alert. Blocking happens on the origin's
+                  IP access tab, which checks the role and asks to confirm;
+                  nothing changes from this drawer. */}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => navigate(logsSearchPath(selectedAlert.ip))}
+                  icon={<Search size={13} />}
+                >
+                  View this IP in traffic logs
+                </Button>
+                {selectedAlert.origin_id && isBlockableIp(selectedAlert.ip) ? (
+                  <Button
+                    variant="danger"
+                    size="md"
+                    onClick={() =>
+                      navigate(originTabPath(selectedAlert.origin_id!, 'ip-access', { ip: selectedAlert.ip, note: `Alert ${formatAlertId(selectedAlert.alert_id)}` }))
+                    }
+                    icon={<Shield size={13} />}
+                  >
+                    Block this IP on the origin
+                  </Button>
+                ) : (
+                  <span className="self-center text-[12px] text-[var(--text-muted)]">
+                    This alert is not linked to one of your origins, so it cannot be blocked from here.
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-1 gap-3">
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)] flex items-center justify-between">
                   <div>
@@ -996,12 +916,18 @@ export const Alerts: React.FC = () => {
                 </div>
 
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
-                  <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
-                    Dispatch Channel
+                  <span className="text-[12px] font-medium text-[var(--text-muted)] block mb-1">
+                    Telegram delivery
                   </span>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
-                    <Send size={10} />
-                    <span>{status?.connected ? 'Telegram Bot Active' : 'Telegram not connected'}</span>
+                  {/* Same label as the table: the backend does not record
+                      whether this alert was sent, so the bot being connected
+                      says nothing about this particular alert. */}
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[12px] font-medium bg-[var(--bg-surface-elevated)] text-[var(--text-secondary)] border border-[var(--bg-border)]">
+                    <Send size={11} aria-hidden="true" />
+                    <span>{getDispatchLabel(selectedAlert).label}</span>
+                  </span>
+                  <span className="block mt-1 text-[11.5px] text-[var(--text-muted)]">
+                    {status?.connected ? 'Your Telegram is connected; attacks are sent once per incident.' : 'Telegram is not connected.'}
                   </span>
                 </div>
               </div>
