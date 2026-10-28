@@ -1,12 +1,11 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { cdnApi } from '../api/cdn'
 import { CdnNode, CdnStats } from '../types'
-import { useAuthStore } from '../store/authStore'
 import { TopBar } from '../components/layout/TopBar'
 import { StatCard } from '../components/ui/StatCard'
 import { Badge } from '../components/ui/Badge'
-import { Button } from '../components/ui/Button'
 import { useThemeStore } from '../store/themeStore'
 import {
   BarChart,
@@ -18,43 +17,27 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
-  Legend,
-  LineChart,
-  Line,
   CartesianGrid,
 } from 'recharts'
-import {
-  Activity,
-  Globe,
-  HardDrive,
-  Trash2,
-  Clock,
-  Zap,
-  Server,
-  RefreshCw,
-  Layers,
-} from 'lucide-react'
+import { Activity, Globe, HardDrive, Trash2, Clock, Server, Layers } from 'lucide-react'
+import { EDGE_STATE_LABEL, EdgeState, nextEdgeState } from '../lib/edgeStatus'
+import { formatBkkTime } from '../lib/time'
 
+// Platform operator page: the edge nodes and their cache. Every figure is a
+// backend measurement (/cdn/nodes health checks, /cdn/stats cache counters);
+// nothing here is per visitor.
 export const CDN: React.FC = () => {
-  const { user } = useAuthStore()
-  const isAdmin = user?.role === 'admin'
   const { theme } = useThemeStore()
 
-  const { data: nodes = [], isLoading: isLoadingNodes } = useQuery({
+  const { data: nodes = [], isLoading: isLoadingNodes, isError: nodesError, dataUpdatedAt: nodesUpdatedAt } = useQuery({
     queryKey: ['cdn-nodes'],
     queryFn: cdnApi.getNodes,
     refetchInterval: 8000,
   })
 
-  const { data: stats = [], isLoading: isLoadingStats } = useQuery({
+  const { data: stats = [], isLoading: isLoadingStats, isError: statsError } = useQuery({
     queryKey: ['cdn-stats'],
     queryFn: cdnApi.getStats,
-    refetchInterval: 8000,
-  })
-
-  const { data: latencyData, isLoading: isLoadingLatency, refetch: refetchLatency } = useQuery({
-    queryKey: ['cdn-latency'],
-    queryFn: () => cdnApi.getLatency('ALL', '1h'),
     refetchInterval: 8000,
   })
 
@@ -74,30 +57,26 @@ export const CDN: React.FC = () => {
     : []
 
   const safeNodes: CdnNode[] = Array.isArray(nodes) ? nodes : []
-
-  // 2026-09-20: /cdn/latency now returns real measured round-trips only
-  // (see api/cdn.py) -- no more fixed "14 ms avg" / "92.4% Faster" text
-  // regardless of what was actually measured.
-  const latencyList = Array.isArray(latencyData) ? latencyData : []
-  const thEdgeLatency = latencyList.find((r: any) => r.client_region?.includes('Thailand'))
-  // One source for node health: /cdn/nodes says whether the POP answers a
-  // health check; /cdn/latency is the measured round-trip probe. They used to
-  // be rendered independently ("Healthy 375 ms" next to "Unreachable"). A node
-  // is only "healthy" when its health check passes AND, where a probe exists
-  // for it, the probe also reached it.
-  const nodeHealth = (node: CdnNode): 'healthy' | 'degraded' | 'offline' => {
-    const up = node.online === true || node.status === 'healthy' || node.status === 'online'
-    if (!up) return 'offline'
-    const probe = node.region === 'TH' ? thEdgeLatency : undefined
-    if (probe && probe.online === false) return 'degraded'
-    return 'healthy'
-  }
-  const thNodeEntry = safeNodes.find((n) => n.region === 'TH')
-  const thHealth = thNodeEntry ? nodeHealth(thNodeEntry) : thEdgeLatency?.online ? 'healthy' : 'offline'
-  // MAIN is the WAF core, not an edge: visitors reach only TH and ASIA (GeoDNS).
+  // MAIN is the WAF core, not an edge: visitors reach only the edges (GeoDNS).
   const edgeNodes = safeNodes.filter((n) => n.region !== 'MAIN')
-  const operationalEdges = edgeNodes.filter((n) => nodeHealth(n) === 'healthy').length
-  const mainNodeLatencyMs = safeNodes.find((n) => n.region === 'MAIN')?.latency_ms ?? null
+
+  // Debounced per-edge state (lib/edgeStatus.ts): one failed 1.2 s probe is
+  // "no answer to the last check", two in a row is Offline.
+  const [edgeStates, setEdgeStates] = useState<Record<string, EdgeState>>({})
+  useEffect(() => {
+    if (!nodesUpdatedAt) return
+    setEdgeStates((prev) => {
+      const next: Record<string, EdgeState> = {}
+      for (const n of safeNodes) {
+        const answered = n.online === true || n.status === 'healthy' || n.status === 'online'
+        next[n.region] = nextEdgeState(prev[n.region], answered)
+      }
+      return next
+    })
+    // Recomputed once per fetch, not per render.
+  }, [nodesUpdatedAt])
+  const stateOf = (n: CdnNode): EdgeState => edgeStates[n.region] ?? 'unknown'
+  const onlineEdges = edgeNodes.filter((n) => stateOf(n) === 'online').length
 
   // Calculations
   const statsObj = stats && !Array.isArray(stats) ? (stats as any) : null
@@ -110,296 +89,238 @@ export const CDN: React.FC = () => {
     ? Number(statsObj.cache_hit_ratio).toFixed(1)
     : totalRequests > 0
     ? ((totalHits / Math.max(totalRequests - totalBlocked - totalBypass, 1)) * 100).toFixed(1)
-    : '0.0'
-  const avgLatency = statsObj?.avg_ttfb_ms
+    : null
+  // /cdn/stats reports a mean time to first byte, not a percentile.
+  const avgTtfb = statsObj?.avg_ttfb_ms != null
     ? String(statsObj.avg_ttfb_ms)
     : statsList.length > 0
     ? (statsList.reduce((sum, s) => sum + (s.avg_latency || 0), 0) / statsList.length).toFixed(0)
-    : '0'
+    : null
 
   const pieData = [
-    { name: 'Cache Hit', value: totalHits, color: '#10b981' },
-    { name: 'Cache Miss', value: totalMisses, color: '#f59e0b' },
-    { name: 'Bypass / Dynamic', value: totalBypass, color: '#38bdf8' },
+    { name: 'Cache hit', value: totalHits, color: '#059669' },
+    { name: 'Cache miss', value: totalMisses, color: '#d97706' },
+    { name: 'Bypass (dynamic)', value: totalBypass, color: '#0284c7' },
   ].filter((d) => d.value > 0)
+
+  // Health-check round trip from the control plane to each edge -- the same
+  // probe as the node status. It is not what a visitor experiences, and the
+  // control plane's own loopback (~0 ms) is not a "direct origin" baseline, so
+  // the two are no longer charted side by side as an "acceleration".
+  const rttData = edgeNodes.map((n) => ({
+    name: n.name || n.region,
+    rtt: stateOf(n) === 'online' && n.latency_ms ? n.latency_ms : null,
+  }))
 
   const isDark = theme === 'dark'
   const gridColor = isDark ? '#1a2436' : '#e2e8f0'
-  const axisColor = isDark ? '#64748b' : '#94a3b8'
+  const axisColor = isDark ? '#94a3b8' : '#64748b'
+  const tooltipStyle = { backgroundColor: isDark ? '#101827' : '#ffffff', borderColor: isDark ? '#2a374d' : '#e2e8f0', borderRadius: '8px', fontSize: '12px' }
 
   return (
     <div className="space-y-6 animate-fade-in">
       <TopBar
-        title="CDN Edge Mesh & Cache Telemetry"
-        subtitle="GeoDNS edge nodes (Thailand, Hong Kong), caching efficiency, and response latency"
+        title="CDN edge nodes"
+        subtitle="Edge health as seen from the control plane, and edge cache counters."
         badge={
-          <Badge color={isLoadingNodes ? 'gray' : 'success'} dot pulse={!isLoadingNodes}>
-            {isLoadingNodes ? 'CHECKING EDGES...' : `${operationalEdges}/${edgeNodes.length} EDGES ONLINE`}
-          </Badge>
+          isLoadingNodes ? (
+            <Badge color="gray">Checking edges…</Badge>
+          ) : nodesError ? (
+            <Badge color="gray">Edge status unavailable</Badge>
+          ) : (
+            <Badge color={onlineEdges === edgeNodes.length ? 'success' : 'warning'} dot>
+              {onlineEdges} of {edgeNodes.length} edges answering
+            </Badge>
+          )
         }
       />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
-          label="Edge Cache Hit Rate"
-          value={`${hitRatio}%`}
+          label="Cache hit rate"
+          value={isLoadingStats || statsError || hitRatio === null ? '—' : `${hitRatio}%`}
           color="green"
           icon={<HardDrive size={16} />}
-          sub={`${totalHits.toLocaleString()} Cached Responses`}
+          sub={statsError ? 'Cache counters unavailable' : `${totalHits.toLocaleString()} responses served from cache`}
         />
         <StatCard
-          label="Edge Ingest Volume"
-          value={totalRequests.toLocaleString()}
+          label="Requests at the edges"
+          value={isLoadingStats || statsError ? '—' : totalRequests.toLocaleString()}
           color="blue"
           icon={<Globe size={16} />}
-          sub="Total HTTP/S Traffic"
+          sub="All edges together"
         />
         <StatCard
-          label="Global P50 Latency"
-          value={`${avgLatency} ms`}
+          label="Average time to first byte"
+          value={isLoadingStats || statsError || avgTtfb === null ? '—' : `${avgTtfb} ms`}
           color="cyan"
           icon={<Activity size={16} />}
-          sub="Across edges and the WAF core"
-        />
-        <StatCard
-          label="Blocked at Edge"
-          value="—"
-          color="red"
-          icon={<Zap size={16} />}
-          sub="Not reported by /cdn/stats yet"
+          sub="Mean over the edges' recorded responses"
         />
       </div>
 
       {/* POP Grid & Cache Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Node Health Card */}
-        <div className="dash-card overflow-hidden flex flex-col">
+        <section className="dash-card overflow-hidden flex flex-col" aria-labelledby="edge-nodes-heading">
           <div className="dash-card-header">
             <div className="flex items-center gap-2">
-              <Server size={16} className="text-orange-500" />
-              <h3>Edge Nodes (GeoDNS)</h3>
+              <Server size={16} className="text-[var(--text-muted)]" aria-hidden="true" />
+              <h3 id="edge-nodes-heading">Nodes</h3>
             </div>
-            <span className="text-[11px] font-mono text-[var(--text-muted)]">Active Nodes</span>
+            {nodesUpdatedAt > 0 && (
+              <span className="text-[12px] text-[var(--text-muted)]">Checked {formatBkkTime(nodesUpdatedAt, { seconds: true })}</span>
+            )}
           </div>
 
-          <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
+          <ul className="m-0 p-4 list-none space-y-3 flex-1">
             {isLoadingNodes ? (
-              <div className="text-center py-8 text-[var(--text-muted)] text-[12px] font-mono">
-                Pinging POP nodes...
-              </div>
+              <li className="text-center py-8 text-[var(--text-muted)] text-[13px]">Checking nodes…</li>
+            ) : nodesError ? (
+              <li className="text-center py-8 text-red-600 dark:text-red-400 text-[13px]">Could not reach the status check.</li>
             ) : safeNodes.length === 0 ? (
-              <div className="text-center py-8 text-[var(--text-muted)] text-[12px] font-mono">
-                No edge nodes discovered.
-              </div>
+              <li className="text-center py-8 text-[var(--text-muted)] text-[13px]">No edge nodes configured.</li>
             ) : (
               safeNodes.map((node) => {
-                const health = nodeHealth(node)
-                const port = node.port || 443
-                const latency = node.latency_ms ? `${node.latency_ms} ms Latency` : 'No latency sample'
-
+                const state = stateOf(node)
+                const isCore = node.region === 'MAIN'
+                const tls = (node as any).ssl_status as string | undefined
                 return (
-                  <div
+                  <li
                     key={node.region}
-                    className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]"
+                    className="flex items-center justify-between gap-3 p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]"
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl leading-none">{node.flag || '🌐'}</span>
-                      <div>
-                        <p className="font-bold text-[13px] text-[var(--text-primary)] m-0 font-mono">
-                          {node.name || node.region}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-2xl leading-none" aria-hidden="true">{node.flag || '🌐'}</span>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-[13px] text-[var(--text-primary)] m-0 truncate">
+                          {node.name || node.region}{isCore ? ' (WAF core)' : ''}
                         </p>
-                        <p className="text-[11px] text-[var(--text-muted)] m-0 font-mono">
-                          PORT {port} • {latency}
+                        <p className="text-[12px] text-[var(--text-muted)] m-0">
+                          {state === 'online' && node.latency_ms ? `Health check ${node.latency_ms} ms` : 'No round-trip sample'}
+                          {!isCore && tls ? `, TLS port ${tls === 'port_open' ? 'open' : 'not reachable'}` : ''}
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge color={health === 'healthy' ? 'success' : health === 'degraded' ? 'warning' : 'danger'} dot>
-                        {health === 'healthy' ? 'Healthy (Online)' : health === 'degraded' ? 'Degraded (probe failed)' : 'Offline'}
-                      </Badge>
-                    </div>
-                  </div>
+                    <Badge
+                      color={state === 'online' ? 'success' : state === 'missed' ? 'warning' : state === 'offline' ? 'danger' : 'gray'}
+                      dot
+                    >
+                      {EDGE_STATE_LABEL[state]}
+                    </Badge>
+                  </li>
                 )
               })
             )}
-
-            <div className="pt-2 text-[11px] text-[var(--text-muted)] font-mono flex items-center justify-between">
-              <span>SSL / TLS 1.3 Termination</span>
-              <span className="text-emerald-500 font-bold">Enabled</span>
-            </div>
-          </div>
-        </div>
+          </ul>
+        </section>
 
         {/* Cache Performance Breakdown */}
-        <div className="lg:col-span-2 dash-card overflow-hidden flex flex-col">
+        <section className="lg:col-span-2 dash-card overflow-hidden flex flex-col" aria-labelledby="cache-heading">
           <div className="dash-card-header">
             <div className="flex items-center gap-2">
-              <Layers size={16} className="text-sky-500" />
-              <h3>Regional Traffic & Cache Ratio</h3>
+              <Layers size={16} className="text-[var(--text-muted)]" aria-hidden="true" />
+              <h3 id="cache-heading">Requests and cache hits per edge</h3>
             </div>
-            <span className="text-[11px] font-mono text-[var(--text-muted)]">By Edge POP</span>
           </div>
 
           <div className="p-4 sm:p-5 flex-1 flex flex-col md:flex-row gap-6 items-center">
-            {/* Bar Chart */}
             <div className="flex-1 h-[220px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={statsList} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="region" stroke={axisColor} fontSize={11} tickLine={false} />
-                  <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: isDark ? '#101827' : '#ffffff',
-                      borderColor: isDark ? '#2a374d' : '#e2e8f0',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      fontFamily: 'monospace',
-                    }}
-                  />
-                  <Bar dataKey="request_count" name="Total Ingest" fill={isDark ? '#38bdf8' : '#0284c7'} radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="cache_hit" name="Cache Hits" fill="#10b981" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              {statsList.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">
+                  {isLoadingStats ? 'Loading…' : statsError ? 'Cache counters unavailable.' : 'No per-edge counters reported yet.'}
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={statsList} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="region" stroke={axisColor} fontSize={11} tickLine={false} />
+                    <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} width={44} />
+                    <Tooltip contentStyle={tooltipStyle} />
+                    <Bar dataKey="request_count" name="Requests" fill={isDark ? '#38bdf8' : '#0369a1'} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                    <Bar dataKey="cache_hit" name="Cache hits" fill="#059669" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
 
-            {/* Donut Chart */}
             <div className="w-full md:w-[220px] flex flex-col items-center shrink-0">
-              <div className="h-[140px] w-[140px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieData.length > 0 ? pieData : [{ name: 'No Data', value: 1, color: '#64748b' }]}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={42}
-                      outerRadius={62}
-                      paddingAngle={4}
-                      dataKey="value"
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: isDark ? '#101827' : '#ffffff',
-                        borderColor: isDark ? '#2a374d' : '#e2e8f0',
-                        borderRadius: '8px',
-                        fontSize: '11px',
-                        fontFamily: 'monospace',
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="w-full space-y-1 mt-2 text-[11px] font-mono">
-                {pieData.map((d) => (
-                  <div key={d.name} className="flex justify-between items-center text-[var(--text-secondary)]">
-                    <span className="flex items-center gap-1.5 truncate">
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
-                      {d.name}
-                    </span>
-                    <span className="font-bold text-[var(--text-primary)]">{d.value.toLocaleString()}</span>
+              {pieData.length > 0 ? (
+                <>
+                  <div className="h-[140px] w-[140px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={pieData} cx="50%" cy="50%" innerRadius={42} outerRadius={62} paddingAngle={2} dataKey="value" isAnimationActive={false}>
+                          {pieData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip contentStyle={tooltipStyle} />
+                      </PieChart>
+                    </ResponsiveContainer>
                   </div>
-                ))}
-              </div>
+                  <ul className="m-0 p-0 list-none w-full space-y-1 mt-2 text-[12.5px]">
+                    {pieData.map((d) => (
+                      <li key={d.name} className="flex justify-between items-center text-[var(--text-secondary)]">
+                        <span className="flex items-center gap-1.5 truncate">
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: d.color }} aria-hidden="true" />
+                          {d.name}
+                        </span>
+                        <span className="font-mono font-semibold text-[var(--text-primary)]">{d.value.toLocaleString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="m-0 text-[13px] text-[var(--text-muted)] text-center">No cache outcomes recorded yet.</p>
+              )}
             </div>
           </div>
-        </div>
+        </section>
       </div>
 
-      {/* Edge Acceleration & Latency Benchmark Section */}
-      <div className="dash-card overflow-hidden">
+      <section className="dash-card overflow-hidden" aria-labelledby="rtt-heading">
         <div className="dash-card-header">
           <div className="flex items-center gap-2">
-            <Clock size={16} className="text-orange-500" />
-            <h3>Edge POP Latency Acceleration (ms)</h3>
-          </div>
-          <span className="text-[11px] font-mono text-[var(--text-muted)]">Edge vs Direct Origin</span>
-        </div>
-
-        <div className="p-4 sm:p-5 grid grid-cols-1 lg:grid-cols-4 gap-6">
-          <div className="lg:col-span-3 h-[240px]">
-            {isLoadingLatency ? (
-              <div className="w-full h-full flex items-center justify-center text-[var(--text-muted)] font-mono text-[12px]">
-                Loading latency telemetry...
-              </div>
-            ) : !Array.isArray(latencyData) || latencyData.length === 0 ? (
-              <div className="w-full h-full flex flex-col items-center justify-center border border-dashed border-[var(--bg-border)] rounded-xl text-[var(--text-muted)] font-mono text-[12px]">
-                <Activity size={24} className="mb-2 text-[var(--text-dim)]" />
-                <p className="m-0 font-bold text-[var(--text-secondary)]">No Edge Acceleration Data</p>
-                <p className="m-0 text-[11px] text-[var(--text-muted)] mt-1">
-                  Add an Origin Server to begin routing and accelerating traffic through Edge POPs.
-                </p>
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={latencyData}
-                  margin={{ top: 10, right: 15, left: -20, bottom: 0 }}
-                >
-                  <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="client_region" stroke={axisColor} fontSize={11} tickLine={false} />
-                  <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: isDark ? '#101827' : '#ffffff',
-                      borderColor: isDark ? '#2a374d' : '#e2e8f0',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      fontFamily: 'monospace',
-                    }}
-                  />
-                  <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', fontFamily: 'monospace' }} />
-                  <Bar dataKey="edge_ms" name="Edge POP Response (ms)" fill="#10b981" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="origin_ms" name="Direct Origin (ms)" fill="#f97316" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-3 justify-center">
-            <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
-              <div className="flex justify-between items-center mb-1">
-                <span className="font-mono font-bold text-[12px] text-[var(--text-primary)]">Thailand Edge Node</span>
-                <Badge color={isLoadingLatency ? 'gray' : thEdgeLatency?.online && thHealth === 'healthy' ? 'success' : 'gray'}>
-                  {isLoadingLatency ? 'Checking...' : thEdgeLatency?.online && thHealth === 'healthy' ? `${thEdgeLatency.edge_ms} ms measured` : thHealth === 'offline' ? 'Offline' : 'Unreachable'}
-                </Badge>
-              </div>
-              <div className="flex justify-between text-[11px] font-mono text-[var(--text-muted)] mt-1.5">
-                <span>Round-trip from Core:</span>
-                <span className={`font-bold ${thEdgeLatency?.online ? 'text-emerald-500' : 'text-[var(--text-dim)]'}`}>
-                  {thEdgeLatency?.online ? `${thEdgeLatency.edge_ms} ms` : '—'}
-                </span>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
-              <div className="flex justify-between items-center mb-1">
-                <span className="font-mono font-bold text-[12px] text-[var(--text-primary)]">Central Core Hub</span>
-                <Badge color="info">{mainNodeLatencyMs != null ? `${mainNodeLatencyMs} ms internal` : '— ms internal'}</Badge>
-              </div>
-              <div className="flex justify-between text-[11px] font-mono text-[var(--text-muted)] mt-1.5">
-                <span>Tunnel Transport:</span>
-                <span className="font-bold text-[var(--text-primary)]">FRP / TLS Tunnel</span>
-              </div>
+            <Clock size={16} className="text-[var(--text-muted)]" aria-hidden="true" />
+            <div>
+              <h3 id="rtt-heading">Health check round trip (ms)</h3>
+              <p className="m-0 text-[12px] text-[var(--text-muted)]">
+                From the control plane to each edge, latest check. Not the latency your visitors see.
+              </p>
             </div>
           </div>
         </div>
-      </div>
+        <div className="p-4 sm:p-5 h-[220px]">
+          {isLoadingNodes ? (
+            <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">Checking…</div>
+          ) : rttData.every((d) => d.rtt === null) ? (
+            <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">No edge answered the last check.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={rttData} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 0 }}>
+                <CartesianGrid stroke={gridColor} strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" stroke={axisColor} fontSize={11} tickLine={false} unit=" ms" allowDecimals={false} />
+                <YAxis type="category" dataKey="name" stroke={axisColor} fontSize={12} tickLine={false} axisLine={false} width={140} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => (v == null ? 'no answer' : `${v} ms`)} />
+                <Bar dataKey="rtt" name="Round trip" fill={isDark ? '#38bdf8' : '#0369a1'} radius={[0, 4, 4, 0]} maxBarSize={28} isAnimationActive={false} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </section>
 
-      <div className="dash-card p-4 sm:p-5 border-l-2 border-l-amber-500">
+      <section className="dash-card p-4 sm:p-5" aria-labelledby="purge-heading">
         <div className="flex items-center gap-2 mb-1.5">
-          <Trash2 size={16} className="text-amber-500" aria-hidden="true" />
-          <h3 className="text-[13.5px] font-bold text-[var(--text-primary)] font-mono m-0">Edge Cache Purge</h3>
+          <Trash2 size={16} className="text-[var(--text-muted)]" aria-hidden="true" />
+          <h3 id="purge-heading" className="text-[14px] font-semibold text-[var(--text-primary)] m-0">Purge a site's cache</h3>
         </div>
-        <p className="text-[12px] text-[var(--text-secondary)] m-0">
-          ล้าง cache ของเว็บได้ที่หน้า origin ของเว็บนั้น (แท็บ Overview, การ์ด Edge Cache Purge) คำสั่งจะไปถึงทุก edge ภายในไม่กี่วินาที
+        <p className="text-[13px] text-[var(--text-secondary)] m-0">
+          Purging works per site. Open the site in{' '}
+          <Link to="/origins" className="text-[var(--accent)] hover:underline">Origins</Link>, then use Purge cache on its Overview tab.
+          The purge reaches every edge within a few seconds.
         </p>
-      </div>
+      </section>
     </div>
   )
 }
