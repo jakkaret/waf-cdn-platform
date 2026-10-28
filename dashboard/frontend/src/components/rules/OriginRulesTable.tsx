@@ -10,6 +10,7 @@ import { rateText } from '../../lib/siteAccess'
 import { originTabPath, type OriginTabId } from '../layout/navigation'
 import { Badge } from '../ui/Badge'
 import type { Origin } from '../../types'
+import { useT } from '../../i18n'
 
 // Every rule of every origin the person can open, in one table (UX
 // reorganization 2026-10-28; this page used to say "your rules live on each
@@ -34,6 +35,15 @@ export interface RuleRow {
 }
 
 const KIND_LABEL: Record<RuleKind, string> = { waf: 'WAF rule', ip: 'IP access', rate: 'Rate limit' }
+const KIND_LABEL_TH: Record<RuleKind, string> = { waf: 'กฎ WAF', ip: 'การเข้าถึงตาม IP', rate: 'Rate limit' }
+const ACTION_TH: Record<string, string> = {
+  block: 'บล็อก',
+  allow: 'อนุญาต',
+  throttle: 'จำกัดอัตรา',
+  challenge: 'ทดสอบ',
+  deceive: 'หลอกล่อ',
+  log: 'บันทึก log',
+}
 const KIND_TAB: Record<RuleKind, OriginTabId> = { waf: 'waf', ip: 'ip-access', rate: 'rate-limits' }
 
 // Beyond this many origins the per-origin requests get heavy; the table says
@@ -45,6 +55,8 @@ export const OriginRulesTable: React.FC = () => {
   const [kind, setKind] = useState<RuleKind | 'all'>('all')
   const [originFilter, setOriginFilter] = useState('all')
   const [query, setQuery] = useState('')
+  const { t, lang } = useT()
+  const kindLabel = (k: RuleKind) => (lang === 'th' ? KIND_LABEL_TH[k] : KIND_LABEL[k])
 
   const originsQuery = useQuery({
     queryKey: ['origins-selector-list', user?.user_id],
@@ -76,14 +88,14 @@ export const OriginRulesTable: React.FC = () => {
       for (const r of (waf?.data as any[] | undefined) ?? []) {
         out.push({
           key: `waf-${o.origin_id}-${r.id}`, kind: 'waf', originId: o.origin_id, originLabel: label,
-          title: r.message || `Rule ${r.id}`, detail: `${r.variable} ${r.operator}`,
+          title: r.message || t(`Rule ${r.id}`, `กฎ ${r.id}`), detail: `${r.variable} ${r.operator}`,
           action: String(r.action || '').toLowerCase(), enabled: !!r.enabled, tab: KIND_TAB.waf,
         })
       }
       for (const r of (ip?.data as any[] | undefined) ?? []) {
         out.push({
           key: `ip-${o.origin_id}-${r.id}`, kind: 'ip', originId: o.origin_id, originLabel: label,
-          title: r.ip, detail: r.note || (r.expires_at ? 'Temporary' : 'Permanent'),
+          title: r.ip, detail: r.note || (r.expires_at ? t('Temporary', 'ชั่วคราว') : t('Permanent', 'ถาวร')),
           action: r.action, enabled: true, tab: KIND_TAB.ip,
         })
       }
@@ -97,7 +109,7 @@ export const OriginRulesTable: React.FC = () => {
     })
     return out
     // results is a new array each render; its data identities are what matter.
-  },[origins.map((o) => o.origin_id).join(','), ...results.map((r) => r.data)])
+  },[lang, origins.map((o) => o.origin_id).join(','), ...results.map((r) => r.data)])
 
   const q = query.trim().toLowerCase()
   const shown = rows.filter(
@@ -110,16 +122,17 @@ export const OriginRulesTable: React.FC = () => {
   rows.forEach((r) => counts[r.kind]++)
 
   if (originsQuery.isError) {
-    return <p className="m-0 text-[13px] text-red-600 dark:text-red-400">Could not load your origins. Reload the page to try again.</p>
+    return <p className="m-0 text-[13px] text-red-600 dark:text-red-400">{t('Could not load your origins. Reload the page to try again.', 'โหลด origin ของคุณไม่สำเร็จ รีโหลดหน้าเพื่อลองใหม่')}</p>
   }
 
   if (!originsQuery.isLoading && allOrigins.length === 0) {
     return (
       <div className="dash-card p-6 text-[13px] text-[var(--text-secondary)] space-y-2">
-        <p className="m-0 font-semibold text-[var(--text-primary)]">No origins yet</p>
+        <p className="m-0 font-semibold text-[var(--text-primary)]">{t('No origins yet', 'ยังไม่มี origin')}</p>
         <p className="m-0">
-          Rules belong to an origin. <Link to="/origins" className="text-[var(--accent)] hover:underline">Add an origin</Link> to
-          create WAF rules, IP access entries and rate limits for it.
+          {t('Rules belong to an origin.', 'กฎผูกอยู่กับ origin')}{' '}
+          <Link to="/origins" className="text-[var(--accent)] hover:underline">{t('Add an origin', 'เพิ่ม origin')}</Link>{' '}
+          {t('to create WAF rules, IP access entries and rate limits for it.', 'เพื่อสร้างกฎ WAF, รายการ IP access และ rate limit ให้ origin นั้น')}
         </p>
       </div>
     )
@@ -127,9 +140,9 @@ export const OriginRulesTable: React.FC = () => {
 
   return (
     <section className="space-y-3" aria-labelledby="origin-rules-heading">
-      <h2 id="origin-rules-heading" className="sr-only">Rules on your origins</h2>
+      <h2 id="origin-rules-heading" className="sr-only">{t('Rules on your origins', 'กฎของ origin ของคุณ')}</h2>
       <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-        <div role="group" aria-label="Rule type" className="flex flex-wrap gap-1">
+        <div role="group" aria-label={t('Rule type', 'ประเภทกฎ')} className="flex flex-wrap gap-1">
           {(['all', 'waf', 'ip', 'rate'] as const).map((k) => (
             <button
               key={k}
@@ -140,7 +153,7 @@ export const OriginRulesTable: React.FC = () => {
                 kind === k ? 'bg-[var(--nav-active)] font-medium text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--nav-hover)]'
               }`}
             >
-              {k === 'all' ? 'All' : KIND_LABEL[k]}{' '}
+              {k === 'all' ? t('All', 'ทั้งหมด') : kindLabel(k)}{' '}
               <span className="tabular-nums text-[var(--text-muted)]">{k === 'all' ? rows.length : counts[k]}</span>
             </button>
           ))}
@@ -153,19 +166,19 @@ export const OriginRulesTable: React.FC = () => {
             onChange={(e) => setOriginFilter(e.target.value)}
             className="dash-input h-9 text-[13px] cursor-pointer sm:w-56"
           >
-            <option value="all">All origins ({origins.length})</option>
+            <option value="all">{t(`All origins (${origins.length})`, `ทุก origin (${origins.length})`)}</option>
             {origins.map((o) => (
               <option key={o.origin_id} value={o.origin_id}>{o.label || o.ip}</option>
             ))}
           </select>
           <label className="relative block sm:w-72">
-            <span className="sr-only">Search rules</span>
+            <span className="sr-only">{t('Search rules', 'ค้นหากฎ')}</span>
             <Search size={14} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search rule, IP or path"
+              placeholder={t('Search rule, IP or path', 'ค้นหากฎ, IP หรือ path')}
               className="dash-input h-9 w-full pl-8 text-[13px]"
             />
           </label>
@@ -174,12 +187,18 @@ export const OriginRulesTable: React.FC = () => {
 
       {allOrigins.length > MAX_ORIGINS && (
         <p className="m-0 text-[12.5px] text-amber-700 dark:text-amber-400">
-          Showing the rules of the first {MAX_ORIGINS} of {allOrigins.length} origins. Filter by origin on its own page for the rest.
+          {t(
+            `Showing the rules of the first ${MAX_ORIGINS} of ${allOrigins.length} origins. Open the other origins on their own page.`,
+            `แสดงกฎของ ${MAX_ORIGINS} origin แรกจากทั้งหมด ${allOrigins.length} origin เปิด origin ที่เหลือจากหน้าของแต่ละ origin`,
+          )}
         </p>
       )}
       {failedOrigins.length > 0 && (
         <p className="m-0 text-[12.5px] text-red-600 dark:text-red-400">
-          Some rules could not be loaded for {failedOrigins.map((o) => o.label || o.ip).join(', ')}. The list below may be incomplete.
+          {t(
+            `Some rules could not be loaded for ${failedOrigins.map((o) => o.label || o.ip).join(', ')}. The list below may be incomplete.`,
+            `โหลดกฎบางส่วนของ ${failedOrigins.map((o) => o.label || o.ip).join(', ')} ไม่สำเร็จ รายการด้านล่างอาจไม่ครบ`,
+          )}
         </p>
       )}
 
@@ -187,23 +206,26 @@ export const OriginRulesTable: React.FC = () => {
         <table className="dash-table">
           <thead>
             <tr>
-              <th>Rule</th>
-              <th>Type</th>
+              <th>{t('Rule', 'กฎ')}</th>
+              <th>{t('Type', 'ประเภท')}</th>
               <th>Origin</th>
-              <th className="hidden md:table-cell">Action</th>
-              <th className="hidden md:table-cell">State</th>
-              <th><span className="sr-only">Open</span></th>
+              <th className="hidden md:table-cell">{t('Action', 'การดำเนินการ')}</th>
+              <th className="hidden md:table-cell">{t('State', 'สถานะ')}</th>
+              <th><span className="sr-only">{t('Open', 'เปิด')}</span></th>
             </tr>
           </thead>
           <tbody>
             {loading && rows.length === 0 ? (
-              <tr><td colSpan={6} className="py-8 text-center text-[13px] text-[var(--text-muted)]">Loading rules…</td></tr>
+              <tr><td colSpan={6} className="py-8 text-center text-[13px] text-[var(--text-muted)]">{t('Loading rules…', 'กำลังโหลดกฎ…')}</td></tr>
             ) : shown.length === 0 ? (
               <tr>
                 <td colSpan={6} className="py-8 text-center text-[13px] text-[var(--text-muted)]">
                   {rows.length === 0
-                    ? 'None of your origins has its own rules yet. The managed rule set (OWASP CRS) still protects every origin.'
-                    : 'No rule matches these filters.'}
+                    ? t(
+                        'None of your origins has its own rules yet. The managed rule set (OWASP CRS) still protects every origin.',
+                        'origin ของคุณยังไม่มีกฎของตัวเอง แต่ชุดกฎ OWASP CRS ยังป้องกันทุก origin อยู่',
+                      )
+                    : t('No rule matches these filters.', 'ไม่มีกฎที่ตรงกับตัวกรอง')}
                 </td>
               </tr>
             ) : (
@@ -213,7 +235,7 @@ export const OriginRulesTable: React.FC = () => {
                     <span className={`block truncate text-[13px] text-[var(--text-primary)] ${r.kind === 'ip' ? 'font-mono' : ''}`}>{r.title}</span>
                     <span className="block truncate font-mono text-[11.5px] text-[var(--text-muted)]" title={r.detail}>{r.detail}</span>
                   </td>
-                  <td className="whitespace-nowrap text-[12.5px] text-[var(--text-secondary)]">{KIND_LABEL[r.kind]}</td>
+                  <td className="whitespace-nowrap text-[12.5px] text-[var(--text-secondary)]">{kindLabel(r.kind)}</td>
                   <td className="whitespace-nowrap text-[12.5px]">
                     <Link to={`/origins/${encodeURIComponent(r.originId)}`} className="text-[var(--text-primary)] hover:text-[var(--accent)] hover:underline">
                       {r.originLabel}
@@ -221,17 +243,21 @@ export const OriginRulesTable: React.FC = () => {
                   </td>
                   <td className="hidden md:table-cell">
                     <Badge color={r.action === 'block' ? 'danger' : r.action === 'allow' ? 'success' : 'gray'}>
-                      {r.action ? r.action.charAt(0).toUpperCase() + r.action.slice(1) : '—'}
+                      {r.action
+                        ? lang === 'th'
+                          ? ACTION_TH[r.action] ?? r.action
+                          : r.action.charAt(0).toUpperCase() + r.action.slice(1)
+                        : '—'}
                     </Badge>
                   </td>
-                  <td className="hidden md:table-cell text-[12.5px] text-[var(--text-secondary)]">{r.enabled ? 'On' : 'Off'}</td>
+                  <td className="hidden md:table-cell text-[12.5px] text-[var(--text-secondary)]">{r.enabled ? t('On', 'เปิด') : t('Off', 'ปิด')}</td>
                   <td className="text-right whitespace-nowrap">
                     <Link
                       to={originTabPath(r.originId, r.tab)}
                       className="inline-flex items-center gap-1 text-[12.5px] font-medium text-[var(--accent)] hover:underline"
-                      aria-label={`Open ${KIND_LABEL[r.kind]} ${r.title} on ${r.originLabel}`}
+                      aria-label={t(`Open ${KIND_LABEL[r.kind]} ${r.title} on ${r.originLabel}`, `เปิด${KIND_LABEL_TH[r.kind]} ${r.title} ที่ ${r.originLabel}`)}
                     >
-                      Open
+                      {t('Open', 'เปิด')}
                       <ExternalLink size={12} aria-hidden="true" />
                     </Link>
                   </td>

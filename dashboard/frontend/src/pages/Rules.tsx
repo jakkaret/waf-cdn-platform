@@ -27,11 +27,13 @@ import { WafRule } from '../types'
 import toast from 'react-hot-toast'
 import { CRS_VERSION } from '../lib/crsVersion'
 import { OriginRulesTable } from '../components/rules/OriginRulesTable'
+import { severityLabel, useT } from '../i18n'
 
 const PAGE_SIZE = 10
 
 export const Rules: React.FC = () => {
   const { user } = useAuthStore()
+  const { t, lang } = useT()
   const isAdmin = user?.role === 'admin'
   const queryClient = useQueryClient()
 
@@ -72,9 +74,9 @@ export const Rules: React.FC = () => {
       setIsModalOpen(false)
       setEditingRule(null)
       setBlastRadiusResult(null)
-      toast.success('Custom WAF rule deployed successfully')
+      toast.success(t('Platform rule deployed', 'นำกฎของแพลตฟอร์มไปใช้แล้ว'))
     },
-    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to create rule'),
+    onError: (err: any) => toast.error(err?.response?.data?.detail || t('Failed to create rule', 'สร้างกฎไม่สำเร็จ')),
   })
 
   const updateMutation = useMutation({
@@ -84,18 +86,18 @@ export const Rules: React.FC = () => {
       setIsModalOpen(false)
       setEditingRule(null)
       setBlastRadiusResult(null)
-      toast.success('WAF rule updated successfully')
+      toast.success(t('Rule updated', 'อัปเดตกฎแล้ว'))
     },
-    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to update rule'),
+    onError: (err: any) => toast.error(err?.response?.data?.detail || t('Failed to update rule', 'อัปเดตกฎไม่สำเร็จ')),
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => rulesApi.deleteRule(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['waf-rules'] })
-      toast.success('Rule removed from ModSecurity policy')
+      toast.success(t('Rule removed from the ModSecurity policy', 'ลบกฎออกจากนโยบาย ModSecurity แล้ว'))
     },
-    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to delete rule'),
+    onError: (err: any) => toast.error(err?.response?.data?.detail || t('Failed to delete rule', 'ลบกฎไม่สำเร็จ')),
   })
 
   const handleBlastRadiusTest = async () => {
@@ -112,9 +114,9 @@ export const Rules: React.FC = () => {
 
       const res = await rulesApi.blastRadius(payload)
       setBlastRadiusResult(res)
-      toast.success('Blast Radius Simulation Complete')
+      toast.success(t('Blast radius test finished', 'ทดสอบผลกระทบเสร็จแล้ว'))
     } catch (err: any) {
-      let errMsg = 'Failed to test blast radius'
+      let errMsg = t('Failed to test blast radius', 'ทดสอบผลกระทบไม่สำเร็จ')
       if (err?.response?.data?.detail) {
         const detail = err.response.data.detail
         errMsg = Array.isArray(detail) ? detail[0]?.msg : String(detail)
@@ -147,7 +149,7 @@ export const Rules: React.FC = () => {
   }
 
   const handleDelete = (id: string) => {
-    if (window.confirm(`Are you sure you want to delete rule #${id}?`)) {
+    if (window.confirm(t(`Are you sure you want to delete rule #${id}?`, `ต้องการลบกฎ #${id} ใช่ไหม?`))) {
       deleteMutation.mutate(id)
     }
   }
@@ -159,7 +161,7 @@ export const Rules: React.FC = () => {
     const secruleStr = `SecRule ${rule.variable || 'REQUEST_URI'} "${rule.operator}" "id:${rawId},phase:2,deny,status:${status},msg:'${rule.message}'"`
     navigator.clipboard.writeText(secruleStr)
     setCopiedId(rule.id)
-    toast.success('Copied SecRule to clipboard')
+    toast.success(t('Copied the SecRule', 'คัดลอก SecRule แล้ว'))
     setTimeout(() => setCopiedId(null), 2000)
   }
 
@@ -239,13 +241,15 @@ export const Rules: React.FC = () => {
     return `SecRule ${variable} "${op}" "id:${rawId},phase:2,deny,status:${status},msg:'${msg}'"`
   }, [editingRule])
 
-  const originSubtitle =
-    'WAF rules, IP access entries and rate limits of every origin you can open. Create and edit them on the origin itself; Open takes you there.'
+  const originSubtitle = t(
+    'WAF rules, IP access entries and rate limits of every origin you can open. Create and edit them on the origin itself; Open takes you there.',
+    'กฎ WAF, รายการ IP access และ rate limit ของทุก origin ที่คุณเปิดได้ สร้างและแก้ไขที่หน้า origin นั้น ๆ ปุ่มเปิดจะพาไปที่นั่น',
+  )
 
   if (!isAdmin) {
     return (
       <div className="animate-fade-in pb-10">
-        <TopBar title="All rules" subtitle={originSubtitle} />
+        <TopBar title={t('All rules', 'กฎทั้งหมด')} subtitle={originSubtitle} />
         <OriginRulesTable />
       </div>
     )
@@ -255,11 +259,11 @@ export const Rules: React.FC = () => {
     <div className="animate-fade-in pb-10">
       {/* Top Header Bar */}
       <TopBar
-        title="All rules"
+        title={t('All rules', 'กฎทั้งหมด')}
         subtitle={
           view === 'origins'
             ? originSubtitle
-            : 'Platform rules apply to every origin on the WAF. Only the platform operator manages them.'
+            : t('Platform rules apply to every origin on the WAF. Only the platform operator manages them.', 'กฎของแพลตฟอร์มมีผลกับทุก origin บน WAF เฉพาะผู้ดูแลแพลตฟอร์มที่จัดการได้')
         }
         action={
           view === 'origins' ? undefined : (
@@ -268,10 +272,10 @@ export const Rules: React.FC = () => {
               onClick={() => refetch()}
               disabled={isFetching}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--bg-surface)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] text-[12px] font-mono font-medium text-[var(--text-primary)] rounded-md hover:bg-[var(--bg-hover)] shadow-sm transition-all cursor-pointer"
-              title="Refresh policies"
+              title={t('Refresh', 'รีเฟรช')}
             >
               <RefreshCw size={13} className={isFetching ? 'animate-spin text-orange-500' : 'text-[var(--text-muted)]'} />
-              <span className="hidden sm:inline">Refresh</span>
+              <span className="hidden sm:inline">{t('Refresh', 'รีเฟรช')}</span>
             </button>
 
             {isAdmin && (
@@ -284,7 +288,7 @@ export const Rules: React.FC = () => {
                   }}
                   icon={<Plus size={14} />}
                 >
-                  Create Rule
+                  {t('Create rule', 'สร้างกฎ')}
                 </Button>
               </>
             )}
@@ -293,22 +297,22 @@ export const Rules: React.FC = () => {
         }
       />
 
-      <div role="tablist" aria-label="Rule scope" className="mb-5 inline-flex rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] p-0.5">
+      <div role="tablist" aria-label={t('Rule scope', 'ขอบเขตของกฎ')} className="mb-5 inline-flex rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] p-0.5">
         {([
-          { id: 'origins', label: 'Origin rules' },
-          { id: 'platform', label: `Platform rules (${rules.length})` },
-        ] as const).map((t) => (
+          { id: 'origins', label: t('Origin rules', 'กฎของ origin') },
+          { id: 'platform', label: t(`Platform rules (${rules.length})`, `กฎของแพลตฟอร์ม (${rules.length})`) },
+        ] as const).map((tab) => (
           <button
-            key={t.id}
+            key={tab.id}
             type="button"
             role="tab"
-            aria-selected={view === t.id}
-            onClick={() => setView(t.id)}
+            aria-selected={view === tab.id}
+            onClick={() => setView(tab.id)}
             className={`h-8 px-3 rounded-md text-[13px] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
-              view === t.id ? 'bg-[var(--nav-active)] font-medium text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              view === tab.id ? 'bg-[var(--nav-active)] font-medium text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
-            {t.label}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -319,13 +323,13 @@ export const Rules: React.FC = () => {
         <div className="dash-card p-4 sm:p-5 flex items-center justify-between">
           <div>
             <span className="text-[11px] font-bold text-[var(--text-muted)] block font-mono mb-1">
-              Custom Edge Rules
+              {t('Platform rules', 'กฎของแพลตฟอร์ม')}
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-[26px] font-bold font-mono text-orange-600 dark:text-orange-400 leading-none">
                 {rules.length}
               </span>
-              <span className="text-[11px] font-mono text-[var(--text-muted)]">Active definitions</span>
+              <span className="text-[11px] font-mono text-[var(--text-muted)]">{t('defined', 'รายการ')}</span>
             </div>
           </div>
           <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-orange-500/10">
@@ -342,7 +346,7 @@ export const Rules: React.FC = () => {
               <span className="text-[26px] font-bold font-mono text-emerald-600 dark:text-emerald-400 leading-none">
                 CRS v{CRS_VERSION}
               </span>
-              <span className="text-[11px] font-mono text-[var(--text-muted)]">Active baseline</span>
+              <span className="text-[11px] font-mono text-[var(--text-muted)]">{t('baseline in use', 'ชุดกฎพื้นฐานที่ใช้อยู่')}</span>
             </div>
           </div>
           <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-emerald-500/10">
@@ -353,13 +357,13 @@ export const Rules: React.FC = () => {
         <div className="dash-card p-4 sm:p-5 flex items-center justify-between">
           <div>
             <span className="text-[11px] font-bold text-[var(--text-muted)] block font-mono mb-1">
-              Default Mitigation Action
+              {t('Default action', 'การดำเนินการเริ่มต้น')}
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-[26px] font-bold font-mono text-sky-600 dark:text-sky-400 leading-none">
                 403 Forbidden
               </span>
-              <span className="text-[11px] font-mono text-[var(--text-muted)]">Hot drop</span>
+              <span className="text-[11px] font-mono text-[var(--text-muted)]">{t('request dropped', 'ตัด request ทิ้ง')}</span>
             </div>
           </div>
           <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-sky-500/10">
@@ -378,7 +382,7 @@ export const Rules: React.FC = () => {
               <Search className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={14} />
               <input
                 type="text"
-                placeholder="Search by ID, variable, operator, or description..."
+                placeholder={t('Search by ID, variable, operator, or description...', 'ค้นหาจาก ID, ตัวแปร, operator หรือคำอธิบาย...')}
                 className="w-full dash-input pl-8 pr-7 py-1.5 text-[12px] font-mono"
                 value={search}
                 onChange={(e) => {
@@ -392,6 +396,7 @@ export const Rules: React.FC = () => {
                     setSearch('')
                     setPage(1)
                   }}
+                  aria-label={t('Clear search', 'ล้างคำค้นหา')}
                   className="absolute right-2.5 top-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] p-0.5 cursor-pointer"
                 >
                   <X size={13} />
@@ -408,7 +413,7 @@ export const Rules: React.FC = () => {
                 setPage(1)
               }}
             >
-              <option value="ALL">All Target Variables</option>
+              <option value="ALL">{t('All variables', 'ทุกตัวแปร')}</option>
               <option value="REQUEST_URI">REQUEST_URI</option>
               <option value="ARGS">ARGS</option>
               <option value="REQUEST_HEADERS">REQUEST_HEADERS</option>
@@ -432,11 +437,11 @@ export const Rules: React.FC = () => {
                 setPage(1)
               }}
             >
-              <option value="ALL">All Severities</option>
-              <option value="CRITICAL">Critical (403)</option>
-              <option value="HIGH">High (403)</option>
-              <option value="MEDIUM">Medium (Warning)</option>
-              <option value="LOW">Low (Notice)</option>
+              <option value="ALL">{t('All severities', 'ทุกระดับความรุนแรง')}</option>
+              <option value="CRITICAL">{severityLabel('CRITICAL', lang)} (403)</option>
+              <option value="HIGH">{severityLabel('HIGH', lang)} (403)</option>
+              <option value="MEDIUM">{severityLabel('MEDIUM', lang)} ({t('warning', 'เตือน')})</option>
+              <option value="LOW">{severityLabel('LOW', lang)} ({t('notice', 'แจ้งให้ทราบ')})</option>
             </select>
 
             {/* Reset Filters */}
@@ -447,22 +452,22 @@ export const Rules: React.FC = () => {
                 className="px-2.5 py-1 text-[11px] font-mono text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 bg-red-50 hover:bg-red-100 dark:bg-red-500/10 rounded border border-red-200 dark:border-red-500/20 transition-colors cursor-pointer flex items-center gap-1"
               >
                 <X size={11} />
-                <span>Reset</span>
+                <span>{t('Reset', 'ล้าง')}</span>
               </button>
             )}
           </div>
 
           <div className="text-[11.5px] font-mono text-[var(--text-muted)]">
-            Showing{' '}
+            {t('Showing', 'แสดง')}{' '}
             <span className="text-[var(--text-primary)] font-semibold">
               {filteredRules.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}
             </span>{' '}
-            to{' '}
+            {t('to', 'ถึง')}{' '}
             <span className="text-[var(--text-primary)] font-semibold">
               {Math.min(page * PAGE_SIZE, filteredRules.length)}
             </span>{' '}
-            of{' '}
-            <span className="text-[var(--text-primary)] font-semibold">{filteredRules.length}</span> matching rules
+            {t('of', 'จาก')}{' '}
+            <span className="text-[var(--text-primary)] font-semibold">{filteredRules.length}</span> {t('matching rules', 'กฎที่ตรงกัน')}
           </div>
         </div>
 
@@ -472,11 +477,11 @@ export const Rules: React.FC = () => {
             <thead>
               <tr className="border-b border-[var(--bg-border)]">
                 <th className="w-28 border-r border-[var(--bg-border)]">Rule ID</th>
-                <th className="w-36 border-r border-[var(--bg-border)]">Target Variable</th>
-                <th className="border-r border-[var(--bg-border)]">Operator & Pattern</th>
-                <th className="w-40 border-r border-[var(--bg-border)]">Action & Severity</th>
-                <th className="border-r border-[var(--bg-border)]">Policy Description</th>
-                <th className="text-right w-24">Actions</th>
+                <th className="w-36 border-r border-[var(--bg-border)]">{t('Variable', 'ตัวแปร')}</th>
+                <th className="border-r border-[var(--bg-border)]">{t('Operator & pattern', 'Operator และรูปแบบ')}</th>
+                <th className="w-40 border-r border-[var(--bg-border)]">{t('Action & severity', 'การดำเนินการและความรุนแรง')}</th>
+                <th className="border-r border-[var(--bg-border)]">{t('Description', 'คำอธิบาย')}</th>
+                <th className="text-right w-24">{t('Actions', 'จัดการ')}</th>
               </tr>
             </thead>
             <tbody>
@@ -484,7 +489,7 @@ export const Rules: React.FC = () => {
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-[var(--text-muted)] font-mono text-[12px]">
                     <RefreshCw size={18} className="animate-spin inline mr-2 text-orange-500" />
-                    Loading ModSecurity custom rule policies...
+                    {t('Loading platform rules...', 'กำลังโหลดกฎของแพลตฟอร์ม...')}
                   </td>
                 </tr>
               ) : filteredRules.length === 0 ? (
@@ -493,19 +498,19 @@ export const Rules: React.FC = () => {
                     <div className="space-y-3">
                       <Code size={32} className="mx-auto text-orange-500 opacity-40" />
                       <p className="text-[13.5px] font-bold font-mono text-[var(--text-primary)] m-0">
-                        No custom rules match the specified criteria
+                        {t('No rules match these filters', 'ไม่มีกฎที่ตรงกับตัวกรอง')}
                       </p>
                       <p className="text-[12px] text-[var(--text-muted)] font-mono m-0 max-w-sm mx-auto">
                         {isAnyFilterActive
-                          ? 'Try clearing the search query or changing filter parameters.'
-                          : 'No custom rules have been defined yet. Click "Create Rule" above to create one.'}
+                          ? t('Try clearing the search or changing the filters.', 'ลองล้างคำค้นหาหรือเปลี่ยนตัวกรอง')
+                          : t('No platform rules yet. Press "Create rule" above to add one.', 'ยังไม่มีกฎของแพลตฟอร์ม กด "สร้างกฎ" ด้านบนเพื่อเพิ่ม')}
                       </p>
                       {isAnyFilterActive && (
                         <button
                           onClick={handleClearFilters}
                           className="mt-2 px-3 py-1.5 bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] rounded-md text-[11.5px] font-mono cursor-pointer transition-colors"
                         >
-                          Clear Filters
+                          {t('Clear filters', 'ล้างตัวกรอง')}
                         </button>
                       )}
                     </div>
@@ -543,7 +548,8 @@ export const Rules: React.FC = () => {
                           <button
                             onClick={() => handleCopySecRule(rule)}
                             className="p-1 text-[var(--text-muted)] hover:text-orange-500 rounded transition-colors cursor-pointer shrink-0"
-                            title="Copy full SecRule syntax"
+                            title={t('Copy the full SecRule', 'คัดลอก SecRule ทั้งหมด')}
+                            aria-label={t('Copy the full SecRule', 'คัดลอก SecRule ทั้งหมด')}
                           >
                             {copiedId === rule.id ? (
                               <Check size={13} className="text-emerald-500" />
@@ -558,7 +564,7 @@ export const Rules: React.FC = () => {
                       <td className="border-r border-[var(--bg-border-subtle)]">
                         <div className="flex flex-col gap-1 items-start">
                           <Badge color={isCritical ? 'danger' : isHigh ? 'warning' : 'info'}>
-                            {rule.severity || 'CRITICAL'}
+                            {severityLabel(rule.severity || 'CRITICAL', lang)}
                           </Badge>
                           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                             rule.action === 'DECEIVE' ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/30' :
@@ -588,20 +594,22 @@ export const Rules: React.FC = () => {
                                   setIsModalOpen(true)
                                 }}
                                 className="p-1.5 text-[var(--text-muted)] hover:text-sky-600 dark:hover:text-sky-400 rounded bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--bg-border)] transition-colors cursor-pointer"
-                                title="Edit Rule"
+                                title={t('Edit rule', 'แก้ไขกฎ')}
+                                aria-label={t('Edit rule', 'แก้ไขกฎ')}
                               >
                                 <Edit2 size={13} />
                               </button>
                               <button
                                 onClick={() => handleDelete(rule.id)}
                                 className="p-1.5 text-[var(--text-muted)] hover:text-red-600 dark:hover:text-red-400 rounded bg-[var(--bg-surface-elevated)] hover:bg-red-50 dark:hover:bg-red-500/10 border border-[var(--bg-border)] transition-colors cursor-pointer"
-                                title="Delete Rule"
+                                title={t('Delete rule', 'ลบกฎ')}
+                                aria-label={t('Delete rule', 'ลบกฎ')}
                               >
                                 <Trash2 size={13} />
                               </button>
                             </>
                           ) : (
-                            <span className="text-[11px] font-mono text-[var(--text-dim)]">Read only</span>
+                            <span className="text-[11px] font-mono text-[var(--text-dim)]">{t('Read only', 'ดูอย่างเดียว')}</span>
                           )}
                         </div>
                       </td>
@@ -617,14 +625,15 @@ export const Rules: React.FC = () => {
         {totalPages > 1 && (
           <div className="p-3.5 border-t border-[var(--bg-border)] bg-[var(--bg-surface)] flex flex-col sm:flex-row items-center justify-between gap-3 text-[12px] font-mono">
             <form onSubmit={handlePageJump} className="flex items-center gap-2 text-[var(--text-muted)]">
-              <span>Page {page} of {totalPages}</span>
+              <span>{t(`Page ${page} of ${totalPages}`, `หน้า ${page} จาก ${totalPages}`)}</span>
               <span className="text-[var(--text-dim)]">•</span>
-              <span>Jump to:</span>
+              <span>{t('Jump to:', 'ไปหน้า:')}</span>
               <input
                 type="number"
                 min={1}
                 max={totalPages}
                 placeholder="#"
+                aria-label={t('Page number', 'เลขหน้า')}
                 value={pageInput}
                 onChange={(e) => setPageInput(e.target.value)}
                 className="w-14 dash-input py-0.5 px-2 text-center text-[12px] font-mono"
@@ -634,7 +643,7 @@ export const Rules: React.FC = () => {
                 disabled={!pageInput}
                 className="bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] px-2 py-0.5 text-[11px] font-semibold rounded disabled:opacity-40 hover:bg-[var(--bg-hover)] text-[var(--text-primary)] cursor-pointer transition-colors"
               >
-                Go
+                {t('Go', 'ไป')}
               </button>
             </form>
 
@@ -642,7 +651,8 @@ export const Rules: React.FC = () => {
               <button
                 onClick={() => setPage(1)}
                 disabled={page <= 1}
-                title="First Page"
+                title={t('First page', 'หน้าแรก')}
+                aria-label={t('First page', 'หน้าแรก')}
                 className="p-1.5 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] disabled:opacity-30 cursor-pointer transition-colors"
               >
                 <ChevronsLeft size={14} />
@@ -652,7 +662,7 @@ export const Rules: React.FC = () => {
                 disabled={page <= 1}
                 className="flex items-center gap-1 px-2.5 py-1 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] disabled:opacity-30 cursor-pointer transition-colors"
               >
-                <ChevronLeft size={13} /> Prev
+                <ChevronLeft size={13} /> {t('Prev', 'ก่อนหน้า')}
               </button>
 
               {Array.from({ length: totalPages }, (_, i) => i + 1)
@@ -681,12 +691,13 @@ export const Rules: React.FC = () => {
                 disabled={page >= totalPages}
                 className="flex items-center gap-1 px-2.5 py-1 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] disabled:opacity-30 cursor-pointer transition-colors"
               >
-                Next <ChevronRight size={13} />
+                {t('Next', 'ถัดไป')} <ChevronRight size={13} />
               </button>
               <button
                 onClick={() => setPage(totalPages)}
                 disabled={page >= totalPages}
-                title="Last Page"
+                title={t('Last page', 'หน้าสุดท้าย')}
+                aria-label={t('Last page', 'หน้าสุดท้าย')}
                 className="p-1.5 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] disabled:opacity-30 cursor-pointer transition-colors"
               >
                 <ChevronsRight size={14} />
@@ -706,8 +717,8 @@ export const Rules: React.FC = () => {
             <Code size={16} className="text-orange-600 dark:text-orange-400 shrink-0" aria-hidden="true" />
             <span>
               {editingRule?.id && rules.find((r) => r.id === editingRule.id)
-                ? `Edit Custom Rule #${String(editingRule.id).replace('custom-', '')}`
-                : 'Create Custom SecRule Policy'}
+                ? t(`Edit rule #${String(editingRule.id).replace('custom-', '')}`, `แก้ไขกฎ #${String(editingRule.id).replace('custom-', '')}`)
+                : t('Create platform rule', 'สร้างกฎของแพลตฟอร์ม')}
             </span>
           </span>
         }
@@ -715,12 +726,12 @@ export const Rules: React.FC = () => {
             <form onSubmit={handleSubmit} className="space-y-4 text-[12.5px]">
               <div>
                 <label htmlFor={`${formId}-rule-id`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
-                  Rule ID (Numeric e.g. 100007)
+                  {t('Rule ID (a number, e.g. 100007)', 'Rule ID (ตัวเลข เช่น 100007)')}
                 </label>
                 <input id={`${formId}-rule-id`}
                   required
                   type="text"
-                  placeholder="e.g. 100007"
+                  placeholder={t('e.g. 100007', 'เช่น 100007')}
                   className="w-full dash-input font-mono"
                   value={editingRule?.id || ''}
                   onChange={(e) => setEditingRule({ ...editingRule, id: e.target.value })}
@@ -730,7 +741,7 @@ export const Rules: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label htmlFor={`${formId}-variable`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
-                    Target Variable
+                    {t('Variable', 'ตัวแปร')}
                   </label>
                   <select id={`${formId}-variable`}
                     className="w-full dash-input font-mono cursor-pointer"
@@ -747,35 +758,35 @@ export const Rules: React.FC = () => {
 
                 <div>
                   <label htmlFor={`${formId}-severity`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
-                    Action Severity
+                    {t('Severity', 'ความรุนแรง')}
                   </label>
                   <select id={`${formId}-severity`}
                     className="w-full dash-input font-mono cursor-pointer"
                     value={editingRule?.severity || 'CRITICAL'}
                     onChange={(e) => setEditingRule({ ...editingRule, severity: e.target.value as any })}
                   >
-                    <option value="CRITICAL">CRITICAL (403 Deny)</option>
-                    <option value="HIGH">HIGH (403 Deny)</option>
-                    <option value="MEDIUM">MEDIUM (Warning)</option>
-                    <option value="LOW">LOW (Notice)</option>
+                    <option value="CRITICAL">{severityLabel('CRITICAL', lang)} ({t('403 deny', '403 ปฏิเสธ')})</option>
+                    <option value="HIGH">{severityLabel('HIGH', lang)} ({t('403 deny', '403 ปฏิเสธ')})</option>
+                    <option value="MEDIUM">{severityLabel('MEDIUM', lang)} ({t('warning', 'เตือน')})</option>
+                    <option value="LOW">{severityLabel('LOW', lang)} ({t('notice', 'แจ้งให้ทราบ')})</option>
                   </select>
                 </div>
               </div>
 
               <div>
                 <label htmlFor={`${formId}-operator`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
-                  Operator & Pattern
+                  {t('Operator & pattern', 'Operator และรูปแบบ')}
                 </label>
                 <input id={`${formId}-operator`}
                   required
                   type="text"
-                  placeholder="@rx (union.*select) or @contains badkeyword"
+                  placeholder={t('@rx (union.*select) or @contains badkeyword', '@rx (union.*select) หรือ @contains badkeyword')}
                   className="w-full dash-input font-mono"
                   value={editingRule?.operator || ''}
                   onChange={(e) => setEditingRule({ ...editingRule, operator: e.target.value })}
                 />
                 <p className="text-[11px] text-[var(--text-muted)] mt-1 font-mono">
-                  Supported: <code className="text-orange-600 dark:text-orange-400">@rx &lt;regex&gt;</code>,{' '}
+                  {t('Supported:', 'รองรับ:')} <code className="text-orange-600 dark:text-orange-400">@rx &lt;regex&gt;</code>,{' '}
                   <code className="text-orange-600 dark:text-orange-400">@contains &lt;string&gt;</code>,{' '}
                   <code className="text-orange-600 dark:text-orange-400">@streq &lt;string&gt;</code>
                 </p>
@@ -784,7 +795,7 @@ export const Rules: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor={`${formId}-action`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
-                    Rule Action
+                    {t('Action', 'การดำเนินการ')}
                   </label>
                   <select id={`${formId}-action`}
                     className="w-full dash-input font-mono cursor-pointer"
@@ -793,22 +804,22 @@ export const Rules: React.FC = () => {
                   >
                     <option value="BLOCK">BLOCK</option>
                     <option value="CHALLENGE">CHALLENGE</option>
-                    <option value="DECEIVE">DECEIVE (Honeypot)</option>
+                    <option value="DECEIVE">DECEIVE (honeypot)</option>
                   </select>
                 </div>
                 {(editingRule?.action === 'DECEIVE') && (
                   <div>
                     <label htmlFor={`${formId}-template`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
-                      Deception Template
+                      {t('Deception template', 'รูปแบบเนื้อหาปลอม')}
                     </label>
                     <select id={`${formId}-template`}
                       className="w-full dash-input font-mono cursor-pointer"
                       value={editingRule?.deception_template || 'auto'}
                       onChange={(e) => setEditingRule({ ...editingRule, deception_template: e.target.value as any })}
                     >
-                      <option value="auto">Auto-Detect</option>
-                      <option value="path_traversal">Fake /etc/passwd</option>
-                      <option value="sqli">Fake SQL JSON</option>
+                      <option value="auto">{t('Auto-detect', 'ตรวจหาอัตโนมัติ')}</option>
+                      <option value="path_traversal">{t('Fake /etc/passwd', '/etc/passwd ปลอม')}</option>
+                      <option value="sqli">{t('Fake SQL JSON', 'SQL JSON ปลอม')}</option>
                     </select>
                   </div>
                 )}
@@ -816,12 +827,12 @@ export const Rules: React.FC = () => {
 
               <div>
                 <label htmlFor={`${formId}-message`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
-                  Policy Description / Alert Message
+                  {t('Description / alert message', 'คำอธิบาย / ข้อความแจ้งเตือน')}
                 </label>
                 <input id={`${formId}-message`}
                   required
                   type="text"
-                  placeholder="e.g. Block SQL injection payload attempt"
+                  placeholder={t('e.g. Block SQL injection payload attempt', 'เช่น บล็อกความพยายามทำ SQL injection')}
                   className="w-full dash-input"
                   value={editingRule?.message || ''}
                   onChange={(e) => setEditingRule({ ...editingRule, message: e.target.value })}
@@ -831,7 +842,7 @@ export const Rules: React.FC = () => {
               {/* Live SecRule Syntax Preview */}
               <div className="rounded-lg bg-slate-950 border border-slate-800 text-slate-200 overflow-hidden font-mono text-[11px] mt-3">
                 <div className="px-3 py-1.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between text-slate-400 text-[10px] font-bold">
-                  <span>ModSecurity SecRule Generated Preview</span>
+                  <span>{t('Generated ModSecurity SecRule', 'SecRule ของ ModSecurity ที่สร้างขึ้น')}</span>
                   <Code size={12} className="text-orange-400" />
                 </div>
                 <div className="p-3 overflow-x-auto text-amber-300 bg-slate-950 leading-relaxed">
@@ -848,13 +859,15 @@ export const Rules: React.FC = () => {
                   className="w-full py-2 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 font-bold text-[12px] transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   <ShieldAlert size={14} />
-                  {isTestingBlastRadius ? 'Running Simulation...' : 'Simulate Blast Radius (Test False Positives)'}
+                  {isTestingBlastRadius
+                    ? t('Running the test...', 'กำลังทดสอบ...')
+                    : t('Test blast radius (check for false positives)', 'ทดสอบผลกระทบ (ตรวจ false positive)')}
                 </button>
                 
                 {blastRadiusResult && (
                   <div className="mt-3 p-3 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2">
                     <div className="flex justify-between items-center">
-                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">Impacted Requests</span>
+                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{t('Impacted requests', 'request ที่ได้รับผลกระทบ')}</span>
                       <span className={`text-[14px] font-bold ${(blastRadiusResult.matched_count || 0) > 100 ? 'text-red-500' : 'text-emerald-500'}`}>
                         {(blastRadiusResult.matched_count || 0).toLocaleString()} / {blastRadiusResult.total_samples || 0}
                       </span>
@@ -866,7 +879,7 @@ export const Rules: React.FC = () => {
                     )}
                     {blastRadiusResult.impacted_ips?.length > 0 && (
                       <div className="text-[11px]">
-                        <span className="font-bold text-slate-500 dark:text-slate-400">Sample IPs Blocked:</span>
+                        <span className="font-bold text-slate-500 dark:text-slate-400">{t('Sample IPs that would be blocked:', 'ตัวอย่าง IP ที่จะถูกบล็อก:')}</span>
                         <div className="mt-1 flex flex-wrap gap-1">
                           {blastRadiusResult.impacted_ips.map((item: any, i: number) => (
                             <span key={i} className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 rounded font-mono text-[10px]">
@@ -882,10 +895,10 @@ export const Rules: React.FC = () => {
 
               <div className="flex justify-end gap-2.5 pt-4 border-t border-[var(--bg-border)]">
                 <Button variant="ghost" type="button" onClick={() => setIsModalOpen(false)}>
-                  Cancel
+                  {t('Cancel', 'ยกเลิก')}
                 </Button>
                 <Button variant="brand" type="submit" isLoading={createMutation.isPending || updateMutation.isPending}>
-                  Save & Deploy Policy
+                  {t('Save & deploy', 'บันทึกและนำไปใช้')}
                 </Button>
               </div>
             </form>

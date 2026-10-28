@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { TopBar } from '../components/layout/TopBar'
 import MLRules from './MLRules'
 import ThresholdProposals from './ThresholdProposals'
+import { useT } from '../i18n'
 
 // One review queue for everything that changes how the WAF blocks (UX
 // reorganization 2026-10-28): rules the ML model proposed and anomaly
@@ -14,9 +15,21 @@ import ThresholdProposals from './ThresholdProposals'
 
 export type ProposalType = 'ml' | 'tuning'
 
-const TYPES: { id: ProposalType; label: string; hint: string }[] = [
-  { id: 'ml', label: 'ML anomaly rules', hint: 'Block rules proposed from detected requests' },
-  { id: 'tuning', label: 'Threshold tuning', hint: 'Changes to an origin’s anomaly score threshold' },
+const TYPES: { id: ProposalType; label: string; hint: string; labelTh: string; hintTh: string }[] = [
+  {
+    id: 'ml',
+    label: 'ML anomaly rules',
+    hint: 'Block rules proposed from detected requests',
+    labelTh: 'กฎ ML anomaly',
+    hintTh: 'กฎบล็อกที่เสนอจาก request ที่ตรวจพบ',
+  },
+  {
+    id: 'tuning',
+    label: 'Threshold tuning',
+    hint: 'Changes to an origin’s anomaly score threshold',
+    labelTh: 'ปรับค่า threshold',
+    hintTh: 'การเปลี่ยนเกณฑ์คะแนน anomaly ของ origin',
+  },
 ]
 
 export const proposalTypeFrom = (value: string | null): ProposalType => (value === 'tuning' ? 'tuning' : 'ml')
@@ -24,6 +37,7 @@ export const proposalTypeFrom = (value: string | null): ProposalType => (value =
 export const RuleProposals: React.FC = () => {
   const [params, setParams] = useSearchParams()
   const type = proposalTypeFrom(params.get('type'))
+  const { t } = useT()
 
   const select = (next: ProposalType) => {
     const p = new URLSearchParams(params)
@@ -34,22 +48,25 @@ export const RuleProposals: React.FC = () => {
   return (
     <div className="animate-fade-in pb-12">
       <TopBar
-        title="Rule proposals"
-        subtitle="Changes the system suggests for your origins. Nothing here affects traffic until someone with the right role approves it."
+        title={t('Rule proposals', 'กฎที่รอตรวจ')}
+        subtitle={t(
+          'Changes the system suggests for your origins. Nothing here affects traffic until someone with the right role approves it.',
+          'การเปลี่ยนแปลงที่ระบบเสนอสำหรับ origin ของคุณ จะยังไม่มีผลกับทราฟฟิกจนกว่าผู้มีสิทธิ์จะอนุมัติ',
+        )}
       />
 
-      <div role="tablist" aria-label="Proposal type" className="mb-5 flex flex-wrap gap-2">
-        {TYPES.map((t) => {
-          const active = t.id === type
+      <div role="tablist" aria-label={t('Proposal type', 'ประเภทข้อเสนอ')} className="mb-5 flex flex-wrap gap-2">
+        {TYPES.map((item) => {
+          const active = item.id === type
           return (
             <button
-              key={t.id}
+              key={item.id}
               type="button"
               role="tab"
-              id={`proposal-tab-${t.id}`}
+              id={`proposal-tab-${item.id}`}
               aria-selected={active}
-              aria-controls={`proposal-panel-${t.id}`}
-              onClick={() => select(t.id)}
+              aria-controls={`proposal-panel-${item.id}`}
+              onClick={() => select(item.id)}
               className={`min-w-[200px] text-left rounded-lg border px-3.5 py-2.5 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
                 active
                   ? 'border-[var(--accent)] bg-[var(--nav-active)]'
@@ -57,9 +74,9 @@ export const RuleProposals: React.FC = () => {
               }`}
             >
               <span className={`block text-[13.5px] ${active ? 'font-semibold text-[var(--text-primary)]' : 'font-medium text-[var(--text-secondary)]'}`}>
-                {t.label}
+                {t(item.label, item.labelTh)}
               </span>
-              <span className="block text-[12px] text-[var(--text-muted)]">{t.hint}</span>
+              <span className="block text-[12px] text-[var(--text-muted)]">{t(item.hint, item.hintTh)}</span>
             </button>
           )
         })}
