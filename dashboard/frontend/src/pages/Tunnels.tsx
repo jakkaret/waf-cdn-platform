@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { CRS_VERSION } from '../lib/crsVersion'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
+import { statusWord, useT } from '../i18n'
 
 // A platform-named address (POST /api/tunnels/quick) for a user who has no
 // domain of their own; see services/quick_tunnel.py.
@@ -45,6 +46,7 @@ interface QuickTunnel {
 export const Tunnels: React.FC = () => {
   const queryClient = useQueryClient()
   const guard = useVerifiedGuard()
+  const { t, lang } = useT()
   // The platform names the address (quick tunnel). A domain the user owns is
   // connected from its origin instead, not from this page.
   const [quickHost, setQuickHost] = useState<string | null>(null)
@@ -83,21 +85,30 @@ export const Tunnels: React.FC = () => {
   })
   const quickTunnels: QuickTunnel[] = quickData?.tunnels || []
   const quickLimit: number = quickData?.limit ?? 3
-  const selectedQuick = quickTunnels.find((t) => t.domain_name === quickHost) || quickTunnels[0] || null
+  const selectedQuick = quickTunnels.find((q) => q.domain_name === quickHost) || quickTunnels[0] || null
 
-  const selectQuick = (t: QuickTunnel) => {
-    setQuickHost(t.domain_name)
-    if (t.port) setLocalPort(t.port)
+  const selectQuick = (q: QuickTunnel) => {
+    setQuickHost(q.domain_name)
+    if (q.port) setLocalPort(q.port)
+  }
+
+  // combineTunnelHubStatus words its detail in English; the Thai is looked up here.
+  const hubDetail = (detail: string) => {
+    if (lang !== 'th') return detail
+    if (detail === 'Both tunnel systems reachable') return 'ระบบ tunnel ทั้งสองเชื่อมต่อได้'
+    if (detail === 'Neither tunnel system is reachable') return 'เชื่อมต่อระบบ tunnel ไม่ได้ทั้งสองระบบ'
+    if (detail.endsWith(' unreachable')) return `${detail.slice(0, -' unreachable'.length)} เชื่อมต่อไม่ได้`
+    return detail
   }
 
   const createQuick = useMutation({
     mutationFn: () => api.post('/tunnels/quick', { port: localPort }).then((r) => r.data),
-    onSuccess: (t: { domain_name: string }) => {
-      setQuickHost(t.domain_name)
+    onSuccess: (created: { domain_name: string }) => {
+      setQuickHost(created.domain_name)
       queryClient.invalidateQueries({ queryKey: ['quick-tunnels'] })
-      toast.success(`Created ${t.domain_name}`)
+      toast.success(t(`Created ${created.domain_name}`, `สร้าง ${created.domain_name} แล้ว`))
     },
-    onError: (err) => toast.error(tunnelErrorMessage(err) || 'Could not create the address'),
+    onError: (err) => toast.error(tunnelErrorMessage(err, lang) || t('Could not create the address', 'สร้างที่อยู่ไม่สำเร็จ')),
   })
 
   const removeQuick = useMutation({
@@ -105,9 +116,9 @@ export const Tunnels: React.FC = () => {
     onSuccess: (r: { domain_name: string }) => {
       if (r.domain_name === quickHost) setQuickHost(null)
       queryClient.invalidateQueries({ queryKey: ['quick-tunnels'] })
-      toast.success(`Removed ${r.domain_name}`)
+      toast.success(t(`Removed ${r.domain_name}`, `ลบ ${r.domain_name} แล้ว`))
     },
-    onError: (err) => toast.error(tunnelErrorMessage(err) || 'Could not remove the address'),
+    onError: (err) => toast.error(tunnelErrorMessage(err, lang) || t('Could not remove the address', 'ลบที่อยู่ไม่สำเร็จ')),
   })
 
   // Each config-generator call mints a tunnel token and scans the domains
@@ -134,12 +145,12 @@ export const Tunnels: React.FC = () => {
   // Derive the live count from the same rows the table renders so the
   // summary cards and the table heading can never disagree (the backend's
   // active_count previously read 0 while the table listed 5 tunnels).
-  const activeCount = data === undefined ? null : tunnels.filter((t: any) => t.is_online).length
+  const activeCount = data === undefined ? null : tunnels.filter((row: any) => row.is_online).length
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text)
     setCopiedKey(key)
-    toast.success('Copied command to clipboard!')
+    toast.success(t('Copied the command', 'คัดลอกคำสั่งแล้ว'))
     setTimeout(() => setCopiedKey(null), 2500)
   }
 
@@ -149,21 +160,24 @@ export const Tunnels: React.FC = () => {
   // unscoped frpc config). buildTunnelCommands returns null until the backend
   // has minted a config for a domain the user owns.
   const cmds = buildTunnelCommands(configData)
-  const configMessage = debouncedDomain.trim() ? tunnelErrorMessage(configError) : null
+  const configMessage = debouncedDomain.trim() ? tunnelErrorMessage(configError, lang) : null
   const PLACEHOLDER = configMessage
     ? `# ${configMessage}`
-    : '# Create an address above to get a signed install command.'
+    : t('# Create an address above to get a signed install command.', '# สร้างที่อยู่ด้านบนก่อน เพื่อรับคำสั่งติดตั้งที่ลงนามแล้ว')
   const linuxCmd = cmds?.linux || PLACEHOLDER
   const dockerCmd = cmds?.docker || PLACEHOLDER
 
   return (
     <div className="space-y-6 animate-fade-in">
       <TopBar
-        title="Private tunnels"
-        subtitle="Connect a server that has no public IP. A small agent on it opens an outbound FRP tunnel to the WAF, so no port forwarding is needed."
+        title={t('Private tunnels', 'Private tunnel')}
+        subtitle={t(
+          'Connect a server that has no public IP. A small agent on it opens an outbound FRP tunnel to the WAF, so no port forwarding is needed.',
+          'เชื่อมเซิร์ฟเวอร์ที่ไม่มี public IP โดย agent ขนาดเล็กบนเครื่องจะเปิด FRP tunnel ขาออกมาหา WAF จึงไม่ต้องทำ port forwarding',
+        )}
         badge={
           <Badge color="success" dot>
-            {activeCount ?? '—'} TUNNELS ACTIVE
+            {activeCount ?? '—'} {t('TUNNELS ACTIVE', 'tunnel ทำงานอยู่')}
           </Badge>
         }
       />
@@ -173,7 +187,7 @@ export const Tunnels: React.FC = () => {
         <div className="card p-4 border border-[var(--bg-border)] bg-[var(--bg-surface)] rounded-xl flex items-center justify-between">
           <div>
             <span className="text-[12px] font-mono text-[var(--text-muted)]">
-              Tunnel Hub Status
+              {t('Tunnel hub status', 'สถานะ tunnel hub')}
             </span>
             <div className="flex items-center gap-2 mt-1">
               <span
@@ -182,10 +196,10 @@ export const Tunnels: React.FC = () => {
               <span
                 className={`text-[16px] font-bold font-mono ${hubStatus.online ? 'text-[var(--text-primary)]' : 'text-red-400'}`}
               >
-                {hubStatus.label}
+                {statusWord(hubStatus.label, lang)}
               </span>
             </div>
-            <p className="text-[11.5px] text-[var(--text-secondary)] mt-0.5">{hubStatus.detail}</p>
+            <p className="text-[11.5px] text-[var(--text-secondary)] mt-0.5">{hubDetail(hubStatus.detail)}</p>
           </div>
           <div className="p-3 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
             <Server size={22} />
@@ -195,12 +209,12 @@ export const Tunnels: React.FC = () => {
         <div className="card p-4 border border-[var(--bg-border)] bg-[var(--bg-surface)] rounded-xl flex items-center justify-between">
           <div>
             <span className="text-[12px] font-mono text-[var(--text-muted)]">
-              Active Tunnels
+              {t('Active tunnels', 'tunnel ที่ทำงานอยู่')}
             </span>
             <div className="text-[20px] font-bold text-[var(--text-primary)] font-mono mt-1">
-              {activeCount ?? '—'} Connected
+              {activeCount ?? '—'} {t('connected', 'เชื่อมต่ออยู่')}
             </div>
-            <p className="text-[11.5px] text-[var(--text-secondary)] mt-0.5">Real-time persistent FRP links</p>
+            <p className="text-[11.5px] text-[var(--text-secondary)] mt-0.5">{t('Persistent FRP links, live', 'การเชื่อมต่อ FRP แบบต่อเนื่อง แสดงสด')}</p>
           </div>
           <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
             <Network size={22} />
@@ -210,12 +224,12 @@ export const Tunnels: React.FC = () => {
         <div className="card p-4 border border-[var(--bg-border)] bg-[var(--bg-surface)] rounded-xl flex items-center justify-between">
           <div>
             <span className="text-[12px] font-mono text-[var(--text-muted)]">
-              WAF Protection
+              {t('WAF protection', 'การป้องกันของ WAF')}
             </span>
             <div className="text-[16px] font-bold text-emerald-400 font-mono mt-1">
-              ModSec CRS {CRS_VERSION} Active
+              ModSec CRS {CRS_VERSION} {t('active', 'ทำงานอยู่')}
             </div>
-            <p className="text-[11.5px] text-[var(--text-secondary)] mt-0.5">Zero IP exposure to internet</p>
+            <p className="text-[11.5px] text-[var(--text-secondary)] mt-0.5">{t('The server IP is never exposed to the internet', 'ไม่เปิดเผย IP ของเซิร์ฟเวอร์สู่อินเทอร์เน็ต')}</p>
           </div>
           <div className="p-3 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
             <Shield size={22} />
@@ -232,15 +246,15 @@ export const Tunnels: React.FC = () => {
             </div>
             <div>
               <h2 className="text-[16px] font-bold text-[var(--text-primary)] font-mono m-0">
-                1-Click Private Tunnel Agent Generator
+                {t('Private tunnel agent installer', 'สร้างคำสั่งติดตั้ง tunnel agent')}
               </h2>
               <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-                Generate an instant automated installer command for your private app, Docker container, or local machine.
+                {t('Generate an install command for your private app, Docker container, or local machine.', 'สร้างคำสั่งติดตั้งสำหรับแอป, Docker container หรือเครื่องในเครือข่ายส่วนตัวของคุณ')}
               </p>
             </div>
           </div>
           <span className="px-2.5 py-1 rounded-full text-[11px] font-mono bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30 font-semibold flex items-center gap-1.5">
-            <Zap size={13} className="text-amber-400" /> 1-Step Setup
+            <Zap size={13} className="text-amber-400" /> {t('1-step setup', 'ตั้งค่าขั้นตอนเดียว')}
           </span>
         </div>
 
@@ -248,9 +262,12 @@ export const Tunnels: React.FC = () => {
         <div className="rounded-xl border border-[var(--bg-border)] bg-[var(--bg-surface)] p-4 space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <p className="text-[12px] text-[var(--text-secondary)] m-0 max-w-[60ch]">
-              The platform gives your app an address under <span className="font-mono">{quickData?.zone || '…'}</span>.
-              The name is random and cannot be chosen. An address whose agent stays offline for{' '}
-              {quickData?.idle_days ?? 7} days is removed.
+              {t('The platform gives your app an address under', 'แพลตฟอร์มจะให้ที่อยู่สำหรับแอปของคุณภายใต้')}{' '}
+              <span className="font-mono">{quickData?.zone || '…'}</span>.{' '}
+              {t(
+                `The name is random and cannot be chosen. An address whose agent stays offline for ${quickData?.idle_days ?? 7} days is removed.`,
+                `ชื่อจะสุ่มให้และเลือกเองไม่ได้ ที่อยู่ที่ agent ออฟไลน์ติดกัน ${quickData?.idle_days ?? 7} วันจะถูกลบ`,
+              )}
             </p>
             <button
               onClick={() => guard('agent_token', () => createQuick.mutate())}
@@ -258,55 +275,71 @@ export const Tunnels: React.FC = () => {
               className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-mono text-[12px] font-semibold flex items-center gap-1.5 transition-all"
             >
               <Plus size={13} />
-              {createQuick.isPending ? 'Creating…' : `New address (${quickTunnels.length}/${quickLimit})`}
+              {createQuick.isPending
+                ? t('Creating…', 'กำลังสร้าง…')
+                : t(`New address (${quickTunnels.length}/${quickLimit})`, `สร้างที่อยู่ใหม่ (${quickTunnels.length}/${quickLimit})`)}
             </button>
           </div>
 
           {quickTunnels.length === 0 ? (
             <p className="text-[12px] text-[var(--text-muted)] m-0">
-              You have no address yet. Set the local port below, then press New address.
+              {t('You have no address yet. Set the local port below, then press New address.', 'ยังไม่มีที่อยู่ ตั้ง local port ด้านล่างแล้วกดสร้างที่อยู่ใหม่')}
             </p>
           ) : (
             <ul className="divide-y divide-[var(--bg-border-subtle)] m-0 p-0 list-none">
-              {quickTunnels.map((t) => {
-                const b = tunnelStatusBadge(t.is_online)
-                const selected = selectedQuick?.domain_name === t.domain_name
+              {quickTunnels.map((q) => {
+                const b = tunnelStatusBadge(q.is_online)
+                const selected = selectedQuick?.domain_name === q.domain_name
                 return (
-                  <li key={t.origin_id} className="flex flex-wrap items-center gap-3 py-2">
+                  <li key={q.origin_id} className="flex flex-wrap items-center gap-3 py-2">
                     <label className="flex items-center gap-2 min-w-0 cursor-pointer">
                       <input
                         type="radio"
                         name="quick-tunnel"
                         checked={selected}
-                        onChange={() => selectQuick(t)}
+                        onChange={() => selectQuick(q)}
                         className="accent-indigo-500"
                       />
-                      <span className="font-mono text-[13px] text-[var(--text-primary)] break-all">{t.domain_name}</span>
+                      <span className="font-mono text-[13px] text-[var(--text-primary)] break-all">{q.domain_name}</span>
                     </label>
-                    <Badge color={b.color}>{b.label}</Badge>
+                    <Badge color={b.color}>{statusWord(b.label, lang)}</Badge>
                     <span className="text-[11.5px] text-[var(--text-muted)] font-mono">
-                      {t.port ? `port ${t.port} · ` : ''}
-                      {t.expires_at ? `removed after ${formatBkkDateTime(t.expires_at, { seconds: false })} if still offline` : 'connected'}
+                      {q.port ? `port ${q.port} · ` : ''}
+                      {q.expires_at
+                        ? t(
+                            `removed after ${formatBkkDateTime(q.expires_at, { seconds: false })} if still offline`,
+                            `จะถูกลบหลัง ${formatBkkDateTime(q.expires_at, { seconds: false })} ถ้ายังออฟไลน์`,
+                          )
+                        : t('connected', 'เชื่อมต่ออยู่')}
                     </span>
                     <span className="ml-auto flex items-center gap-1">
                       <a
-                        href={t.url}
+                        href={q.url}
                         target="_blank"
                         rel="noreferrer"
                         className="p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-                        title="Open"
+                        title={t('Open', 'เปิด')}
+                        aria-label={t('Open', 'เปิด')}
                       >
                         <ExternalLink size={13} />
                       </a>
                       <button
                         onClick={() => {
-                          if (window.confirm(`Remove ${t.domain_name}? Its agent stops working and the name is gone for good.`)) {
-                            removeQuick.mutate(t.origin_id)
+                          if (
+                            window.confirm(
+                              t(
+                                `Remove ${q.domain_name}? Its agent stops working and the name is gone for good.`,
+                                `ลบ ${q.domain_name}? agent ของที่อยู่นี้จะหยุดทำงานและชื่อนี้จะหายไปถาวร`,
+                              ),
+                            )
+                          ) {
+                            removeQuick.mutate(q.origin_id)
                           }
                         }}
                         disabled={removeQuick.isPending}
                         className="p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-red-400 hover:bg-[var(--bg-hover)] disabled:opacity-50"
-                        title="Remove"
+                        title={t('Remove', 'ลบ')}
+                        aria-label={t('Remove', 'ลบ')}
                       >
                         <Trash2 size={13} />
                       </button>
@@ -322,7 +355,7 @@ export const Tunnels: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
           <div>
             <label className="block text-[11px] font-mono text-[var(--text-muted)] mb-1">
-              Local Port
+              Local port
             </label>
             <input
               type="number"
@@ -335,7 +368,7 @@ export const Tunnels: React.FC = () => {
 
           <div>
             <label className="block text-[11px] font-mono text-[var(--text-muted)] mb-1">
-              Local IP Address
+              {t('Local IP address', 'Local IP')}
             </label>
             <input
               type="text"
@@ -357,7 +390,7 @@ export const Tunnels: React.FC = () => {
                 : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
             }`}
           >
-            <Laptop size={14} /> Linux Service (1-Liner)
+            <Laptop size={14} /> {t('Linux service (one line)', 'Linux service (คำสั่งเดียว)')}
           </button>
           <button
             onClick={() => setActiveTab('docker')}
@@ -367,7 +400,7 @@ export const Tunnels: React.FC = () => {
                 : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
             }`}
           >
-            <Box size={14} /> Docker Container
+            <Box size={14} /> Docker container
           </button>
         </div>
 
@@ -394,14 +427,17 @@ export const Tunnels: React.FC = () => {
             className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-mono text-[11.5px] font-semibold flex items-center gap-1.5 transition-all shadow-lg cursor-pointer"
           >
             {copiedKey === activeTab ? <Check size={13} /> : <Copy size={13} />}
-            {copiedKey === activeTab ? 'COPIED!' : 'COPY COMMAND'}
+            {copiedKey === activeTab ? t('COPIED!', 'คัดลอกแล้ว') : t('COPY COMMAND', 'คัดลอกคำสั่ง')}
           </button>
         </div>
 
         <div className="mt-3 flex items-center gap-2 text-[11.5px] text-[var(--text-muted)]">
           <Sparkles size={13} className="text-amber-400" />
           <span>
-            Paste this single command in your private server terminal. It automatically downloads the agent and establishes a permanent 24/7 background connection.
+            {t(
+              'Paste this single command in your private server terminal. It downloads the agent and keeps a connection open in the background, 24/7.',
+              'วางคำสั่งนี้ใน terminal ของเซิร์ฟเวอร์ส่วนตัว ระบบจะดาวน์โหลด agent และเปิดการเชื่อมต่อค้างไว้เบื้องหลังตลอด 24 ชั่วโมง',
+            )}
           </span>
         </div>
       </div>
@@ -412,7 +448,8 @@ export const Tunnels: React.FC = () => {
           <div className="flex items-center gap-2">
             <Activity size={18} className="text-indigo-400" />
             <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
-              Live Connected Tunnel Proxies ({activeCount ?? '—'}{activeCount !== null && tunnels.length !== activeCount ? ` of ${tunnels.length}` : ''})
+              {t('Connected tunnel proxies', 'tunnel proxy ที่เชื่อมต่ออยู่')} ({activeCount ?? '—'}
+              {activeCount !== null && tunnels.length !== activeCount ? t(` of ${tunnels.length}`, ` จาก ${tunnels.length}`) : ''})
             </h3>
           </div>
           <div className="flex items-center gap-2">
@@ -426,7 +463,7 @@ export const Tunnels: React.FC = () => {
                       : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                   }`}
                 >
-                  👤 My Tunnels
+                  👤 {t('My tunnels', 'tunnel ของฉัน')}
                 </button>
                 <button
                   onClick={() => setScope('all')}
@@ -436,17 +473,18 @@ export const Tunnels: React.FC = () => {
                       : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                   }`}
                 >
-                  🌐 All System Tunnels (Admin)
+                  🌐 {t('All tunnels (admin)', 'tunnel ทั้งระบบ (admin)')}
                 </button>
               </div>
             )}
             <button
               onClick={() => {
                 refetch()
-                toast.success('Refreshed tunnel connections')
+                toast.success(t('Refreshed tunnel connections', 'รีเฟรชการเชื่อมต่อ tunnel แล้ว'))
               }}
               className="p-1.5 rounded-lg bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--bg-border)] transition-colors cursor-pointer"
-              title="Refresh Tunnels"
+              title={t('Refresh tunnels', 'รีเฟรช tunnel')}
+              aria-label={t('Refresh tunnels', 'รีเฟรช tunnel')}
             >
               <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
             </button>
@@ -457,29 +495,32 @@ export const Tunnels: React.FC = () => {
           <table className="w-full text-left border-collapse font-mono text-[12.5px]">
             <thead>
               <tr className="border-b border-[var(--bg-border)] text-[var(--text-muted)] text-[11px]">
-                <th className="py-2.5 px-3">Tunnel Proxy</th>
-                <th className="py-2.5 px-3">Public Protected Domain</th>
-                {data?.is_admin && <th className="py-2.5 px-3">Owner</th>}
-                <th className="py-2.5 px-3">Target</th>
-                <th className="py-2.5 px-3">Live Conns</th>
-                <th className="py-2.5 px-3 text-right">Status</th>
+                <th className="py-2.5 px-3">Tunnel proxy</th>
+                <th className="py-2.5 px-3">{t('Protected public domain', 'โดเมนสาธารณะที่ป้องกัน')}</th>
+                {data?.is_admin && <th className="py-2.5 px-3">{t('Owner', 'เจ้าของ')}</th>}
+                <th className="py-2.5 px-3">{t('Target', 'ปลายทาง')}</th>
+                <th className="py-2.5 px-3">{t('Live connections', 'การเชื่อมต่อ')}</th>
+                <th className="py-2.5 px-3 text-right">{t('Status', 'สถานะ')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--bg-border-subtle)]">
               {tunnels.length === 0 ? (
                 <tr>
                   <td colSpan={data?.is_admin ? 6 : 5} className="py-8 text-center text-[var(--text-muted)]">
-                    No active tunnel proxies currently connected. Run the installer script on your private machine to establish a connection.
+                    {t(
+                      'No tunnel proxies are connected. Run the install command on your private machine to connect one.',
+                      'ยังไม่มี tunnel proxy ที่เชื่อมต่ออยู่ รันคำสั่งติดตั้งบนเครื่องส่วนตัวของคุณเพื่อเชื่อมต่อ',
+                    )}
                   </td>
                 </tr>
               ) : (
-                tunnels.map((t: any, idx: number) => {
-                  const domainName = t.custom_domains?.[0] || t.domain || t.name
+                tunnels.map((row: any, idx: number) => {
+                  const domainName = row.custom_domains?.[0] || row.domain || row.name
                   return (
                     <tr key={idx} className="hover:bg-[var(--bg-hover)] transition-colors">
                       <td className="py-3 px-3 font-bold text-[var(--text-primary)] flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                        {t.name}
+                        {row.name}
                       </td>
                       <td className="py-3 px-3 text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300">
                         <a
@@ -496,21 +537,21 @@ export const Tunnels: React.FC = () => {
                         <td className="py-3 px-3">
                           <span
                             className={`px-2 py-0.5 rounded-md text-[11px] font-mono ${
-                              t.is_mine
+                              row.is_mine
                                 ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
                                 : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                             }`}
                           >
-                            {t.is_mine ? '👤 You' : `👤 @${t.owner_username}`}
+                            {row.is_mine ? `👤 ${t('You', 'คุณ')}` : `👤 @${row.owner_username}`}
                           </span>
                         </td>
                       )}
-                      <td className="py-3 px-3 text-amber-300">{t.local_target || 'Local App'}</td>
-                      <td className="py-3 px-3 text-[var(--text-secondary)]">{t.connections || 0} conns</td>
+                      <td className="py-3 px-3 text-amber-300">{row.local_target || t('Local app', 'แอปในเครื่อง')}</td>
+                      <td className="py-3 px-3 text-[var(--text-secondary)]">{row.connections || 0} {t('conns', 'การเชื่อมต่อ')}</td>
                       <td className="py-3 px-3 text-right">
                         {(() => {
-                          const b = tunnelStatusBadge(t.is_online)
-                          return <Badge color={b.color}>{b.label}</Badge>
+                          const b = tunnelStatusBadge(row.is_online)
+                          return <Badge color={b.color}>{statusWord(b.label, lang)}</Badge>
                         })()}
                       </td>
                     </tr>
@@ -530,13 +571,14 @@ export const Tunnels: React.FC = () => {
           <div className="flex items-center gap-2">
             <Shield size={18} className="text-purple-400" />
             <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
-              Custom Tunnel — cloudwaf ({cloudwafAgents.length})
+              {t('Custom tunnel', 'Custom tunnel')} — cloudwaf ({cloudwafAgents.length})
             </h3>
           </div>
           <button
             onClick={() => refetchCloudwaf()}
             className="p-1.5 rounded-lg bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--bg-border)] transition-colors cursor-pointer"
-            title="Refresh Custom Tunnel"
+            title={t('Refresh custom tunnel', 'รีเฟรช custom tunnel')}
+            aria-label={t('Refresh custom tunnel', 'รีเฟรช custom tunnel')}
           >
             <RefreshCw size={14} />
           </button>
@@ -547,22 +589,22 @@ export const Tunnels: React.FC = () => {
             <thead>
               <tr className="border-b border-[var(--bg-border)] text-[var(--text-muted)] text-[11px]">
                 <th className="py-2.5 px-3">Origin</th>
-                <th className="py-2.5 px-3">Domains</th>
-                <th className="py-2.5 px-3">Live Conns</th>
-                <th className="py-2.5 px-3 text-right">Status</th>
+                <th className="py-2.5 px-3">{t('Domains', 'โดเมน')}</th>
+                <th className="py-2.5 px-3">{t('Live connections', 'การเชื่อมต่อ')}</th>
+                <th className="py-2.5 px-3 text-right">{t('Status', 'สถานะ')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--bg-border-subtle)]">
               {!cloudwaf?.server_running ? (
                 <tr>
                   <td colSpan={4} className="py-8 text-center text-[var(--text-muted)]">
-                    {cloudwaf?.reason || 'The custom tunnel server has not published any state.'}
+                    {cloudwaf?.reason || t('The custom tunnel server has not published any state.', 'custom tunnel server ยังไม่ได้ส่งสถานะใด ๆ')}
                   </td>
                 </tr>
               ) : cloudwafAgents.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="py-8 text-center text-[var(--text-muted)]">
-                    No custom-tunnel agents currently connected.
+                    {t('No custom-tunnel agents are connected.', 'ยังไม่มี agent ของ custom tunnel ที่เชื่อมต่ออยู่')}
                   </td>
                 </tr>
               ) : (
@@ -573,7 +615,7 @@ export const Tunnels: React.FC = () => {
                       {a.origin_label || a.agent_id}
                     </td>
                     <td className="py-3 px-3 text-indigo-400">{(a.domains || []).join(', ') || '—'}</td>
-                    <td className="py-3 px-3 text-[var(--text-secondary)]">{a.active_connections || 0} conns</td>
+                    <td className="py-3 px-3 text-[var(--text-secondary)]">{a.active_connections || 0} {t('conns', 'การเชื่อมต่อ')}</td>
                     <td className="py-3 px-3 text-right">
                       {/* server_running is fresh here (checked above), so
                           every agent still listed is connected right now --
@@ -581,7 +623,7 @@ export const Tunnels: React.FC = () => {
                           own snapshot() gives (see tunnel/server.py). */}
                       {(() => {
                         const b = tunnelStatusBadge(true)
-                        return <Badge color={b.color}>{b.label}</Badge>
+                        return <Badge color={b.color}>{statusWord(b.label, lang)}</Badge>
                       })()}
                     </td>
                   </tr>

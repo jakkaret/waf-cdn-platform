@@ -42,19 +42,20 @@ export function buildTunnelCommands(
 // domain the user did not own looked like a page that did nothing. detail is
 // a string from our own HTTPExceptions, a list from FastAPI's 422 validation,
 // or {message} from the email gate.
-export function tunnelErrorMessage(error: unknown): string | null {
+export function tunnelErrorMessage(error: unknown, lang: 'en' | 'th' = 'en'): string | null {
   if (!error) return null
+  const th = lang === 'th'
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
   if (typeof detail === 'string' && detail) return detail
   if (Array.isArray(detail) && detail.length) {
     const first = detail[0] as { loc?: unknown[]; msg?: string }
     const field = Array.isArray(first?.loc) ? first.loc[first.loc.length - 1] : null
-    if (field === 'domain') return 'Enter a full hostname, for example shop.example.com.'
-    if (field === 'port') return 'Local port must be a number from 1 to 65535.'
-    return first?.msg || 'The request was not valid.'
+    if (field === 'domain') return th ? 'กรอกชื่อ host เต็ม เช่น shop.example.com' : 'Enter a full hostname, for example shop.example.com.'
+    if (field === 'port') return th ? 'Local port ต้องเป็นตัวเลขตั้งแต่ 1 ถึง 65535' : 'Local port must be a number from 1 to 65535.'
+    return first?.msg || (th ? 'คำขอไม่ถูกต้อง' : 'The request was not valid.')
   }
   if (detail && typeof detail === 'object' && typeof (detail as { message?: unknown }).message === 'string') {
     return (detail as { message: string }).message
   }
-  return 'Could not reach the server. Try again.'
+  return th ? 'ติดต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง' : 'Could not reach the server. Try again.'
 }
