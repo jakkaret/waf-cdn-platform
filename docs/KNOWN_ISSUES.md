@@ -136,6 +136,36 @@ same list (only admins can change them) and tenants cannot own rules of their
 own. `GET /api/logs/filters` returns the distinct status codes/methods across
 all traffic (no hostnames or IPs).
 
+## 11. One request can be stored twice in access_logs — OPEN (found 2026-10-28)
+
+Found while labelling ML gate blocks. Many requests that come through an edge
+have two `access_logs` rows with the same `request_id`. Usually one row is the
+edge's access log row and the other carries the real rule. Example:
+
+| request_id | status | rule_id | attack_type | request_time_ms |
+|---|---|---|---|---|
+| `1fa4e7f4dc5cda53c75641ad2edffdab` | 403 | `WAF-CRS` | WAF Security Block | 255 |
+| same | 403 | `920420` | Request content type is not allowed by policy | 0 |
+
+Measured on Main over the last 7 days (2026-10-28):
+
+- 403 rows: 7,185 rows, 5,960 distinct ids, so 1,225 extra rows (about 17%).
+- Other rows: 14,126 rows, 13,303 distinct ids, so 823 extra rows.
+- The most common pairs, by duplicated id: `930130`+`WAF-CRS` (804, edge-th),
+  `930130`+empty (253 edge-th, 151 edge-asia), `920440`+`WAF-CRS` (242),
+  empty+empty (234), `2000005`+empty (128).
+
+Impact: block counts are too high on every page that counts rows rather than
+distinct ids (Overview, Logs histogram, incidents, reports), and the same block
+can raise more than one alert. The rows with the real rule id do not show in a
+search for `WAF-CRS`.
+
+Cause not confirmed. The second row has `request_time_ms = 0`, so it does not
+look like the edge's access log row (`api/cdn.py` ingest). One candidate is the ModSecurity audit path
+(`services/log_forward.py`: a lone audit entry flushed after the merge timeout).
+Before fixing it, trace one id through both paths. Do not just delete rows: the
+second row is often the only one that has the real rule id.
+
 ## Handling
 
 Re-check the relevant runtime evidence before acting. Update this register when the
