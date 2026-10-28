@@ -21,6 +21,13 @@ export const OUTCOME_LABEL: Record<LogOutcome, string> = {
   allowed: 'Passed',
 }
 
+export const OUTCOME_LABEL_TH: Record<LogOutcome, string> = {
+  blocked: 'ถูกบล็อก',
+  rate_limited: 'ถูก rate limit',
+  error: 'origin ผิดพลาด',
+  allowed: 'ผ่าน',
+}
+
 // The log pipeline stores the placeholder "WAF-CRS" when ModSecurity blocked
 // a request without reporting which rule (services/log_normalize.py). That is
 // not a rule id, so it is shown as "not recorded" rather than as one.
