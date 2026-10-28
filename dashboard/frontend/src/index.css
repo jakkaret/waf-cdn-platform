@@ -310,3 +310,64 @@ body {
     overflow: hidden;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Incident report printing (components/reports/FormalReport.tsx).
+   The report is a separate layer that only exists while the print dialog is
+   open; on paper everything else is hidden. Colours are fixed (black on
+   white) whatever the app theme is.
+--------------------------------------------------------------------------- */
+.print-root { display: none; }
+
+.print-root {
+  --text-primary: #111827;
+  --text-secondary: #1f2937;
+  --text-muted: #4b5563;
+  --bg-surface-elevated: #f3f4f6;
+  color: #111827;
+  background: #fff;
+  font-family: var(--font-sans);
+  font-size: 10.5pt;
+  line-height: 1.6;
+}
+.pr-doc { max-width: 180mm; margin: 0 auto; }
+.pr-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; padding-bottom: 8px; border-bottom: 2px solid #111827; }
+.pr-org { display: flex; align-items: center; gap: 10px; }
+.pr-org b { display: block; font-size: 11pt; }
+.pr-org span { display: block; font-size: 9pt; color: #4b5563; }
+.pr-no { text-align: right; }
+.pr-no span { display: block; font-size: 8.5pt; color: #4b5563; }
+.pr-no b { font-family: var(--font-mono); font-size: 10.5pt; letter-spacing: 0.02em; }
+.pr-title { font-size: 17pt; font-weight: 700; text-align: center; margin: 18px 0 0; }
+.pr-subtitle { text-align: center; color: #4b5563; margin: 0 0 14px; font-size: 10pt; }
+.pr-kv { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+.pr-kv th { text-align: left; font-weight: 600; width: 34%; padding: 5px 10px; background: #f3f4f6; border: 1px solid #d1d5db; vertical-align: top; }
+.pr-kv td { padding: 5px 10px; border: 1px solid #d1d5db; vertical-align: top; }
+.pr-h2 { font-size: 12pt; font-weight: 700; margin: 18px 0 6px; padding-bottom: 3px; border-bottom: 1px solid #9ca3af; break-after: avoid; page-break-after: avoid; }
+.pr-table { width: 100%; border-collapse: collapse; }
+.pr-table th { text-align: left; font-weight: 600; padding: 5px 8px; background: #f3f4f6; border: 1px solid #d1d5db; }
+.pr-table td { padding: 5px 8px; border: 1px solid #d1d5db; vertical-align: top; overflow-wrap: anywhere; }
+.pr-table tr { break-inside: avoid; page-break-inside: avoid; }
+.pr-r { text-align: right; font-variant-numeric: tabular-nums; }
+.pr-note { margin: 0 0 6px; font-size: 9pt; color: #92400e; }
+.pr-muted { margin: 0; color: #4b5563; }
+.pr-narrative { color: #1f2937; }
+.pr-narrative code { background: #f3f4f6; }
+.pr-chart { break-inside: avoid; page-break-inside: avoid; }
+.pr-signs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 26px; break-inside: avoid; page-break-inside: avoid; }
+.pr-sign { text-align: center; font-size: 9.5pt; }
+.pr-sign p { margin: 0 0 10px; white-space: nowrap; }
+.pr-sign b { display: block; margin-top: 2px; }
+.pr-foot { margin-top: 22px; padding-top: 6px; border-top: 1px solid #d1d5db; font-size: 8.5pt; color: #4b5563; }
+
+@media print {
+  @page {
+    size: A4;
+    margin: 16mm 15mm 18mm;
+    @bottom-right { content: "หน้า " counter(page) " / " counter(pages); font-family: 'IBM Plex Sans Thai', sans-serif; font-size: 8.5pt; color: #4b5563; }
+  }
+  html, body { background: #fff !important; }
+  body > *:not(.print-root) { display: none !important; }
+  .print-root { display: block !important; }
+  .print-root * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

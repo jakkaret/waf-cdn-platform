@@ -9,7 +9,6 @@ import { getOtpConfig, updateOtpConfig } from '../api/otp'
 import { getOriginViewers, addOriginViewer, removeOriginViewer } from '../api/origin_viewers'
 import { getOriginEditors, addOriginEditor, removeOriginEditor } from '../api/origin_editors'
 import { getOriginAuditLog } from '../api/origin_audit_log'
-import { createPostmortem, getPostmortems, getPostmortem } from '../api/postmortems'
 import { useAuthStore } from '../store/authStore'
 import { tunnelConnectivityBadge } from '../lib/tunnelStatus'
 import { CRS_VERSION } from '../lib/crsVersion'
@@ -17,7 +16,6 @@ import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { LoadingSpinner } from '../components/ui/LoadingSpinner'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
-import { EmptyState } from '../components/ui/EmptyState'
 import { ConnectSiteFlow } from '../components/ConnectSiteFlow'
 import { OriginTarget } from '../components/OriginTarget'
 import { PurgeCache } from '../components/PurgeCache'
@@ -28,6 +26,7 @@ import { OriginIpAccess } from '../components/OriginIpAccess'
 import { OriginMlProtection } from '../components/OriginMlProtection'
 import { OriginRateLimits } from '../components/OriginRateLimits'
 import { ShieldActivity } from '../components/ShieldActivity'
+import { OriginReports } from '../components/reports/OriginReports'
 import { OriginTabs } from '../components/OriginTabs'
 import { getSiteRateRules } from '../api/siteAccess'
 import { originUpstreamLabel } from '../lib/originUpstream'
@@ -73,8 +72,7 @@ import {
 } from 'lucide-react'
 import { ORIGIN_ROLE_LABEL, canEditOrigin, canManageOrigin, originRoleOf } from '../lib/roles'
 import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
-import { ReportText } from '../components/ai/ReportText'
-import { BKK_LABEL, formatBkkDateTime } from '../lib/time'
+import { formatBkkDateTime } from '../lib/time'
 
 const cveSeverityClass = (sev: string): string => {
   switch (sev) {
@@ -118,9 +116,6 @@ export const OriginDetail: React.FC = () => {
   // "Block IP" links from Alerts / the dashboard / logs prefill the form.
   const prefillIp = activeTab === 'ip-access' ? searchParams.get('ip') : null
   const prefillNote = activeTab === 'ip-access' ? searchParams.get('note') : null
-  const [pmStart, setPmStart] = useState('')
-  const [pmEnd, setPmEnd] = useState('')
-  const [selectedPostmortemId, setSelectedPostmortemId] = useState<string | null>(null)
   const [techTagInput, setTechTagInput] = useState('')
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false)
@@ -459,34 +454,6 @@ export const OriginDetail: React.FC = () => {
     enabled: !!id && activeTab === 'team',
   })
   const auditEvents = auditLogData?.data?.events || []
-
-  // AI Incident Postmortem (2026-09-22): owner-only, matching the backend
-  // (a postmortem merges in global-scope audit events an editor/viewer of
-  // this one origin has no business seeing).
-  const { data: postmortemsData, isLoading: postmortemsLoading } = useQuery({
-    queryKey: ['origin-postmortems', id],
-    queryFn: () => getPostmortems(id!),
-    enabled: !!id && isAdmin && activeTab === 'postmortem',
-  })
-  const postmortems = postmortemsData?.data?.postmortems || []
-
-  const { data: selectedPostmortemData, isLoading: selectedPostmortemLoading } = useQuery({
-    queryKey: ['origin-postmortem', id, selectedPostmortemId],
-    queryFn: () => getPostmortem(id!, selectedPostmortemId!),
-    enabled: !!id && !!selectedPostmortemId,
-  })
-  const selectedPostmortem = selectedPostmortemData?.data?.postmortem || null
-
-  const createPostmortemMutation = useMutation({
-    mutationFn: () => createPostmortem(id!, pmStart.replace('T', ' ') + ':00', pmEnd.replace('T', ' ') + ':00'),
-    onSuccess: (res) => {
-      toast.success('สร้างรายงาน Postmortem สำเร็จ')
-      queryClient.invalidateQueries({ queryKey: ['origin-postmortems', id] })
-      queryClient.setQueryData(['origin-postmortem', id, res.data.postmortem.id], res)
-      setSelectedPostmortemId(res.data.postmortem.id)
-    },
-    onError: (e: any) => toast.error(e.response?.data?.detail || 'Failed to generate postmortem'),
-  })
 
   // CVE Auto-Patch (2026-09-22): feeds POST /api/ml-rules/cve-scan's
   // matching -- self-declared, no real fingerprinting.
@@ -1530,180 +1497,7 @@ export const OriginDetail: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'postmortem' && (
-          <div className="space-y-5">
-            {!isAdmin ? (
-              <EmptyState
-                icon={<FileText size={24} />}
-                title="Admin only"
-                subtitle="Incident Postmortem reports are visible to this origin's Admins only -- they can include system-wide settings changes, not just this origin's own activity."
-              />
-            ) : (
-              <>
-                <div className="dash-card p-5 space-y-4">
-                  <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
-                    <FileText size={14} /> Generate Incident Report
-                  </h3>
-                  <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                    Pick a time range around an incident. The report correlates real traffic/alert
-                    volume in that window against the real audit trail -- including system-wide
-                    settings and ML rule changes -- and asks AI to draft an executive summary,
-                    timeline, root-cause hypothesis, and recommendations.
-                  </p>
-                  <div className="flex flex-wrap items-end gap-3">
-                    <div className="space-y-1">
-                      <label className="block text-[11px] text-[var(--text-muted)] font-mono">Start ({BKK_LABEL})</label>
-                      <input
-                        type="datetime-local"
-                        value={pmStart}
-                        onChange={(e) => setPmStart(e.target.value)}
-                        className="bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[11px] text-[var(--text-muted)] font-mono">End ({BKK_LABEL})</label>
-                      <input
-                        type="datetime-local"
-                        value={pmEnd}
-                        onChange={(e) => setPmEnd(e.target.value)}
-                        className="bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
-                      />
-                    </div>
-                    <Button
-                      icon={<FileText size={14} />}
-                      onClick={() => createPostmortemMutation.mutate()}
-                      disabled={!pmStart || !pmEnd || createPostmortemMutation.isPending}
-                      isLoading={createPostmortemMutation.isPending}
-                    >
-                      Generate Report
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="dash-card p-5 space-y-4">
-                  <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)]">
-                    Past Reports
-                  </h3>
-                  {postmortemsLoading ? (
-                    <LoadingSpinner />
-                  ) : postmortems.length === 0 ? (
-                    <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                      No reports generated yet.
-                    </p>
-                  ) : (
-                    <div className="space-y-2 font-mono text-[12px]">
-                      {postmortems.map((p) => (
-                        <button
-                          key={p.id}
-                          onClick={() => setSelectedPostmortemId(p.id)}
-                          className={`w-full text-left flex justify-between items-center py-2 px-3 rounded border transition-colors cursor-pointer ${
-                            selectedPostmortemId === p.id
-                              ? 'border-orange-500 bg-[var(--bg-hover)]'
-                              : 'border-[var(--bg-border-subtle)] hover:bg-[var(--bg-hover)]'
-                          }`}
-                        >
-                          <span className="text-[var(--text-primary)]">
-                            {p.start_time} &rarr; {p.end_time}
-                          </span>
-                          <span className="flex items-center gap-2 text-[var(--text-muted)]">
-                            {p.stats?.total_alerts ?? 0} alerts
-                            {p.has_ai_narrative && <Badge color="brand">AI</Badge>}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {selectedPostmortemId && (
-                  <div className="dash-card p-5 space-y-4">
-                    {selectedPostmortemLoading ? (
-                      <LoadingSpinner />
-                    ) : !selectedPostmortem ? (
-                      <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                        Report not found.
-                      </p>
-                    ) : (
-                      <>
-                        <div className="flex justify-between items-start gap-3 pb-3 border-b border-[var(--bg-border-subtle)]">
-                          <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
-                            Report: {selectedPostmortem.start_time} &rarr; {selectedPostmortem.end_time}
-                          </h3>
-                          <button
-                            onClick={() => setSelectedPostmortemId(null)}
-                            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-[11px] font-mono"
-                          >
-                            Close
-                          </button>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-3 font-mono text-[12px]">
-                          <div className="dash-card p-3 text-center">
-                            <div className="text-[var(--text-muted)] text-[11px]">Total Requests</div>
-                            <div className="text-[18px] font-bold text-[var(--text-primary)]">
-                              {selectedPostmortem.stats?.total_requests ?? 0}
-                            </div>
-                          </div>
-                          <div className="dash-card p-3 text-center">
-                            <div className="text-[var(--text-muted)] text-[11px]">Alerts / Blocked</div>
-                            <div className="text-[18px] font-bold text-orange-500">
-                              {selectedPostmortem.stats?.total_alerts ?? 0}
-                            </div>
-                          </div>
-                          <div className="dash-card p-3 text-center">
-                            <div className="text-[var(--text-muted)] text-[11px]">Top Attack Type</div>
-                            <div className="text-[14px] font-bold text-[var(--text-primary)]">
-                              {selectedPostmortem.stats?.top_attack_types?.[0]?.type || '-'}
-                            </div>
-                          </div>
-                        </div>
-
-                        {selectedPostmortem.ai_narrative ? (
-                          <div className="space-y-2">
-                            {selectedPostmortem.ai_narrative_degraded && (
-                              <Badge color="warning">AI summary may be truncated</Badge>
-                            )}
-                            <ReportText
-                              text={selectedPostmortem.ai_narrative}
-                              className="text-[12.5px] bg-[var(--bg-surface-elevated)] rounded p-4"
-                            />
-                          </div>
-                        ) : (
-                          <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                            AI summary unavailable for this report -- showing raw data below.
-                          </p>
-                        )}
-
-                        <details className="font-mono text-[12px]">
-                          <summary className="cursor-pointer text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
-                            Raw timeline ({selectedPostmortem.audit_events?.length ?? 0} audit event(s),{' '}
-                            {selectedPostmortem.hourly_buckets?.length ?? 0} hourly bucket(s))
-                          </summary>
-                          <div className="mt-3 space-y-2">
-                            {(selectedPostmortem.audit_events || []).map((ev) => (
-                              <div
-                                key={ev.event_id}
-                                className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]"
-                              >
-                                <span className="text-[var(--text-primary)]">{ev.summary}</span>
-                                <span className="flex items-center gap-2">
-                                  <Badge color={ev.scope === 'global' ? 'warning' : 'gray'}>{ev.scope}</Badge>
-                                  <span className="text-[var(--text-muted)] text-[11px]">
-                                    {formatBkkDateTime(ev.timestamp)}
-                                  </span>
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                      </>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
+        {activeTab === 'postmortem' && id && <OriginReports originId={id} canWrite={isAdmin} />}
       </div>
 
       <ConfirmDialog
