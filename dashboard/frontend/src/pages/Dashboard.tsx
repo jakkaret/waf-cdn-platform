@@ -288,7 +288,7 @@ export const Dashboard: React.FC = () => {
           <div className="mb-5 p-3.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/[0.12] border border-amber-300/60 dark:border-amber-500/25">
             <div className="flex items-center gap-2 mb-2.5">
               <AlertTriangle size={15} className="text-amber-600 dark:text-amber-400" />
-              <span className="text-[11px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400 font-mono">
+              <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 font-mono">
                 Needs Attention
               </span>
             </div>
@@ -721,7 +721,7 @@ export const Dashboard: React.FC = () => {
                   <Globe size={14} className="text-sky-600 dark:text-sky-400" />
                   <h3>Geographic Distribution</h3>
                 </div>
-                <span className="text-[10px] text-[var(--text-dim)] font-mono uppercase">Global Inbound</span>
+                <span className="text-[10px] text-[var(--text-dim)] font-mono">Global Inbound</span>
               </div>
 
               <div className="overflow-x-auto">
@@ -750,7 +750,7 @@ export const Dashboard: React.FC = () => {
                                 <span className="font-medium text-[12px] text-[var(--text-primary)]">
                                   {countryDisplayName(c.country, c.name)}
                                 </span>
-                                <span className="text-[10px] font-mono text-[var(--text-dim)] uppercase">
+                                <span className="text-[10px] font-mono text-[var(--text-dim)]">
                                   [{c.country}]
                                 </span>
                               </div>

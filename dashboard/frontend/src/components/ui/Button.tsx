@@ -22,21 +22,23 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     ref
   ) => {
     const base =
-      'inline-flex items-center justify-center gap-1.5 font-medium rounded-md transition-all duration-150 focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer'
+      'inline-flex items-center justify-center gap-1.5 font-medium rounded-md transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-surface)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer'
 
     const variants: Record<string, string> = {
       primary:
-        'bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white shadow-sm border border-transparent active:scale-[0.98]',
+        'bg-[var(--accent-fill)] hover:bg-[var(--accent-fill-hover)] text-white shadow-sm border border-transparent active:scale-[0.98]',
       brand:
         // orange-500/600 measured 2.8:1 / 3.56:1 with white text -- fails WCAG AA (4.5:1).
         // orange-700/800 give 5.18:1 / 7.31:1.
         'bg-orange-700 hover:bg-orange-800 text-white shadow-sm border border-transparent active:scale-[0.98]',
       secondary:
         'bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] hover:bg-[var(--bg-hover)] shadow-sm active:scale-[0.98]',
+      // -700 text in light mode: red-500 / emerald-500 on their own 10% tint
+      // were about 3.5:1 and 2.5:1.
       danger:
-        'bg-red-500/10 text-red-500 border border-red-500/30 hover:bg-red-500/20 active:scale-[0.98]',
+        'bg-red-500/10 text-red-700 dark:text-red-300 border border-red-600/30 hover:bg-red-500/20 active:scale-[0.98]',
       success:
-        'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 hover:bg-emerald-500/20 active:scale-[0.98]',
+        'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-600/30 hover:bg-emerald-500/20 active:scale-[0.98]',
       outline:
         'bg-transparent text-[var(--accent)] border border-[var(--accent)]/50 hover:bg-[var(--accent-subtle)] active:scale-[0.98]',
       ghost:
@@ -44,10 +46,10 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     }
 
     const sizes: Record<string, string> = {
-      xs: 'px-2 py-0.5 text-[11px]',
-      sm: 'px-2.5 py-1 text-[11.5px]',
-      md: 'px-3 py-1.5 text-[12.5px]',
-      lg: 'px-4 py-2 text-[13.5px]',
+      xs: 'px-2 py-0.5 text-[11.5px]',
+      sm: 'px-2.5 h-8 text-[12px]',
+      md: 'px-3 h-9 text-[13px]',
+      lg: 'px-4 h-10 text-[14px]',
     }
 
     return (

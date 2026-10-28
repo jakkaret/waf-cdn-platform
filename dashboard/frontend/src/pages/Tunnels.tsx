@@ -182,7 +182,7 @@ export const Tunnels: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card p-4 border border-[var(--bg-border)] bg-[var(--bg-surface)] rounded-xl flex items-center justify-between">
           <div>
-            <span className="text-[12px] font-mono text-[var(--text-muted)] uppercase tracking-wider">
+            <span className="text-[12px] font-mono text-[var(--text-muted)]">
               Tunnel Hub Status
             </span>
             <div className="flex items-center gap-2 mt-1">
@@ -204,7 +204,7 @@ export const Tunnels: React.FC = () => {
 
         <div className="card p-4 border border-[var(--bg-border)] bg-[var(--bg-surface)] rounded-xl flex items-center justify-between">
           <div>
-            <span className="text-[12px] font-mono text-[var(--text-muted)] uppercase tracking-wider">
+            <span className="text-[12px] font-mono text-[var(--text-muted)]">
               Active Tunnels
             </span>
             <div className="text-[20px] font-bold text-[var(--text-primary)] font-mono mt-1">
@@ -219,7 +219,7 @@ export const Tunnels: React.FC = () => {
 
         <div className="card p-4 border border-[var(--bg-border)] bg-[var(--bg-surface)] rounded-xl flex items-center justify-between">
           <div>
-            <span className="text-[12px] font-mono text-[var(--text-muted)] uppercase tracking-wider">
+            <span className="text-[12px] font-mono text-[var(--text-muted)]">
               WAF Protection
             </span>
             <div className="text-[16px] font-bold text-emerald-400 font-mono mt-1">
@@ -361,7 +361,7 @@ export const Tunnels: React.FC = () => {
         <div className={`grid grid-cols-1 ${mode === 'own' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-4 pt-2`}>
           {mode === 'own' && (
             <div>
-              <label className="block text-[11px] font-mono uppercase tracking-wider text-[var(--text-muted)] mb-1">
+              <label className="block text-[11px] font-mono text-[var(--text-muted)] mb-1">
                 Public Target Domain
               </label>
               <input
@@ -378,7 +378,7 @@ export const Tunnels: React.FC = () => {
           )}
 
           <div>
-            <label className="block text-[11px] font-mono uppercase tracking-wider text-[var(--text-muted)] mb-1">
+            <label className="block text-[11px] font-mono text-[var(--text-muted)] mb-1">
               Local Port
             </label>
             <input
@@ -391,7 +391,7 @@ export const Tunnels: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-[11px] font-mono uppercase tracking-wider text-[var(--text-muted)] mb-1">
+            <label className="block text-[11px] font-mono text-[var(--text-muted)] mb-1">
               Local IP Address
             </label>
             <input
@@ -490,7 +490,7 @@ export const Tunnels: React.FC = () => {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Activity size={18} className="text-indigo-400" />
-            <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono uppercase tracking-wider m-0">
+            <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
               Live Connected Tunnel Proxies ({activeCount ?? '—'}{activeCount !== null && tunnels.length !== activeCount ? ` of ${tunnels.length}` : ''})
             </h3>
           </div>
@@ -535,7 +535,7 @@ export const Tunnels: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse font-mono text-[12.5px]">
             <thead>
-              <tr className="border-b border-[var(--bg-border)] text-[var(--text-muted)] text-[11px] uppercase tracking-wider">
+              <tr className="border-b border-[var(--bg-border)] text-[var(--text-muted)] text-[11px]">
                 <th className="py-2.5 px-3">Tunnel Proxy</th>
                 <th className="py-2.5 px-3">Public Protected Domain</th>
                 {data?.is_admin && <th className="py-2.5 px-3">Owner</th>}
@@ -608,7 +608,7 @@ export const Tunnels: React.FC = () => {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Shield size={18} className="text-purple-400" />
-            <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono uppercase tracking-wider m-0">
+            <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
               Custom Tunnel — cloudwaf ({cloudwafAgents.length})
             </h3>
           </div>
@@ -624,7 +624,7 @@ export const Tunnels: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse font-mono text-[12.5px]">
             <thead>
-              <tr className="border-b border-[var(--bg-border)] text-[var(--text-muted)] text-[11px] uppercase tracking-wider">
+              <tr className="border-b border-[var(--bg-border)] text-[var(--text-muted)] text-[11px]">
                 <th className="py-2.5 px-3">Origin</th>
                 <th className="py-2.5 px-3">Domains</th>
                 <th className="py-2.5 px-3">Live Conns</th>

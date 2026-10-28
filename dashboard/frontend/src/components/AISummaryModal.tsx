@@ -80,7 +80,7 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
         <div className="p-6 overflow-y-auto space-y-5 flex-1">
           {/* Natural language query input */}
           <div className="space-y-2">
-            <label className="text-[12px] font-bold font-mono text-[var(--text-secondary)] uppercase tracking-wider block">
+            <label className="text-[12px] font-bold font-mono text-[var(--text-secondary)] block">
               ช่วงเวลา
             </label>
             <div className="relative flex items-center">
@@ -147,19 +147,19 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
               {/* Stat Metric Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)]">
-                  <span className="text-[11px] text-[var(--text-muted)] font-mono uppercase block">Total Requests</span>
+                  <span className="text-[11px] text-[var(--text-muted)] font-mono block">Total Requests</span>
                   <span className="text-[20px] font-bold text-[var(--text-primary)] font-mono">
                     {result.stats.total_requests.toLocaleString()}
                   </span>
                 </div>
                 <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)]">
-                  <span className="text-[11px] text-red-400 font-mono uppercase block">Blocked Attacks</span>
+                  <span className="text-[11px] text-red-400 font-mono block">Blocked Attacks</span>
                   <span className="text-[20px] font-bold text-red-400 font-mono">
                     {result.stats.blocked_attacks.toLocaleString()}
                   </span>
                 </div>
                 <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)]">
-                  <span className="text-[11px] text-emerald-400 font-mono uppercase block">Block Rate</span>
+                  <span className="text-[11px] text-emerald-400 font-mono block">Block Rate</span>
                   <span className="text-[20px] font-bold text-emerald-400 font-mono">
                     {blockRate}%
                   </span>

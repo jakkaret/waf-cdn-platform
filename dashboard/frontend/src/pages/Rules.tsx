@@ -318,7 +318,7 @@ export const Rules: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
         <div className="dash-card p-4 sm:p-5 flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] block font-mono mb-1">
+            <span className="text-[11px] font-bold text-[var(--text-muted)] block font-mono mb-1">
               Custom Edge Rules
             </span>
             <div className="flex items-baseline gap-2">
@@ -335,7 +335,7 @@ export const Rules: React.FC = () => {
 
         <div className="dash-card p-4 sm:p-5 flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] block font-mono mb-1">
+            <span className="text-[11px] font-bold text-[var(--text-muted)] block font-mono mb-1">
               OWASP Core Rule Set
             </span>
             <div className="flex items-baseline gap-2">
@@ -352,7 +352,7 @@ export const Rules: React.FC = () => {
 
         <div className="dash-card p-4 sm:p-5 flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] block font-mono mb-1">
+            <span className="text-[11px] font-bold text-[var(--text-muted)] block font-mono mb-1">
               Default Mitigation Action
             </span>
             <div className="flex items-baseline gap-2">
@@ -714,7 +714,7 @@ export const Rules: React.FC = () => {
       >
             <form onSubmit={handleSubmit} className="space-y-4 text-[12.5px]">
               <div>
-                <label htmlFor={`${formId}-rule-id`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                <label htmlFor={`${formId}-rule-id`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
                   Rule ID (Numeric e.g. 100007)
                 </label>
                 <input id={`${formId}-rule-id`}
@@ -729,7 +729,7 @@ export const Rules: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor={`${formId}-variable`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                  <label htmlFor={`${formId}-variable`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
                     Target Variable
                   </label>
                   <select id={`${formId}-variable`}
@@ -746,7 +746,7 @@ export const Rules: React.FC = () => {
                 </div>
 
                 <div>
-                  <label htmlFor={`${formId}-severity`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                  <label htmlFor={`${formId}-severity`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
                     Action Severity
                   </label>
                   <select id={`${formId}-severity`}
@@ -763,7 +763,7 @@ export const Rules: React.FC = () => {
               </div>
 
               <div>
-                <label htmlFor={`${formId}-operator`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                <label htmlFor={`${formId}-operator`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
                   Operator & Pattern
                 </label>
                 <input id={`${formId}-operator`}
@@ -783,7 +783,7 @@ export const Rules: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor={`${formId}-action`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                  <label htmlFor={`${formId}-action`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
                     Rule Action
                   </label>
                   <select id={`${formId}-action`}
@@ -798,7 +798,7 @@ export const Rules: React.FC = () => {
                 </div>
                 {(editingRule?.action === 'DECEIVE') && (
                   <div>
-                    <label htmlFor={`${formId}-template`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                    <label htmlFor={`${formId}-template`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
                       Deception Template
                     </label>
                     <select id={`${formId}-template`}
@@ -815,7 +815,7 @@ export const Rules: React.FC = () => {
               </div>
 
               <div>
-                <label htmlFor={`${formId}-message`} className="block mb-1 font-bold text-[11px] uppercase font-mono text-[var(--text-secondary)]">
+                <label htmlFor={`${formId}-message`} className="block mb-1 font-bold text-[11px] font-mono text-[var(--text-secondary)]">
                   Policy Description / Alert Message
                 </label>
                 <input id={`${formId}-message`}
@@ -830,7 +830,7 @@ export const Rules: React.FC = () => {
 
               {/* Live SecRule Syntax Preview */}
               <div className="rounded-lg bg-slate-950 border border-slate-800 text-slate-200 overflow-hidden font-mono text-[11px] mt-3">
-                <div className="px-3 py-1.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between text-slate-400 text-[10px] uppercase font-bold">
+                <div className="px-3 py-1.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between text-slate-400 text-[10px] font-bold">
                   <span>ModSecurity SecRule Generated Preview</span>
                   <Code size={12} className="text-orange-400" />
                 </div>
@@ -854,7 +854,7 @@ export const Rules: React.FC = () => {
                 {blastRadiusResult && (
                   <div className="mt-3 p-3 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2">
                     <div className="flex justify-between items-center">
-                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Impacted Requests</span>
+                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">Impacted Requests</span>
                       <span className={`text-[14px] font-bold ${(blastRadiusResult.matched_count || 0) > 100 ? 'text-red-500' : 'text-emerald-500'}`}>
                         {(blastRadiusResult.matched_count || 0).toLocaleString()} / {blastRadiusResult.total_samples || 0}
                       </span>

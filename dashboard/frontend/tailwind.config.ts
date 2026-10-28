@@ -14,27 +14,11 @@ export default {
         xl: '16px',
         '2xl': '20px',
       },
+      // Stacks live in index.css (--font-sans / --font-mono) so CSS, Tailwind
+      // and inline chart styles share one definition.
       fontFamily: {
-        sans: [
-          'Inter',
-          '-apple-system',
-          'BlinkMacSystemFont',
-          'Segoe UI',
-          'Roboto',
-          'Helvetica Neue',
-          'Arial',
-          'sans-serif',
-        ],
-        mono: [
-          'JetBrains Mono',
-          'SFMono-Regular',
-          'Menlo',
-          'Monaco',
-          'Consolas',
-          'Liberation Mono',
-          'Courier New',
-          'monospace',
-        ],
+        sans: ['var(--font-sans)'],
+        mono: ['var(--font-mono)'],
       },
       colors: {
         // Token names the shared components (Table, ConfirmDialog, EmptyState,

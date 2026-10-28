@@ -20,7 +20,7 @@ const CopyField: React.FC<{ label: string; value: string }> = ({ label, value })
   const [copied, setCopied] = useState(false)
   return (
     <div className="flex items-center gap-2 min-w-0">
-      <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] w-14 shrink-0">{label}</span>
+      <span className="text-[10.5px] font-bold text-[var(--text-muted)] w-14 shrink-0">{label}</span>
       <code className="flex-1 min-w-0 truncate px-2 py-1 rounded bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[11.5px]">{value}</code>
       <button
         type="button"

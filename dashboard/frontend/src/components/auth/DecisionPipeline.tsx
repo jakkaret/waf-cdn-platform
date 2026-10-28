@@ -13,7 +13,7 @@ export const DecisionPipeline: React.FC = () => {
           <span className="status-ping-pulse bg-[var(--success)]" />
           <span className="status-ping-dot bg-[var(--success)]" />
         </span>
-        <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+        <span className="font-mono text-[11px] font-semibold tracking-[0.1em] text-[var(--text-secondary)]">
           ModSecurity CRS {CRS_VERSION} · always on
         </span>
       </div>

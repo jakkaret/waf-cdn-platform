@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Menu, MailCheck, ArrowRight } from 'lucide-react'
+import { Menu, MailCheck } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { isUnverified } from '../auth/EmailVerifyGate'
 import { Sidebar } from './Sidebar'
@@ -32,19 +32,20 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
           </button>
           <span className="text-[14px] font-bold"><span className="text-[#a34830] dark:text-[#d0674a]">IT</span> <span className="text-[#89898a] dark:text-[#a3a3a4]">KKU</span></span>
         </div>
-        <main className="flex-1 p-5 sm:p-7 min-w-0">
+        {/* pb-20 keeps the last row clear of the AI copilot button. */}
+        <main className="flex-1 p-4 pb-20 sm:p-7 sm:pb-20 min-w-0">
           {isUnverified(user) && (
             <div className="max-w-[1560px] mx-auto mb-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-[10px] border border-[var(--bg-border)] bg-[var(--bg-surface)] px-4 py-3 text-[12.5px]">
               <MailCheck size={16} className="text-orange-500 shrink-0 hidden sm:block" />
               <p className="m-0 flex-1 text-[var(--text-secondary)] leading-5">
-                <span className="font-semibold text-[var(--text-primary)]">ยืนยันอีเมล</span>{' '}
-                <span className="font-mono">{user?.email}</span> เพื่อเพิ่มเว็บ เชิญทีม และใช้ฟีเจอร์ได้ครบ
+                <span className="font-semibold text-[var(--text-primary)]">Verify</span>{' '}
+                <span className="font-mono">{user?.email}</span> to add sites, invite your team and use every feature.
               </p>
               <Link
                 to={`/verify-email?next=${encodeURIComponent(location.pathname + location.search)}`}
-                className="inline-flex items-center justify-center gap-1.5 shrink-0 rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] px-3 py-1.5 text-[12px] font-semibold text-white transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 shrink-0 rounded-md bg-[var(--accent-fill)] hover:bg-[var(--accent-fill-hover)] px-3 h-9 text-[13px] font-medium text-white transition-colors"
               >
-                ยืนยันอีเมล <ArrowRight size={13} />
+                Verify email
               </Link>
             </div>
           )}

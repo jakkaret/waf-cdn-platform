@@ -62,7 +62,7 @@ export const ShieldActivity: React.FC<{ originId: string }> = ({ originId }) => 
                     key={`${c.kind}-${c.event}`}
                     className="px-3 py-2 rounded-md border border-[var(--bg-border-subtle)] font-mono"
                   >
-                    <div className="text-[10.5px] uppercase text-[var(--text-muted)]">
+                    <div className="text-[10.5px] text-[var(--text-muted)]">
                       {c.kind} · {c.label}
                     </div>
                     <div className={`text-[18px] font-bold ${BAD.has(c.event) ? 'text-red-500' : 'text-[var(--text-primary)]'}`}>

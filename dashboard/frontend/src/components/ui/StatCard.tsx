@@ -110,7 +110,7 @@ export const StatCard: React.FC<StatCardProps> = ({
     >
       <div>
         <div className="flex items-center justify-between gap-2 mb-2">
-          <span className="text-[12px] font-semibold tracking-tight text-[var(--text-secondary)] uppercase">
+          <span className="text-[12px] font-semibold tracking-tight text-[var(--text-secondary)]">
             {label}
           </span>
           {icon && (

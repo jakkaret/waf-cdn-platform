@@ -12,7 +12,7 @@ export const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children })
           <img src="/itkku-logo.png" alt="IT KKU" className="w-9 h-9 object-contain" />
           <div className="leading-tight">
             <span className="block font-bold text-[15px] tracking-tight"><span className="text-[#a34830] dark:text-[#d0674a]">IT</span> <span className="text-[#89898a] dark:text-[#a3a3a4]">KKU</span></span>
-            <span className="block text-[10px] font-mono uppercase tracking-[0.12em] text-[var(--text-muted)]">WAF &amp; CDN</span>
+            <span className="block text-[10px] font-mono tracking-[0.12em] text-[var(--text-muted)]">WAF &amp; CDN</span>
           </div>
         </Link>
         <ThemeToggle />

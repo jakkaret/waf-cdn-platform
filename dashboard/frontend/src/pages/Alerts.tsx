@@ -345,7 +345,7 @@ export const Alerts: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-3.5">
         <div className="dash-card p-4 sm:p-4.5 flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] block font-mono mb-1">
+            <span className="text-[11px] font-bold text-[var(--text-muted)] block font-mono mb-1">
               Alerts listed
             </span>
             <div className="flex items-baseline gap-2">
@@ -364,7 +364,7 @@ export const Alerts: React.FC = () => {
 
         <div className="dash-card p-4 sm:p-4.5 flex items-center justify-between bg-red-50/40 dark:bg-red-950/[0.08] border-red-200/60 dark:border-red-500/15">
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-red-600/80 dark:text-red-400/80 block font-mono mb-1">
+            <span className="text-[11px] font-bold text-red-600/80 dark:text-red-400/80 block font-mono mb-1">
               Critical severity
             </span>
             <div className="flex items-baseline gap-2">
@@ -381,7 +381,7 @@ export const Alerts: React.FC = () => {
 
         <div className="dash-card p-4 sm:p-4.5 flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] block font-mono mb-1">
+            <span className="text-[11px] font-bold text-[var(--text-muted)] block font-mono mb-1">
               Attack incidents
             </span>
             <div className="flex items-baseline gap-2">
@@ -849,7 +849,7 @@ export const Alerts: React.FC = () => {
               <div className="grid grid-cols-1 gap-3">
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)] flex items-center justify-between">
                   <div>
-                    <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
+                    <span className="text-[10.5px] font-bold text-[var(--text-muted)] block mb-1">
                       Alert ID
                     </span>
                     <span className="text-orange-600 dark:text-orange-400 font-mono font-bold">
@@ -866,7 +866,7 @@ export const Alerts: React.FC = () => {
                 </div>
 
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
-                  <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
+                  <span className="text-[10.5px] font-bold text-[var(--text-muted)] block mb-1">
                     Event Timestamp ({BKK_LABEL})
                   </span>
                   <span className="text-[var(--text-primary)] font-bold">
@@ -876,7 +876,7 @@ export const Alerts: React.FC = () => {
 
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)] flex items-center justify-between">
                   <div>
-                    <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
+                    <span className="text-[10.5px] font-bold text-[var(--text-muted)] block mb-1">
                       Attacking Client IP
                     </span>
                     <span className="text-[var(--text-primary)] font-bold">{selectedAlert.ip}</span>
@@ -893,7 +893,7 @@ export const Alerts: React.FC = () => {
 
               <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)]">
+                  <span className="text-[10.5px] font-bold text-[var(--text-muted)]">
                     Target Request URI
                   </span>
                   <button
@@ -909,7 +909,7 @@ export const Alerts: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
-                  <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] block mb-1">
+                  <span className="text-[10.5px] font-bold text-[var(--text-muted)] block mb-1">
                     Threat Severity Level
                   </span>
                   {getSeverityBadge(selectedAlert.severity)}
@@ -933,7 +933,7 @@ export const Alerts: React.FC = () => {
               </div>
 
               <div className="p-3.5 rounded-lg bg-red-50 dark:bg-red-500/[0.08] border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-400 space-y-1.5">
-                <div className="flex items-center gap-1.5 font-bold text-[11px] uppercase">
+                <div className="flex items-center gap-1.5 font-bold text-[11px]">
                   <ShieldAlert size={14} />
                   <span>Detection & Alert Reason</span>
                 </div>

@@ -95,7 +95,7 @@ export const Register: React.FC = () => {
               <span className="block font-bold text-[15px] tracking-tight">
                 <span className="text-[#a34830] dark:text-[#d0674a]">IT</span> <span className="text-[#89898a] dark:text-[#a3a3a4]">KKU</span>
               </span>
-              <span className="block text-[10px] font-mono uppercase tracking-[0.12em] text-[var(--text-muted)]">
+              <span className="block text-[10px] font-mono tracking-[0.12em] text-[var(--text-muted)]">
                 WAF &amp; CDN
               </span>
             </div>
@@ -132,7 +132,7 @@ export const Register: React.FC = () => {
                 return (
                   <div key={item.label} className="dash-card p-4">
                     <Icon size={16} className="text-orange-600 dark:text-orange-400" />
-                    <p className="mt-3 mb-0 text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)] font-mono">
+                    <p className="mt-3 mb-0 text-[11px] tracking-[0.08em] text-[var(--text-muted)] font-mono">
                       {item.label}
                     </p>
                     <p className="mt-1 mb-0 text-[13px] font-semibold text-[var(--text-primary)] font-mono">
@@ -339,7 +339,7 @@ export const Register: React.FC = () => {
 
                 <div className="my-5 flex items-center gap-3">
                   <div className="flex-1 h-px bg-[var(--bg-border)]" />
-                  <span className="text-[11px] text-[var(--text-muted)] font-mono uppercase tracking-wider">
+                  <span className="text-[11px] text-[var(--text-muted)] font-mono">
                     Or continue with
                   </span>
                   <div className="flex-1 h-px bg-[var(--bg-border)]" />

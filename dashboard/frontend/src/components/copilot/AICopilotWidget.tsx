@@ -138,40 +138,43 @@ export const AICopilotWidget: React.FC = () => {
     <>
       {/* Floating Trigger Button */}
       {!isOpen && (
+        // A small round button in the corner: the old wide pill with a
+        // pulsing dot sat on top of table rows and buttons on every page.
+        // AppLayout keeps bottom padding so the last row stays reachable.
         <button
+          type="button"
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-50 group flex items-center gap-2.5 px-4 py-3 rounded-full bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 text-white shadow-2xl hover:shadow-indigo-500/40 hover:scale-105 transition-all duration-300 border border-indigo-400/40 cursor-pointer"
+          aria-label="Open AI copilot"
+          title="AI copilot"
+          className="fixed bottom-4 right-4 z-40 flex items-center justify-center gap-2 h-11 w-11 lg:w-auto lg:px-3.5 rounded-full bg-indigo-700 hover:bg-indigo-800 text-white shadow-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500"
         >
-          <div className="relative">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 absolute -top-0.5 -right-0.5 animate-ping" />
-            <span className="w-2 h-2 rounded-full bg-emerald-400 absolute -top-0 -right-0" />
-            <Bot size={20} className="group-hover:rotate-12 transition-transform duration-300" />
-          </div>
-          <span className="font-mono text-[13px] font-bold tracking-tight">AI Copilot</span>
-          <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px] font-mono uppercase tracking-wider font-bold">
-            LIVE
-          </span>
+          <Bot size={18} aria-hidden="true" />
+          <span className="hidden lg:inline text-[13px] font-medium">AI copilot</span>
         </button>
       )}
 
       {/* Expanded Floating Chat Panel */}
       {isOpen && (
-        <div className="fixed bottom-6 right-6 z-50 w-[92vw] sm:w-[420px] h-[580px] max-h-[85vh] bg-[var(--bg-surface)]/95 backdrop-blur-xl border border-indigo-500/30 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-300">
+        // Opaque panel: the translucent one let red chart lines show through.
+        <div
+          role="dialog"
+          aria-label="AI copilot"
+          className="fixed inset-x-2 bottom-2 sm:inset-x-auto sm:bottom-4 sm:right-4 z-50 sm:w-[420px] h-[580px] max-h-[85vh] bg-[var(--bg-surface)] border border-[var(--bg-border)] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+        >
           {/* Header */}
-          <div className="px-4 py-3 bg-gradient-to-r from-indigo-950/80 via-slate-900/90 to-purple-950/80 border-b border-indigo-500/20 flex items-center justify-between shrink-0">
+          <div className="px-4 py-3 bg-[var(--bg-surface-elevated)] border-b border-[var(--bg-border)] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
                 <Sparkles size={16} className="text-indigo-300" />
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
-                  <h3 className="text-[13.5px] font-bold text-[var(--text-primary)] m-0 font-mono">
-                    WAF Copilot
+                  <h3 className="text-[14px] font-semibold text-[var(--text-primary)] m-0">
+                    AI copilot
                   </h3>
                 </div>
-                <p className="text-[10.5px] text-[var(--text-muted)] m-0 flex items-center gap-1 mt-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-                  <span>ข้อมูล 24 ชม. ของเว็บในบัญชีนี้</span>
+                <p className="text-[11.5px] text-[var(--text-muted)] m-0 mt-0.5">
+                  Answers from the last 24 h of your sites. Check important answers in the logs.
                 </p>
               </div>
             </div>

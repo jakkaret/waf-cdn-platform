@@ -65,7 +65,7 @@ const Devices: React.FC = () => {
         {sessions.length > 0 && (
           <table className="w-full text-[13px]">
             <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+              <tr className="text-left text-[11px] text-[var(--text-muted)]">
                 <th className="px-5 py-3 font-medium">Device</th>
                 <th className="px-5 py-3 font-medium">IP address</th>
                 <th className="px-5 py-3 font-medium">Signed in</th>

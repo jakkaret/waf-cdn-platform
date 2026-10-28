@@ -177,7 +177,7 @@ export const IPRules: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         <div className="dash-card p-4">
           <div className="flex items-center justify-between text-[var(--text-muted)] mb-1">
-            <span className="text-[11.5px] font-mono font-medium uppercase">Total Blocked</span>
+            <span className="text-[11.5px] font-mono font-medium">Total Blocked</span>
             <ShieldAlert size={16} className="text-red-500" />
           </div>
           <div className="text-[22px] font-bold font-mono text-[var(--text-primary)]">
@@ -190,7 +190,7 @@ export const IPRules: React.FC = () => {
 
         <div className="dash-card p-4">
           <div className="flex items-center justify-between text-[var(--text-muted)] mb-1">
-            <span className="text-[11.5px] font-mono font-medium uppercase">Active Whitelist</span>
+            <span className="text-[11.5px] font-mono font-medium">Active Whitelist</span>
             <ShieldCheck size={16} className="text-emerald-500" />
           </div>
           <div className="text-[22px] font-bold font-mono text-[var(--text-primary)]">
@@ -203,7 +203,7 @@ export const IPRules: React.FC = () => {
 
         <div className="dash-card p-4">
           <div className="flex items-center justify-between text-[var(--text-muted)] mb-1">
-            <span className="text-[11.5px] font-mono font-medium uppercase">Temporary Jails</span>
+            <span className="text-[11.5px] font-mono font-medium">Temporary Jails</span>
             <Clock size={16} className="text-amber-500" />
           </div>
           <div className="text-[22px] font-bold font-mono text-[var(--text-primary)]">
@@ -216,7 +216,7 @@ export const IPRules: React.FC = () => {
 
         <div className="dash-card p-4">
           <div className="flex items-center justify-between text-[var(--text-muted)] mb-1">
-            <span className="text-[11.5px] font-mono font-medium uppercase">Perimeter Sync</span>
+            <span className="text-[11.5px] font-mono font-medium">Perimeter Sync</span>
             <Radio size={16} className="text-orange-500 animate-pulse" />
           </div>
           <div className="text-[22px] font-bold font-mono text-emerald-500">

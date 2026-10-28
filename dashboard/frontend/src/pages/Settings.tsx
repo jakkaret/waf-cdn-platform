@@ -234,7 +234,7 @@ export const Settings: React.FC = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
                   <div>
-                    <label className="block text-[11px] font-bold uppercase font-mono text-[var(--text-secondary)] mb-1">
+                    <label className="block text-[11px] font-bold font-mono text-[var(--text-secondary)] mb-1">
                       Paranoia Level
                     </label>
                     <select
@@ -253,7 +253,7 @@ export const Settings: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold uppercase font-mono text-[var(--text-secondary)] mb-1">
+                    <label className="block text-[11px] font-bold font-mono text-[var(--text-secondary)] mb-1">
                       Inbound Anomaly Limit
                     </label>
                     <input
@@ -269,7 +269,7 @@ export const Settings: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold uppercase font-mono text-[var(--text-secondary)] mb-1">
+                    <label className="block text-[11px] font-bold font-mono text-[var(--text-secondary)] mb-1">
                       Outbound Anomaly Limit
                     </label>
                     <input
@@ -286,7 +286,7 @@ export const Settings: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold uppercase font-mono text-[var(--text-secondary)] mb-1">
+                  <label className="block text-[11px] font-bold font-mono text-[var(--text-secondary)] mb-1">
                     Client Real-IP Header
                   </label>
                   <input
@@ -336,7 +336,7 @@ export const Settings: React.FC = () => {
                 </label>
 
                 <div>
-                  <label className="block text-[11px] font-bold uppercase font-mono text-[var(--text-secondary)] mb-1">
+                  <label className="block text-[11px] font-bold font-mono text-[var(--text-secondary)] mb-1">
                     Edge Rule Polling Interval (seconds)
                   </label>
                   <input
@@ -366,7 +366,7 @@ export const Settings: React.FC = () => {
           {/* Card 1: Active Security Posture */}
           <div className="dash-card p-4 space-y-3">
             <div className="flex items-center justify-between border-b border-[var(--bg-border)] pb-2.5">
-              <span className="text-[11px] font-bold font-mono text-[var(--text-secondary)] uppercase tracking-wider">
+              <span className="text-[11px] font-bold font-mono text-[var(--text-secondary)]">
                 Security Posture
               </span>
               <span
@@ -421,7 +421,7 @@ export const Settings: React.FC = () => {
 
           {/* Card 2: Quick Operations */}
           <div className="dash-card p-4 space-y-2.5">
-            <h4 className="text-[11px] font-bold font-mono text-[var(--text-secondary)] uppercase tracking-wider m-0">
+            <h4 className="text-[11px] font-bold font-mono text-[var(--text-secondary)] m-0">
               Quick Operations
             </h4>
 
@@ -447,7 +447,7 @@ export const Settings: React.FC = () => {
 
           {/* Card 3: Contextual Tip */}
           <div className="dash-card p-4 bg-orange-50 dark:bg-orange-500/[0.06] border border-orange-200 dark:border-orange-500/20 text-[12px] space-y-1">
-            <div className="flex items-center gap-1.5 font-bold font-mono text-orange-600 dark:text-orange-400 text-[11px] uppercase">
+            <div className="flex items-center gap-1.5 font-bold font-mono text-orange-600 dark:text-orange-400 text-[11px]">
               <Zap size={13} />
               <span>Operational Guideline</span>
             </div>

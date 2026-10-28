@@ -81,7 +81,7 @@ export const Login: React.FC = () => {
               <span className="block font-bold text-[15px] tracking-tight">
                 <span className="text-[#a34830] dark:text-[#d0674a]">IT</span> <span className="text-[#89898a] dark:text-[#a3a3a4]">KKU</span>
               </span>
-              <span className="block text-[10px] font-mono uppercase tracking-[0.12em] text-[var(--text-muted)]">
+              <span className="block text-[10px] font-mono tracking-[0.12em] text-[var(--text-muted)]">
                 WAF &amp; CDN
               </span>
             </div>
@@ -222,7 +222,7 @@ export const Login: React.FC = () => {
 
                 <div className="my-5 flex items-center gap-3">
                   <div className="flex-1 h-px bg-[var(--bg-border)]" />
-                  <span className="text-[11px] text-[var(--text-muted)] font-mono uppercase tracking-wider">
+                  <span className="text-[11px] text-[var(--text-muted)] font-mono">
                     Or continue with
                   </span>
                   <div className="flex-1 h-px bg-[var(--bg-border)]" />

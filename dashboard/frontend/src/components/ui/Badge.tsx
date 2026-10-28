@@ -19,15 +19,18 @@ export const Badge: React.FC<BadgeProps> = ({
   pulse = false,
   size = 'md',
 }) => {
+  // Light mode uses the -700/-800 shade for text: the -500/-600 ones on their
+  // own 10% tint measured below 4.5:1. Every badge carries a word, so the
+  // state never rests on color alone.
   const styles: Record<BadgeColor, string> = {
-    success: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/30',
-    danger: 'bg-red-500/10 text-red-500 border-red-500/20 dark:text-red-400 dark:border-red-500/30',
-    warning: 'bg-amber-500/10 text-amber-600 border-amber-500/20 dark:text-amber-400 dark:border-amber-500/30',
-    info: 'bg-sky-500/10 text-sky-600 border-sky-500/20 dark:text-sky-400 dark:border-sky-500/30',
-    blue: 'bg-sky-500/10 text-sky-600 border-sky-500/20 dark:text-sky-400 dark:border-sky-500/30',
-    brand: 'bg-orange-500/10 text-orange-600 border-orange-500/25 dark:text-orange-400 dark:border-orange-500/35',
-    purple: 'bg-violet-500/10 text-violet-600 border-violet-500/20 dark:text-violet-400 dark:border-violet-500/30',
-    cyan: 'bg-cyan-500/10 text-cyan-600 border-cyan-500/20 dark:text-cyan-400 dark:border-cyan-500/30',
+    success: 'bg-emerald-500/10 text-emerald-800 border-emerald-600/25 dark:text-emerald-300 dark:border-emerald-500/30',
+    danger: 'bg-red-500/10 text-red-800 border-red-600/25 dark:text-red-300 dark:border-red-500/30',
+    warning: 'bg-amber-500/10 text-amber-800 border-amber-600/25 dark:text-amber-300 dark:border-amber-500/30',
+    info: 'bg-sky-500/10 text-sky-800 border-sky-600/25 dark:text-sky-300 dark:border-sky-500/30',
+    blue: 'bg-sky-500/10 text-sky-800 border-sky-600/25 dark:text-sky-300 dark:border-sky-500/30',
+    brand: 'bg-orange-500/10 text-orange-800 border-orange-600/25 dark:text-orange-300 dark:border-orange-500/35',
+    purple: 'bg-violet-500/10 text-violet-800 border-violet-600/25 dark:text-violet-300 dark:border-violet-500/30',
+    cyan: 'bg-cyan-500/10 text-cyan-800 border-cyan-600/25 dark:text-cyan-300 dark:border-cyan-500/30',
     gray: 'bg-[var(--bg-surface-elevated)] text-[var(--text-secondary)] border-[var(--bg-border)]',
   }
 
@@ -43,11 +46,11 @@ export const Badge: React.FC<BadgeProps> = ({
     gray: 'bg-[var(--text-muted)]',
   }
 
-  const sizeClasses = size === 'sm' ? 'px-1.5 py-0.2 text-[10.5px]' : 'px-2 py-0.5 text-[11px]'
+  const sizeClasses = size === 'sm' ? 'px-1.5 py-px text-[11px]' : 'px-2 py-0.5 text-[12px]'
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-md font-semibold tracking-tight border font-mono ${styles[color]} ${sizeClasses} ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-md font-medium border whitespace-nowrap ${styles[color]} ${sizeClasses} ${className}`}
     >
       {dot && (
         <span className="relative flex h-1.5 w-1.5 items-center justify-center shrink-0">

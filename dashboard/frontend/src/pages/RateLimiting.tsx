@@ -194,7 +194,7 @@ export const RateLimiting: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         <div className="dash-card p-4">
           <div className="flex items-center justify-between text-[var(--text-muted)] mb-1">
-            <span className="text-[11.5px] font-mono font-medium uppercase">Active Policies</span>
+            <span className="text-[11.5px] font-mono font-medium">Active Policies</span>
             <Gauge size={16} className="text-orange-500" />
           </div>
           <div className="text-[22px] font-bold font-mono text-[var(--text-primary)]">
@@ -207,7 +207,7 @@ export const RateLimiting: React.FC = () => {
 
         <div className="dash-card p-4">
           <div className="flex items-center justify-between text-[var(--text-muted)] mb-1">
-            <span className="text-[11.5px] font-mono font-medium uppercase">Throttled Clients</span>
+            <span className="text-[11.5px] font-mono font-medium">Throttled Clients</span>
             <Zap size={16} className="text-amber-500" />
           </div>
           <div className="text-[22px] font-bold font-mono text-amber-500">
@@ -220,7 +220,7 @@ export const RateLimiting: React.FC = () => {
 
         <div className="dash-card p-4">
           <div className="flex items-center justify-between text-[var(--text-muted)] mb-1">
-            <span className="text-[11.5px] font-mono font-medium uppercase">Engine Mechanism</span>
+            <span className="text-[11.5px] font-mono font-medium">Engine Mechanism</span>
             <Layers size={16} className="text-blue-400" />
           </div>
           <div className="text-[16px] font-bold font-mono text-[var(--text-primary)] mt-1">
@@ -233,7 +233,7 @@ export const RateLimiting: React.FC = () => {
 
         <div className="dash-card p-4">
           <div className="flex items-center justify-between text-[var(--text-muted)] mb-1">
-            <span className="text-[11.5px] font-mono font-medium uppercase">Edge Enforcement</span>
+            <span className="text-[11.5px] font-mono font-medium">Edge Enforcement</span>
             <Activity size={16} className="text-emerald-500 animate-pulse" />
           </div>
           <div className="text-[22px] font-bold font-mono text-emerald-500">

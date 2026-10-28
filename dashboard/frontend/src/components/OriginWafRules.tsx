@@ -167,7 +167,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
   const setOperatorValue = (value: string) => setForm((f) => ({ ...f, operator: `${operatorName} ${value}` }))
 
   const inputClass = 'w-full dash-input font-mono'
-  const labelClass = 'text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block uppercase'
+  const labelClass = 'text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block'
 
   // Decoy-path rules show as checkboxes in their own section, not in the list.
   const customRules = (rules ?? []).filter((r) => !r.decoy)
@@ -308,7 +308,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
           if (rows.length === 0) return null
           return (
             <div key={tier} className="dash-card p-4">
-              <h3 className="text-[11px] font-bold font-mono uppercase text-[var(--text-muted)] mb-2">
+              <h3 className="text-[11px] font-bold font-mono text-[var(--text-muted)] mb-2">
                 {tier === 'universal' ? 'Safe for any site' : 'Depends on your stack'}
               </h3>
               <div className="space-y-2.5">

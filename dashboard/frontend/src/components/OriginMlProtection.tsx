@@ -78,7 +78,7 @@ export const OriginMlProtection: React.FC<Props> = ({ originId, canEdit }) => {
   const dirty = isDirty(saved, form)
   const turningOn = saved.mode === 'log' && form.mode === 'enforce'
   const canSave = canEdit && dirty && !error && (!turningOn || ack)
-  const labelClass = 'text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block uppercase'
+  const labelClass = 'text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block'
   const setMode = (mode: MlMode) => setForm((f) => (f ? { ...f, mode } : f))
 
   return (

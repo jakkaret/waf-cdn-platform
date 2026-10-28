@@ -75,7 +75,7 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
     && form.limit_count >= 1 && form.limit_count <= 100000 && form.window_seconds >= 1 && form.window_seconds <= 3600
   const ruleName = (id: string) => rules?.find((r) => r.id === id)?.name ?? 'Platform limit'
   const inputClass = 'w-full dash-input font-mono'
-  const labelClass = 'text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block uppercase'
+  const labelClass = 'text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block'
 
   return (
     <div className="space-y-6">

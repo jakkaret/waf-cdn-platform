@@ -45,16 +45,18 @@ const Support: React.FC = () => {
   return (
     <div className="animate-fade-in pb-12">
       <TopBar
-        title="Support tickets"
+        title="Support"
         subtitle={
           staff
             ? 'All tickets. You can open an origin only while its admin has granted support access on the ticket.'
             : 'Ask the support team for help with one of your origins. You decide if and how long they may access it.'
         }
         action={
-          myOrigins.length > 0 ? (
-            <Button variant="brand" onClick={() => setShowForm((v) => !v)}>
-              {showForm ? 'Cancel' : 'Open a ticket'}
+          // The header button only opens the form; Cancel lives in the form
+          // next to Open ticket (it used to turn into an orange "Cancel" here).
+          myOrigins.length > 0 && !showForm ? (
+            <Button variant="brand" onClick={() => setShowForm(true)}>
+              Open a ticket
             </Button>
           ) : undefined
         }
@@ -90,9 +92,12 @@ const Support: React.FC = () => {
           <p className="text-[12px] text-[var(--text-muted)] m-0">
             Opening a ticket does not give the support team access. You can grant access from the ticket page.
           </p>
-          <div>
+          <div className="flex gap-2">
             <Button type="submit" variant="brand" isLoading={open.isPending} disabled={!originId || !subject.trim() || !message.trim()}>
               Open ticket
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setShowForm(false)} disabled={open.isPending}>
+              Cancel
             </Button>
           </div>
         </form>
@@ -109,7 +114,7 @@ const Support: React.FC = () => {
         {list.length > 0 && (
           <table className="w-full text-[13px]">
             <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+              <tr className="text-left text-[11px] text-[var(--text-muted)]">
                 <th className="px-5 py-3 font-medium">Subject</th>
                 <th className="px-5 py-3 font-medium">Origin</th>
                 <th className="px-5 py-3 font-medium">Status</th>

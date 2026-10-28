@@ -106,7 +106,7 @@ export const OriginSelector: React.FC = () => {
         <div className="absolute left-0 sm:right-0 sm:left-auto top-full mt-2 w-72 rounded-2xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] shadow-xl z-50 overflow-hidden animate-fade-in divide-y divide-[var(--bg-border-subtle)]">
           {/* Header */}
           <div className="px-3.5 py-2.5 bg-[var(--bg-primary)]/50 flex justify-between items-center">
-            <span className="text-[10.5px] font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+            <span className="text-[10.5px] font-bold text-[var(--text-muted)] flex items-center gap-1.5">
               <Server size={12} className="text-orange-500" />
               My Web Origins
             </span>
