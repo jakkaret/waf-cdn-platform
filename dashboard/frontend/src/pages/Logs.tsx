@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { logsApi, LogCursor, HistogramBucket } from '../api/logs'
@@ -16,7 +16,7 @@ import toast from 'react-hot-toast'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
 import { confidenceLabel, LogExplanation, toLogExplanation } from '../lib/logExplanation'
 import { BKK_LABEL, bkkDateKey, formatBkkDateTime, formatBkkTime } from '../lib/time'
-import { OUTCOME_LABEL, logOutcome, realRuleId } from '../lib/logRow'
+import { ML_RULE_ID, OUTCOME_LABEL, isMlAction, logOutcome, realRuleId } from '../lib/logRow'
 
 type RangePreset = '15m' | '1h' | '24h' | '7d' | 'all'
 const RANGE_LABEL: Record<RangePreset, string> = { '15m': 'Last 15 min', '1h': 'Last hour', '24h': 'Last 24 h', '7d': 'Last 7 days', all: 'All' }
@@ -140,7 +140,7 @@ export const Logs: React.FC = () => {
         `"${(log.url || '').replace(/"/g, '""')}"`,
         log.status,
         `"${OUTCOME_LABEL[logOutcome(log.status)]}"`,
-        `"${realRuleId(log.rule_id) ?? ''}"`,
+        `"${isMlAction(log.rule_id) ? ML_RULE_ID : realRuleId(log.rule_id) ?? ''}"`,
         `"${(log.attack_type || '').replace(/"/g, '""')}"`,
       ].join(',')),
     ]
@@ -160,6 +160,9 @@ export const Logs: React.FC = () => {
     const color = o === 'blocked' ? 'danger' : o === 'rate_limited' ? 'warning' : o === 'error' ? 'warning' : 'gray'
     return <Badge color={color}>{OUTCOME_LABEL[o]}</Badge>
   }
+
+  // The ML gate answered the request (blocked or challenged), not ModSecurity.
+  const mlBadge = <Badge color="purple" size="sm">ML</Badge>
 
   const selectClass =
     'w-full h-9 px-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[13px] text-[var(--text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] cursor-pointer'
@@ -361,6 +364,7 @@ export const Logs: React.FC = () => {
               ) : (
                 logs.map((log, idx) => {
                   const rule = realRuleId(log.rule_id)
+                  const byMl = isMlAction(log.rule_id)
                   return (
                     <tr
                       key={log.log_id || log.request_id || `log-${idx}`}
@@ -375,10 +379,17 @@ export const Logs: React.FC = () => {
                       <td className="font-mono text-[12px] text-[var(--text-primary)] max-w-[300px] truncate" title={log.url}>
                         {log.url || '/'}
                       </td>
-                      <td className="whitespace-nowrap">{outcomeBadge(log.status)}</td>
+                      <td className="whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1.5">
+                          {outcomeBadge(log.status)}
+                          {byMl && mlBadge}
+                        </span>
+                      </td>
                       <td className="hidden sm:table-cell font-mono text-[12px] text-[var(--text-secondary)] whitespace-nowrap">{log.status}</td>
                       <td className="hidden lg:table-cell font-mono text-[12px] text-[var(--text-secondary)] whitespace-nowrap">
-                        {rule ?? (logOutcome(log.status) === 'blocked' ? <span className="text-[var(--text-muted)]">not recorded</span> : '—')}
+                        {byMl
+                          ? <span className="font-sans">ML model</span>
+                          : rule ?? (logOutcome(log.status) === 'blocked' ? <span className="text-[var(--text-muted)]">not recorded</span> : '—')}
                       </td>
                       <td className="text-right whitespace-nowrap">
                         <button
@@ -430,11 +441,13 @@ export const Logs: React.FC = () => {
       >
         {selectedLog && (() => {
           const rule = realRuleId(selectedLog.rule_id)
+          const byMl = isMlAction(selectedLog.rule_id)
           const outcome = logOutcome(selectedLog.status)
           return (
             <div className="space-y-4 text-[13px]">
               <div className="flex flex-wrap items-center gap-2">
                 {outcomeBadge(selectedLog.status)}
+                {byMl && mlBadge}
                 <span className="text-[12.5px] text-[var(--text-muted)]">
                   HTTP {selectedLog.status} {statusText(selectedLog.status)}
                 </span>
@@ -463,12 +476,27 @@ export const Logs: React.FC = () => {
                   <dt className="text-[12px] text-[var(--text-muted)]">{selectedLog.method} request</dt>
                   <dd className="m-0 font-mono text-[12.5px] text-[var(--text-primary)] break-all">{selectedLog.url}</dd>
                 </div>
-                <div className="p-3 rounded-lg bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)]">
-                  <dt className="text-[12px] text-[var(--text-muted)]">ModSecurity rule</dt>
-                  <dd className="m-0 font-mono text-[var(--text-primary)]">
-                    {rule ?? (outcome === 'blocked' ? 'Not recorded for this request' : 'None')}
-                  </dd>
-                </div>
+                {byMl ? (
+                  <div className="p-3 rounded-lg bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)]">
+                    <dt className="text-[12px] text-[var(--text-muted)]">Answered by</dt>
+                    <dd className="m-0 text-[var(--text-primary)]">
+                      ML model (Gen 3), not a ModSecurity rule.{' '}
+                      <Link
+                        to="/ml-analyst"
+                        className="text-[var(--accent)] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded"
+                      >
+                        See its score in ML insights
+                      </Link>
+                    </dd>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)]">
+                    <dt className="text-[12px] text-[var(--text-muted)]">ModSecurity rule</dt>
+                    <dd className="m-0 font-mono text-[var(--text-primary)]">
+                      {rule ?? (outcome === 'blocked' ? 'Not recorded for this request' : 'None')}
+                    </dd>
+                  </div>
+                )}
                 <div className="p-3 rounded-lg bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)]">
                   <dt className="text-[12px] text-[var(--text-muted)]">Detection reason</dt>
                   <dd className="m-0 text-[var(--text-primary)]">{selectedLog.attack_type || 'None recorded'}</dd>

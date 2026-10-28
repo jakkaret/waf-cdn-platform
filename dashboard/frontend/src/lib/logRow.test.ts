@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { logOutcome, realRuleId } from './logRow'
+import { isMlAction, logOutcome, realRuleId } from './logRow'
 
 describe('logOutcome', () => {
   it('names what the WAF did, not a threat level', () => {
@@ -20,5 +20,19 @@ describe('realRuleId', () => {
     expect(realRuleId('WAF-CRS')).toBeNull()
     expect(realRuleId('')).toBeNull()
     expect(realRuleId(null)).toBeNull()
+  })
+
+  it('never shows the ML gate as a ModSecurity rule', () => {
+    expect(realRuleId('ML-GEN3')).toBeNull()
+  })
+})
+
+describe('isMlAction', () => {
+  it('is only the ML gate marker', () => {
+    expect(isMlAction('ML-GEN3')).toBe(true)
+    expect(isMlAction(' ML-GEN3 ')).toBe(true)
+    expect(isMlAction('WAF-CRS')).toBe(false)
+    expect(isMlAction('920420')).toBe(false)
+    expect(isMlAction(null)).toBe(false)
   })
 })

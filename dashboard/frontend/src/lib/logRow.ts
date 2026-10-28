@@ -26,7 +26,15 @@ export const OUTCOME_LABEL: Record<LogOutcome, string> = {
 // not a rule id, so it is shown as "not recorded" rather than as one.
 export const GENERIC_RULE_ID = 'WAF-CRS'
 
+// The inline ML gate's own block or challenge (backend log_normalize.ML_RULE_ID):
+// the Gen 3 model's score, not a ModSecurity rule, so never shown as a rule id.
+export const ML_RULE_ID = 'ML-GEN3'
+
+export function isMlAction(ruleId: string | null | undefined): boolean {
+  return String(ruleId ?? '').trim() === ML_RULE_ID
+}
+
 export function realRuleId(ruleId: string | null | undefined): string | null {
   const v = String(ruleId ?? '').trim()
-  return v && v !== GENERIC_RULE_ID ? v : null
+  return v && v !== GENERIC_RULE_ID && v !== ML_RULE_ID ? v : null
 }
