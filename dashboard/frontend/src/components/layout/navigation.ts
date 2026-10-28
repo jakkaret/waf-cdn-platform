@@ -140,8 +140,32 @@ export const ORIGIN_TABS: OriginTabDef[] = [
   { id: 'rate-limits', label: 'Rate limits', keywords: ['rate', 'rate limit', 'throttle', 'requests per minute'] },
   { id: 'shield', label: 'Bot & login shield', keywords: ['bot', 'captcha', 'otp', 'login'] },
   { id: 'team', label: 'Team & audit log', keywords: ['members', 'invite', 'editor', 'viewer', 'audit'] },
-  { id: 'postmortem', label: 'Incident postmortem', keywords: ['incident report', 'postmortem', 'report'] },
+  { id: 'postmortem', label: 'Reports', keywords: ['incident report', 'postmortem', 'report', 'pdf', 'export'] },
 ]
+
+// The origin page shows five tabs. Each of the nine section ids above still
+// works in a link (?tab=ip-access opens Protection with IP rules open), so
+// quick search, All rules, Alerts and "Block IP" links keep landing right.
+export type OriginViewId = 'overview' | 'protection' | 'domains' | 'team' | 'reports'
+
+export const ORIGIN_VIEWS: { id: OriginViewId; label: string; sections: OriginTabId[] }[] = [
+  { id: 'overview', label: 'Overview', sections: ['overview'] },
+  { id: 'protection', label: 'Protection', sections: ['waf', 'ml', 'ip-access', 'rate-limits', 'shield'] },
+  { id: 'domains', label: 'Domains & DNS', sections: ['domains'] },
+  { id: 'team', label: 'Team & history', sections: ['team'] },
+  { id: 'reports', label: 'Reports', sections: ['postmortem'] },
+]
+
+export const viewOfSection = (section: OriginTabId): OriginViewId =>
+  ORIGIN_VIEWS.find((v) => v.sections.includes(section))?.id ?? 'overview'
+
+// What ?tab= lands on: a section id, or "protection" with nothing open.
+export function resolveOriginTab(raw: string | null): { view: OriginViewId; section: OriginTabId | null } {
+  const tab = raw === 'ssl' ? 'domains' : raw === 'reports' ? 'postmortem' : raw
+  if (tab === 'protection') return { view: 'protection', section: null }
+  if (isOriginTab(tab)) return { view: viewOfSection(tab), section: tab }
+  return { view: 'overview', section: 'overview' }
+}
 
 export const isOriginTab = (value: string | null | undefined): value is OriginTabId =>
   ORIGIN_TABS.some((t) => t.id === value)
