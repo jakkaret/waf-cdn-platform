@@ -177,6 +177,33 @@ def mask_user(name: str) -> str:
     return name[:2] + "*" * min(len(name) - 2, 6)
 
 
+def redact_secrets(text: str, content_type: str = "") -> str:
+    """`text` (a form, JSON body or query string) with the value of every
+    password-like field replaced, for the stored sample. "" when it cannot be
+    parsed but holds such a field, so a password never lands in storage."""
+    if not text:
+        return ""
+    ct = (content_type or "").lower()
+    if "json" in ct or text.lstrip().startswith("{"):
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = None
+        if isinstance(data, dict):
+            return json.dumps({k: ("***" if str(k).lower() in _PASS_FIELDS else v) for k, v in data.items()},
+                              ensure_ascii=False)
+    else:
+        try:
+            pairs = urllib.parse.parse_qsl(text, keep_blank_values=True, max_num_fields=200)
+        except ValueError:
+            pairs = []
+        if pairs:
+            return urllib.parse.urlencode([(k, "***" if k.lower() in _PASS_FIELDS else v) for k, v in pairs],
+                                          safe="*'()/:,")
+    lowered = text.lower()
+    return "" if any(f"{f}=" in lowered or f'"{f}"' in lowered for f in _PASS_FIELDS) else text
+
+
 def extract_login(body: str, content_type: str = "") -> Optional[Dict[str, Any]]:
     """A login attempt in a form or JSON body, without keeping the password."""
     fields = _form_fields(body, content_type)
@@ -276,10 +303,10 @@ def build_event(*, request_id: str, host: str, client_ip: str, user_agent: str, 
         replayed = deception_content.find_honeytoken(site, corpus) or "unknown"
     stage = stage_for(template_id, method, bool(login), bool(upload), bool(replayed))
     masked_path, _ = pii_masker.mask_text(path[:2048])
-    masked_query, _ = pii_masker.mask_text(query[:2048]) if query else ("", [])
+    masked_query, _ = pii_masker.mask_text(redact_secrets(query[:2048])) if query else ("", [])
     sample = ""
     if body and not upload:
-        sample = mask_body(body[:BODY_SAMPLE_CHARS * 2])[:BODY_SAMPLE_CHARS]
+        sample = mask_body(redact_secrets(body[:BODY_SAMPLE_CHARS * 2], content_type))[:BODY_SAMPLE_CHARS]
     ts = now if now is not None else time.time()
     host_n = deception_content.normalize_host(host)
     return {
@@ -559,6 +586,8 @@ def summarize_window(sessions: List[Dict[str, Any]], days: int, now: Optional[fl
 # ------------------------------------------------------------------ alerts
 
 _NOTIFY_GAP_HOURS = 1
+# Alerts one site can get in an hour, whatever the attacker rotates.
+MAX_ALERTS_PER_ORIGIN_HOUR = 10
 
 STAGE_TH = {
     "recon": "สำรวจ", "loot": "ได้ข้อมูลลับปลอม", "exploit": "พยายามเจาะ",
@@ -566,14 +595,21 @@ STAGE_TH = {
 }
 
 
-def claim_alert(origin_id: str, actor: str, stage: str, now: Optional[dt.datetime] = None) -> bool:
-    """True once per (origin, actor, stage, hour): the caller may send."""
+def claim_alert(origin_id: str, key: str, stage: str, now: Optional[dt.datetime] = None) -> bool:
+    """True once per (origin, key, stage, hour) and at most
+    MAX_ALERTS_PER_ORIGIN_HOUR times per site and hour: the caller may send.
+    `key` is the client IP, not the actor id: a new User-Agent per request
+    must not mean a new alert per request."""
     from db import pool
     now = now or dt.datetime.now(dt.timezone.utc)
     hour = now.replace(minute=0, second=0, microsecond=0)
+    pool.exec_("DELETE FROM honeypot_notified WHERE created_at < now() - interval '2 days'")
     row = pool.q1(
-        "INSERT INTO honeypot_notified (origin_id, actor_id, stage, hour) VALUES (%s::uuid, %s, %s, %s) "
-        "ON CONFLICT DO NOTHING RETURNING stage", (origin_id, actor, stage, hour))
+        "INSERT INTO honeypot_notified (origin_id, actor_id, stage, hour) "
+        "SELECT %s::uuid, %s, %s, %s WHERE (SELECT count(*) FROM honeypot_notified "
+        "WHERE origin_id = %s::uuid AND hour = %s) < %s "
+        "ON CONFLICT DO NOTHING RETURNING stage",
+        (origin_id, key, stage, hour, origin_id, hour, MAX_ALERTS_PER_ORIGIN_HOUR))
     return bool(row)
 
 
@@ -593,13 +629,15 @@ def format_alert(event: Dict[str, Any], label: str) -> str:
 
 
 async def notify(event: Dict[str, Any]) -> bool:
-    """Push credential use / file drops to the site's team, once per actor,
-    stage and hour. Everything else waits for the daily digest."""
+    """Push credential use / file drops to the site's team, once per client
+    IP, stage and hour (capped per site). Everything else waits for the
+    daily digest."""
     import asyncio
     if event.get("stage") not in ALERT_STAGES or not event.get("origin_id"):
         return False
     try:
-        if not await asyncio.to_thread(claim_alert, event["origin_id"], event["actor_id"], event["stage"]):
+        key = f"ip:{event.get('client_ip') or event['actor_id']}"
+        if not await asyncio.to_thread(claim_alert, event["origin_id"], key, event["stage"]):
             return False
         from services import notification_prefs
         from services import telegram_listener as tl

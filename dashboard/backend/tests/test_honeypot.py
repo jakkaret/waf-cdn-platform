@@ -334,3 +334,29 @@ def test_incident_report_counts_the_windows_honeypot_sessions(monkeypatch):
     assert timeline["stats"]["honeypot"] == {"sessions": 2, "ips": 2, "loot": 2, "exploit": 1,
                                              "credential_use": 1, "persistence": 1}
     assert asked == {"origin": oid, "since": dt.datetime(2026, 10, 27, 2, 0), "until": dt.datetime(2026, 10, 27, 5, 0)}
+
+
+@pytest.mark.parametrize("field", ["pwd", "password", "pass", "passwd", "user_pass", "pw", "pswd", "secret"])
+def test_no_password_field_reaches_the_stored_sample(monkeypatch, field):
+    monkeypatch.setattr(honeypot, "origin_for_host", lambda h: "")
+    secret = "Zq9-s3cret-Xy"
+    for body, ct in ((f"log=admin&{field}={secret}", "application/x-www-form-urlencoded"),
+                     (f'{{"user":"admin","{field}":"{secret}"}}', "application/json"),
+                     (f"log=admin&{field}={secret}&broken=%", "")):
+        e = honeypot.build_event(
+            request_id="r", host=HOST, client_ip="198.51.100.5", user_agent="curl/8", method="POST",
+            uri=f"/wp-login.php?{field}={secret}", referer="", content_type=ct, body=body,
+            raw_body=body.encode(), template_id="admin_panel", category="", rule_id="", response_body="",
+            delay_seconds=0, edge_peer="")
+        assert secret not in repr(e), (field, ct)
+    assert honeypot.redact_secrets("q=1'+OR+1=1--") .startswith("q=1")
+
+
+def test_rotating_user_agents_cannot_flood_alerts(team):
+    oid, _ = team
+    now = dt.datetime(2026, 10, 28, 10, 15, tzinfo=dt.timezone.utc)
+    assert honeypot.claim_alert(oid, "ip:198.51.100.1", "credential_use", now) is True
+    assert honeypot.claim_alert(oid, "ip:198.51.100.1", "credential_use", now) is False
+    got = [honeypot.claim_alert(oid, f"ip:203.0.113.{i}", "persistence", now) for i in range(30)]
+    assert sum(got) == honeypot.MAX_ALERTS_PER_ORIGIN_HOUR - 1
+    assert honeypot.claim_alert(oid, "ip:198.51.100.1", "credential_use", now + dt.timedelta(hours=1)) is True
