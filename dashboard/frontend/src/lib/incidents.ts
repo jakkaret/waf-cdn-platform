@@ -27,6 +27,8 @@ const ATTACK_TYPE_TH: Record<string, string> = {
   'URL file extension is restricted by policy': 'ขอไฟล์นามสกุลต้องห้าม',
   'Attempt to access a backup or working file': 'หาไฟล์สำรอง',
   'Invalid character in request (null character)': 'อักขระแปลกปลอมใน URL',
+  'ML Block': 'คำขอที่ ML บล็อก',
+  'ML Challenge': 'คำขอที่ ML ให้ยืนยันว่าเป็นคน',
 }
 
 export const attackTypeLabel = (t: string): string => ATTACK_TYPE_TH[t] ?? t
