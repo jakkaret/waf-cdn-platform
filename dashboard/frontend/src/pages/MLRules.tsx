@@ -27,7 +27,6 @@ import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { MLPendingRule, MLRuleGenerator } from '../types'
 import {
-  GENERATOR_HINT,
   GENERATOR_LABEL,
   approveScope,
   approveWarning,
@@ -39,6 +38,8 @@ import {
   cveScanOriginChoices,
   deployScopeOf,
   filterAndSortRules,
+  generatorHint,
+  generatorLabel,
   generatorOf,
   legacyPendingCount,
   renderSecRule,
@@ -49,6 +50,7 @@ import {
   type BacktestTone,
   type RuleFilters,
 } from '../lib/mlRules'
+import { useT } from '../i18n'
 
 const PAGE_SIZE = 15
 // One empty list for "no data yet". `= []` in the destructuring made a new
@@ -59,12 +61,12 @@ const NO_RULES: MLPendingRule[] = []
 
 type StatusTab = RuleFilters['status']
 
-const STATUS_TABS: { id: StatusTab; label: string }[] = [
-  { id: 'pending', label: 'รออนุมัติ' },
-  { id: 'approved', label: 'ใช้งานอยู่' },
-  { id: 'rejected', label: 'ปฏิเสธแล้ว' },
-  { id: 'revoked', label: 'ยกเลิกแล้ว' },
-  { id: 'all', label: 'ทั้งหมด' },
+const STATUS_TABS: { id: StatusTab; label: string; labelEn: string }[] = [
+  { id: 'pending', label: 'รออนุมัติ', labelEn: 'Pending' },
+  { id: 'approved', label: 'ใช้งานอยู่', labelEn: 'Active' },
+  { id: 'rejected', label: 'ปฏิเสธแล้ว', labelEn: 'Rejected' },
+  { id: 'revoked', label: 'ยกเลิกแล้ว', labelEn: 'Revoked' },
+  { id: 'all', label: 'ทั้งหมด', labelEn: 'All' },
 ]
 // The CVE-scan dialog's value for "every origin" (platform admin only).
 const ALL_ORIGINS = '__all__'
@@ -100,6 +102,8 @@ interface PendingApproval {
 export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const { user } = useAuthStore()
   const queryClient = useQueryClient()
+  const { t, lang } = useT()
+  const ago = (iso?: string) => timeAgo(iso, Date.now(), lang)
 
   const [filters, setFilters] = useState<RuleFilters>({
     status: 'pending', generator: 'all', attackType: 'all', search: '', sort: 'hits', origin: 'all',
@@ -153,12 +157,17 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
   const rejectLegacy = useMutation({
     mutationFn: () => mlRulesApi.rejectLegacy(),
     onSuccess: (res) => {
-      toast.success(`ปฏิเสธกฎแบบเก่าแล้ว ${res.rejected} กฎ` + (res.skipped ? ` (ข้าม ${res.skipped} กฎที่มีคนรีวิวไปก่อน)` : ''))
+      toast.success(
+        t(
+          `Rejected ${res.rejected} legacy rules` + (res.skipped ? ` (skipped ${res.skipped} already reviewed)` : ''),
+          `ปฏิเสธกฎแบบเก่าแล้ว ${res.rejected} กฎ` + (res.skipped ? ` (ข้าม ${res.skipped} กฎที่มีคนรีวิวไปก่อน)` : ''),
+        ),
+      )
       setSelected([])
       setConfirmLegacy(false)
       refresh()
     },
-    onError: (err: any) => toast.error(err.response?.data?.detail || 'ปฏิเสธกฎแบบเก่าไม่สำเร็จ'),
+    onError: (err: any) => toast.error(err.response?.data?.detail || t('Could not reject the legacy rules', 'ปฏิเสธกฎแบบเก่าไม่สำเร็จ')),
   })
 
   const attackTypes = useMemo(
@@ -203,20 +212,26 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
       setScanOpen(false)
       const searched: string[] = res.keywords_searched || []
       if (searched.length === 0) {
-        toast.error('ยังไม่มี origin ที่ตั้ง tech stack tag ไว้ เพิ่ม tag ที่หน้า origin ก่อนสแกน')
+        toast.error(t('No origin has tech stack tags yet. Add tags on the origin page before scanning.', 'ยังไม่มี origin ที่ตั้ง tech stack tag ไว้ เพิ่ม tag ที่หน้า origin ก่อนสแกน'))
         return
       }
       toast.success(
         res.proposals_created > 0
-          ? `สแกน CVE เสร็จ: เสนอกฎใหม่ ${res.proposals_created} ข้อ จาก ${res.matches_found} รายการที่ตรง`
-          : `สแกน CVE เสร็จ: ตรง ${res.matches_found} รายการ แต่ไม่มีกฎใหม่ (ซ้ำ ${res.skipped_duplicate}, pattern ใช้ไม่ได้ ${res.skipped_no_valid_pattern})`,
+          ? t(
+              `CVE scan done: proposed ${res.proposals_created} new rules from ${res.matches_found} matches`,
+              `สแกน CVE เสร็จ: เสนอกฎใหม่ ${res.proposals_created} ข้อ จาก ${res.matches_found} รายการที่ตรง`,
+            )
+          : t(
+              `CVE scan done: ${res.matches_found} matches but no new rule (duplicates ${res.skipped_duplicate}, unusable pattern ${res.skipped_no_valid_pattern})`,
+              `สแกน CVE เสร็จ: ตรง ${res.matches_found} รายการ แต่ไม่มีกฎใหม่ (ซ้ำ ${res.skipped_duplicate}, pattern ใช้ไม่ได้ ${res.skipped_no_valid_pattern})`,
+            ),
       )
       refresh()
     },
     onError: (err: any) => toast.error(
       err.response?.status === 429
-        ? 'สแกน origin นี้ครบจำนวนต่อชั่วโมงแล้ว ลองใหม่ภายหลัง'
-        : err.response?.data?.detail || 'สแกน CVE ไม่สำเร็จ',
+        ? t('This origin reached its scans per hour. Try again later.', 'สแกน origin นี้ครบจำนวนต่อชั่วโมงแล้ว ลองใหม่ภายหลัง')
+        : err.response?.data?.detail || t('CVE scan failed', 'สแกน CVE ไม่สำเร็จ'),
     ),
   })
 
@@ -230,11 +245,11 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
     setBusy(true)
     try {
       await mlRulesApi.revokeRule(revoking.rule_id, revokeReason.trim())
-      toast.success('ยกเลิกการใช้งานแล้ว กฎหยุดทำงานกับ WAF ทันที')
+      toast.success(t('Revoked. The rule stopped on the WAF.', 'ยกเลิกการใช้งานแล้ว กฎหยุดทำงานกับ WAF ทันที'))
       setRevoking(null)
       setRevokeReason('')
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'ยกเลิกการใช้งานไม่สำเร็จ')
+      toast.error(err.response?.data?.detail || t('Could not revoke the rule', 'ยกเลิกการใช้งานไม่สำเร็จ'))
     } finally {
       setBusy(false)
       refresh()
@@ -242,21 +257,21 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
   }
 
   const runBacktest = async (ids: string[]) => {
-    setTesting((t) => [...t, ...ids])
+    setTesting((cur) => [...cur, ...ids])
     let failed = 0
     for (const id of ids) {
       try {
         await mlRulesApi.backtestRule(id)
       } catch (err: any) {
         failed += 1
-        if (ids.length === 1) toast.error(err.response?.data?.detail || 'ทดสอบกฎไม่สำเร็จ')
+        if (ids.length === 1) toast.error(err.response?.data?.detail || t('Could not test the rule', 'ทดสอบกฎไม่สำเร็จ'))
       } finally {
-        setTesting((t) => t.filter((x) => x !== id))
+        setTesting((cur) => cur.filter((x) => x !== id))
       }
     }
     if (ids.length > 1) {
-      if (failed) toast.error(`ทดสอบไม่สำเร็จ ${failed} จาก ${ids.length} กฎ`)
-      else toast.success(`ทดสอบครบ ${ids.length} กฎแล้ว`)
+      if (failed) toast.error(t(`${failed} of ${ids.length} tests failed`, `ทดสอบไม่สำเร็จ ${failed} จาก ${ids.length} กฎ`))
+      else toast.success(t(`Tested all ${ids.length} rules`, `ทดสอบครบ ${ids.length} กฎแล้ว`))
     }
     refresh()
   }
@@ -265,11 +280,16 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
     setBusy(true)
     const results = await Promise.allSettled(ids.map((id) => mlRulesApi.approveRule(id)))
     const ok = results.filter((r) => r.status === 'fulfilled').length
-    if (ok) toast.success(ids.length === 1 ? 'อนุมัติแล้ว กฎมีผลกับ ModSecurity ทันที' : `อนุมัติแล้ว ${ok} กฎ`)
+    if (ok)
+      toast.success(
+        ids.length === 1
+          ? t('Approved. The rule is live in ModSecurity.', 'อนุมัติแล้ว กฎมีผลกับ ModSecurity ทันที')
+          : t(`Approved ${ok} rules`, `อนุมัติแล้ว ${ok} กฎ`),
+      )
     // e.g. 403 "Owner or Editor of this origin required" after a role change.
     if (ok < ids.length) {
       const first = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
-      toast.error(first?.reason?.response?.data?.detail || `อนุมัติไม่สำเร็จ ${ids.length - ok} กฎ`)
+      toast.error(first?.reason?.response?.data?.detail || t(`${ids.length - ok} approvals failed`, `อนุมัติไม่สำเร็จ ${ids.length - ok} กฎ`))
     }
     setSelected((s) => s.filter((id) => !ids.includes(id)))
     setApproval(null)
@@ -285,11 +305,13 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
     const risky = targets.filter((r) => approveWarning(r) !== null).length
     setApproval({
       ids: targets.map((r) => r.rule_id),
-      scope: approveScope(targets),
+      scope: approveScope(targets, lang),
       warning:
         targets.length === 1
-          ? approveWarning(targets[0])
-          : risky ? `ในนี้มี ${risky} ข้อที่ยังไม่ได้ทดสอบหรือชน traffic ปกติ` : null,
+          ? approveWarning(targets[0], lang)
+          : risky
+            ? t(`${risky} of these are untested or match normal traffic`, `ในนี้มี ${risky} ข้อที่ยังไม่ได้ทดสอบหรือชน traffic ปกติ`)
+            : null,
     })
   }
 
@@ -298,10 +320,10 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
     setBusy(true)
     const results = await Promise.allSettled(rejecting.map((id) => mlRulesApi.rejectRule(id, rejectReason.trim())))
     const ok = results.filter((r) => r.status === 'fulfilled').length
-    if (ok) toast.success(rejecting.length === 1 ? 'ปฏิเสธกฎแล้ว' : `ปฏิเสธแล้ว ${ok} กฎ`)
+    if (ok) toast.success(rejecting.length === 1 ? t('Rule rejected', 'ปฏิเสธกฎแล้ว') : t(`Rejected ${ok} rules`, `ปฏิเสธแล้ว ${ok} กฎ`))
     if (ok < rejecting.length) {
       const first = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
-      toast.error(first?.reason?.response?.data?.detail || `ปฏิเสธไม่สำเร็จ ${rejecting.length - ok} กฎ`)
+      toast.error(first?.reason?.response?.data?.detail || t(`${rejecting.length - ok} rejections failed`, `ปฏิเสธไม่สำเร็จ ${rejecting.length - ok} กฎ`))
     }
     setSelected((s) => s.filter((id) => !rejecting.includes(id)))
     setRejecting(null)
@@ -313,8 +335,8 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
   const copyRule = (rule: MLPendingRule) => {
     const text = renderSecRule(rule)
     navigator.clipboard.writeText(text).then(
-      () => toast.success('คัดลอก SecRule แล้ว'),
-      () => toast.error('คัดลอกไม่สำเร็จ'),
+      () => toast.success(t('Copied the SecRule', 'คัดลอก SecRule แล้ว')),
+      () => toast.error(t('Could not copy', 'คัดลอกไม่สำเร็จ')),
     )
   }
 
@@ -325,7 +347,7 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
     const gen = generatorOf(rule)
     const open = expanded.includes(rule.rule_id)
     const pending = rule.status === 'pending'
-    const bt = backtestView(rule.backtest)
+    const bt = backtestView(rule.backtest, lang)
     const isTesting = testing.includes(rule.rule_id)
     const hits = rule.hit_count ?? 1
     const panelId = `rule-panel-${rule.rule_id}`
@@ -339,7 +361,7 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
             {reviewer ? (
               <input
                 type="checkbox"
-                aria-label={`เลือกกฎ ${rule.attack_type}`}
+                aria-label={t(`Select rule ${rule.attack_type}`, `เลือกกฎ ${rule.attack_type}`)}
                 checked={selected.includes(rule.rule_id)}
                 onChange={() => setSelected((s) => toggle(s, rule.rule_id))}
                 className="h-4 w-4 accent-[var(--accent)] dark:[color-scheme:dark] cursor-pointer"
@@ -363,25 +385,25 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
                 className={`shrink-0 text-[var(--text-muted)] transition-transform duration-150 motion-reduce:transition-none ${open ? 'rotate-90' : ''}`}
               />
               <span className="text-[14px] font-semibold text-[var(--text-primary)]">{rule.attack_type}</span>
-              <span className={`${pillBase} ${GENERATOR_PILL[gen]}`} title={GENERATOR_HINT[gen]}>{GENERATOR_LABEL[gen]}</span>
+              <span className={`${pillBase} ${GENERATOR_PILL[gen]}`} title={generatorHint(gen, lang)}>{generatorLabel(gen, lang)}</span>
               <span
                 className={`${pillBase} gap-1 border-[var(--bg-border)] bg-[var(--bg-primary)] text-[var(--text-secondary)]`}
-                title={globalScope ? 'กฎนี้มีผลกับทุก origin' : `กฎนี้มีผลเฉพาะ ${ruleOriginLabel(rule)}`}
+                title={globalScope ? t('This rule applies to every origin', 'กฎนี้มีผลกับทุก origin') : t(`This rule applies only to ${ruleOriginLabel(rule)}`, `กฎนี้มีผลเฉพาะ ${ruleOriginLabel(rule)}`)}
               >
                 {globalScope ? <Globe size={11} aria-hidden="true" /> : <Server size={11} aria-hidden="true" />}
                 <span className="max-w-[14rem] truncate">{ruleOriginLabel(rule)}</span>
               </span>
               {rule.status === 'approved' && (
                 <span className={`${pillBase} border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300`}>
-                  ใช้งานอยู่ #{rule.deployed_rule_id}
+                  {t('Active', 'ใช้งานอยู่')} #{rule.deployed_rule_id}
                 </span>
               )}
               {rule.status === 'rejected' && (
-                <span className={`${pillBase} border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300`}>ปฏิเสธแล้ว</span>
+                <span className={`${pillBase} border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300`}>{t('Rejected', 'ปฏิเสธแล้ว')}</span>
               )}
               {rule.status === 'revoked' && (
                 <span className={`${pillBase} border-[var(--bg-border)] bg-[var(--bg-primary)] text-[var(--text-secondary)]`}>
-                  ยกเลิกแล้ว #{rule.deployed_rule_id}
+                  {t('Revoked', 'ยกเลิกแล้ว')} #{rule.deployed_rule_id}
                 </span>
               )}
             </span>
@@ -393,7 +415,7 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
           <div className="col-start-2 xl:col-start-auto text-[12.5px]">
             <span className="font-semibold tabular-nums text-[var(--text-primary)]">{hits.toLocaleString()}</span>
             <span className="text-[var(--text-muted)]"> request</span>
-            <span className="block text-[12px] text-[var(--text-muted)]">{timeAgo(rule.last_seen_at || rule.created_at)}</span>
+            <span className="block text-[12px] text-[var(--text-muted)]">{ago(rule.last_seen_at || rule.created_at)}</span>
           </div>
 
           <div className="col-start-2 xl:col-start-auto text-[12.5px]">
@@ -401,14 +423,14 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
               <>
                 <span className={`flex items-center gap-1.5 font-medium ${BACKTEST_TEXT[bt.tone]}`}>
                   <span className={`h-2 w-2 shrink-0 rounded-full ${BACKTEST_DOT[bt.tone]}`} aria-hidden="true" />
-                  {isTesting ? 'กำลังทดสอบ...' : bt.label}
+                  {isTesting ? t('Testing...', 'กำลังทดสอบ...') : bt.label}
                 </span>
                 {rule.backtest && !isTesting && (
-                  <span className="block text-[12px] text-[var(--text-muted)]">ทดสอบ {timeAgo(rule.backtest.ran_at)}</span>
+                  <span className="block text-[12px] text-[var(--text-muted)]">{t('tested', 'ทดสอบ')} {ago(rule.backtest.ran_at)}</span>
                 )}
               </>
             ) : (
-              <span className="text-[var(--text-muted)]">ทดสอบไม่ได้ (CVE)</span>
+              <span className="text-[var(--text-muted)]">{t('Cannot test (CVE)', 'ทดสอบไม่ได้ (CVE)')}</span>
             )}
           </div>
 
@@ -421,32 +443,38 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
                 isLoading={isTesting}
                 icon={<FlaskConical size={13} />}
               >
-                ทดสอบ
+                {t('Test', 'ทดสอบ')}
               </Button>
             )}
             {pending && !reviewer && (
-              <span className="text-[12px] text-[var(--text-muted)]" title="อนุมัติหรือปฏิเสธได้เฉพาะ Owner หรือ Editor ของ origin นี้">
-                รอ Owner/Editor อนุมัติ
+              <span
+                className="text-[12px] text-[var(--text-muted)]"
+                title={t('Only an Owner or Editor of this origin can approve or reject', 'อนุมัติหรือปฏิเสธได้เฉพาะ Owner หรือ Editor ของ origin นี้')}
+              >
+                {t('Waiting for an Owner/Editor', 'รอ Owner/Editor อนุมัติ')}
               </span>
             )}
             {reviewer && (
               <>
                 <Button variant="ghost" size="sm" onClick={() => { setRejectReason(''); setRejecting([rule.rule_id]) }}>
-                  ปฏิเสธ
+                  {t('Reject', 'ปฏิเสธ')}
                 </Button>
                 <Button variant="brand" size="sm" onClick={() => requestApprove([rule.rule_id])} disabled={busy} icon={<Check size={13} />}>
-                  อนุมัติ
+                  {t('Approve', 'อนุมัติ')}
                 </Button>
               </>
             )}
             {canRevokeRule(rule) && (
               <Button variant="ghost" size="sm" onClick={() => { setRevokeReason(''); setRevoking(rule) }} icon={<Ban size={13} />}>
-                ยกเลิกการใช้งาน
+                {t('Revoke', 'ยกเลิกการใช้งาน')}
               </Button>
             )}
             {rule.status === 'approved' && !canRevokeRule(rule) && !isAdmin && globalScope && (
-              <span className="text-[12px] text-[var(--text-muted)]" title="กฎนี้มีผลกับทุก origin จึงยกเลิกได้เฉพาะผู้ดูแลแพลตฟอร์ม">
-                ยกเลิกได้เฉพาะผู้ดูแลแพลตฟอร์ม
+              <span
+                className="text-[12px] text-[var(--text-muted)]"
+                title={t('This rule applies to every origin, so only the platform operator can revoke it', 'กฎนี้มีผลกับทุก origin จึงยกเลิกได้เฉพาะผู้ดูแลแพลตฟอร์ม')}
+              >
+                {t('Only the platform operator can revoke', 'ยกเลิกได้เฉพาะผู้ดูแลแพลตฟอร์ม')}
               </span>
             )}
           </div>
@@ -457,36 +485,42 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
             <section className="min-w-0">
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <h3 className="m-0 text-[12.5px] font-medium text-[var(--text-secondary)]">
-                  {rule.deploy_scope === 'origin' ? 'SecRule (ส่วนที่ใช้ตรวจ request)' : 'SecRule ที่จะติดตั้ง'}
+                  {rule.deploy_scope === 'origin'
+                    ? t('SecRule (the part that checks the request)', 'SecRule (ส่วนที่ใช้ตรวจ request)')
+                    : t('SecRule to be deployed', 'SecRule ที่จะติดตั้ง')}
                 </h3>
                 <button
                   type="button"
                   onClick={() => copyRule(rule)}
                   className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                 >
-                  <Copy size={12} aria-hidden="true" /> คัดลอก
+                  <Copy size={12} aria-hidden="true" /> {t('Copy', 'คัดลอก')}
                 </button>
               </div>
               <pre className="m-0 overflow-x-auto rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] p-3 font-mono text-[12px] leading-relaxed text-[var(--text-primary)]">
                 {rule.secrule_template
                   ? renderSecRule(rule)
-                  : 'ไม่มี SecRule template'}
+                  : t('No SecRule template', 'ไม่มี SecRule template')}
               </pre>
               {/* What approve writes is a two-link chain (rule_manager.scope_ml_rule_to_origin):
                   the origin guard first, then this rule as the chained link. */}
               {rule.deploy_scope === 'origin' && (
                 <p className="mt-2 mb-0 text-[12px] leading-relaxed text-[var(--text-muted)]">
-                  ตอนติดตั้ง ระบบจะครอบกฎนี้ด้วยเงื่อนไข <code className="font-mono">TX:waf_origin_id</code> ให้ทำงานเฉพาะ
-                  request ของ {rule.origin_label || 'origin นี้'} (กฎแรกของ chain เช็ค origin แล้วค่อยเช็คกฎด้านบน)
+                  {t('On deploy, the rule is wrapped in a', 'ตอนติดตั้ง ระบบจะครอบกฎนี้ด้วยเงื่อนไข')}{' '}
+                  <code className="font-mono">TX:waf_origin_id</code>{' '}
+                  {t(
+                    `condition so it only runs for requests of ${rule.origin_label || 'this origin'} (the chain's first rule checks the origin, then the rule above).`,
+                    `ให้ทำงานเฉพาะ request ของ ${rule.origin_label || 'origin นี้'} (กฎแรกของ chain เช็ค origin แล้วค่อยเช็คกฎด้านบน)`,
+                  )}
                 </p>
               )}
-              <p className="mt-2 mb-0 text-[12px] leading-relaxed text-[var(--text-muted)]">{GENERATOR_HINT[gen]}</p>
+              <p className="mt-2 mb-0 text-[12px] leading-relaxed text-[var(--text-muted)]">{generatorHint(gen, lang)}</p>
             </section>
 
             <section className="min-w-0 space-y-4">
               {canBacktest(rule) && (
                 <div>
-                  <h3 className="m-0 mb-1.5 text-[12.5px] font-medium text-[var(--text-secondary)]">ผลทดสอบกับ traffic จริง</h3>
+                  <h3 className="m-0 mb-1.5 text-[12.5px] font-medium text-[var(--text-secondary)]">{t('Test against real traffic', 'ผลทดสอบกับ traffic จริง')}</h3>
                   <p className={`m-0 text-[13px] ${BACKTEST_TEXT[bt.tone]}`}>{bt.detail}</p>
                   {rule.backtest && rule.backtest.example_paths.length > 0 && (
                     <ul className="mt-1.5 mb-0 space-y-0.5 pl-0 list-none">
@@ -496,13 +530,13 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
                     </ul>
                   )}
                   <p className="mt-1.5 mb-0 text-[11.5px] leading-relaxed text-[var(--text-muted)]">
-                    ใช้ request ล่าสุดที่ WAF ปล่อยผ่าน ไม่รวม body และแสดงเฉพาะ path
+                    {t('Uses the latest requests the WAF let through, without bodies; only paths are shown.', 'ใช้ request ล่าสุดที่ WAF ปล่อยผ่าน ไม่รวม body และแสดงเฉพาะ path')}
                   </p>
                 </div>
               )}
 
               <div>
-                <h3 className="m-0 mb-1.5 text-[12.5px] font-medium text-[var(--text-secondary)]">Request ที่ทำให้เสนอกฎนี้</h3>
+                <h3 className="m-0 mb-1.5 text-[12.5px] font-medium text-[var(--text-secondary)]">{t('Requests that led to this rule', 'Request ที่ทำให้เสนอกฎนี้')}</h3>
                 <ul className="m-0 space-y-1 pl-0 list-none">
                   {(rule.examples && rule.examples.length > 0
                     ? rule.examples
@@ -512,9 +546,9 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
                       <span className="shrink-0 font-mono text-[var(--text-muted)]">{ex.method || 'GET'}</span>
                       <span className="min-w-0 truncate font-mono text-[var(--text-primary)]" title={ex.url}>{ex.url || '/'}</span>
                       {ex.requested_by && (
-                        <span className="shrink-0 text-[var(--text-secondary)]" title="ผู้ที่กดขอให้เสนอกฎนี้">ขอโดย {ex.requested_by}</span>
+                        <span className="shrink-0 text-[var(--text-secondary)]" title={t('Who asked for this proposal', 'ผู้ที่กดขอให้เสนอกฎนี้')}>{t('requested by', 'ขอโดย')} {ex.requested_by}</span>
                       )}
-                      <span className="ml-auto shrink-0 text-[var(--text-muted)]">{timeAgo(ex.seen_at)}</span>
+                      <span className="ml-auto shrink-0 text-[var(--text-muted)]">{ago(ex.seen_at)}</span>
                     </li>
                   ))}
                 </ul>
@@ -522,14 +556,14 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
 
               {rule.status !== 'pending' && rule.reviewed_by && (
                 <p className="m-0 text-[12px] text-[var(--text-muted)]">
-                  {rule.status === 'rejected' ? 'ปฏิเสธ' : 'อนุมัติ'}โดย {rule.reviewed_by} {timeAgo(rule.reviewed_at)}
-                  {rule.reject_reason && <span className="block text-[var(--text-secondary)]">เหตุผล: {rule.reject_reason}</span>}
+                  {rule.status === 'rejected' ? t('Rejected by', 'ปฏิเสธโดย') : t('Approved by', 'อนุมัติโดย')} {rule.reviewed_by} {ago(rule.reviewed_at)}
+                  {rule.reject_reason && <span className="block text-[var(--text-secondary)]">{t('Reason:', 'เหตุผล:')} {rule.reject_reason}</span>}
                 </p>
               )}
               {rule.status === 'revoked' && rule.revoked_by && (
                 <p className="m-0 text-[12px] text-[var(--text-muted)]">
-                  ยกเลิกการใช้งานโดย {rule.revoked_by} {timeAgo(rule.revoked_at)}
-                  {rule.revoke_reason && <span className="block text-[var(--text-secondary)]">เหตุผล: {rule.revoke_reason}</span>}
+                  {t('Revoked by', 'ยกเลิกการใช้งานโดย')} {rule.revoked_by} {ago(rule.revoked_at)}
+                  {rule.revoke_reason && <span className="block text-[var(--text-secondary)]">{t('Reason:', 'เหตุผล:')} {rule.revoke_reason}</span>}
                 </p>
               )}
             </section>
@@ -543,20 +577,26 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
     <div className={embedded ? '' : 'animate-fade-in pb-12'}>
       {(() => {
         const subtitle = isAdmin
-          ? 'Rules the ML model proposed from detected requests. A rule has no effect on ModSecurity until someone approves it.'
-          : "Rules the ML model proposed for origins you belong to. Once an Owner or Editor approves one, it applies to that origin only."
+          ? t(
+              'Rules the ML model proposed from detected requests. A rule has no effect on ModSecurity until someone approves it.',
+              'กฎที่โมเดล ML เสนอจาก request ที่ตรวจพบ กฎจะยังไม่มีผลกับ ModSecurity จนกว่าจะมีคนอนุมัติ',
+            )
+          : t(
+              'Rules the ML model proposed for origins you belong to. Once an Owner or Editor approves one, it applies to that origin only.',
+              'กฎที่โมเดล ML เสนอสำหรับ origin ที่คุณเป็นสมาชิก เมื่อ Owner หรือ Editor อนุมัติแล้ว กฎจะมีผลเฉพาะ origin นั้น',
+            )
         const actions = (
           <div className="flex items-center gap-2">
             {canScan && (
               <Button variant="secondary" onClick={openScan} isLoading={cveScan.isPending} icon={<Bug size={14} />}>
-                Scan for CVEs
+                {t('Scan for CVEs', 'สแกน CVE')}
               </Button>
             )}
             <Button
               variant="secondary"
               onClick={() => refetch()}
-              aria-label="Refresh the rule list"
-              title="Refresh"
+              aria-label={t('Refresh the rule list', 'รีเฟรชรายการกฎ')}
+              title={t('Refresh', 'รีเฟรช')}
               icon={<RefreshCw size={14} className={isFetching ? 'animate-spin motion-reduce:animate-none' : ''} />}
             />
           </div>
@@ -567,25 +607,30 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
             {actions}
           </div>
         ) : (
-          <TopBar title="ML anomaly rules" subtitle={subtitle} action={actions} />
+          <TopBar title={t('ML anomaly rules', 'กฎ ML anomaly')} subtitle={subtitle} action={actions} />
         )
       })()}
 
       {isAdmin && legacyPending > 0 && (
         <div className="mb-4 flex flex-col gap-3 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="m-0 text-[13px] leading-relaxed text-[var(--text-secondary)]">
-            <strong className="font-medium text-[var(--text-primary)]">มีกฎแบบเก่ารออนุมัติ {legacyPending} กฎ</strong>{' '}
-            มาจาก RandomForest ที่เลิกใช้แล้ว ส่วนใหญ่ตรงแค่ request ต้นทาง
+            <strong className="font-medium text-[var(--text-primary)]">
+              {t(`${legacyPending} legacy rules are waiting for approval`, `มีกฎแบบเก่ารออนุมัติ ${legacyPending} กฎ`)}
+            </strong>{' '}
+            {t(
+              'They come from the retired RandomForest model and mostly match only their source request.',
+              'มาจาก RandomForest ที่เลิกใช้แล้ว ส่วนใหญ่ตรงแค่ request ต้นทาง',
+            )}
           </p>
           <Button variant="secondary" className="shrink-0" onClick={() => setConfirmLegacy(true)} icon={<X size={14} />}>
-            ปฏิเสธกฎแบบเก่าทั้งหมด
+            {t('Reject all legacy rules', 'ปฏิเสธกฎแบบเก่าทั้งหมด')}
           </Button>
         </div>
       )}
 
       <div className="dash-card overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-[var(--bg-border)] p-3.5 lg:flex-row lg:items-center lg:justify-between">
-          <div role="tablist" aria-label="สถานะกฎ" className="flex flex-wrap gap-1">
+          <div role="tablist" aria-label={t('Rule status', 'สถานะกฎ')} className="flex flex-wrap gap-1">
             {STATUS_TABS.map((tab) => {
               const active = filters.status === tab.id
               return (
@@ -601,7 +646,7 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
                       : 'text-[var(--text-secondary)] hover:bg-[var(--nav-hover)] hover:text-[var(--text-primary)]'
                   }`}
                 >
-                  {tab.label}
+                  {lang === 'th' ? tab.label : tab.labelEn}
                   <span className={`rounded-full px-1.5 text-[11.5px] tabular-nums ${active ? 'bg-[var(--bg-surface)] text-[var(--text-primary)]' : 'bg-[var(--bg-primary)] text-[var(--text-muted)]'}`}>
                     {counts[tab.id]}
                   </span>
@@ -611,13 +656,13 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
           </div>
 
           <label className="relative block lg:w-80">
-            <span className="sr-only">ค้นหากฎ</span>
+            <span className="sr-only">{t('Search rules', 'ค้นหากฎ')}</span>
             <Search size={15} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
             <input
               type="search"
               value={filters.search}
               onChange={(e) => setFilter('search', e.target.value)}
-              placeholder="ค้นหาประเภท, pattern, URL, CVE"
+              placeholder={t('Search type, pattern, URL, CVE', 'ค้นหาประเภท, pattern, URL, CVE')}
               className="dash-input h-9 w-full pl-9 text-[13px]"
             />
           </label>
@@ -626,23 +671,23 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
         <div className="flex flex-wrap items-center gap-2 border-b border-[var(--bg-border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5">
           {originOptions.length > 1 && (
             <select aria-label="Origin" className={selectClass} value={filters.origin} onChange={(e) => setFilter('origin', e.target.value)}>
-              <option value="all">ทุก origin</option>
+              <option value="all">{t('All origins', 'ทุก origin')}</option>
               {originOptions.map((o) => <option key={o.id || 'global'} value={o.id}>{o.label}</option>)}
             </select>
           )}
-          <select aria-label="ตัวสร้างกฎ" className={selectClass} value={filters.generator} onChange={(e) => setFilter('generator', e.target.value as RuleFilters['generator'])}>
-            <option value="all">ทุกตัวสร้างกฎ</option>
+          <select aria-label={t('Rule generator', 'ตัวสร้างกฎ')} className={selectClass} value={filters.generator} onChange={(e) => setFilter('generator', e.target.value as RuleFilters['generator'])}>
+            <option value="all">{t('All generators', 'ทุกตัวสร้างกฎ')}</option>
             {(Object.keys(GENERATOR_LABEL) as MLRuleGenerator[]).map((g) => (
-              <option key={g} value={g}>{GENERATOR_LABEL[g]}</option>
+              <option key={g} value={g}>{generatorLabel(g, lang)}</option>
             ))}
           </select>
-          <select aria-label="ประเภทการโจมตี" className={selectClass} value={filters.attackType} onChange={(e) => setFilter('attackType', e.target.value)}>
-            <option value="all">ทุกประเภทการโจมตี</option>
-            {attackTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+          <select aria-label={t('Attack type', 'ประเภทการโจมตี')} className={selectClass} value={filters.attackType} onChange={(e) => setFilter('attackType', e.target.value)}>
+            <option value="all">{t('All attack types', 'ทุกประเภทการโจมตี')}</option>
+            {attackTypes.map((type) => <option key={type} value={type}>{type}</option>)}
           </select>
-          <select aria-label="เรียงตาม" className={selectClass} value={filters.sort} onChange={(e) => setFilter('sort', e.target.value as RuleFilters['sort'])}>
-            <option value="hits">เรียงตามจำนวน request</option>
-            <option value="newest">เรียงตามล่าสุด</option>
+          <select aria-label={t('Sort by', 'เรียงตาม')} className={selectClass} value={filters.sort} onChange={(e) => setFilter('sort', e.target.value as RuleFilters['sort'])}>
+            <option value="hits">{t('Sort by request count', 'เรียงตามจำนวน request')}</option>
+            <option value="newest">{t('Sort by newest', 'เรียงตามล่าสุด')}</option>
           </select>
           {filtersActive && (
             <Button
@@ -650,16 +695,16 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
               size="sm"
               onClick={() => { setFilters((f) => ({ ...f, generator: 'all', attackType: 'all', search: '', origin: 'all' })); setPage(1) }}
             >
-              ล้างตัวกรอง
+              {t('Clear filters', 'ล้างตัวกรอง')}
             </Button>
           )}
-          <span className="ml-auto text-[12.5px] text-[var(--text-muted)]">{visible.length.toLocaleString()} กฎ</span>
+          <span className="ml-auto text-[12.5px] text-[var(--text-muted)]">{visible.length.toLocaleString()} {t('rules', 'กฎ')}</span>
         </div>
 
         {selected.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 border-b border-[var(--accent-border)] bg-[var(--accent-subtle)] px-3.5 py-2.5">
-            <span className="text-[13px] font-medium text-[var(--text-primary)]">เลือก {selected.length} กฎ</span>
-            <Button variant="ghost" size="sm" onClick={() => setSelected([])}>ยกเลิกการเลือก</Button>
+            <span className="text-[13px] font-medium text-[var(--text-primary)]">{t(`${selected.length} selected`, `เลือก ${selected.length} กฎ`)}</span>
+            <Button variant="ghost" size="sm" onClick={() => setSelected([])}>{t('Clear selection', 'ยกเลิกการเลือก')}</Button>
             <div className="ml-auto flex flex-wrap gap-2">
               <Button
                 variant="secondary"
@@ -669,11 +714,11 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
                 disabled={!rules.some((r) => selected.includes(r.rule_id) && mayBacktest(r))}
                 onClick={() => runBacktest(rules.filter((r) => selected.includes(r.rule_id) && mayBacktest(r)).map((r) => r.rule_id))}
               >
-                ทดสอบที่เลือก
+                {t('Test selected', 'ทดสอบที่เลือก')}
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => { setRejectReason(''); setRejecting(selected) }}>ปฏิเสธ</Button>
+              <Button variant="secondary" size="sm" onClick={() => { setRejectReason(''); setRejecting(selected) }}>{t('Reject', 'ปฏิเสธ')}</Button>
               <Button variant="brand" size="sm" icon={<Check size={13} />} onClick={() => requestApprove(selected)} disabled={busy}>
-                อนุมัติ
+                {t('Approve', 'อนุมัติ')}
               </Button>
             </div>
           </div>
@@ -684,7 +729,7 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
             {pendingOnPage.length > 0 ? (
               <input
                 type="checkbox"
-                aria-label="เลือกกฎที่รออนุมัติในหน้านี้"
+                aria-label={t('Select the pending rules on this page', 'เลือกกฎที่รออนุมัติในหน้านี้')}
                 checked={allPageSelected}
                 onChange={() =>
                   setSelected((s) =>
@@ -698,46 +743,52 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
             ) : (
               <span className="block w-4" aria-hidden="true" />
             )}
-            <span>กฎ</span>
-            <span>พบ</span>
-            <span>ทดสอบกับ traffic จริง</span>
-            <span className="sr-only">การทำงาน</span>
+            <span>{t('Rule', 'กฎ')}</span>
+            <span>{t('Seen', 'พบ')}</span>
+            <span>{t('Test against real traffic', 'ทดสอบกับ traffic จริง')}</span>
+            <span className="sr-only">{t('Actions', 'การทำงาน')}</span>
           </div>
         )}
 
         {isLoading ? (
           <p className="m-0 flex items-center justify-center gap-2 py-16 text-[13px] text-[var(--text-muted)]">
-            <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> กำลังโหลดกฎ
+            <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> {t('Loading rules', 'กำลังโหลดกฎ')}
           </p>
         ) : isError ? (
           <div className="py-14 text-center">
-            <p className="m-0 text-[13.5px] text-[var(--text-primary)]">โหลดรายการกฎไม่สำเร็จ</p>
-            <Button variant="secondary" size="sm" className="mt-3" onClick={() => refetch()}>ลองใหม่</Button>
+            <p className="m-0 text-[13.5px] text-[var(--text-primary)]">{t('Could not load the rules', 'โหลดรายการกฎไม่สำเร็จ')}</p>
+            <Button variant="secondary" size="sm" className="mt-3" onClick={() => refetch()}>{t('Try again', 'ลองใหม่')}</Button>
           </div>
         ) : pageRules.length === 0 ? (
           <div className="px-6 py-14 text-center">
             {filters.status === 'pending' && !filtersActive ? (
               <>
                 <ShieldCheck size={28} className="mx-auto text-emerald-500" aria-hidden="true" />
-                <p className="mt-3 mb-1 text-[14px] font-medium text-[var(--text-primary)]">ไม่มีกฎรออนุมัติ</p>
+                <p className="mt-3 mb-1 text-[14px] font-medium text-[var(--text-primary)]">{t('No rules waiting for approval', 'ไม่มีกฎรออนุมัติ')}</p>
                 {isAdmin ? (
                   <p className="m-0 mx-auto max-w-md text-[12.5px] leading-relaxed text-[var(--text-muted)]">
-                    กฎใหม่มาจากหน้า AI security analyst เมื่อ Gen 3 ตรวจพบการโจมตี และจากปุ่มสแกน CVE
+                    {t('New rules come from ML insights when Gen 3 detects an attack, and from the CVE scan button.', 'กฎใหม่มาจากหน้า ML insights เมื่อ Gen 3 ตรวจพบการโจมตี และจากปุ่มสแกน CVE')}
                   </p>
                 ) : (
                   <p className="m-0 mx-auto max-w-md text-[12.5px] leading-relaxed text-[var(--text-muted)]">
-                    กฎที่เสนอจะขึ้นที่นี่เมื่อคุณวิเคราะห์ request ของ origin ที่คุณเป็น Owner หรือ Editor ในหน้า{' '}
+                    {t(
+                      'Proposed rules show up here when, on',
+                      'กฎที่เสนอจะขึ้นที่นี่เมื่อคุณวิเคราะห์ request ของ origin ที่คุณเป็น Owner หรือ Editor ในหน้า',
+                    )}{' '}
                     <Link to="/ml-analyst" className="font-medium text-[var(--accent)] hover:text-[var(--accent-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded">
-                      AI security analyst
+                      ML insights
                     </Link>{' '}
-                    แล้ว Gen 3 ตรวจพบการโจมตี คุณเห็นเฉพาะกฎของ origin ที่คุณเป็นสมาชิก
+                    {t(
+                      ', Gen 3 flags an attack on an origin where you are Owner or Editor. You only see rules of origins you belong to.',
+                      'แล้ว Gen 3 ตรวจพบการโจมตี คุณเห็นเฉพาะกฎของ origin ที่คุณเป็นสมาชิก',
+                    )}
                   </p>
                 )}
               </>
             ) : (
               <>
                 <Sparkles size={28} className="mx-auto text-[var(--text-muted)]" aria-hidden="true" />
-                <p className="mt-3 mb-0 text-[14px] font-medium text-[var(--text-primary)]">ไม่มีกฎที่ตรงกับตัวกรอง</p>
+                <p className="mt-3 mb-0 text-[14px] font-medium text-[var(--text-primary)]">{t('No rules match these filters', 'ไม่มีกฎที่ตรงกับตัวกรอง')}</p>
               </>
             )}
           </div>
@@ -748,15 +799,15 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
         {totalPages > 1 && (
           <div className="flex items-center justify-between gap-3 border-t border-[var(--bg-border)] px-4 py-3 text-[12.5px] text-[var(--text-muted)]">
             <span>
-              {((page - 1) * PAGE_SIZE + 1).toLocaleString()}–{Math.min(page * PAGE_SIZE, visible.length).toLocaleString()} จาก {visible.length.toLocaleString()}
+              {((page - 1) * PAGE_SIZE + 1).toLocaleString()}–{Math.min(page * PAGE_SIZE, visible.length).toLocaleString()} {t('of', 'จาก')} {visible.length.toLocaleString()}
             </span>
             <div className="flex items-center gap-1.5">
               <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} icon={<ChevronLeft size={14} />}>
-                ก่อนหน้า
+                {t('Previous', 'ก่อนหน้า')}
               </Button>
               <span className="px-2 tabular-nums">{page} / {totalPages}</span>
               <Button variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-                ถัดไป <ChevronRight size={14} aria-hidden="true" />
+                {t('Next', 'ถัดไป')} <ChevronRight size={14} aria-hidden="true" />
               </Button>
             </div>
           </div>
@@ -766,16 +817,20 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
       <Modal
         open={!!approval}
         onClose={() => !busy && setApproval(null)}
-        title={approval && approval.ids.length > 1 ? `อนุมัติ ${approval.ids.length} กฎ` : 'อนุมัติกฎนี้'}
+        title={
+          approval && approval.ids.length > 1
+            ? t(`Approve ${approval.ids.length} rules`, `อนุมัติ ${approval.ids.length} กฎ`)
+            : t('Approve this rule', 'อนุมัติกฎนี้')
+        }
       >
         <p className="m-0 text-[13.5px] font-medium leading-relaxed text-[var(--text-primary)]">{approval?.scope}</p>
         {approval?.warning && (
           <p className="mt-2 mb-0 text-[13px] leading-relaxed text-amber-700 dark:text-amber-400">{approval.warning}</p>
         )}
         <div className="mt-5 flex justify-end gap-2.5 border-t border-[var(--bg-border-subtle)] pt-4">
-          <Button variant="ghost" size="lg" onClick={() => setApproval(null)} disabled={busy}>ยกเลิก</Button>
+          <Button variant="ghost" size="lg" onClick={() => setApproval(null)} disabled={busy}>{t('Cancel', 'ยกเลิก')}</Button>
           <Button variant="brand" size="lg" onClick={() => approval && approveIds(approval.ids)} isLoading={busy} icon={<Check size={14} />}>
-            อนุมัติ
+            {t('Approve', 'อนุมัติ')}
           </Button>
         </div>
       </Modal>
@@ -783,16 +838,22 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
       <Modal
         open={confirmLegacy}
         onClose={() => !rejectLegacy.isPending && setConfirmLegacy(false)}
-        title={`ปฏิเสธกฎแบบเก่า ${legacyPending} กฎ`}
-        description="เฉพาะกฎแบบเก่าที่ยังรออนุมัติ กฎจาก Gen 3, CVE และกฎที่อนุมัติไปแล้วไม่ถูกแตะ"
+        title={t(`Reject ${legacyPending} legacy rules`, `ปฏิเสธกฎแบบเก่า ${legacyPending} กฎ`)}
+        description={t(
+          'Only pending legacy rules. Rules from Gen 3, CVE and rules already approved are not touched.',
+          'เฉพาะกฎแบบเก่าที่ยังรออนุมัติ กฎจาก Gen 3, CVE และกฎที่อนุมัติไปแล้วไม่ถูกแตะ',
+        )}
       >
         <p className="m-0 text-[13.5px] leading-relaxed text-[var(--text-primary)]">
-          ระบบจะบันทึกเหตุผลว่า "กฎแบบเก่าจาก RandomForest: ระบบเปลี่ยนมาใช้ Gen 3 แล้ว" และดูย้อนหลังได้ที่แท็บปฏิเสธแล้ว
+          {t(
+            'The reason "Legacy rule from RandomForest: the platform now uses Gen 3" is recorded, and they stay visible in the Rejected tab.',
+            'ระบบจะบันทึกเหตุผลว่า "กฎแบบเก่าจาก RandomForest: ระบบเปลี่ยนมาใช้ Gen 3 แล้ว" และดูย้อนหลังได้ที่แท็บปฏิเสธแล้ว',
+          )}
         </p>
         <div className="mt-5 flex justify-end gap-2.5 border-t border-[var(--bg-border-subtle)] pt-4">
-          <Button variant="ghost" size="lg" onClick={() => setConfirmLegacy(false)} disabled={rejectLegacy.isPending}>ยกเลิก</Button>
+          <Button variant="ghost" size="lg" onClick={() => setConfirmLegacy(false)} disabled={rejectLegacy.isPending}>{t('Cancel', 'ยกเลิก')}</Button>
           <Button variant="danger" size="lg" onClick={() => rejectLegacy.mutate()} isLoading={rejectLegacy.isPending} icon={<X size={14} />}>
-            ปฏิเสธทั้งหมด
+            {t('Reject all', 'ปฏิเสธทั้งหมด')}
           </Button>
         </div>
       </Modal>
@@ -800,22 +861,25 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
       <Modal
         open={!!rejecting}
         onClose={() => !busy && setRejecting(null)}
-        title={rejecting && rejecting.length > 1 ? `ปฏิเสธ ${rejecting.length} กฎ` : 'ปฏิเสธกฎนี้'}
-        description="กฎที่ปฏิเสธจะไม่ถูกติดตั้ง และถ้า request แบบเดียวกันเข้ามาอีก ระบบจะเสนอเป็นกฎใหม่"
+        title={rejecting && rejecting.length > 1 ? t(`Reject ${rejecting.length} rules`, `ปฏิเสธ ${rejecting.length} กฎ`) : t('Reject this rule', 'ปฏิเสธกฎนี้')}
+        description={t(
+          'A rejected rule is not deployed. If the same kind of request comes in again, it is proposed as a new rule.',
+          'กฎที่ปฏิเสธจะไม่ถูกติดตั้ง และถ้า request แบบเดียวกันเข้ามาอีก ระบบจะเสนอเป็นกฎใหม่',
+        )}
       >
         <form onSubmit={(e) => { e.preventDefault(); rejectIds() }}>
-          <label htmlFor="reject-reason" className="block text-[12.5px] font-medium text-[var(--text-secondary)]">เหตุผล (ไม่บังคับ)</label>
+          <label htmlFor="reject-reason" className="block text-[12.5px] font-medium text-[var(--text-secondary)]">{t('Reason (optional)', 'เหตุผล (ไม่บังคับ)')}</label>
           <input
             id="reject-reason"
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
-            placeholder="เช่น ชน traffic ปกติของ /search"
+            placeholder={t('e.g. matches normal traffic on /search', 'เช่น ชน traffic ปกติของ /search')}
             className="dash-input mt-1.5 h-10 w-full text-[13.5px]"
             autoFocus
           />
           <div className="mt-5 flex justify-end gap-2.5 border-t border-[var(--bg-border-subtle)] pt-4">
-            <Button variant="ghost" size="lg" type="button" onClick={() => setRejecting(null)} disabled={busy}>ยกเลิก</Button>
-            <Button variant="danger" size="lg" type="submit" isLoading={busy} icon={<X size={14} />}>ปฏิเสธ</Button>
+            <Button variant="ghost" size="lg" type="button" onClick={() => setRejecting(null)} disabled={busy}>{t('Cancel', 'ยกเลิก')}</Button>
+            <Button variant="danger" size="lg" type="submit" isLoading={busy} icon={<X size={14} />}>{t('Reject', 'ปฏิเสธ')}</Button>
           </div>
         </form>
       </Modal>
@@ -823,28 +887,31 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
       <Modal
         open={!!revoking}
         onClose={() => !busy && setRevoking(null)}
-        title="ยกเลิกการใช้งานกฎนี้"
-        description="ระบบจะเอากฎออกจาก WAF แล้ว reload ทันที กฎยังอยู่ในแท็บยกเลิกแล้วพร้อมบันทึกว่าใครยกเลิกและเพราะอะไร ถ้าต้องการใช้อีกต้องเสนอกฎใหม่"
+        title={t('Revoke this rule', 'ยกเลิกการใช้งานกฎนี้')}
+        description={t(
+          'The rule is removed from the WAF and reloaded at once. It stays in the Revoked tab with who revoked it and why. To use it again, propose a new rule.',
+          'ระบบจะเอากฎออกจาก WAF แล้ว reload ทันที กฎยังอยู่ในแท็บยกเลิกแล้วพร้อมบันทึกว่าใครยกเลิกและเพราะอะไร ถ้าต้องการใช้อีกต้องเสนอกฎใหม่',
+        )}
       >
         <form onSubmit={(e) => { e.preventDefault(); revokeRule() }}>
           {revoking && (
             <p className="m-0 mb-3 text-[13.5px] font-medium leading-relaxed text-[var(--text-primary)]">
-              {revokeScope(revoking)}: {revoking.attack_type} (#{revoking.deployed_rule_id})
+              {revokeScope(revoking, lang)}: {revoking.attack_type} (#{revoking.deployed_rule_id})
             </p>
           )}
-          <label htmlFor="revoke-reason" className="block text-[12.5px] font-medium text-[var(--text-secondary)]">เหตุผล (ไม่บังคับ)</label>
+          <label htmlFor="revoke-reason" className="block text-[12.5px] font-medium text-[var(--text-secondary)]">{t('Reason (optional)', 'เหตุผล (ไม่บังคับ)')}</label>
           <input
             id="revoke-reason"
             value={revokeReason}
             onChange={(e) => setRevokeReason(e.target.value)}
-            placeholder="เช่น block ผู้ใช้จริงที่หน้า /search"
+            placeholder={t('e.g. blocks real users on /search', 'เช่น block ผู้ใช้จริงที่หน้า /search')}
             maxLength={500}
             className="dash-input mt-1.5 h-10 w-full text-[13.5px]"
             autoFocus
           />
           <div className="mt-5 flex justify-end gap-2.5 border-t border-[var(--bg-border-subtle)] pt-4">
-            <Button variant="ghost" size="lg" type="button" onClick={() => setRevoking(null)} disabled={busy}>ไม่ยกเลิก</Button>
-            <Button variant="danger" size="lg" type="submit" isLoading={busy} icon={<Ban size={14} />}>ยกเลิกการใช้งาน</Button>
+            <Button variant="ghost" size="lg" type="button" onClick={() => setRevoking(null)} disabled={busy}>{t('Keep it', 'ไม่ยกเลิก')}</Button>
+            <Button variant="danger" size="lg" type="submit" isLoading={busy} icon={<Ban size={14} />}>{t('Revoke', 'ยกเลิกการใช้งาน')}</Button>
           </div>
         </form>
       </Modal>
@@ -852,36 +919,43 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
       <Modal
         open={scanOpen}
         onClose={() => !cveScan.isPending && setScanOpen(false)}
-        title="สแกน CVE"
-        description="ค้นหา CVE ล่าสุดจาก NVD ที่ตรงกับ tech stack ของ origin แล้วเสนอเป็นกฎรออนุมัติ ไม่มีกฎไหนมีผลจนกว่าจะมีคนอนุมัติ"
+        title={t('Scan for CVEs', 'สแกน CVE')}
+        description={t(
+          "Search NVD for recent CVEs that match the origin's tech stack and propose them as pending rules. No rule takes effect until someone approves it.",
+          'ค้นหา CVE ล่าสุดจาก NVD ที่ตรงกับ tech stack ของ origin แล้วเสนอเป็นกฎรออนุมัติ ไม่มีกฎไหนมีผลจนกว่าจะมีคนอนุมัติ',
+        )}
       >
         <form onSubmit={(e) => { e.preventDefault(); cveScan.mutate(scanTarget === ALL_ORIGINS ? '' : scanTarget) }}>
-          <label htmlFor="scan-origin" className="block text-[12.5px] font-medium text-[var(--text-secondary)]">สแกนให้</label>
+          <label htmlFor="scan-origin" className="block text-[12.5px] font-medium text-[var(--text-secondary)]">{t('Scan for', 'สแกนให้')}</label>
           <select
             id="scan-origin"
             value={scanTarget}
             onChange={(e) => setScanTarget(e.target.value)}
             className="dash-input mt-1.5 h-10 w-full text-[13.5px] cursor-pointer"
           >
-            {isAdmin && <option value={ALL_ORIGINS}>ทุก origin ที่มี tech stack</option>}
+            {isAdmin && <option value={ALL_ORIGINS}>{t('Every origin with a tech stack', 'ทุก origin ที่มี tech stack')}</option>}
             {scanChoices.map((c) => (
-              <option key={c.id} value={c.id}>{c.label}{c.hasTags ? '' : ' (ยังไม่ได้ตั้ง tech stack)'}</option>
+              <option key={c.id} value={c.id}>{c.label}{c.hasTags ? '' : t(' (no tech stack set)', ' (ยังไม่ได้ตั้ง tech stack)')}</option>
             ))}
           </select>
           {scanPick && !scanPick.hasTags ? (
             <p className="mt-2 mb-0 text-[12.5px] leading-relaxed text-amber-700 dark:text-amber-400">
-              origin นี้ยังไม่มี tech stack tag เพิ่มได้ที่{' '}
-              <Link to={`/origins/${scanPick.id}`} className="font-medium underline">หน้า origin</Link> ก่อนสแกน
+              {t('This origin has no tech stack tags yet. Add them on the', 'origin นี้ยังไม่มี tech stack tag เพิ่มได้ที่')}{' '}
+              <Link to={`/origins/${scanPick.id}`} className="font-medium underline">{t('origin page', 'หน้า origin')}</Link>{' '}
+              {t('before scanning.', 'ก่อนสแกน')}
             </p>
           ) : (
             <p className="mt-2 mb-0 text-[12px] leading-relaxed text-[var(--text-muted)]">
               {scanTarget === ALL_ORIGINS
-                ? 'สแกนทุก origin ครั้งละไม่เกิน 5 กฎ ที่เหลือจะมาในการสแกนครั้งถัดไป'
-                : 'กฎที่ได้เป็นของ origin นี้ และถ้าอนุมัติจะมีผลเฉพาะ origin นี้ แต่ละ origin สแกนได้ 3 ครั้งต่อชั่วโมง'}
+                ? t('Scans every origin, up to 5 rules per scan; the rest come in the next scan.', 'สแกนทุก origin ครั้งละไม่เกิน 5 กฎ ที่เหลือจะมาในการสแกนครั้งถัดไป')
+                : t(
+                    'The rules belong to this origin and, once approved, apply to it only. Each origin can be scanned 3 times per hour.',
+                    'กฎที่ได้เป็นของ origin นี้ และถ้าอนุมัติจะมีผลเฉพาะ origin นี้ แต่ละ origin สแกนได้ 3 ครั้งต่อชั่วโมง',
+                  )}
             </p>
           )}
           <div className="mt-5 flex justify-end gap-2.5 border-t border-[var(--bg-border-subtle)] pt-4">
-            <Button variant="ghost" size="lg" type="button" onClick={() => setScanOpen(false)} disabled={cveScan.isPending}>ยกเลิก</Button>
+            <Button variant="ghost" size="lg" type="button" onClick={() => setScanOpen(false)} disabled={cveScan.isPending}>{t('Cancel', 'ยกเลิก')}</Button>
             <Button
               variant="brand"
               size="lg"
@@ -890,7 +964,7 @@ export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
               disabled={!scanTarget || (!!scanPick && !scanPick.hasTags)}
               icon={<Bug size={14} />}
             >
-              สแกน
+              {t('Scan', 'สแกน')}
             </Button>
           </div>
         </form>

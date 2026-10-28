@@ -3,11 +3,31 @@
 import type { MLPendingRule, MLRuleBacktest, MLRuleGenerator, Origin } from '../types'
 import { canEditOrigin, originRoleOf } from './roles'
 
+// Text helpers take the UI language last; Thai is the default because the
+// copy was written (and is tested) in Thai first.
+type Lang = 'en' | 'th'
+const L = (lang: Lang, th: string, en: string) => (lang === 'th' ? th : en)
+
 export const GENERATOR_LABEL: Record<MLRuleGenerator, string> = {
   'gen3-detector': 'Gen3 detector',
   'rf-regex': 'แบบเก่า',
   cve: 'CVE patch',
 }
+
+export const GENERATOR_LABEL_EN: Record<MLRuleGenerator, string> = {
+  'gen3-detector': 'Gen3 detector',
+  'rf-regex': 'Legacy',
+  cve: 'CVE patch',
+}
+
+export const GENERATOR_HINT_EN: Record<MLRuleGenerator, string> = {
+  'gen3-detector': 'A broad rule from a Gen 3 detector; it applies to every request with the same pattern.',
+  'rf-regex': 'A legacy rule from before Gen 3: a stock regex or the first 40 characters of the source request, which usually matches only that request. No new rule of this kind is created.',
+  cve: 'A virtual patch for a CVE that matches the origin’s tech stack.',
+}
+
+export const generatorLabel = (g: MLRuleGenerator, lang: Lang = 'th') => (lang === 'th' ? GENERATOR_LABEL[g] : GENERATOR_LABEL_EN[g])
+export const generatorHint = (g: MLRuleGenerator, lang: Lang = 'th') => (lang === 'th' ? GENERATOR_HINT[g] : GENERATOR_HINT_EN[g])
 
 export const GENERATOR_HINT: Record<MLRuleGenerator, string> = {
   'gen3-detector': 'กฎกว้างจาก detector ของ Gen 3 ใช้กับทุก request ที่มีรูปแบบเดียวกัน',
@@ -44,30 +64,50 @@ export interface BacktestView {
 // risk rather than a few odd requests.
 const DANGER_RATIO = 0.01
 
-export function backtestView(backtest?: MLRuleBacktest | null): BacktestView {
+export function backtestView(backtest?: MLRuleBacktest | null, lang: Lang = 'th'): BacktestView {
   if (!backtest) {
-    return { tone: 'none', label: 'ยังไม่ได้ทดสอบ', detail: 'กดทดสอบเพื่อดูว่ากฎนี้จะบล็อก traffic ปกติหรือไม่' }
+    return {
+      tone: 'none',
+      label: L(lang, 'ยังไม่ได้ทดสอบ', 'Not tested yet'),
+      detail: L(lang, 'กดทดสอบเพื่อดูว่ากฎนี้จะบล็อก traffic ปกติหรือไม่', 'Run a test to see whether this rule would block normal traffic.'),
+    }
   }
   const { matched, scanned, window_days: days } = backtest
   if (scanned === 0) {
-    return { tone: 'warn', label: 'ไม่มี traffic ให้ทดสอบ', detail: `ไม่พบ request ที่ผ่าน WAF ใน ${days} วันล่าสุด` }
+    return {
+      tone: 'warn',
+      label: L(lang, 'ไม่มี traffic ให้ทดสอบ', 'No traffic to test'),
+      detail: L(lang, `ไม่พบ request ที่ผ่าน WAF ใน ${days} วันล่าสุด`, `No request passed the WAF in the last ${days} days.`),
+    }
   }
-  const sample = `${scanned.toLocaleString()} request ที่ผ่าน WAF ใน ${days} วันล่าสุด`
+  const sample = L(
+    lang,
+    `${scanned.toLocaleString()} request ที่ผ่าน WAF ใน ${days} วันล่าสุด`,
+    `${scanned.toLocaleString()} requests that passed the WAF in the last ${days} days`,
+  )
   if (matched === 0) {
-    return { tone: 'clean', label: 'ไม่ชน traffic ปกติ', detail: `ไม่ match เลยใน ${sample}` }
+    return {
+      tone: 'clean',
+      label: L(lang, 'ไม่ชน traffic ปกติ', 'No normal traffic matched'),
+      detail: L(lang, `ไม่ match เลยใน ${sample}`, `No match in ${sample}.`),
+    }
   }
   const tone: BacktestTone = matched / scanned >= DANGER_RATIO ? 'danger' : 'warn'
-  return { tone, label: `ชน ${matched.toLocaleString()} request`, detail: `match ${matched.toLocaleString()} จาก ${sample}` }
+  return {
+    tone,
+    label: L(lang, `ชน ${matched.toLocaleString()} request`, `Matches ${matched.toLocaleString()} requests`),
+    detail: L(lang, `match ${matched.toLocaleString()} จาก ${sample}`, `Matched ${matched.toLocaleString()} of ${sample}.`),
+  }
 }
 
 // The risk a reviewer confirms before deploying, or null when no warning is
 // needed. Where the rule takes effect is approveScope's job.
-export function approveWarning(rule: Pick<MLPendingRule, 'backtest' | 'generator' | 'created_by'>): string | null {
+export function approveWarning(rule: Pick<MLPendingRule, 'backtest' | 'generator' | 'created_by'>, lang: Lang = 'th'): string | null {
   if (!canBacktest(rule)) return null
-  const view = backtestView(rule.backtest)
-  if (view.tone === 'none') return 'กฎนี้ยังไม่ได้ทดสอบกับ traffic จริง'
+  const view = backtestView(rule.backtest, lang)
+  if (view.tone === 'none') return L(lang, 'กฎนี้ยังไม่ได้ทดสอบกับ traffic จริง', 'This rule has not been tested against real traffic.')
   if (view.tone === 'warn' || view.tone === 'danger') {
-    return `${view.detail} ถ้าอนุมัติ request แบบนี้จะถูกบล็อก (403)`
+    return L(lang, `${view.detail} ถ้าอนุมัติ request แบบนี้จะถูกบล็อก (403)`, `${view.detail} If you approve it, requests like these are blocked (403).`)
   }
   return null
 }
@@ -89,11 +129,22 @@ export function ruleOriginLabel(rule: ScopeFields): string {
 }
 
 // Where approving these rules takes effect, for the confirm dialog.
-export function approveScope(rules: ScopeFields[]): string {
+export function approveScope(rules: ScopeFields[], lang: Lang = 'th'): string {
   const n = rules.length
-  const subject = n === 1 ? 'กฎนี้' : `กฎ ${n} ข้อ`
   const global = rules.filter((r) => deployScopeOf(r) === 'global').length
-  const labels = Array.from(new Set(rules.filter((r) => deployScopeOf(r) === 'origin').map(ruleOriginLabel)))
+  const labels = Array.from(new Set(rules.filter((r) => deployScopeOf(r) === 'origin').map((r) => ruleOriginLabel(r))))
+  if (lang === 'en') {
+    const subject = n === 1 ? 'This rule' : `These ${n} rules`
+    const s = n === 1 ? 's' : ''
+    if (global === n) return `${subject} take${s} effect in ModSecurity for every origin at once.`
+    if (global === 0) {
+      return labels.length === 1
+        ? `${subject} appl${n === 1 ? 'ies' : 'y'} only to ${labels[0]}.`
+        : `${subject} apply only to each rule’s own origin (${labels.join(', ')}).`
+    }
+    return `${subject}: ${global} apply to every origin, the rest only to ${labels.join(', ')}.`
+  }
+  const subject = n === 1 ? 'กฎนี้' : `กฎ ${n} ข้อ`
   if (global === n) return `${subject}จะมีผลกับ ModSecurity ของทุก origin ทันที`
   if (global === 0) {
     return labels.length === 1
@@ -116,10 +167,10 @@ export function canRevokeRule(rule: Pick<MLPendingRule, 'status' | 'can_revoke'>
 }
 
 // What the revoke dialog says will stop.
-export function revokeScope(rule: ScopeFields): string {
+export function revokeScope(rule: ScopeFields, lang: Lang = 'th'): string {
   return deployScopeOf(rule) === 'global'
-    ? 'กฎนี้จะหยุดทำงานกับทุก origin ทันที'
-    : `กฎนี้จะหยุดทำงานกับ ${ruleOriginLabel(rule)} ทันที`
+    ? L(lang, 'กฎนี้จะหยุดทำงานกับทุก origin ทันที', 'This rule stops for every origin at once')
+    : L(lang, `กฎนี้จะหยุดทำงานกับ ${ruleOriginLabel(rule)} ทันที`, `This rule stops for ${ruleOriginLabel(rule)} at once`)
 }
 
 export function canBacktestRule(
@@ -213,12 +264,12 @@ export function filterAndSortRules(rules: MLPendingRule[], f: RuleFilters): MLPe
 }
 
 // "5 นาทีที่แล้ว" style, for last-seen / tested-at columns.
-export function timeAgo(iso: string | undefined, now: number = Date.now()): string {
+export function timeAgo(iso: string | undefined, now: number = Date.now(), lang: Lang = 'th'): string {
   if (!iso) return ''
   const t = Date.parse(iso)
   if (Number.isNaN(t)) return ''
   const seconds = Math.round((t - now) / 1000)
-  const rtf = new Intl.RelativeTimeFormat('th', { numeric: 'auto' })
+  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' })
   const steps: [Intl.RelativeTimeFormatUnit, number][] = [['day', 86400], ['hour', 3600], ['minute', 60]]
   for (const [unit, size] of steps) {
     if (Math.abs(seconds) >= size) return rtf.format(Math.trunc(seconds / size), unit)
@@ -235,6 +286,12 @@ export interface SuggestionSummary {
   origin_id?: string
 }
 
+const REASON_TEXT_EN: Record<string, string> = {
+  gen3_not_attack: 'Gen 3 does not see this request as an attack, so no rule is proposed.',
+  gen3_no_detector: 'Gen 3 judged it from the request structure; no detector caught it, so there is no rule to propose.',
+  generator_error: 'The rule generator returned an error. Try again.',
+}
+
 const REASON_TEXT: Record<string, string> = {
   gen3_not_attack: 'Gen 3 ไม่ถือว่า request นี้เป็นการโจมตี จึงไม่เสนอกฎ',
   gen3_no_detector: 'Gen 3 ตัดสินจากโครงสร้าง request ไม่มี detector ตัวไหนจับได้ จึงไม่มีกฎให้เสนอ',
@@ -247,7 +304,18 @@ const REASON_TEXT: Record<string, string> = {
 export function describeSuggestion(
   s?: SuggestionSummary | null,
   originLabel?: string | null,
+  lang: Lang = 'th',
 ): { queued: boolean; text: string } {
+  if (lang === 'en') {
+    if (!s) return { queued: false, text: 'Analysis finished' }
+    if (s.created + s.merged === 0) return { queued: false, text: REASON_TEXT_EN[s.reason] || 'No rule proposed' }
+    const parts = []
+    if (s.created) parts.push(`proposed ${s.created} new rule${s.created === 1 ? '' : 's'}`)
+    if (s.merged) parts.push(`added evidence to ${s.merged} pending rule${s.merged === 1 ? '' : 's'}`)
+    const where = originLabel ? ` for ${originLabel}` : originLabel === null ? ' in the platform operator queue' : ''
+    const text = parts.join(' and ') + where
+    return { queued: true, text: text.charAt(0).toUpperCase() + text.slice(1) }
+  }
   if (!s) return { queued: false, text: 'วิเคราะห์เสร็จแล้ว' }
   if (s.created + s.merged === 0) return { queued: false, text: REASON_TEXT[s.reason] || 'ไม่มีกฎที่เสนอ' }
   const parts = []

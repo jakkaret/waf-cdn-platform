@@ -146,6 +146,11 @@ describe('approveScope', () => {
     expect(mixed).toContain('1 ข้อมีผลกับทุก origin')
     expect(mixed).toContain('shop.example.com')
   })
+  it('words the same scopes in English', () => {
+    expect(approveScope([shop], 'en')).toBe('This rule applies only to shop.example.com.')
+    expect(approveScope([shop, shop], 'en')).toBe('These 2 rules apply only to shop.example.com.')
+    expect(approveScope([global], 'en')).toBe('This rule takes effect in ModSecurity for every origin at once.')
+  })
 })
 
 describe('canReviewRule / canBacktestRule', () => {
