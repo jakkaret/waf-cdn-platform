@@ -52,7 +52,7 @@ location = /internal-ml-capture {
     proxy_set_header X-Original-Host $host;
     proxy_set_header X-Original-URI $request_uri;
     proxy_set_header X-Original-Method $request_method;
-    proxy_set_header X-Original-Request-ID $request_id;
+    proxy_set_header X-Original-Request-ID $waf_request_id;
     proxy_set_header Content-Type $content_type;
     proxy_set_header Host $host;
     proxy_read_timeout 2s;
@@ -75,7 +75,7 @@ location = /internal-ml-gate {
     proxy_set_header X-Original-Host $host;
     proxy_set_header X-Original-URI $request_uri;
     proxy_set_header X-Original-Method $request_method;
-    proxy_set_header X-Original-Request-ID $request_id;
+    proxy_set_header X-Original-Request-ID $waf_request_id;
     proxy_set_header Content-Type $content_type;
     proxy_set_header Host $host;
     proxy_connect_timeout 300ms;

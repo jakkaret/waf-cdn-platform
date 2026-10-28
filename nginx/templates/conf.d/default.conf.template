@@ -38,6 +38,16 @@ map $remote_addr $waf_client_ip {
     default $remote_addr;
 }
 
+# The edge's request id. Our edges send their own $request_id as X-Request-ID
+# (overwriting the client's), and the access log row the dashboard stores for
+# the request comes from the edge with that id -- so the ML relays send it on,
+# and an ML verdict joins its access_logs row. Only a 32-hex value is taken;
+# anything else (no edge in front) keeps this server's own $request_id.
+map $http_x_request_id $waf_request_id {
+    "~^[0-9a-f]{32}$" $http_x_request_id;
+    default           $request_id;
+}
+
 # P2.3: a path a CAPTCHA/OTP gate protects is answered with
 # Cache-Control: private, no-store, so neither the edge cache nor any other
 # shared cache keeps it ($shield_protected comes from the shield check).
