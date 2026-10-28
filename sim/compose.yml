@@ -1,0 +1,164 @@
+# Simulated WAF + CDN platform: every machine of production as a container
+# with its own Docker daemon, on networks that carry the real addresses.
+#
+#   main       Main node   178.104.53.123, WireGuard 10.88.0.1
+#   edge-th    edge (TH)   45.154.26.91,   WireGuard 10.88.0.2
+#   edge-asia  edge (ASIA) 57.158.25.236,  WireGuard 10.88.0.3
+#   lab        lab/origin pool (DVWA behind FRP), reaches Main's public address
+#   client     a visitor with curl and dig on every public network
+#
+# The addresses exist only inside these Docker networks. Start with
+# sim/up.sh (generates fake secrets first), not with compose directly.
+name: wafsim
+
+x-node: &node
+  build:
+    context: ./node
+    secrets: [extra_ca]
+  image: wafsim-node:latest
+  privileged: true
+  restart: "no"
+  environment: &node-env
+    SIM_REGISTRY_MIRROR: ${SIM_REGISTRY_MIRROR-https://mirror.gcr.io}
+    TZ: Asia/Bangkok
+  healthcheck:
+    test: ["CMD", "test", "-f", "/run/sim-ready"]
+    interval: 10s
+    timeout: 3s
+    retries: 180
+    start_period: 30s
+
+services:
+  main:
+    <<: *node
+    hostname: main
+    environment:
+      <<: *node-env
+      SIM_ROLE: main
+      SIM_NODE: main
+    # The dashboard at http://localhost:8880 (Main's Caddy, "http://localhost" site)
+    ports:
+      - "127.0.0.1:8880:80"
+    volumes:
+      - ..:/src:ro
+      - .:/sim:ro
+      - ./.state:/sim-state
+      - ./.state/extra-ca.crt:/sim-ca/extra.crt:ro
+      - main_docker:/var/lib/docker
+      # The rest of the machine's disk that its containers mount from.
+      - main_root:/root
+      - main_frp:/etc/frp
+      - main_cwt_etc:/etc/cloudwaf-tunnel
+      - main_cwt_state:/var/lib/cloudwaf-tunnel
+    networks:
+      pub-main: { ipv4_address: 178.104.53.123 }
+      wg: { ipv4_address: 10.88.0.1 }
+
+  edge-th:
+    <<: *node
+    hostname: edge-th
+    environment:
+      <<: *node-env
+      SIM_ROLE: edge
+      SIM_NODE: edge-th
+      EDGE_REGION: edge-th
+      EDGE_PUBLIC_IP: 45.154.26.91
+      EDGE_DEPLOY_DIR: /root/edge_node
+    volumes:
+      - ..:/src:ro
+      - .:/sim:ro
+      - ./.state:/sim-state
+      - ./.state/extra-ca.crt:/sim-ca/extra.crt:ro
+      - edge_th_docker:/var/lib/docker
+      - edge_th_root:/root
+      - edge_th_opt:/opt
+    networks:
+      pub-th: { ipv4_address: 45.154.26.91 }
+      # only so this edge's PowerDNS can health-check the other edge
+      pub-asia: { ipv4_address: 57.158.25.2 }
+      wg: { ipv4_address: 10.88.0.2 }
+
+  edge-asia:
+    <<: *node
+    hostname: edge-asia
+    environment:
+      <<: *node-env
+      SIM_ROLE: edge
+      SIM_NODE: edge-asia
+      EDGE_REGION: edge-asia
+      EDGE_PUBLIC_IP: 57.158.25.236
+      EDGE_DEPLOY_DIR: /opt/edge_node
+    volumes:
+      - ..:/src:ro
+      - .:/sim:ro
+      - ./.state:/sim-state
+      - ./.state/extra-ca.crt:/sim-ca/extra.crt:ro
+      - edge_asia_docker:/var/lib/docker
+      - edge_asia_opt:/opt
+    networks:
+      pub-asia: { ipv4_address: 57.158.25.236 }
+      pub-th: { ipv4_address: 45.154.26.3 }
+      wg: { ipv4_address: 10.88.0.3 }
+
+  lab:
+    <<: *node
+    hostname: lab
+    environment:
+      <<: *node-env
+      SIM_ROLE: lab
+      SIM_NODE: lab
+    volumes:
+      - ..:/src:ro
+      - .:/sim:ro
+      - ./.state:/sim-state
+      - ./.state/extra-ca.crt:/sim-ca/extra.crt:ro
+      - lab_docker:/var/lib/docker
+      - lab_agent:/etc/waf-agent
+    networks:
+      pub-main: { ipv4_address: 178.104.53.75 }
+
+  client:
+    image: wafsim-node:latest
+    hostname: client
+    entrypoint: ["sleep", "infinity"]
+    depends_on: [main]
+    volumes:
+      - .:/sim:ro
+      - ./.state:/sim-state
+    networks:
+      pub-th: { ipv4_address: 45.154.26.10 }
+      pub-asia: { ipv4_address: 57.158.25.10 }
+      pub-main: { ipv4_address: 178.104.53.10 }
+
+secrets:
+  extra_ca:
+    file: ./.state/extra-ca.crt
+
+# Each machine's disk: its Docker data plus the directories its containers
+# mount from, so a restarted machine comes back as it was.
+volumes:
+  main_docker:
+  main_root:
+  main_frp:
+  main_cwt_etc:
+  main_cwt_state:
+  edge_th_docker:
+  edge_th_root:
+  edge_th_opt:
+  edge_asia_docker:
+  edge_asia_opt:
+  lab_docker:
+  lab_agent:
+
+# Gateways sit at .254 so that .1 (Main's WireGuard address) is free.
+networks:
+  pub-main:
+    ipam: { config: [{ subnet: 178.104.53.0/24, gateway: 178.104.53.254 }] }
+  pub-th:
+    ipam: { config: [{ subnet: 45.154.26.0/24, gateway: 45.154.26.254 }] }
+  pub-asia:
+    ipam: { config: [{ subnet: 57.158.25.0/24, gateway: 57.158.25.254 }] }
+  # Stands in for the WireGuard tunnel (deploy/wireguard): same addresses,
+  # no encryption.
+  wg:
+    ipam: { config: [{ subnet: 10.88.0.0/24, gateway: 10.88.0.254 }] }

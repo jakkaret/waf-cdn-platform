@@ -1,0 +1,14 @@
+# Edge Caddy of the simulation: plain HTTP to the edge nginx, the same hop
+# (and cache key "http|host|...") as production. Production also terminates
+# TLS here with Let's Encrypt; the simulation has no public CA, so it serves
+# HTTP only.
+{
+    auto_https off
+    admin off
+}
+
+:80 {
+    header -Server
+    header X-Content-Type-Options nosniff
+    reverse_proxy cdn-edge-node:80
+}

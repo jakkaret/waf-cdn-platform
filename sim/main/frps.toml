@@ -1,0 +1,20 @@
+# frps of the simulated Main node (the real one is /etc/frp/frps.toml, not
+# in git). @...@ values are filled from sim/.state/secrets.env.
+bindPort = 7000
+vhostHTTPPort = 8085
+
+auth.method = "token"
+auth.token = "@FRP_AUTH_TOKEN@"
+
+webServer.addr = "127.0.0.1"
+webServer.port = 7500
+webServer.user = "@FRP_ADMIN_USER@"
+webServer.password = "@FRP_ADMIN_PASS@"
+
+# Gatekeeper (dashboard/backend/api/tunnels.py frp_hook): loopback only, the
+# secret rides in the path.
+[[httpPlugins]]
+name = "waf-gatekeeper"
+addr = "127.0.0.1:8000"
+path = "/api/tunnels/frp-hook/@FRP_HOOK_SECRET@"
+ops = ["Login", "NewProxy", "CloseProxy"]
