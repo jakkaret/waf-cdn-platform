@@ -209,6 +209,41 @@ async def get_quota(current_user: dict = Depends(get_current_user)):
     info = origin_service.get_quota_info(current_user.get("user_id"))
     return info
 
+
+@router.get("/overview")
+async def get_origins_overview(current_user: dict = Depends(get_current_user)):
+    """Summary columns for the Origins list: 24 h requests/blocked, the five
+    protections and live domains, for exactly the origins GET /api/origins
+    shows this user (services/origin_overview.py). Declared before
+    /{origin_id} so "overview" is never read as an id."""
+    from api.rules import rule_manager
+    from services import origin_overview
+    from services.origin_ip_rules import list_rules as list_ip_rules
+    from services.rate_limit_service import RateLimitService
+    from services.tenant_rules import TenantRuleService
+
+    def build():
+        origins = origin_service.get_origins_visible_to_user(current_user.get("user_id"))
+        ids = [str(o.get("id")) for o in origins]
+        domain_rows = origin_service.db.get_domains_by_origin_ids(ids) if ids else []
+        traffic = origin_overview.traffic_24h(origin_overview.clickhouse(), origins, domain_rows)
+        tenant_rules = TenantRuleService(rule_manager)
+        rates = RateLimitService()
+        rows = []
+        for o in origins:
+            oid = str(o.get("id"))
+            t = traffic.get(oid)
+            rows.append({
+                "origin_id": oid,
+                "requests_24h": None if t is None else t["requests"],
+                "blocked_24h": None if t is None else t["blocked"],
+                "protection": origin_overview.protection(o, tenant_rules, list_ip_rules, rates.list_rules),
+                "domains": origin_overview.domains_summary(domain_rows, oid),
+            })
+        return rows
+
+    return {"origins": await asyncio.to_thread(build)}
+
 def _tunnel_is_online(tunnel_name: str, online_names: set) -> bool:
     """FRP namespaces a proxy's live name with the connection's identity for
     shared/legacy-token clients (e.g. "<legacy-token>.dvwa-waf-it-kku-online"),

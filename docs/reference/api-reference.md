@@ -10,7 +10,7 @@ status: VERIFIED
 
 Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/api/system/*`, ไฟล์ static) อยู่นอกขอบเขตของไฟล์นี้
 
-พบทั้งหมด **182 endpoints** ใน **29 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 30 รายการ
+พบทั้งหมด **183 endpoints** ใน **29 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 30 รายการ
 
 ## `api/ai_summary.py`
 
@@ -230,6 +230,7 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 |---|---|---|---|---|
 | GET | `/api/origins` | `list_origins` | login |  |
 | POST | `/api/origins` | `create_origin` | login |  |
+| GET | `/api/origins/overview` | `get_origins_overview` | login | Summary columns for the Origins list: 24 h requests/blocked, the five |
 | GET | `/api/origins/quota` | `get_quota` | login | Return quota usage for the current user (origins used / max). |
 | DELETE | `/api/origins/{origin_id}` | `delete_origin` | origin owner |  |
 | GET | `/api/origins/{origin_id}` | `get_origin` | origin read, login |  |
