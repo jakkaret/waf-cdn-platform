@@ -89,6 +89,7 @@ async def stream_logs(
     cursor_ts: Optional[int] = Query(None, description="keyset cursor: epoch seconds of last row"),
     cursor_id: Optional[str] = Query(None, description="keyset cursor: id of last row"),
     include_health: bool = Query(False, description="include internal /healthz checks"),
+    exclude_static: bool = Query(False, description="hide static assets (/_next/static/, .js, .css, images, fonts) unless blocked or rate limited"),
     current_user: dict = Depends(require_viewer_or_above),
 ):
     """Keyset-paginated log stream (filter-first, 'load more'). Replaces deep
@@ -100,6 +101,7 @@ async def stream_logs(
         limit=limit, search=search, status_filter=status, severity_filter=severity,
         method_filter=method, origin_clause=clause, from_ts=from_ts, to_ts=to_ts,
         cursor_ts=cursor_ts, cursor_id=cursor_id, exclude_health=not include_health,
+        exclude_static=exclude_static,
     )
 
 
@@ -114,6 +116,7 @@ async def logs_histogram(
     from_ts: Optional[int] = Query(None),
     to_ts: Optional[int] = Query(None),
     include_health: bool = Query(False),
+    exclude_static: bool = Query(False),
     current_user: dict = Depends(require_viewer_or_above),
 ):
     """Counts per time bucket for the filter bar chart (total + blocked)."""
@@ -124,6 +127,7 @@ async def logs_histogram(
         bucket_seconds=bucket_seconds, search=search, status_filter=status,
         severity_filter=severity, method_filter=method, origin_clause=clause,
         from_ts=from_ts, to_ts=to_ts, exclude_health=not include_health,
+        exclude_static=exclude_static,
     )
     return {"buckets": buckets, "bucket_seconds": bucket_seconds}
 

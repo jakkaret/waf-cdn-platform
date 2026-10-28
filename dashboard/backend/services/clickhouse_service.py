@@ -22,6 +22,12 @@ from services.geoip import country_code
 # from growing right back to the same size. 30 days is enough for demo +
 # short-term trend analysis; override via env if that assumption changes.
 ACCESS_LOGS_RETENTION_DAYS = int(os.getenv("ACCESS_LOGS_RETENTION_DAYS", "30"))
+
+# Paths the logs page hides when "Hide static assets" is on (re2 syntax for
+# ClickHouse match(); backslashes doubled for the SQL string literal).
+STATIC_ASSET_PATTERN = (
+    r"^/(_next/static|static|assets)/|\\.(js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|eot)(\\?|$)"
+)
 # ml_verdicts keeps every tenant's paths and (redacted) queries: a week covers
 # ML Insights' longest view and the threshold preview, and no more.
 ML_VERDICTS_RETENTION_DAYS = int(os.getenv("ML_VERDICTS_RETENTION_DAYS", "7"))
@@ -528,7 +534,7 @@ class ClickHouseService:
 
     def _log_filter_clauses(self, search="", status_filter="ALL", severity_filter="ALL",
                             method_filter="ALL", origin_clause="", from_ts=None, to_ts=None,
-                            exclude_health=True) -> list:
+                            exclude_health=True, exclude_static=False) -> list:
         """Shared WHERE clauses for the logs list + histogram. Time bounds are
         integer epoch seconds (no injection); search/method are escaped."""
         w = []
@@ -542,6 +548,13 @@ class ClickHouseService:
             # internal container health checks (GET /healthz from the docker
             # gateway) flood the security view; drop them by default.
             w.append("url != '/healthz'")
+        if exclude_static:
+            # Opt-in "hide static assets" switch on the logs page: framework
+            # bundles and plain asset files, with or without a query string.
+            # Blocked and rate-limited requests stay visible even on an asset
+            # path: an attack aimed at /x.js must not vanish from the view.
+            # A fixed pattern, no user input.
+            w.append(f"NOT (match(url, '{STATIC_ASSET_PATTERN}') AND status_code NOT IN (403, 429))")
         if search:
             e = escape_like_value(search)
             w.append(f"(client_ip ILIKE '%{e}%' OR url ILIKE '%{e}%' OR rule_id ILIKE '%{e}%' OR user_agent ILIKE '%{e}%' OR attack_type ILIKE '%{e}%')")
@@ -566,7 +579,7 @@ class ClickHouseService:
 
     def query_logs_keyset(self, limit=50, search="", status_filter="ALL", severity_filter="ALL",
                           method_filter="ALL", origin_clause="", from_ts=None, to_ts=None,
-                          cursor_ts=None, cursor_id=None, exclude_health=True) -> dict:
+                          cursor_ts=None, cursor_id=None, exclude_health=True, exclude_static=False) -> dict:
         """Cursor (keyset) pagination on (timestamp, id) DESC: stays fast at any
         depth, unlike OFFSET which re-reads every skipped row. Returns one page
         plus next_cursor; no total COUNT (too expensive on a huge table)."""
@@ -574,7 +587,7 @@ class ClickHouseService:
             return {"logs": [], "has_more": False, "next_cursor": None}
         limit = max(1, min(int(limit), 200))
         w = self._log_filter_clauses(search, status_filter, severity_filter, method_filter,
-                                     origin_clause, from_ts, to_ts, exclude_health)
+                                     origin_clause, from_ts, to_ts, exclude_health, exclude_static)
         if cursor_ts is not None and cursor_id and self._UUID_RE.match(str(cursor_id)):
             cts = int(cursor_ts)
             w.append(f"(toUnixTimestamp(timestamp) < {cts} OR (toUnixTimestamp(timestamp) = {cts} AND id < toUUID('{cursor_id}')))")
@@ -615,14 +628,14 @@ class ClickHouseService:
 
     def logs_histogram(self, bucket_seconds=3600, search="", status_filter="ALL",
                        severity_filter="ALL", method_filter="ALL", origin_clause="",
-                       from_ts=None, to_ts=None, exclude_health=True) -> list:
+                       from_ts=None, to_ts=None, exclude_health=True, exclude_static=False) -> list:
         """Count per time bucket (+ how many were blocked) for the filter bar
         chart. Lets the user see the shape and click a spike to zoom."""
         if not self.connected:
             return []
         bucket_seconds = max(10, min(int(bucket_seconds), 86400))
         w = self._log_filter_clauses(search, status_filter, severity_filter, method_filter,
-                                     origin_clause, from_ts, to_ts, exclude_health)
+                                     origin_clause, from_ts, to_ts, exclude_health, exclude_static)
         where_str = f"WHERE {' AND '.join(w)}" if w else ""
         query = f"""
             SELECT toUnixTimestamp(toStartOfInterval(timestamp, INTERVAL {bucket_seconds} SECOND)) as bucket,

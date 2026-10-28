@@ -1,32 +1,25 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { logsApi, LogCursor, HistogramBucket } from '../api/logs'
 import { useOriginFilterStore } from '../store/originFilterStore'
+import { useThemeStore } from '../store/themeStore'
 import { TopBar } from '../components/layout/TopBar'
 import { Drawer } from '../components/ui/Drawer'
 import { Badge } from '../components/ui/Badge'
-import {
-  Download,
-  Search,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-  Copy,
-  Check,
-  ShieldAlert,
-  ShieldCheck,
-  RefreshCw,
-  Code,
-  Shield,
-  X,
-} from 'lucide-react'
+import { Button } from '../components/ui/Button'
+import { BlockIpButton } from '../components/BlockIpButton'
+import { Download, Search, Copy, Check, RefreshCw, Code, Shield, X, Sparkles } from 'lucide-react'
 import { WafLog } from '../types'
 import toast from 'react-hot-toast'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
 import { confidenceLabel, LogExplanation, toLogExplanation } from '../lib/logExplanation'
-import { BKK_LABEL, bkkDateKey, formatBkkDateTime } from '../lib/time'
+import { BKK_LABEL, bkkDateKey, formatBkkDateTime, formatBkkTime } from '../lib/time'
+import { OUTCOME_LABEL, logOutcome, realRuleId } from '../lib/logRow'
+
+type RangePreset = '15m' | '1h' | '24h' | '7d' | 'all'
+const RANGE_LABEL: Record<RangePreset, string> = { '15m': 'Last 15 min', '1h': 'Last hour', '24h': 'Last 24 h', '7d': 'Last 7 days', all: 'All' }
 
 export const Logs: React.FC = () => {
   // Filter-first at scale: a time range narrows the search, and we never
@@ -34,7 +27,7 @@ export const Logs: React.FC = () => {
   // ?search= comes from "View in traffic logs" links (alerts, dashboard).
   const [searchParams] = useSearchParams()
   const linkedSearch = searchParams.get('search') ?? ''
-  const [rangePreset, setRangePreset] = useState<'15m'|'1h'|'24h'|'7d'|'all'>(linkedSearch ? '7d' : '24h')
+  const [rangePreset, setRangePreset] = useState<RangePreset>(linkedSearch ? '7d' : '24h')
   const [search, setSearch] = useState(linkedSearch)
   useEffect(() => {
     if (linkedSearch) setSearch(linkedSearch)
@@ -42,10 +35,14 @@ export const Logs: React.FC = () => {
   const debouncedSearch = useDebouncedValue(search)
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [methodFilter, setMethodFilter] = useState('ALL')
-  const [severityFilter, setSeverityFilter] = useState('ALL')
+  // Static files (framework bundles, images, fonts) drown out the requests
+  // worth reading; hidden on request by the backend (exclude_static).
+  const [hideStatic, setHideStatic] = useState(true)
   const [selectedLog, setSelectedLog] = useState<WafLog | null>(null)
   const [copiedText, setCopiedText] = useState<string | null>(null)
-  
+  const { theme } = useThemeStore()
+  const isDark = theme === 'dark'
+
   const [explanation, setExplanation] = useState<LogExplanation | null>(null)
   const [isExplaining, setIsExplaining] = useState(false)
   const [maskedPayload, setMaskedPayload] = useState<string | null>(null)
@@ -57,7 +54,7 @@ export const Logs: React.FC = () => {
     return { from: now - span, to: null as number | null }
   }, [rangePreset])
   // histogram bucket chosen from the span so the bar chart stays readable
-  const bucketSeconds = rangePreset === '15m' ? 60 : rangePreset === '1h' ? 300 : rangePreset === '24h' ? 3600 : rangePreset === '7d' ? 86400 : 86400
+  const bucketSeconds = rangePreset === '15m' ? 60 : rangePreset === '1h' ? 300 : rangePreset === '24h' ? 3600 : 86400
 
   const { selectedOrigin, selectedOriginLabel, setSelectedOrigin } = useOriginFilterStore()
 
@@ -70,16 +67,16 @@ export const Logs: React.FC = () => {
   const commonFilters = {
     search: debouncedSearch,
     status_filter: statusFilter,
-    severity_filter: severityFilter,
     method_filter: methodFilter,
     origin: selectedOrigin,
     from_ts: range.from,
     to_ts: range.to,
+    exclude_static: hideStatic,
   }
 
-  const { data, isLoading, isFetching, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } =
+  const { data, isLoading, isError, isFetching, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteQuery({
-      queryKey: ['logs-stream', debouncedSearch, statusFilter, severityFilter, methodFilter, selectedOrigin, range.from, range.to],
+      queryKey: ['logs-stream', debouncedSearch, statusFilter, methodFilter, selectedOrigin, range.from, range.to, hideStatic],
       queryFn: ({ pageParam }) => logsApi.getLogStream({ ...commonFilters, limit: 50, cursor: pageParam as LogCursor | null }),
       initialPageParam: null as LogCursor | null,
       getNextPageParam: (lastPage) => (lastPage.has_more ? lastPage.next_cursor : undefined),
@@ -89,16 +86,16 @@ export const Logs: React.FC = () => {
   const logs = data?.pages.flatMap((pg) => pg.logs) ?? []
   const total = logs.length
 
-  const { data: histogram = [] } = useQuery<HistogramBucket[]>({
-    queryKey: ['logs-histogram', debouncedSearch, statusFilter, severityFilter, methodFilter, selectedOrigin, range.from, range.to, bucketSeconds],
+  const { data: histogram = [], isLoading: histoLoading, isError: histoError } = useQuery<HistogramBucket[]>({
+    queryKey: ['logs-histogram', debouncedSearch, statusFilter, methodFilter, selectedOrigin, range.from, range.to, bucketSeconds, hideStatic],
     queryFn: () => logsApi.getHistogram({ ...commonFilters, bucket_seconds: bucketSeconds }),
     refetchInterval: 15000,
   })
-  const histoMax = histogram.reduce((m, b) => Math.max(m, b.total), 1)
-
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(e.target.value)
-  }
+  const histoTotal = histogram.reduce((a, b) => a + b.total, 0)
+  const histoBlocked = histogram.reduce((a, b) => a + b.blocked, 0)
+  // Numeric time axis: bars sit at their real time, gaps stay gaps.
+  const histoData = histogram.map((b) => ({ t: b.bucket * 1000, passed: b.total - b.blocked, blocked: b.blocked }))
+  const bucketText = bucketSeconds >= 86400 ? 'per day' : bucketSeconds >= 3600 ? 'per hour' : `per ${bucketSeconds / 60} min`
 
   const handleExplainLog = async (logId: string) => {
     try {
@@ -106,20 +103,19 @@ export const Logs: React.FC = () => {
       const res = await logsApi.explainLog(logId)
       setExplanation(toLogExplanation(res))
     } catch (err) {
-      toast.error('Failed to generate explanation')
+      toast.error('Could not generate an explanation. Try again.')
     } finally {
       setIsExplaining(false)
     }
   }
 
-  const handleMaskPreview = async (logId: string, logUrl: string) => {
+  const handleMaskPreview = async (logUrl: string) => {
     try {
       setIsMasking(true)
-      // Sending URL to preview masking
       const res = await logsApi.maskPreview(logUrl)
       setMaskedPayload(res.masked_text || res.masked_payload || JSON.stringify(res))
     } catch (err) {
-      toast.error('Failed to generate mask preview')
+      toast.error('Could not mask the URL. Try again.')
     } finally {
       setIsMasking(false)
     }
@@ -132,10 +128,9 @@ export const Logs: React.FC = () => {
     setTimeout(() => setCopiedText(null), 2000)
   }
 
-
   const exportToCSV = () => {
     if (logs.length === 0) return
-    const headers = ['datetime_bkk', 'ip', 'method', 'url', 'status', 'rule_id', 'severity']
+    const headers = ['datetime_bkk', 'ip', 'method', 'url', 'status', 'result', 'rule_id', 'attack_type']
     const csvRows = [
       headers.join(','),
       ...logs.map((log) => [
@@ -144,8 +139,9 @@ export const Logs: React.FC = () => {
         `"${log.method}"`,
         `"${(log.url || '').replace(/"/g, '""')}"`,
         log.status,
-        `"${log.rule_id || (log.status === 403 ? 'WAF-CRS' : '')}"`,
-        `"${log.severity || (log.status === 403 ? 'CRITICAL' : '')}"`,
+        `"${OUTCOME_LABEL[logOutcome(log.status)]}"`,
+        `"${realRuleId(log.rule_id) ?? ''}"`,
+        `"${(log.attack_type || '').replace(/"/g, '""')}"`,
       ].join(',')),
     ]
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
@@ -153,302 +149,266 @@ export const Logs: React.FC = () => {
     a.href = window.URL.createObjectURL(blob)
     a.download = `waf_traffic_logs_${bkkDateKey()}.csv`
     a.click()
-    toast.success('Downloaded log records CSV')
+    toast.success('Downloaded the loaded rows as CSV')
   }
 
-  const getStatusBadge = (status: number) => {
-    if (status === 403) return <Badge color="danger">403 BLOCKED</Badge>
-    if (status === 429) return <Badge color="warning">429 RATE LIMIT</Badge>
-    if (status >= 500) return <Badge color="danger">{status} SERVER ERR</Badge>
-    if (status >= 400) return <Badge color="warning">{status} CLIENT ERR</Badge>
-    if (status >= 300) return <Badge color="info">{status} REDIRECT</Badge>
-    return <Badge color="success">{status} OK</Badge>
+  const statusText = (status: number) =>
+    status >= 500 ? 'Server error' : status >= 400 ? 'Client error' : status >= 300 ? 'Redirect' : 'OK'
+
+  const outcomeBadge = (status: number) => {
+    const o = logOutcome(status)
+    const color = o === 'blocked' ? 'danger' : o === 'rate_limited' ? 'warning' : o === 'error' ? 'warning' : 'gray'
+    return <Badge color={color}>{OUTCOME_LABEL[o]}</Badge>
   }
 
-  const getSeverityBadge = (severity?: string | null) => {
-    const sev = (severity || 'NONE').toUpperCase()
-    if (sev === 'CRITICAL') return <Badge color="danger">CRITICAL</Badge>
-    if (sev === 'HIGH') return <Badge color="danger">HIGH</Badge>
-    if (sev === 'MEDIUM') return <Badge color="warning">MEDIUM</Badge>
-    if (sev === 'LOW') return <Badge color="info">LOW</Badge>
-    return <Badge color="gray">NONE</Badge>
-  }
-
+  const selectClass =
+    'w-full h-9 px-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[13px] text-[var(--text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] cursor-pointer'
+  const axisColor = isDark ? '#94a3b8' : '#64748b'
 
   return (
     <div className="animate-fade-in pb-8">
-      {/* Top Header Bar */}
       <TopBar
         scope
         title="Traffic logs"
-        subtitle="Every request that reached your sites through the WAF, newest first"
-        badge={
-          <Badge color="success" dot pulse>
-            LIVE TELEMETRY
-          </Badge>
-        }
+        subtitle={`Every request that reached your sites through the WAF, newest first. Times are ${BKK_LABEL}.`}
         action={
           <div className="flex items-center gap-2">
-            <button
-              onClick={exportToCSV}
-              disabled={logs.length === 0}
-              className="flex items-center gap-1.5 px-3 py-1.8 bg-[var(--bg-surface)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] text-[12px] font-mono font-medium text-[var(--text-primary)] rounded-xl hover:bg-[var(--bg-hover)] shadow-sm transition-all cursor-pointer disabled:opacity-40"
-              title="Export visible log rows to CSV"
-            >
-              <Download size={13} className="text-[var(--text-muted)]" />
+            <Button variant="secondary" onClick={exportToCSV} disabled={logs.length === 0} icon={<Download size={13} />} title="Export the loaded rows to CSV">
               <span className="hidden sm:inline">Export CSV</span>
-            </button>
-            <button
-              onClick={() => {
-                refetch()
-                toast.success('Logs refreshed')
-              }}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-1.5 px-3 py-1.8 bg-[var(--bg-surface)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] text-[12px] font-mono font-medium text-[var(--text-primary)] rounded-xl hover:bg-[var(--bg-hover)] shadow-sm transition-all cursor-pointer"
-              title="Refresh log stream"
+              icon={<RefreshCw size={13} className={isFetching ? 'animate-spin motion-reduce:animate-none' : ''} />}
+              title="Refresh"
             >
-              <RefreshCw size={13} className={isFetching ? 'animate-spin text-orange-500' : 'text-[var(--text-muted)]'} />
               <span className="hidden sm:inline">Refresh</span>
-            </button>
+            </Button>
           </div>
         }
       />
 
-      {/* Origin Scope Filter Indicator Banner */}
       {selectedOrigin !== 'ALL' && (
-        <div className="mb-5 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-between gap-3 text-indigo-300 font-mono text-[12px] animate-fade-in">
-          <div className="flex items-center gap-2 truncate">
-            <Shield size={16} className="text-indigo-400 shrink-0" />
-            <span className="truncate">
-              Showing Traffic Logs for Origin:{' '}
-              <strong className="text-white font-bold">{selectedOriginLabel}</strong>
-            </span>
-          </div>
+        <div className="mb-4 px-3.5 py-2.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--bg-border)] flex items-center justify-between gap-3 text-[13px]">
+          <span className="flex items-center gap-2 truncate text-[var(--text-secondary)]">
+            <Shield size={15} className="shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
+            <span className="truncate">Only <strong className="text-[var(--text-primary)]">{selectedOriginLabel}</strong></span>
+          </span>
           <button
+            type="button"
             onClick={() => setSelectedOrigin('ALL', 'All Managed Origins (ทั้งหมด)')}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-white text-[11px] font-bold transition-colors cursor-pointer shrink-0"
+            className="flex items-center gap-1 h-8 px-2.5 rounded-md border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] text-[12.5px] cursor-pointer shrink-0"
           >
-            <X size={12} />
-            <span>Show All Origins</span>
+            <X size={12} aria-hidden="true" />
+            Show all origins
           </button>
         </div>
       )}
 
-      {/* Time range + activity histogram (filter-first, click a bar to zoom) */}
-      <div className="dash-card p-4 mb-4 font-mono">
+      {/* Time range + activity histogram */}
+      <section className="dash-card p-4 mb-4" aria-labelledby="logs-histo-heading">
         <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5">
-            {(['15m','1h','24h','7d','all'] as const).map((r) => (
+          <div role="group" aria-label="Time range" className="flex flex-wrap items-center gap-1.5">
+            {(['15m', '1h', '24h', '7d', 'all'] as const).map((r) => (
               <button
                 key={r}
+                type="button"
+                aria-pressed={rangePreset === r}
                 onClick={() => setRangePreset(r)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                className={`h-8 px-2.5 rounded-md text-[12.5px] border transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
                   rangePreset === r
-                    ? 'border-orange-500 bg-orange-500/10 text-orange-500'
-                    : 'border-[var(--bg-border)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
+                    ? 'border-[var(--accent)] bg-[var(--nav-active)] text-[var(--text-primary)] font-medium'
+                    : 'border-[var(--bg-border)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                 }`}
               >
-                {r === 'all' ? 'All' : `Last ${r}`}
+                {RANGE_LABEL[r]}
               </button>
             ))}
           </div>
-          <div className="text-[11px] text-[var(--text-muted)]">
-            {histogram.reduce((a: number, b: HistogramBucket) => a + b.total, 0).toLocaleString()} events in range
-            {' · '}
-            {histogram.reduce((a: number, b: HistogramBucket) => a + b.blocked, 0).toLocaleString()} blocked
-          </div>
+          <p id="logs-histo-heading" className="m-0 text-[12.5px] text-[var(--text-muted)]">
+            {histoTotal.toLocaleString()} requests, {histoBlocked.toLocaleString()} blocked or rate limited, counted {bucketText}
+          </p>
         </div>
-        <div className="flex items-end gap-[2px] h-16">
-          {histogram.length === 0 ? (
-            <div className="w-full text-center text-[11px] text-[var(--text-muted)] self-center">No activity in this range</div>
+        <div className="h-28">
+          {histoLoading ? (
+            <div className="h-full flex items-center justify-center text-[12.5px] text-[var(--text-muted)]">Loading…</div>
+          ) : histoError ? (
+            <div className="h-full flex items-center justify-center text-[12.5px] text-red-600 dark:text-red-400">Could not load the activity chart.</div>
+          ) : histoData.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-[12.5px] text-[var(--text-muted)]">No requests in this range</div>
           ) : (
-            histogram.map((b: HistogramBucket) => {
-              const h = Math.max(2, Math.round((b.total / histoMax) * 64))
-              const bh = b.total > 0 ? Math.round((b.blocked / b.total) * h) : 0
-              const d = new Date(b.bucket * 1000)
-              const label = `${formatBkkDateTime(d)} — ${b.total} events, ${b.blocked} blocked`
-              return (
-                <div
-                  key={b.bucket}
-                  title={label}
-                  className="flex-1 min-w-[2px] flex flex-col justify-end cursor-pointer group"
-                  onClick={() => { setRangePreset('all'); }}
-                >
-                  <div className="w-full bg-red-500/80 rounded-t-sm" style={{ height: `${bh}px` }} />
-                  <div className="w-full bg-orange-400/50 group-hover:bg-orange-400 rounded-b-sm" style={{ height: `${h - bh}px` }} />
-                </div>
-              )
-            })
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={histoData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }} barCategoryGap={1}>
+                <CartesianGrid stroke={isDark ? '#1a2436' : '#e2e8f0'} strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="t"
+                  type="number"
+                  scale="time"
+                  domain={[`dataMin - ${(bucketSeconds * 1000) / 2}`, `dataMax + ${(bucketSeconds * 1000) / 2}`]}
+                  tickFormatter={(t: number) => (bucketSeconds >= 86400 ? bkkDateKey(t).slice(5) : formatBkkTime(t))}
+                  stroke={axisColor}
+                  fontSize={11}
+                  tickLine={false}
+                  minTickGap={36}
+                />
+                <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} width={36} />
+                <Tooltip
+                  labelFormatter={(t: number) => formatBkkDateTime(t, { seconds: false })}
+                  contentStyle={{ backgroundColor: isDark ? '#101827' : '#fff', borderColor: isDark ? '#2a374d' : '#e2e8f0', borderRadius: 8, fontSize: 12 }}
+                />
+                <Bar dataKey="passed" stackId="a" name="Passed" fill={isDark ? '#334155' : '#cbd5e1'} isAnimationActive={false} />
+                <Bar dataKey="blocked" stackId="a" name="Blocked or rate limited" fill="#dc2626" isAnimationActive={false} />
+              </BarChart>
+            </ResponsiveContainer>
           )}
         </div>
-      </div>
+      </section>
 
-      {/* Filter and Search Bar */}
-      <div className="dash-card p-4 mb-4 font-mono">
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-          {/* Search Box */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" size={14} />
+      {/* Filters */}
+      <section className="dash-card p-4 mb-4" aria-label="Filters">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_auto] gap-3 items-center">
+          <label className="relative block">
+            <span className="sr-only">Search</span>
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" size={14} aria-hidden="true" />
             <input
-              type="text"
-              placeholder="Search IP, URL, Rule ID..."
+              type="search"
+              placeholder="Search IP, URL, rule ID, attack type"
               value={search}
-              onChange={handleSearchChange}
-              className="w-full pl-9 pr-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-orange-500 transition-colors"
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full h-9 pl-9 pr-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[13px] text-[var(--text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
             />
-          </div>
+          </label>
 
-          {/* Status Filter */}
-          <div>
-            <select
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value)
-              }}
-              className="w-full px-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
-            >
-              <option value="ALL">All HTTP Status</option>
-              <option value="BLOCKED">Blocked (403 / 429)</option>
-              <option value="ALLOWED">Allowed (2xx OK)</option>
+          <label className="block">
+            <span className="sr-only">WAF result and HTTP status</span>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
+              <option value="ALL">Any result or status</option>
+              <option value="BLOCKED">Blocked or rate limited (403, 429)</option>
+              <option value="ALLOWED">Passed with 2xx</option>
               {filterOptions?.status_codes?.map((code) => (
                 <option key={code} value={String(code)}>
-                  Status {code}
+                  HTTP {code}
                 </option>
               ))}
             </select>
-          </div>
+          </label>
 
-          {/* Severity Filter */}
-          <div>
-            <select
-              value={severityFilter}
-              onChange={(e) => {
-                setSeverityFilter(e.target.value)
-              }}
-              className="w-full px-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
-            >
-              <option value="ALL">All Severities</option>
-              <option value="CRITICAL">CRITICAL (Mitigated)</option>
-              <option value="HIGH">HIGH (Server Errors)</option>
-              <option value="MEDIUM">MEDIUM (Client Warnings)</option>
-              <option value="LOW">LOW (Redirects)</option>
-              <option value="NONE">NONE (Clean Traffic)</option>
-            </select>
-          </div>
-
-          {/* Method Filter */}
-          <div>
-            <select
-              value={methodFilter}
-              onChange={(e) => {
-                setMethodFilter(e.target.value)
-              }}
-              className="w-full px-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
-            >
-              <option value="ALL">All Methods</option>
+          <label className="block">
+            <span className="sr-only">HTTP method</span>
+            <select value={methodFilter} onChange={(e) => setMethodFilter(e.target.value)} className={selectClass}>
+              <option value="ALL">Any method</option>
               {filterOptions?.methods?.map((m) => (
                 <option key={m} value={m}>
                   {m}
                 </option>
               ))}
             </select>
-          </div>
-        </div>
-      </div>
+          </label>
 
-      {/* Main Table */}
-      <div className="dash-card overflow-hidden font-mono">
+          <label className="inline-flex items-center gap-2 text-[13px] text-[var(--text-secondary)] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={hideStatic}
+              onChange={(e) => setHideStatic(e.target.checked)}
+              className="h-4 w-4 accent-[var(--accent)] cursor-pointer"
+            />
+            Hide static files
+            <span className="sr-only">(blocked requests to static files stay visible)</span>
+          </label>
+        </div>
+        <p className="m-0 mt-2 text-[12px] text-[var(--text-muted)]">
+          Hiding static files never hides a blocked request. The log does not record a threat severity per request, so
+          rows show what the WAF did and the HTTP status instead.
+        </p>
+      </section>
+
+      {/* Main table */}
+      <div className="dash-card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-[12px]">
-            <thead className="bg-[var(--bg-primary)] border-b border-[var(--bg-border)] text-[var(--text-muted)] uppercase text-[10.5px]">
+          <table className="dash-table">
+            <thead>
               <tr>
-                <th className="py-3 px-3.5">Timestamp ({BKK_LABEL})</th>
-                <th className="py-3 px-3.5">Client IP</th>
-                <th className="py-3 px-3.5">Method</th>
-                <th className="py-3 px-3.5">Target Path / URL</th>
-                <th className="py-3 px-3.5">Status</th>
-                <th className="py-3 px-3.5">Severity</th>
-                <th className="py-3 px-3.5 text-right">Details</th>
+                <th>Time ({BKK_LABEL})</th>
+                <th>Client IP</th>
+                <th className="hidden md:table-cell">Method</th>
+                <th>Path</th>
+                <th>Result</th>
+                <th className="hidden sm:table-cell">HTTP</th>
+                <th className="hidden lg:table-cell">Rule</th>
+                <th><span className="sr-only">Details</span></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--bg-border-subtle)]">
+            <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-[var(--text-muted)]">
-                    <div className="flex items-center justify-center gap-2">
-                      <RefreshCw size={14} className="animate-spin text-orange-500" />
-                      <span>Loading logs from ClickHouse database...</span>
-                    </div>
+                  <td colSpan={8} className="py-12 text-center text-[var(--text-muted)] text-[13px]">
+                    Loading requests…
+                  </td>
+                </tr>
+              ) : isError ? (
+                <tr>
+                  <td colSpan={8} className="py-12 text-center text-red-600 dark:text-red-400 text-[13px]">
+                    Could not load the logs. They will retry in a few seconds.
                   </td>
                 </tr>
               ) : logs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-[var(--text-muted)]">
-                    No traffic log records found for this query / origin.
+                  <td colSpan={8} className="py-12 text-center text-[var(--text-muted)] text-[13px]">
+                    No requests match these filters{hideStatic ? ' (static files are hidden)' : ''}.
                   </td>
                 </tr>
               ) : (
-                logs.map((log, idx) => (
-                  <tr
-                    key={log.request_id || `log-${idx}`}
-                    onClick={() => setSelectedLog(log)}
-                    className="hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
-                  >
-                    <td className="py-2.5 px-3.5 text-[var(--text-secondary)] whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSelectedLog(log)
-                        }}
-                        aria-label={`Inspect event from ${log.ip} at ${log.datetime}`}
-                        className="text-left cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60"
-                      >
+                logs.map((log, idx) => {
+                  const rule = realRuleId(log.rule_id)
+                  return (
+                    <tr
+                      key={log.log_id || log.request_id || `log-${idx}`}
+                      onClick={() => setSelectedLog(log)}
+                      className="hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+                    >
+                      <td className="font-mono text-[12px] text-[var(--text-secondary)] whitespace-nowrap">
                         {formatBkkDateTime(log.datetime)}
-                      </button>
-                    </td>
-                    <td className="py-2.5 px-3.5 font-bold text-[var(--text-primary)] whitespace-nowrap">
-                      {log.ip}
-                    </td>
-                    <td className="py-2.5 px-3.5">
-                      <span className="px-1.5 py-0.5 rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] text-[10.5px] font-bold text-sky-400">
-                        {log.method}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3.5 text-[var(--text-primary)] truncate max-w-[280px]">
-                      {log.url || '/'}
-                    </td>
-                    <td className="py-2.5 px-3.5 whitespace-nowrap">
-                      {getStatusBadge(log.status)}
-                    </td>
-                    <td className="py-2.5 px-3.5 whitespace-nowrap">
-                      {getSeverityBadge(log.severity)}
-                    </td>
-                    <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
-                      <span className="text-orange-500 font-semibold text-[11px] hover:underline">
-                        Inspect →
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="font-mono text-[12.5px] font-semibold text-[var(--text-primary)] whitespace-nowrap">{log.ip}</td>
+                      <td className="hidden md:table-cell font-mono text-[12px] text-[var(--text-secondary)]">{log.method}</td>
+                      <td className="font-mono text-[12px] text-[var(--text-primary)] max-w-[300px] truncate" title={log.url}>
+                        {log.url || '/'}
+                      </td>
+                      <td className="whitespace-nowrap">{outcomeBadge(log.status)}</td>
+                      <td className="hidden sm:table-cell font-mono text-[12px] text-[var(--text-secondary)] whitespace-nowrap">{log.status}</td>
+                      <td className="hidden lg:table-cell font-mono text-[12px] text-[var(--text-secondary)] whitespace-nowrap">
+                        {rule ?? (logOutcome(log.status) === 'blocked' ? <span className="text-[var(--text-muted)]">not recorded</span> : '—')}
+                      </td>
+                      <td className="text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedLog(log)
+                          }}
+                          aria-label={`Details of the request from ${log.ip} at ${formatBkkDateTime(log.datetime)}`}
+                          className="h-7 px-2 rounded-md border border-[var(--bg-border)] text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                        >
+                          Details
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
         </div>
 
         {/* Load-more footer (keyset -- no deep paging) */}
-        <div className="p-3.5 border-t border-[var(--bg-border)] flex flex-col sm:flex-row items-center justify-between gap-3 text-[12px] font-mono text-[var(--text-muted)]">
+        <div className="p-3.5 border-t border-[var(--bg-border)] flex flex-col sm:flex-row items-center justify-between gap-3 text-[12.5px] text-[var(--text-muted)]">
           <div>
-            Loaded <strong className="text-orange-500">{total.toLocaleString()}</strong> events
-            {hasNextPage ? ' (more available)' : ' (end of range)'}
+            {total.toLocaleString()} requests loaded{hasNextPage ? ', more available' : ', end of range'}
           </div>
-          <button
-            onClick={() => fetchNextPage()}
-            disabled={!hasNextPage || isFetchingNextPage}
-            className="px-4 py-1.5 rounded-lg border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer text-[var(--text-primary)] font-semibold"
-          >
+          <Button variant="secondary" onClick={() => fetchNextPage()} disabled={!hasNextPage || isFetchingNextPage}>
             {isFetchingNextPage ? 'Loading…' : hasNextPage ? 'Load more' : 'No more'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -463,78 +423,100 @@ export const Logs: React.FC = () => {
         size="lg"
         title={
           <span className="inline-flex items-center gap-2">
-            <Code size={16} className="text-orange-500 shrink-0" aria-hidden="true" />
-            <span>Event Inspection Details</span>
+            <Code size={16} className="text-[var(--text-muted)] shrink-0" aria-hidden="true" />
+            <span>Request details</span>
           </span>
         }
       >
-        {selectedLog && (
-          <div className="space-y-4 font-mono">
-              <div className="grid grid-cols-2 gap-3 text-[12px]">
-                <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
-                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Timestamp ({BKK_LABEL})</span>
-                  <p className="font-bold text-[var(--text-primary)] m-0">{formatBkkDateTime(selectedLog.datetime)}</p>
-                </div>
-                <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
-                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Client IPv4</span>
-                  <p className="font-bold text-orange-400 m-0">{selectedLog.ip}</p>
-                </div>
+        {selectedLog && (() => {
+          const rule = realRuleId(selectedLog.rule_id)
+          const outcome = logOutcome(selectedLog.status)
+          return (
+            <div className="space-y-4 text-[13px]">
+              <div className="flex flex-wrap items-center gap-2">
+                {outcomeBadge(selectedLog.status)}
+                <span className="text-[12.5px] text-[var(--text-muted)]">
+                  HTTP {selectedLog.status} {statusText(selectedLog.status)}
+                </span>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1 text-[12px]">
-                <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Requested URL</span>
-                <p className="font-bold text-[var(--text-primary)] break-all m-0">{selectedLog.url}</p>
+              <dl className="m-0 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3 rounded-lg bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)]">
+                  <dt className="text-[12px] text-[var(--text-muted)]">Time ({BKK_LABEL})</dt>
+                  <dd className="m-0 font-mono text-[var(--text-primary)]">{formatBkkDateTime(selectedLog.datetime)}</dd>
+                </div>
+                <div className="p-3 rounded-lg bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)]">
+                  <dt className="text-[12px] text-[var(--text-muted)]">Client IP</dt>
+                  <dd className="m-0 flex items-center gap-1.5">
+                    <span className="font-mono font-semibold text-[var(--text-primary)]">{selectedLog.ip}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(selectedLog.ip, 'IP')}
+                      className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+                      aria-label="Copy IP"
+                    >
+                      {copiedText === selectedLog.ip ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                    </button>
+                  </dd>
+                </div>
+                <div className="sm:col-span-2 p-3 rounded-lg bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)]">
+                  <dt className="text-[12px] text-[var(--text-muted)]">{selectedLog.method} request</dt>
+                  <dd className="m-0 font-mono text-[12.5px] text-[var(--text-primary)] break-all">{selectedLog.url}</dd>
+                </div>
+                <div className="p-3 rounded-lg bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)]">
+                  <dt className="text-[12px] text-[var(--text-muted)]">ModSecurity rule</dt>
+                  <dd className="m-0 font-mono text-[var(--text-primary)]">
+                    {rule ?? (outcome === 'blocked' ? 'Not recorded for this request' : 'None')}
+                  </dd>
+                </div>
+                <div className="p-3 rounded-lg bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)]">
+                  <dt className="text-[12px] text-[var(--text-muted)]">Detection reason</dt>
+                  <dd className="m-0 text-[var(--text-primary)]">{selectedLog.attack_type || 'None recorded'}</dd>
+                </div>
+                {selectedLog.user_agent && (
+                  <div className="sm:col-span-2 p-3 rounded-lg bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)]">
+                    <dt className="text-[12px] text-[var(--text-muted)]">User agent</dt>
+                    <dd className="m-0 font-mono text-[12px] text-[var(--text-secondary)] break-all">{selectedLog.user_agent}</dd>
+                  </div>
+                )}
+              </dl>
+
+              {/* Next steps. Block IP opens the origin's IP access tab with
+                  the address filled in; nothing changes from here. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <BlockIpButton
+                  ip={selectedLog.ip}
+                  originId={selectedOrigin !== 'ALL' ? selectedOrigin : null}
+                  note={`Traffic log ${formatBkkDateTime(selectedLog.datetime)}`}
+                  size="md"
+                />
+                <Button variant="secondary" onClick={() => setSearch(selectedLog.ip)} icon={<Search size={13} />}>
+                  Show all requests from this IP
+                </Button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[12px]">
-                <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
-                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">HTTP Method</span>
-                  <p className="font-bold text-sky-400 m-0">{selectedLog.method}</p>
-                </div>
-                <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
-                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Status Code</span>
-                  <p className="font-bold text-[var(--text-primary)] m-0">{selectedLog.status}</p>
-                </div>
-                <div className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] space-y-1">
-                  <span className="text-[10.5px] text-[var(--text-muted)] uppercase">Severity</span>
-                  {/* Matches the table badge's own fallback ('NONE', line
-                      ~162) -- showing 'LOW' here for the same empty
-                      severity implied an actual detected threat on a row
-                      the table correctly marked as clean traffic. */}
-                  <p className="font-bold text-[var(--text-primary)] m-0">{selectedLog.severity || 'NONE'}</p>
-                </div>
-              </div>
-
-              {selectedLog.rule_id && (
-                <div className="p-2.5 rounded-xl bg-red-950/20 border border-red-500/30 space-y-1 text-[12px]">
-                  <span className="text-[10.5px] text-red-400 uppercase font-bold">Triggered ModSecurity Rule</span>
-                  <p className="font-bold text-red-300 m-0">Rule ID: {selectedLog.rule_id}</p>
-                </div>
-              )}
-
-              {/* Log Explain & Mask Preview Actions */}
-              <div className="flex gap-2 pt-2">
-                <button
-                  onClick={() => handleExplainLog(selectedLog.log_id!)}
-                  disabled={isExplaining}
-                  className="flex-1 py-2 rounded-xl bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 font-bold text-[12px] transition-colors cursor-pointer disabled:opacity-50"
+              <div className="pt-3 border-t border-[var(--bg-border-subtle)] flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => selectedLog.log_id && handleExplainLog(selectedLog.log_id)}
+                  disabled={isExplaining || !selectedLog.log_id}
+                  icon={<Sparkles size={13} />}
                 >
-                  {isExplaining ? 'Analyzing...' : 'AI Explain Log'}
-                </button>
-                <button
-                  onClick={() => handleMaskPreview(selectedLog.log_id!, selectedLog.url)}
-                  disabled={isMasking}
-                  className="flex-1 py-2 rounded-xl bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 font-bold text-[12px] transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  {isMasking ? 'Masking...' : 'PII Mask Preview'}
-                </button>
+                  {isExplaining ? 'Explaining…' : 'Explain with AI'}
+                </Button>
+                <Button variant="secondary" onClick={() => handleMaskPreview(selectedLog.url)} disabled={isMasking}>
+                  {isMasking ? 'Masking…' : 'Preview URL with personal data masked'}
+                </Button>
               </div>
 
               {explanation && (
-                <div className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-500/30 space-y-2 text-[12px]">
-                  <span className="text-[10.5px] text-indigo-400 uppercase font-bold">AI Explanation</span>
-                  <p className="text-[var(--text-primary)] m-0 leading-relaxed whitespace-pre-wrap font-semibold">{explanation.summary}</p>
-                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 m-0">
+                <div className="p-3 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] space-y-2">
+                  <p className="m-0 flex items-center gap-1.5 text-[12px] font-medium text-indigo-700 dark:text-indigo-300">
+                    <Sparkles size={12} aria-hidden="true" />
+                    AI explanation. It can be wrong; the recorded rule and reason above are what the WAF logged.
+                  </p>
+                  <p className="text-[var(--text-primary)] m-0 leading-relaxed whitespace-pre-wrap">{explanation.summary}</p>
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 m-0 text-[12.5px]">
                     {explanation.category && (<><dt className="text-[var(--text-muted)]">Category</dt><dd className="m-0 text-[var(--text-primary)]">{explanation.category}</dd></>)}
                     {explanation.matchedToken && (<><dt className="text-[var(--text-muted)]">Matched token</dt><dd className="m-0 font-mono break-all text-[var(--text-primary)]">{explanation.matchedToken}</dd></>)}
                     {explanation.rootCause && explanation.rootCause !== explanation.summary && (<><dt className="text-[var(--text-muted)]">Root cause</dt><dd className="m-0 text-[var(--text-primary)]">{explanation.rootCause}</dd></>)}
@@ -545,15 +527,19 @@ export const Logs: React.FC = () => {
               )}
 
               {maskedPayload && (
-                <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 space-y-2 text-[12px]">
-                  <span className="text-[10.5px] text-emerald-400 uppercase font-bold">Masked Payload Preview</span>
-                  <pre className="text-[var(--text-primary)] m-0 p-2 bg-black/40 rounded-lg overflow-x-auto text-[11px] font-mono whitespace-pre-wrap">
+                <div className="p-3 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] space-y-1.5">
+                  <p className="m-0 text-[12px] font-medium text-[var(--text-secondary)]">URL with personal data masked</p>
+                  <pre className="text-[var(--text-primary)] m-0 p-2 bg-[var(--bg-primary)] rounded-md overflow-x-auto text-[12px] font-mono whitespace-pre-wrap">
                     {maskedPayload}
                   </pre>
+                  {maskedPayload === selectedLog.url && (
+                    <p className="m-0 text-[12px] text-[var(--text-muted)]">Nothing in this URL looked like personal data.</p>
+                  )}
                 </div>
               )}
-          </div>
-        )}
+            </div>
+          )
+        })()}
       </Drawer>
     </div>
   )

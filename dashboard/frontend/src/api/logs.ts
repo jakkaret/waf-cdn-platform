@@ -30,6 +30,8 @@ export interface LogStreamParams {
   from_ts?: number | null
   to_ts?: number | null
   cursor?: LogCursor | null
+  // Hide /_next/static/, .js, .css, images and fonts (backend exclude_static).
+  exclude_static?: boolean
 }
 
 export const logsApi = {
@@ -75,6 +77,7 @@ export const logsApi = {
         to_ts: params.to_ts ?? undefined,
         cursor_ts: params.cursor?.ts ?? undefined,
         cursor_id: params.cursor?.id ?? undefined,
+        exclude_static: params.exclude_static || undefined,
       },
     })
     return res.data
@@ -90,6 +93,7 @@ export const logsApi = {
         origin: params.origin || 'ALL',
         from_ts: params.from_ts ?? undefined,
         to_ts: params.to_ts ?? undefined,
+        exclude_static: params.exclude_static || undefined,
       },
     })
     return res.data.buckets || []

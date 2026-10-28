@@ -31,6 +31,32 @@ def test_health_noise_excluded_by_default():
     assert not any("healthz" in c for c in w2)
 
 
+def test_static_assets_hidden_only_when_asked():
+    import re
+    from services.clickhouse_service import STATIC_ASSET_PATTERN
+
+    ch = _svc()
+    assert not any("match(url" in c for c in ch._log_filter_clauses())
+    clause = next(c for c in ch._log_filter_clauses(exclude_static=True) if "match(url" in c)
+    assert clause.startswith("NOT (match(url, '")
+    # Blocked / rate-limited requests on asset paths are never hidden.
+    assert clause.endswith("AND status_code NOT IN (403, 429))")
+    # What ClickHouse sees after unescaping the SQL literal ('\\' -> '\').
+    rx = re.compile(STATIC_ASSET_PATTERN.replace("\\\\", "\\"))
+    for path in ["/_next/static/chunks/main.js", "/assets/app.css?v=3", "/favicon.ico", "/img/logo.PNG".lower()]:
+        assert rx.search(path), path
+    for path in ["/login", "/api/items?id=1", "/admin.php", "/static-page", "/js/"]:
+        assert not rx.search(path), path
+
+
+def test_stream_passes_the_static_switch_to_the_query():
+    ch = _svc()
+    ch.query_logs_keyset(exclude_static=True)
+    assert "NOT (match(url" in ch._captured["q"]
+    ch.logs_histogram(exclude_static=True)
+    assert "NOT (match(url" in ch._captured["q"]
+
+
 def test_time_bounds_are_integer_epoch():
     ch = _svc()
     w = ch._log_filter_clauses(from_ts=1700000000, to_ts=1700003600)
