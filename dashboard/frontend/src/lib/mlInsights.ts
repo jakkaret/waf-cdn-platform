@@ -68,9 +68,12 @@ export interface MLInsights {
 }
 
 export const RANGES = [
-  { hours: 24, label: '24 hours' },
-  { hours: 168, label: '7 days' },
+  { hours: 24, label: '24 hours', labelTh: '24 ชั่วโมง' },
+  { hours: 168, label: '7 days', labelTh: '7 วัน' },
 ] as const
+
+// Text helpers below take the UI language last (English by default).
+type Lang = 'en' | 'th'
 
 export type ListMode = 'flagged' | 'watch'
 
@@ -122,34 +125,46 @@ export function histogramBars(bins: HistogramBin[], threshold: number | null) {
 export function statusView(
   code: number | null,
   action?: GateAction | null,
+  lang: Lang = 'en',
 ): { text: string; tone: 'ok' | 'blocked' | 'error' | 'unknown' } {
-  if (action === 'block') return { text: '403 blocked by ML', tone: 'blocked' }
-  if (action === 'challenge') return { text: 'Challenged by ML', tone: 'error' }
-  if (code === null || code === undefined) return { text: 'Not in the log yet', tone: 'unknown' }
-  if (code === 403 || code === 429) return { text: `${code} blocked`, tone: 'blocked' }
+  const th = lang === 'th'
+  if (action === 'block') return { text: th ? '403 ถูก ML บล็อก' : '403 blocked by ML', tone: 'blocked' }
+  if (action === 'challenge') return { text: th ? 'ML ให้ทำด่านทดสอบ' : 'Challenged by ML', tone: 'error' }
+  if (code === null || code === undefined) return { text: th ? 'ยังไม่อยู่ใน log' : 'Not in the log yet', tone: 'unknown' }
+  if (code === 403 || code === 429) return { text: th ? `${code} ถูกบล็อก` : `${code} blocked`, tone: 'blocked' }
   if (code >= 500) return { text: `${code}`, tone: 'error' }
   return { text: `${code}`, tone: 'ok' }
 }
 
 // Why an Owner/Editor gets no "propose a rule" button on this request ("" = they do).
-export function proposeHint(r: Pick<InsightRequest, 'can_edit' | 'can_propose' | 'action' | 'is_attack'>): string {
+export function proposeHint(r: Pick<InsightRequest, 'can_edit' | 'can_propose' | 'action' | 'is_attack'>, lang: Lang = 'en'): string {
   if (!r.can_edit || r.can_propose) return ''
-  if (r.action === 'block') return 'ML already blocks this request, so no extra rule is needed.'
-  if (!r.is_attack) return "The score is below the model's threshold, so the model does not propose a rule from this request."
+  const th = lang === 'th'
+  if (r.action === 'block') return th ? 'ML บล็อก request นี้อยู่แล้ว จึงไม่ต้องมีกฎเพิ่ม' : 'ML already blocks this request, so no extra rule is needed.'
+  if (!r.is_attack) {
+    return th
+      ? 'คะแนนต่ำกว่า threshold ของโมเดล โมเดลจึงไม่เสนอกฎจาก request นี้'
+      : "The score is below the model's threshold, so the model does not propose a rule from this request."
+  }
   return ''
 }
 
 // Why a pending proposal was not made, from the backend's suggestion.reason.
-export function suggestReasonText(reason: string): string {
+export function suggestReasonText(reason: string, lang: Lang = 'en'): string {
+  const th = lang === 'th'
   switch (reason) {
     case 'gen3_not_attack':
-      return 'Scored again from the stored (masked) data, the request falls below the threshold, so there is no rule to propose.'
+      return th
+        ? 'เมื่อให้คะแนนใหม่จากข้อมูลที่เก็บไว้ (ปิดบังแล้ว) request นี้ต่ำกว่า threshold จึงไม่มีกฎให้เสนอ'
+        : 'Scored again from the stored (masked) data, the request falls below the threshold, so there is no rule to propose.'
     case 'gen3_no_detector':
-      return 'The model flagged the shape of the request, but no detector matched, so no general rule can be built from it.'
+      return th
+        ? 'โมเดลตั้งธงจากโครงสร้างของ request แต่ไม่มี detector ตัวไหนจับได้ จึงสร้างกฎทั่วไปจากมันไม่ได้'
+        : 'The model flagged the shape of the request, but no detector matched, so no general rule can be built from it.'
     case 'generator_error':
-      return 'The ML rule generator returned an error. Try again.'
+      return th ? 'ตัวสร้างกฎ ML ตอบกลับผิดพลาด ลองใหม่อีกครั้ง' : 'The ML rule generator returned an error. Try again.'
     default:
-      return reason ? `No rule could be proposed (${reason}).` : ''
+      return reason ? (th ? `เสนอกฎไม่ได้ (${reason})` : `No rule could be proposed (${reason}).`) : ''
   }
 }
 
@@ -168,8 +183,15 @@ export function requestTarget(r: Pick<InsightRequest, 'path' | 'query'>): string
   return r.query ? `${r.path}?${r.query}` : r.path
 }
 
-export function emptyReason(summary: InsightsSummary, hasOrigins: boolean, isAdmin: boolean): string {
-  if (!isAdmin && !hasOrigins) return 'You have no origins to look at yet. Add one, or ask its owner to invite you.'
-  if (!summary.total) return 'No requests were scored in this period. Scoring starts once your sites receive traffic.'
+export function emptyReason(summary: InsightsSummary, hasOrigins: boolean, isAdmin: boolean, lang: Lang = 'en'): string {
+  const th = lang === 'th'
+  if (!isAdmin && !hasOrigins) {
+    return th ? 'คุณยังไม่มี origin ให้ดู เพิ่ม origin หรือขอให้เจ้าของเชิญคุณ' : 'You have no origins to look at yet. Add one, or ask its owner to invite you.'
+  }
+  if (!summary.total) {
+    return th
+      ? 'ช่วงนี้ยังไม่มี request ที่ถูกให้คะแนน การให้คะแนนจะเริ่มเมื่อเว็บของคุณมีทราฟฟิก'
+      : 'No requests were scored in this period. Scoring starts once your sites receive traffic.'
+  }
   return ''
 }

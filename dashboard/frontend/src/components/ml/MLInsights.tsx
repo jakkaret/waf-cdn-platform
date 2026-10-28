@@ -14,6 +14,7 @@ import {
   RANGES, requestTarget, scorePoints, statusView, WATCH_FLOOR,
 } from '../../lib/mlInsights'
 import { VerdictActions } from './VerdictActions'
+import { useT } from '../../i18n'
 
 // Gen 3 scores of the selected origin's real traffic (nginx mirror, or the
 // inline gate of an origin in ML enforce mode -> ML service -> ClickHouse
@@ -63,7 +64,8 @@ const Tile: React.FC<{ label: string; value: string; sub?: string }> = ({ label,
 
 const RequestRow: React.FC<{ r: InsightRequest; showHost: boolean }> = ({ r, showHost }) => {
   const [open, setOpen] = useState(false)
-  const status = statusView(r.status_code, r.action)
+  const { t, lang } = useT()
+  const status = statusView(r.status_code, r.action, lang)
   const target = requestTarget(r)
   return (
     <>
@@ -73,7 +75,7 @@ const RequestRow: React.FC<{ r: InsightRequest; showHost: boolean }> = ({ r, sho
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            aria-label={open ? 'Hide details' : 'Show details'}
+            aria-label={open ? t('Hide details', 'ซ่อนรายละเอียด') : t('Show details', 'แสดงรายละเอียด')}
             className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
             {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -112,7 +114,9 @@ const RequestRow: React.FC<{ r: InsightRequest; showHost: boolean }> = ({ r, sho
               ))}
             </span>
           ) : (
-            <span className={muted} title="The model scored the shape of the request; no detector matched">Request shape</span>
+            <span className={muted} title={t('The model scored the shape of the request; no detector matched', 'โมเดลให้คะแนนจากโครงสร้างของ request ไม่มี detector ตัวไหนตรง')}>
+              {t('Request shape', 'โครงสร้าง request')}
+            </span>
           )}
         </td>
         <td className={`py-2 pr-3 whitespace-nowrap text-[12px] ${STATUS_TONE[status.tone]}`}>{status.text}</td>
@@ -126,13 +130,16 @@ const RequestRow: React.FC<{ r: InsightRequest; showHost: boolean }> = ({ r, sho
               <dd className="m-0 font-mono break-all text-[var(--text-primary)]">{r.method} {target}</dd>
               <dt className="text-[var(--text-muted)]">Host</dt>
               <dd className="m-0 text-[var(--text-primary)]">{r.host}</dd>
-              <dt className="text-[var(--text-muted)]">Score / threshold</dt>
+              <dt className="text-[var(--text-muted)]">{t('Score / threshold', 'คะแนน / threshold')}</dt>
               <dd className="m-0 tabular-nums text-[var(--text-primary)]">{scorePoints(r.score, 2)} / {scorePoints(r.threshold, 2)}</dd>
-              <dt className="text-[var(--text-muted)]">Body size</dt>
+              <dt className="text-[var(--text-muted)]">{t('Body size', 'ขนาด body')}</dt>
               <dd className="m-0 tabular-nums text-[var(--text-primary)]">
-                {r.body_length.toLocaleString()} bytes {r.has_body ? '(a masked copy is kept; the Owner and Editors can open it)' : '(content not kept)'}
+                {r.body_length.toLocaleString()} bytes{' '}
+                {r.has_body
+                  ? t('(a masked copy is kept; the Owner and Editors can open it)', '(เก็บสำเนาแบบปิดบังไว้ Owner และ Editor เปิดดูได้)')
+                  : t('(content not kept)', '(ไม่ได้เก็บเนื้อหา)')}
               </dd>
-              <dt className="text-[var(--text-muted)]">Client</dt>
+              <dt className="text-[var(--text-muted)]">{t('Client', 'ผู้ใช้')}</dt>
               <dd className="m-0 text-[var(--text-primary)]">{r.client_ip ?? '-'}{r.country ? ` (${r.country})` : ''}</dd>
               <dt className="text-[var(--text-muted)]">Request ID</dt>
               <dd className="m-0 font-mono break-all text-[var(--text-secondary)]">{r.request_id || '-'}</dd>
@@ -153,6 +160,7 @@ export const MLInsights: React.FC = () => {
   const c = theme === 'dark' ? COLORS.dark : COLORS.light
   const [hours, setHours] = useState<number>(24)
   const [mode, setMode] = useState<ListMode>('flagged')
+  const { t, lang } = useT()
 
   const { data: originsRes } = useQuery({ queryKey: ['origins'], queryFn: () => getOrigins() })
   const hasOrigins = (originsRes?.data?.origins ?? []).length > 0
@@ -180,7 +188,7 @@ export const MLInsights: React.FC = () => {
   }))
   const maxDetector = Math.max(1, ...(data?.detectors ?? []).map((d) => d.count))
   const showHost = (summary?.hosts ?? 0) > 1 || selectedOrigin === 'ALL'
-  const reason = summary ? emptyReason(summary, hasOrigins, isAdmin) : ''
+  const reason = summary ? emptyReason(summary, hasOrigins, isAdmin, lang) : ''
 
   return (
     <div className="space-y-5">
@@ -188,23 +196,33 @@ export const MLInsights: React.FC = () => {
         <div className="flex max-w-3xl items-start gap-2.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] px-3 py-2.5">
           <Info size={16} className="mt-0.5 shrink-0 text-[var(--accent)]" aria-hidden="true" />
           <p className="m-0 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">
-            <strong className="font-medium text-[var(--text-primary)]">Log mode by default:</strong> the model scores every request
-            that passes the WAF, body included, and only records the score. It{' '}
-            <strong className="font-medium text-[var(--text-primary)]">does not block</strong>. An Owner or Editor can turn on enforce
-            mode in the origin's ML protection tab.
+            <strong className="font-medium text-[var(--text-primary)]">{t('Log mode by default:', 'ค่าเริ่มต้นเป็นโหมดบันทึก log:')}</strong>{' '}
+            {t(
+              'the model scores every request that passes the WAF, body included, and only records the score. It',
+              'โมเดลให้คะแนนทุก request ที่ผ่าน WAF รวม body และบันทึกคะแนนไว้เท่านั้น',
+            )}{' '}
+            <strong className="font-medium text-[var(--text-primary)]">{t('does not block', 'ไม่บล็อก')}</strong>.{' '}
+            {t(
+              "An Owner or Editor can turn on enforce mode in the origin's ML protection tab.",
+              'Owner หรือ Editor เปิดโหมดบังคับใช้ได้ที่แท็บการป้องกันด้วย ML ของ origin',
+            )}
             {(summary?.blocked ?? 0) + (summary?.challenged ?? 0) > 0 && (
               <>
-                {' '}In this period ML blocked{' '}
-                <strong className="font-medium text-[var(--text-primary)]">{(summary?.blocked ?? 0).toLocaleString()}</strong> and
-                challenged <strong className="font-medium text-[var(--text-primary)]">{(summary?.challenged ?? 0).toLocaleString()}</strong> requests.
+                {' '}
+                {t(
+                  `In this period ML blocked ${(summary?.blocked ?? 0).toLocaleString()} and challenged ${(summary?.challenged ?? 0).toLocaleString()} requests.`,
+                  `ช่วงนี้ ML บล็อก ${(summary?.blocked ?? 0).toLocaleString()} request และให้ทำด่านทดสอบ ${(summary?.challenged ?? 0).toLocaleString()} request`,
+                )}
               </>
+            )}{' '}
+            {t(
+              'A flagged request is an estimate, not a confirmed attack: read it together with its path and what was detected. Health checks and monitoring or telemetry calls (for example from Cloudflare Workers) can be flagged too and are usually safe.',
+              'request ที่ถูกตั้งธงเป็นการประมาณ ไม่ใช่การโจมตีที่ยืนยันแล้ว ควรดูประกอบกับ path และสิ่งที่ตรวจพบ health check และการเรียกของระบบ monitoring หรือ telemetry (เช่นจาก Cloudflare Workers) ก็อาจถูกตั้งธงได้และมักปลอดภัย',
             )}
-            {' '}A flagged request is an estimate, not a confirmed attack: read it together with its path and what was detected. Health
-            checks and monitoring or telemetry calls (for example from Cloudflare Workers) can be flagged too and are usually safe.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-md border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5" role="group" aria-label="Time range">
+          <div className="inline-flex rounded-md border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5" role="group" aria-label={t('Time range', 'ช่วงเวลา')}>
             {RANGES.map((r) => (
               <button
                 key={r.hours}
@@ -215,14 +233,14 @@ export const MLInsights: React.FC = () => {
                   hours === r.hours ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                 }`}
               >
-                {r.label}
+                {lang === 'th' ? r.labelTh : r.label}
               </button>
             ))}
           </div>
           <button
             type="button"
             onClick={() => refetch()}
-            aria-label="Refresh"
+            aria-label={t('Refresh', 'รีเฟรช')}
             className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--bg-border)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
             <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
@@ -231,29 +249,37 @@ export const MLInsights: React.FC = () => {
       </div>
 
       <p className={`m-0 ${muted}`}>
-        Showing <span className="text-[var(--text-secondary)]">{selectedOrigin === 'ALL' ? (isAdmin ? 'every origin you can view' : 'all your origins') : selectedOriginLabel}</span>.
-        {' '}Change it with the origin picker at the top.
+        {t('Showing', 'กำลังแสดง')}{' '}
+        <span className="text-[var(--text-secondary)]">
+          {selectedOrigin === 'ALL'
+            ? isAdmin
+              ? t('every origin you can view', 'ทุก origin ที่คุณดูได้')
+              : t('all your origins', 'ทุก origin ของคุณ')
+            : selectedOriginLabel}
+        </span>
+        .{' '}
+        {t('Change it with the origin picker at the top.', 'เปลี่ยนได้จากตัวเลือก origin ด้านบน')}
       </p>
 
       {isLoading && (
         <div className="dash-card flex min-h-[14rem] items-center justify-center gap-2 text-[13px] text-[var(--text-muted)]">
           <span className="h-4 w-4 rounded-full border-2 border-[var(--bg-border)] border-t-[var(--accent)] animate-spin" />
-          Loading ML insights…
+          {t('Loading ML insights…', 'กำลังโหลด ML insights…')}
         </div>
       )}
 
       {isError && (
         <div className="dash-card p-5 text-[13px] text-[var(--text-secondary)]">
           {(error as any)?.response?.status === 503
-            ? 'The analytics store is unavailable right now. Try again in a minute.'
-            : 'Could not load ML insights. Reload the page to try again.'}
+            ? t('The analytics store is unavailable right now. Try again in a minute.', 'ระบบเก็บข้อมูลวิเคราะห์ใช้งานไม่ได้ตอนนี้ ลองใหม่ในอีกหนึ่งนาที')
+            : t('Could not load ML insights. Reload the page to try again.', 'โหลด ML insights ไม่สำเร็จ รีโหลดหน้าเพื่อลองใหม่')}
         </div>
       )}
 
       {data && summary && reason && (
         <div className="dash-card flex min-h-[12rem] flex-col items-center justify-center p-8 text-center">
           <ShieldAlert size={32} className="text-[var(--text-dim)]" aria-hidden="true" />
-          <p className="mt-3 mb-1 text-[14px] font-medium text-[var(--text-primary)]">No data yet</p>
+          <p className="mt-3 mb-1 text-[14px] font-medium text-[var(--text-primary)]">{t('No data yet', 'ยังไม่มีข้อมูล')}</p>
           <p className="m-0 max-w-md text-[12.5px] text-[var(--text-muted)]">{reason}</p>
         </div>
       )}
@@ -261,22 +287,36 @@ export const MLInsights: React.FC = () => {
       {data && summary && !reason && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Tile label="Requests scored" value={summary.total.toLocaleString()} sub={summary.last_seen ? `Latest ${formatBkkDateTime(summary.last_seen, { seconds: false })}` : undefined} />
-            <Tile label="Flagged by ML" value={summary.flagged.toLocaleString()} sub={`${flaggedShare(summary)} of all scored`} />
-            <Tile label="Worth watching" value={summary.watch.toLocaleString()} sub={`Score ${scorePoints(WATCH_FLOOR, 0)} or more, below the threshold`} />
-            <Tile label="Model threshold" value={scorePoints(threshold, 1)} sub="Scores at or above this are flagged" />
+            <Tile
+              label={t('Requests scored', 'request ที่ให้คะแนนแล้ว')}
+              value={summary.total.toLocaleString()}
+              sub={summary.last_seen ? t(`Latest ${formatBkkDateTime(summary.last_seen, { seconds: false })}`, `ล่าสุด ${formatBkkDateTime(summary.last_seen, { seconds: false })}`) : undefined}
+            />
+            <Tile
+              label={t('Flagged by ML', 'ML ตั้งธง')}
+              value={summary.flagged.toLocaleString()}
+              sub={t(`${flaggedShare(summary)} of all scored`, `${flaggedShare(summary)} ของทั้งหมดที่ให้คะแนน`)}
+            />
+            <Tile
+              label={t('Worth watching', 'ควรจับตา')}
+              value={summary.watch.toLocaleString()}
+              sub={t(`Score ${scorePoints(WATCH_FLOOR, 0)} or more, below the threshold`, `คะแนนตั้งแต่ ${scorePoints(WATCH_FLOOR, 0)} แต่ต่ำกว่า threshold`)}
+            />
+            <Tile label={t('Model threshold', 'threshold ของโมเดล')} value={scorePoints(threshold, 1)} sub={t('Scores at or above this are flagged', 'คะแนนตั้งแต่ค่านี้จะถูกตั้งธง')} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            <section className="dash-card p-4 lg:col-span-8" aria-label="Score distribution">
+            <section className="dash-card p-4 lg:col-span-8" aria-label={t('Score distribution', 'การกระจายของคะแนน')}>
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className={sectionTitle}>Score distribution</h2>
+                <h2 className={sectionTitle}>{t('Score distribution', 'การกระจายของคะแนน')}</h2>
                 <span className="flex items-center gap-3 text-[12px] text-[var(--text-secondary)]">
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.below }} />Below the threshold</span>
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.flagged }} />At or above (flagged)</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.below }} />{t('Below the threshold', 'ต่ำกว่า threshold')}</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.flagged }} />{t('At or above (flagged)', 'ตั้งแต่ threshold (ถูกตั้งธง)')}</span>
                 </span>
               </div>
-              <p className={`m-0 mt-0.5 ${muted}`}>Requests per score band, 0 to 100. The vertical line is the model's threshold.</p>
+              <p className={`m-0 mt-0.5 ${muted}`}>
+                {t("Requests per score band, 0 to 100. The vertical line is the model's threshold.", 'จำนวน request ในแต่ละช่วงคะแนน 0 ถึง 100 เส้นแนวตั้งคือ threshold ของโมเดล')}
+              </p>
               <div className="mt-3 h-56">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={bars.map((b) => ({ ...b, below: b.count - b.flagged }))} margin={{ top: 8, right: 4, left: -16, bottom: 0 }} barCategoryGap={2}>
@@ -287,8 +327,8 @@ export const MLInsights: React.FC = () => {
                       cursor={{ fill: 'var(--bg-border)', opacity: 0.4 }}
                       content={
                         <ChartTip
-                          title={(p) => `Score ${p.label}`}
-                          rows={(p) => [['Requests', p.count.toLocaleString()], ['Flagged', p.flagged.toLocaleString()]]}
+                          title={(p) => t(`Score ${p.label}`, `คะแนน ${p.label}`)}
+                          rows={(p) => [[t('Requests', 'Request'), p.count.toLocaleString()], [t('Flagged', 'ถูกตั้งธง'), p.flagged.toLocaleString()]]}
                         />
                       }
                     />
@@ -300,9 +340,9 @@ export const MLInsights: React.FC = () => {
               </div>
             </section>
 
-            <section className="dash-card p-4 lg:col-span-4" aria-label="What was detected in flagged requests">
-              <h2 className={sectionTitle}>What was detected</h2>
-              <p className={`m-0 mt-0.5 ${muted}`}>In flagged requests</p>
+            <section className="dash-card p-4 lg:col-span-4" aria-label={t('What was detected in flagged requests', 'สิ่งที่ตรวจพบใน request ที่ถูกตั้งธง')}>
+              <h2 className={sectionTitle}>{t('What was detected', 'สิ่งที่ตรวจพบ')}</h2>
+              <p className={`m-0 mt-0.5 ${muted}`}>{t('In flagged requests', 'ใน request ที่ถูกตั้งธง')}</p>
               {data.detectors.length ? (
                 <ul className="m-0 mt-3 p-0 list-none space-y-2.5">
                   {data.detectors.map((d) => (
@@ -319,15 +359,19 @@ export const MLInsights: React.FC = () => {
                 </ul>
               ) : (
                 <p className={`m-0 mt-3 ${muted}`}>
-                  {summary.flagged ? 'No detector matched the flagged requests; the model judged them by their shape.' : 'No flagged requests yet.'}
+                  {summary.flagged
+                    ? t('No detector matched the flagged requests; the model judged them by their shape.', 'ไม่มี detector ตรงกับ request ที่ถูกตั้งธง โมเดลตัดสินจากโครงสร้างของ request')
+                    : t('No flagged requests yet.', 'ยังไม่มี request ที่ถูกตั้งธง')}
                 </p>
               )}
             </section>
           </div>
 
-          <section className="dash-card p-4" aria-label="Flagged requests over time">
-            <h2 className={sectionTitle}>Flagged over time</h2>
-            <p className={`m-0 mt-0.5 ${muted}`}>Per {longRange ? '6 hours' : 'hour'}, Bangkok time</p>
+          <section className="dash-card p-4" aria-label={t('Flagged requests over time', 'request ที่ถูกตั้งธงตามเวลา')}>
+            <h2 className={sectionTitle}>{t('Flagged over time', 'ที่ถูกตั้งธงตามเวลา')}</h2>
+            <p className={`m-0 mt-0.5 ${muted}`}>
+              {longRange ? t('Per 6 hours, Bangkok time', 'ทุก 6 ชั่วโมง เวลากรุงเทพฯ') : t('Per hour, Bangkok time', 'รายชั่วโมง เวลากรุงเทพฯ')}
+            </p>
             <div className="mt-3 h-36">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={timeline} margin={{ top: 8, right: 4, left: -16, bottom: 0 }} barCategoryGap={2}>
@@ -339,7 +383,7 @@ export const MLInsights: React.FC = () => {
                     content={
                       <ChartTip
                         title={(p) => formatBkkDateTime(p.t)}
-                        rows={(p) => [['Flagged', p.flagged.toLocaleString()], ['All requests', p.count.toLocaleString()]]}
+                        rows={(p) => [[t('Flagged', 'ถูกตั้งธง'), p.flagged.toLocaleString()], [t('All requests', 'Request ทั้งหมด'), p.count.toLocaleString()]]}
                       />
                     }
                   />
@@ -349,14 +393,22 @@ export const MLInsights: React.FC = () => {
             </div>
           </section>
 
-          <section className="dash-card p-0 overflow-hidden" aria-label="Requests">
+          <section className="dash-card p-0 overflow-hidden" aria-label={t('Requests', 'Request')}>
             <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
               <div>
-                <h2 className={sectionTitle}>Latest requests</h2>
-                <p className={`m-0 mt-0.5 ${muted}`}>Sensitive query values (token, password) are masked. For requests scoring 50 or more a masked copy of the body is kept for 7 days.</p>
+                <h2 className={sectionTitle}>{t('Latest requests', 'request ล่าสุด')}</h2>
+                <p className={`m-0 mt-0.5 ${muted}`}>
+                  {t(
+                    'Sensitive query values (token, password) are masked. For requests scoring 50 or more a masked copy of the body is kept for 7 days.',
+                    'ค่าที่อ่อนไหวใน query (token, password) ถูกปิดบัง request ที่ได้คะแนนตั้งแต่ 50 จะเก็บสำเนา body แบบปิดบังไว้ 7 วัน',
+                  )}
+                </p>
               </div>
-              <div className="inline-flex rounded-md border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5" role="group" aria-label="Which requests">
-                {([['flagged', 'Flagged'], ['watch', `Score ${scorePoints(WATCH_FLOOR, 0)} or more`]] as const).map(([m, label]) => (
+              <div className="inline-flex rounded-md border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5" role="group" aria-label={t('Which requests', 'request ที่จะแสดง')}>
+                {([
+                  ['flagged', t('Flagged', 'ถูกตั้งธง')],
+                  ['watch', t(`Score ${scorePoints(WATCH_FLOOR, 0)} or more`, `คะแนนตั้งแต่ ${scorePoints(WATCH_FLOOR, 0)}`)],
+                ] as const).map(([m, label]) => (
                   <button
                     key={m}
                     type="button"
@@ -376,13 +428,13 @@ export const MLInsights: React.FC = () => {
                 <table className="w-full min-w-[46rem] border-collapse text-left">
                   <thead>
                     <tr className="text-[11.5px] font-medium text-[var(--text-muted)]">
-                      <th className="w-8 py-2 pl-3" aria-label="Details" />
-                      <th className="py-2 pr-3 font-medium">Time</th>
+                      <th className="w-8 py-2 pl-3" aria-label={t('Details', 'รายละเอียด')} />
+                      <th className="py-2 pr-3 font-medium">{t('Time', 'เวลา')}</th>
                       {showHost && <th className="py-2 pr-3 font-medium">Host</th>}
                       <th className="py-2 pr-3 font-medium">Request</th>
-                      <th className="py-2 pr-3 font-medium">Score</th>
-                      <th className="py-2 pr-3 font-medium">Detected</th>
-                      <th className="py-2 pr-3 font-medium">WAF answer</th>
+                      <th className="py-2 pr-3 font-medium">{t('Score', 'คะแนน')}</th>
+                      <th className="py-2 pr-3 font-medium">{t('Detected', 'ตรวจพบ')}</th>
+                      <th className="py-2 pr-3 font-medium">{t('WAF answer', 'WAF ตอบ')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -392,7 +444,9 @@ export const MLInsights: React.FC = () => {
               </div>
             ) : (
               <p className={`m-0 px-4 py-8 text-center ${muted}`}>
-                {mode === 'flagged' ? 'No flagged requests in this period.' : 'No requests scored 50 or more in this period.'}
+                {mode === 'flagged'
+                  ? t('No flagged requests in this period.', 'ช่วงนี้ไม่มี request ที่ถูกตั้งธง')
+                  : t('No requests scored 50 or more in this period.', 'ช่วงนี้ไม่มี request ที่ได้คะแนนตั้งแต่ 50')}
               </p>
             )}
           </section>
