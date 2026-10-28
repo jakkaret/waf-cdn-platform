@@ -6,15 +6,20 @@ export const BLOCK_RANGE = [51, 100] as const
 export const SUGGESTED = { challenge: 88, block: 95 } as const
 
 /** Why these bands cannot be saved, or null when they can. */
-export function bandError(challenge: number | null, block: number): string | null {
+export function bandError(challenge: number | null, block: number, lang: 'en' | 'th' = 'en'): string | null {
+  const th = lang === 'th'
   if (!Number.isInteger(block) || block < BLOCK_RANGE[0] || block > BLOCK_RANGE[1]) {
-    return `Block score must be a whole number from ${BLOCK_RANGE[0]} to ${BLOCK_RANGE[1]}.`
+    return th
+      ? `คะแนนบล็อกต้องเป็นจำนวนเต็มตั้งแต่ ${BLOCK_RANGE[0]} ถึง ${BLOCK_RANGE[1]}`
+      : `Block score must be a whole number from ${BLOCK_RANGE[0]} to ${BLOCK_RANGE[1]}.`
   }
   if (challenge === null) return null
   if (!Number.isInteger(challenge) || challenge < CHALLENGE_RANGE[0] || challenge > CHALLENGE_RANGE[1]) {
-    return `Challenge score must be a whole number from ${CHALLENGE_RANGE[0]} to ${CHALLENGE_RANGE[1]}.`
+    return th
+      ? `คะแนนทดสอบต้องเป็นจำนวนเต็มตั้งแต่ ${CHALLENGE_RANGE[0]} ถึง ${CHALLENGE_RANGE[1]}`
+      : `Challenge score must be a whole number from ${CHALLENGE_RANGE[0]} to ${CHALLENGE_RANGE[1]}.`
   }
-  if (challenge >= block) return 'The challenge score must be lower than the block score.'
+  if (challenge >= block) return th ? 'คะแนนทดสอบต้องต่ำกว่าคะแนนบล็อก' : 'The challenge score must be lower than the block score.'
   return null
 }
 

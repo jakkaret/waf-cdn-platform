@@ -4,11 +4,12 @@ import { getShieldEvents } from '../api/shieldEvents'
 import { Badge } from './ui/Badge'
 import { LoadingSpinner } from './ui/LoadingSpinner'
 import { formatBkkDateTime } from '../lib/time'
+import { useT } from '../i18n'
 
 const RANGES = [
-  { hours: 24, label: '24h' },
-  { hours: 24 * 7, label: '7d' },
-  { hours: 24 * 30, label: '30d' },
+  { hours: 24, label: '24h', labelTh: '24 ชม.' },
+  { hours: 24 * 7, label: '7d', labelTh: '7 วัน' },
+  { hours: 24 * 30, label: '30d', labelTh: '30 วัน' },
 ]
 
 // Which outcomes read as a problem (wrong codes, blocked scripts) vs normal.
@@ -16,6 +17,7 @@ const BAD = new Set(['blocked_no_clearance', 'otp_wrong_code', 'otp_too_many_att
 
 export const ShieldActivity: React.FC<{ originId: string }> = ({ originId }) => {
   const [hours, setHours] = useState(24)
+  const { t } = useT()
   const { data, isLoading, isError } = useQuery({
     queryKey: ['shield-events', originId, hours],
     queryFn: async () => (await getShieldEvents(originId, hours)).data,
@@ -25,8 +27,8 @@ export const ShieldActivity: React.FC<{ originId: string }> = ({ originId }) => 
   return (
     <div className="dash-card p-5 space-y-4">
       <div className="flex justify-between items-center pb-3 border-b border-[var(--bg-border-subtle)]">
-        <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">Shield Activity</h3>
-        <div className="flex gap-1" role="group" aria-label="Time range">
+        <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">{t('Shield activity', 'กิจกรรมของ Shield')}</h3>
+        <div className="flex gap-1" role="group" aria-label={t('Time range', 'ช่วงเวลา')}>
           {RANGES.map((r) => (
             <button
               key={r.hours}
@@ -38,7 +40,7 @@ export const ShieldActivity: React.FC<{ originId: string }> = ({ originId }) => 
                   : 'border-[var(--bg-border)] text-[var(--text-muted)]'
               }`}
             >
-              {r.label}
+              {t(r.label, r.labelTh)}
             </button>
           ))}
         </div>
@@ -47,11 +49,11 @@ export const ShieldActivity: React.FC<{ originId: string }> = ({ originId }) => 
       {isLoading ? (
         <LoadingSpinner />
       ) : isError || !data ? (
-        <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">Activity is unavailable right now.</p>
+        <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">{t('Activity is unavailable right now.', 'ยังดูกิจกรรมไม่ได้ในตอนนี้')}</p>
       ) : (
         <>
           {data.counts.length === 0 ? (
-            <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">No CAPTCHA/OTP activity in this period.</p>
+            <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">{t('No CAPTCHA/OTP activity in this period.', 'ไม่มีกิจกรรม CAPTCHA/OTP ในช่วงนี้')}</p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {data.counts
@@ -78,10 +80,10 @@ export const ShieldActivity: React.FC<{ originId: string }> = ({ originId }) => 
               <table className="dash-table">
                 <thead>
                   <tr>
-                    <th>Time</th>
-                    <th>Event</th>
-                    <th>Email</th>
-                    <th>Client IP</th>
+                    <th>{t('Time', 'เวลา')}</th>
+                    <th>{t('Event', 'เหตุการณ์')}</th>
+                    <th>{t('Email', 'อีเมล')}</th>
+                    <th>{t('Client IP', 'IP ผู้ใช้')}</th>
                     <th>Path</th>
                   </tr>
                 </thead>
@@ -106,7 +108,7 @@ export const ShieldActivity: React.FC<{ originId: string }> = ({ originId }) => 
             </div>
           )}
           <p className="text-[11px] text-[var(--text-muted)] font-mono m-0">
-            Emails are shown masked; the full address is never stored.
+            {t('Emails are shown masked; the full address is never stored.', 'อีเมลแสดงแบบปิดบางส่วน ระบบไม่เก็บที่อยู่เต็ม')}
           </p>
         </>
       )}

@@ -15,6 +15,7 @@ import { looksLikePathPattern, rateText } from '../lib/siteAccess'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { LoadingSpinner } from './ui/LoadingSpinner'
+import { useT } from '../i18n'
 
 interface Props {
   originId: string
@@ -34,6 +35,7 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
   const queryClient = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<SiteRateRuleInput>(EMPTY)
+  const { t } = useT()
   const key = ['site-rate-limits', originId]
 
   const { data: rules, isLoading } = useQuery({ queryKey: key, queryFn: () => getSiteRateRules(originId) })
@@ -51,29 +53,29 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
       refresh()
       setForm(EMPTY)
       setShowForm(false)
-      toast.success('Rate limit added')
+      toast.success(t('Rate limit added', 'เพิ่ม rate limit แล้ว'))
     },
-    onError: (e) => toast.error(errText(e, 'Failed to add the rate limit')),
+    onError: (e) => toast.error(errText(e, t('Failed to add the rate limit', 'เพิ่ม rate limit ไม่สำเร็จ'))),
   })
 
   const toggleMutation = useMutation({
     mutationFn: (rule: SiteRateRule) => updateSiteRateRule(originId, rule.id, { enabled: !rule.enabled }),
     onSuccess: refresh,
-    onError: (e) => toast.error(errText(e, 'Failed to update the rate limit')),
+    onError: (e) => toast.error(errText(e, t('Failed to update the rate limit', 'อัปเดต rate limit ไม่สำเร็จ'))),
   })
 
   const deleteMutation = useMutation({
     mutationFn: (ruleId: string) => deleteSiteRateRule(originId, ruleId),
     onSuccess: () => {
       refresh()
-      toast.success('Rate limit removed')
+      toast.success(t('Rate limit removed', 'ลบ rate limit แล้ว'))
     },
-    onError: (e) => toast.error(errText(e, 'Failed to remove the rate limit')),
+    onError: (e) => toast.error(errText(e, t('Failed to remove the rate limit', 'ลบ rate limit ไม่สำเร็จ'))),
   })
 
   const formOk = form.name.trim() !== '' && looksLikePathPattern(form.path_pattern)
     && form.limit_count >= 1 && form.limit_count <= 100000 && form.window_seconds >= 1 && form.window_seconds <= 3600
-  const ruleName = (id: string) => rules?.find((r) => r.id === id)?.name ?? 'Platform limit'
+  const ruleName = (id: string) => rules?.find((r) => r.id === id)?.name ?? t('Platform limit', 'limit ของแพลตฟอร์ม')
   const inputClass = 'w-full dash-input font-mono'
   const labelClass = 'text-[11px] font-bold font-mono text-[var(--text-muted)] mb-1 block'
 
@@ -82,15 +84,17 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
       <section className="space-y-3">
         <div className="flex justify-between items-center gap-3">
           <div>
-            <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">Rate Limits</h2>
+            <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">Rate limit</h2>
             <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-              Limit how many requests one visitor IP can send to a path on this origin's domains. Over the limit the
-              visitor gets 429 until the window ends. Each domain counts on its own; platform-wide limits still apply.
+              {t(
+                "Limit how many requests one visitor IP can send to a path on this origin's domains. Over the limit the visitor gets 429 until the window ends. Each domain counts on its own; platform-wide limits still apply.",
+                'จำกัดจำนวน request ที่ IP หนึ่งส่งไปยัง path บนโดเมนของ origin นี้ได้ เกินแล้วจะได้ 429 จนกว่าช่วงเวลาจะหมด แต่ละโดเมนนับแยกกัน และ limit ของแพลตฟอร์มยังมีผลอยู่',
+              )}
             </p>
           </div>
           {canEdit && (
             <Button variant={showForm ? 'secondary' : 'brand'} onClick={() => setShowForm((s) => !s)}>
-              {showForm ? 'Cancel' : '+ Add Limit'}
+              {showForm ? t('Cancel', 'ยกเลิก') : t('+ Add limit', '+ เพิ่ม limit')}
             </Button>
           )}
         </div>
@@ -104,11 +108,11 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
             }}
           >
             <div className="md:col-span-2">
-              <label className={labelClass}>Name</label>
+              <label className={labelClass}>{t('Name', 'ชื่อ')}</label>
               <input
                 className={inputClass}
                 maxLength={80}
-                placeholder="e.g. Login guard"
+                placeholder={t('e.g. Login guard', 'เช่น กันยิงหน้าล็อกอิน')}
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               />
@@ -117,7 +121,7 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
               <label className={labelClass}>Path</label>
               <input
                 className={inputClass}
-                placeholder="/login, /api/*, or *"
+                placeholder={t('/login, /api/*, or *', '/login, /api/* หรือ *')}
                 value={form.path_pattern}
                 onChange={(e) => setForm((f) => ({ ...f, path_pattern: e.target.value }))}
               />
@@ -137,7 +141,7 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
               </select>
             </div>
             <div>
-              <label className={labelClass}>Requests</label>
+              <label className={labelClass}>{t('Requests', 'จำนวน request')}</label>
               <input
                 type="number"
                 min={1}
@@ -148,7 +152,7 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
               />
             </div>
             <div>
-              <label className={labelClass}>Per (seconds)</label>
+              <label className={labelClass}>{t('Per (seconds)', 'ต่อ (วินาที)')}</label>
               <input
                 type="number"
                 min={1}
@@ -160,7 +164,7 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
             </div>
             <div className="md:col-span-2 flex justify-end">
               <Button type="submit" disabled={!formOk} isLoading={addMutation.isPending}>
-                Add Limit
+                {t('Add limit', 'เพิ่ม limit')}
               </Button>
             </div>
           </form>
@@ -173,11 +177,11 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
             <table className="dash-table">
               <thead>
                 <tr>
-                  <th>Name</th>
+                  <th>{t('Name', 'ชื่อ')}</th>
                   <th>Method</th>
                   <th>Path</th>
                   <th>Limit</th>
-                  <th>On</th>
+                  <th>{t('On', 'เปิด')}</th>
                   {canEdit && <th></th>}
                 </tr>
               </thead>
@@ -185,7 +189,7 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
                 {!rules || rules.length === 0 ? (
                   <tr>
                     <td colSpan={canEdit ? 6 : 5} className="py-6 text-center text-[var(--text-muted)] font-mono text-[12px]">
-                      No rate limits for this origin.
+                      {t('No rate limits for this origin.', 'origin นี้ยังไม่มี rate limit')}
                     </td>
                   </tr>
                 ) : (
@@ -203,7 +207,7 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
                           checked={!!rule.enabled}
                           disabled={!canEdit || toggleMutation.isPending}
                           onChange={() => toggleMutation.mutate(rule)}
-                          aria-label={`Turn ${rule.name} ${rule.enabled ? 'off' : 'on'}`}
+                          aria-label={rule.enabled ? t(`Turn ${rule.name} off`, `ปิด ${rule.name}`) : t(`Turn ${rule.name} on`, `เปิด ${rule.name}`)}
                         />
                       </td>
                       {canEdit && (
@@ -212,7 +216,7 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
                             onClick={() => deleteMutation.mutate(rule.id)}
                             disabled={deleteMutation.isPending}
                             className="text-red-500 hover:text-red-400 cursor-pointer"
-                            aria-label={`Delete ${rule.name}`}
+                            aria-label={t(`Delete ${rule.name}`, `ลบ ${rule.name}`)}
                           >
                             <Trash2 size={14} />
                           </button>
@@ -229,9 +233,12 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
 
       <section className="space-y-3">
         <div>
-          <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">Visitors Being Counted</h2>
+          <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">{t('Visitors being counted', 'ผู้เข้าชมที่กำลังถูกนับ')}</h2>
           <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-            IPs with an open counter on this origin's domains right now, from its own limits and the platform's.
+            {t(
+              "IPs with an open counter on this origin's domains right now, from its own limits and the platform's.",
+              'IP ที่กำลังถูกนับบนโดเมนของ origin นี้ตอนนี้ ทั้งจาก limit ของ origin เองและของแพลตฟอร์ม',
+            )}
           </p>
         </div>
         <div className="dash-card overflow-x-auto">
@@ -239,18 +246,18 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
             <thead>
               <tr>
                 <th>IP</th>
-                <th>Domain</th>
+                <th>{t('Domain', 'โดเมน')}</th>
                 <th>Limit</th>
-                <th>Requests</th>
-                <th>Resets in</th>
-                <th>Status</th>
+                <th>{t('Requests', 'Request')}</th>
+                <th>{t('Resets in', 'รีเซ็ตใน')}</th>
+                <th>{t('Status', 'สถานะ')}</th>
               </tr>
             </thead>
             <tbody>
               {!throttled || throttled.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-6 text-center text-[var(--text-muted)] font-mono text-[12px]">
-                    Nobody is near a limit.
+                    {t('Nobody is near a limit.', 'ยังไม่มีใครใกล้ถึง limit')}
                   </td>
                 </tr>
               ) : (
@@ -263,7 +270,7 @@ export const OriginRateLimits: React.FC<Props> = ({ originId, canEdit }) => {
                     <td className="font-mono text-[12px]">{c.ttl_seconds}s</td>
                     <td>
                       <Badge color={c.status === 'throttled' ? 'danger' : 'gray'}>
-                        {c.status === 'throttled' ? 'Throttled' : 'Counting'}
+                        {c.status === 'throttled' ? t('Throttled', 'ถูกจำกัด') : t('Counting', 'กำลังนับ')}
                       </Badge>
                     </td>
                   </tr>

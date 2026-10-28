@@ -1,12 +1,12 @@
 // Helpers for a site's IP access list and rate limits (components/OriginIpAccess.tsx,
 // components/OriginRateLimits.tsx). The backend re-checks everything.
 
-export const DURATIONS: { label: string; hours: number | null }[] = [
-  { label: 'Permanent', hours: null },
-  { label: '1 hour', hours: 1 },
-  { label: '24 hours', hours: 24 },
-  { label: '7 days', hours: 24 * 7 },
-  { label: '30 days', hours: 24 * 30 },
+export const DURATIONS: { label: string; labelTh: string; hours: number | null }[] = [
+  { label: 'Permanent', labelTh: 'ถาวร', hours: null },
+  { label: '1 hour', labelTh: '1 ชั่วโมง', hours: 1 },
+  { label: '24 hours', labelTh: '24 ชั่วโมง', hours: 24 },
+  { label: '7 days', labelTh: '7 วัน', hours: 24 * 7 },
+  { label: '30 days', labelTh: '30 วัน', hours: 24 * 30 },
 ]
 
 // A quick check before sending: an IPv4/IPv6 address, optionally with a /prefix.

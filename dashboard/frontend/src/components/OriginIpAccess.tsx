@@ -9,6 +9,7 @@ import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { LoadingSpinner } from './ui/LoadingSpinner'
+import { useT } from '../i18n'
 
 interface Props {
   originId: string
@@ -31,6 +32,7 @@ export const OriginIpAccess: React.FC<Props> = ({ originId, canEdit, prefillIp, 
   const fid = useId()
   const [form, setForm] = useState<SiteIpRuleInput>(EMPTY)
   const [confirming, setConfirming] = useState(false)
+  const { t } = useT()
   const key = ['site-ip-rules', originId]
 
   // A prefill only fills the form; the person still reviews and confirms.
@@ -45,9 +47,13 @@ export const OriginIpAccess: React.FC<Props> = ({ originId, canEdit, prefillIp, 
     onSuccess: (rule) => {
       queryClient.invalidateQueries({ queryKey: key })
       setForm(EMPTY)
-      toast.success(`${rule.ip} ${rule.action === 'block' ? 'blocked' : 'allowed'} on this origin`)
+      toast.success(
+        rule.action === 'block'
+          ? t(`${rule.ip} blocked on this origin`, `บล็อก ${rule.ip} ใน origin นี้แล้ว`)
+          : t(`${rule.ip} allowed on this origin`, `อนุญาต ${rule.ip} ใน origin นี้แล้ว`),
+      )
     },
-    onError: (e) => toast.error(errText(e, 'Could not add the IP. Nothing was changed.')),
+    onError: (e) => toast.error(errText(e, t('Could not add the IP. Nothing was changed.', 'เพิ่ม IP ไม่สำเร็จ ยังไม่มีอะไรเปลี่ยน'))),
     onSettled: () => setConfirming(false),
   })
 
@@ -55,31 +61,37 @@ export const OriginIpAccess: React.FC<Props> = ({ originId, canEdit, prefillIp, 
     mutationFn: (ruleId: number) => deleteSiteIpRule(originId, ruleId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: key })
-      toast.success('Removed')
+      toast.success(t('Removed', 'ลบแล้ว'))
     },
-    onError: (e) => toast.error(errText(e, 'Could not remove the IP')),
+    onError: (e) => toast.error(errText(e, t('Could not remove the IP', 'ลบ IP ไม่สำเร็จ'))),
   })
 
   const ipOk = looksLikeIp(form.ip)
   const existing = (rules ?? []).find((r) => r.ip === form.ip.trim())
-  const duration = DURATIONS.find((d) => (d.hours ?? null) === (form.hours ?? null))?.label ?? 'Permanent'
+  const durationItem = DURATIONS.find((d) => (d.hours ?? null) === (form.hours ?? null))
+  const duration = durationItem ? t(durationItem.label, durationItem.labelTh) : t('Permanent', 'ถาวร')
   const inputClass = 'w-full dash-input font-mono'
   const labelClass = 'text-[12px] font-medium text-[var(--text-secondary)] mb-1 block'
 
   return (
     <section className="space-y-3">
       <div>
-        <h2 className="text-[16px] font-semibold text-[var(--text-primary)] m-0">IP access</h2>
+        <h2 className="text-[16px] font-semibold text-[var(--text-primary)] m-0">{t('IP access', 'การเข้าถึงตาม IP')}</h2>
         <p className="text-[13px] text-[var(--text-muted)] m-0 mt-0.5 max-w-[80ch]">
-          Block or always allow an IP address or range on this origin's domains only. Blocked visitors get 403 at
-          the edge. Allowed visitors skip the WAF checks for this origin, so allow only addresses you trust. The
-          platform's own block list still applies on top.
+          {t(
+            "Block or always allow an IP address or range on this origin's domains only. Blocked visitors get 403 at the edge. Allowed visitors skip the WAF checks for this origin, so allow only addresses you trust. The platform's own block list still applies on top.",
+            'บล็อกหรืออนุญาต IP หรือช่วง IP เฉพาะโดเมนของ origin นี้ ผู้ที่ถูกบล็อกจะได้ 403 ที่ edge ส่วนผู้ที่ได้รับอนุญาตจะข้ามการตรวจของ WAF สำหรับ origin นี้ จึงควรอนุญาตเฉพาะที่อยู่ที่ไว้ใจได้ รายการบล็อกของแพลตฟอร์มยังมีผลซ้อนอยู่ด้วย',
+          )}
         </p>
       </div>
 
       {prefillIp && !canEdit && (
         <p role="note" className="m-0 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] px-4 py-3 text-[13px] text-[var(--text-secondary)]">
-          You can view this list but not change it. Ask an Owner or Editor of this origin to block <span className="font-mono">{prefillIp}</span>.
+          {t(
+            'You can view this list but not change it. Ask an Owner or Editor of this origin to block',
+            'คุณดูรายการนี้ได้แต่แก้ไขไม่ได้ ให้ Owner หรือ Editor ของ origin นี้บล็อก',
+          )}{' '}
+          <span className="font-mono">{prefillIp}</span>.
         </p>
       )}
 
@@ -96,16 +108,16 @@ export const OriginIpAccess: React.FC<Props> = ({ originId, canEdit, prefillIp, 
         >
           {prefillIp && (
             <p className="m-0 text-[13px] text-[var(--text-secondary)]">
-              Filled in from the event you were looking at. Check the details, then add the rule.
+              {t('Filled in from the event you were looking at. Check the details, then add the rule.', 'กรอกให้จากเหตุการณ์ที่คุณเปิดดูอยู่ ตรวจรายละเอียดแล้วจึงเพิ่มกฎ')}
             </p>
           )}
           <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_2fr_auto] gap-3 items-end">
             <div>
-              <label htmlFor={`${fid}-ip`} className={labelClass}>IP or CIDR</label>
+              <label htmlFor={`${fid}-ip`} className={labelClass}>{t('IP or CIDR', 'IP หรือ CIDR')}</label>
               <input
                 id={`${fid}-ip`}
                 className={inputClass}
-                placeholder="198.51.100.7 or 192.0.2.0/24"
+                placeholder={t('198.51.100.7 or 192.0.2.0/24', '198.51.100.7 หรือ 192.0.2.0/24')}
                 value={form.ip}
                 aria-invalid={form.ip.trim() !== '' && !ipOk}
                 aria-describedby={`${fid}-ip-help`}
@@ -113,19 +125,19 @@ export const OriginIpAccess: React.FC<Props> = ({ originId, canEdit, prefillIp, 
               />
             </div>
             <div>
-              <label htmlFor={`${fid}-action`} className={labelClass}>Action</label>
+              <label htmlFor={`${fid}-action`} className={labelClass}>{t('Action', 'การดำเนินการ')}</label>
               <select
                 id={`${fid}-action`}
                 className={inputClass}
                 value={form.action}
                 onChange={(e) => setForm((f) => ({ ...f, action: e.target.value as SiteIpRuleInput['action'] }))}
               >
-                <option value="block">Block</option>
-                <option value="allow">Allow</option>
+                <option value="block">{t('Block', 'บล็อก')}</option>
+                <option value="allow">{t('Allow', 'อนุญาต')}</option>
               </select>
             </div>
             <div>
-              <label htmlFor={`${fid}-hours`} className={labelClass}>Duration</label>
+              <label htmlFor={`${fid}-hours`} className={labelClass}>{t('Duration', 'ระยะเวลา')}</label>
               <select
                 id={`${fid}-hours`}
                 className={inputClass}
@@ -134,32 +146,34 @@ export const OriginIpAccess: React.FC<Props> = ({ originId, canEdit, prefillIp, 
               >
                 {DURATIONS.map((d) => (
                   <option key={d.label} value={d.hours ?? ''}>
-                    {d.label}
+                    {t(d.label, d.labelTh)}
                   </option>
                 ))}
               </select>
             </div>
             <div>
-              <label htmlFor={`${fid}-note`} className={labelClass}>Note</label>
+              <label htmlFor={`${fid}-note`} className={labelClass}>{t('Note', 'หมายเหตุ')}</label>
               <input
                 id={`${fid}-note`}
                 className={inputClass}
                 maxLength={200}
-                placeholder="optional"
+                placeholder={t('optional', 'ไม่บังคับ')}
                 value={form.note}
                 onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
               />
             </div>
             <Button type="submit" variant={form.action === 'block' ? 'brand' : 'primary'} disabled={!ipOk} isLoading={addMutation.isPending}>
-              {form.action === 'block' ? 'Review block' : 'Add'}
+              {form.action === 'block' ? t('Review block', 'ตรวจก่อนบล็อก') : t('Add', 'เพิ่ม')}
             </Button>
           </div>
           <p id={`${fid}-ip-help`} className="m-0 text-[12px]">
             {form.ip.trim() !== '' && !ipOk ? (
-              <span className="text-red-600 dark:text-red-400">Enter an IPv4 or IPv6 address, or a CIDR range.</span>
+              <span className="text-red-600 dark:text-red-400">{t('Enter an IPv4 or IPv6 address, or a CIDR range.', 'กรอกที่อยู่ IPv4 หรือ IPv6 หรือช่วง CIDR')}</span>
             ) : existing ? (
               <span className="text-amber-700 dark:text-amber-400">
-                {existing.ip} is already on this list ({existing.action === 'block' ? 'blocked' : 'allowed'}).
+                {existing.action === 'block'
+                  ? t(`${existing.ip} is already on this list (blocked).`, `${existing.ip} อยู่ในรายการนี้แล้ว (บล็อก)`)
+                  : t(`${existing.ip} is already on this list (allowed).`, `${existing.ip} อยู่ในรายการนี้แล้ว (อนุญาต)`)}
               </span>
             ) : (
               <span className="text-[var(--text-muted)]">&nbsp;</span>
@@ -171,25 +185,25 @@ export const OriginIpAccess: React.FC<Props> = ({ originId, canEdit, prefillIp, 
       {isLoading ? (
         <LoadingSpinner />
       ) : isError ? (
-        <p className="m-0 text-[13px] text-red-600 dark:text-red-400">Could not load this origin's IP list. Reload to try again.</p>
+        <p className="m-0 text-[13px] text-red-600 dark:text-red-400">{t("Could not load this origin's IP list. Reload to try again.", 'โหลดรายการ IP ของ origin นี้ไม่สำเร็จ รีโหลดเพื่อลองใหม่')}</p>
       ) : (
         <div className="dash-card overflow-x-auto">
           <table className="dash-table">
             <thead>
               <tr>
-                <th>IP / range</th>
-                <th>Action</th>
-                <th>Note</th>
-                <th>Expires ({BKK_LABEL})</th>
-                <th>Added by</th>
-                {canEdit && <th><span className="sr-only">Remove</span></th>}
+                <th>{t('IP / range', 'IP / ช่วง')}</th>
+                <th>{t('Action', 'การดำเนินการ')}</th>
+                <th>{t('Note', 'หมายเหตุ')}</th>
+                <th>{t(`Expires (${BKK_LABEL})`, 'หมดอายุ (เวลากรุงเทพฯ)')}</th>
+                <th>{t('Added by', 'เพิ่มโดย')}</th>
+                {canEdit && <th><span className="sr-only">{t('Remove', 'ลบ')}</span></th>}
               </tr>
             </thead>
             <tbody>
               {!rules || rules.length === 0 ? (
                 <tr>
                   <td colSpan={canEdit ? 6 : 5} className="py-6 text-center text-[var(--text-muted)] text-[13px]">
-                    No IPs listed for this origin.
+                    {t('No IPs listed for this origin.', 'ยังไม่มี IP ในรายการของ origin นี้')}
                   </td>
                 </tr>
               ) : (
@@ -198,12 +212,12 @@ export const OriginIpAccess: React.FC<Props> = ({ originId, canEdit, prefillIp, 
                     <td className="font-mono font-semibold">{rule.ip}</td>
                     <td>
                       <Badge color={rule.action === 'block' ? 'danger' : 'success'}>
-                        {rule.action === 'block' ? 'Block' : 'Allow'}
+                        {rule.action === 'block' ? t('Block', 'บล็อก') : t('Allow', 'อนุญาต')}
                       </Badge>
                     </td>
                     <td className="text-[12.5px] text-[var(--text-secondary)]">{rule.note || '—'}</td>
                     <td className="font-mono text-[11.5px]">
-                      {rule.expires_at ? formatBkkDateTime(rule.expires_at) : 'Never'}
+                      {rule.expires_at ? formatBkkDateTime(rule.expires_at) : t('Never', 'ไม่หมดอายุ')}
                     </td>
                     <td className="text-[12px] text-[var(--text-muted)]">{rule.created_by || '—'}</td>
                     {canEdit && (
@@ -212,7 +226,7 @@ export const OriginIpAccess: React.FC<Props> = ({ originId, canEdit, prefillIp, 
                           onClick={() => deleteMutation.mutate(rule.id)}
                           disabled={deleteMutation.isPending}
                           className="p-1 rounded text-red-600 dark:text-red-400 hover:bg-red-500/10 cursor-pointer"
-                          aria-label={`Remove ${rule.ip}`}
+                          aria-label={t(`Remove ${rule.ip}`, `ลบ ${rule.ip}`)}
                         >
                           <Trash2 size={14} />
                         </button>
@@ -232,9 +246,12 @@ export const OriginIpAccess: React.FC<Props> = ({ originId, canEdit, prefillIp, 
         onConfirm={() => {
           if (!addMutation.isPending) addMutation.mutate()
         }}
-        title={`Block ${form.ip.trim()}?`}
-        message={`Every request from ${form.ip.trim()} to this origin's domains will get 403 at the edge (${duration.toLowerCase()}). This applies as soon as you confirm. Check that the address is not your own, a monitoring service or a shared proxy.`}
-        confirmText={addMutation.isPending ? 'Blocking…' : 'Block IP'}
+        title={t(`Block ${form.ip.trim()}?`, `บล็อก ${form.ip.trim()}?`)}
+        message={t(
+          `Every request from ${form.ip.trim()} to this origin's domains will get 403 at the edge (${duration.toLowerCase()}). This applies as soon as you confirm. Check that the address is not your own, a monitoring service or a shared proxy.`,
+          `ทุก request จาก ${form.ip.trim()} ไปยังโดเมนของ origin นี้จะได้ 403 ที่ edge (${duration}) มีผลทันทีที่ยืนยัน ตรวจให้แน่ใจว่าไม่ใช่ที่อยู่ของคุณเอง ระบบ monitoring หรือ proxy ที่ใช้ร่วมกัน`,
+        )}
+        confirmText={addMutation.isPending ? t('Blocking…', 'กำลังบล็อก…') : t('Block IP', 'บล็อก IP')}
         isDanger
       />
     </section>

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { ORIGIN_TABS, type OriginTabId } from './layout/navigation'
+import { ORIGIN_TABS, labelIn, type OriginTabId } from './layout/navigation'
+import { useT } from '../i18n'
 
 // The origin page's tab strip. Nine tabs do not fit narrow screens, so:
 // on phones it is a select listing all of them; from sm up it is a tab row
@@ -16,6 +17,7 @@ interface Props {
 export const OriginTabs: React.FC<Props> = ({ active, onSelect, icons }) => {
   const scroller = useRef<HTMLDivElement>(null)
   const [edges, setEdges] = useState({ left: false, right: false })
+  const { t, lang } = useT()
 
   const measure = useCallback(() => {
     const el = scroller.current
@@ -52,7 +54,7 @@ export const OriginTabs: React.FC<Props> = ({ active, onSelect, icons }) => {
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'Home' && e.key !== 'End') return
     e.preventDefault()
-    const i = ORIGIN_TABS.findIndex((t) => t.id === active)
+    const i = ORIGIN_TABS.findIndex((tab) => tab.id === active)
     const next =
       e.key === 'Home' ? 0 : e.key === 'End' ? ORIGIN_TABS.length - 1
       : (i + (e.key === 'ArrowRight' ? 1 : -1) + ORIGIN_TABS.length) % ORIGIN_TABS.length
@@ -64,7 +66,10 @@ export const OriginTabs: React.FC<Props> = ({ active, onSelect, icons }) => {
     <>
       <div className="sm:hidden">
         <label htmlFor="origin-tab-select" className="block text-[12px] font-medium text-[var(--text-muted)] mb-1">
-          Section ({ORIGIN_TABS.findIndex((t) => t.id === active) + 1} of {ORIGIN_TABS.length})
+          {t(
+            `Section (${ORIGIN_TABS.findIndex((tab) => tab.id === active) + 1} of ${ORIGIN_TABS.length})`,
+            `ส่วนที่ ${ORIGIN_TABS.findIndex((tab) => tab.id === active) + 1} จาก ${ORIGIN_TABS.length}`,
+          )}
         </label>
         <select
           id="origin-tab-select"
@@ -72,8 +77,8 @@ export const OriginTabs: React.FC<Props> = ({ active, onSelect, icons }) => {
           onChange={(e) => onSelect(e.target.value as OriginTabId)}
           className="w-full dash-input h-10 text-[14px] cursor-pointer"
         >
-          {ORIGIN_TABS.map((t) => (
-            <option key={t.id} value={t.id}>{t.label}</option>
+          {ORIGIN_TABS.map((tab) => (
+            <option key={tab.id} value={tab.id}>{labelIn(tab, lang)}</option>
           ))}
         </select>
       </div>
@@ -93,7 +98,7 @@ export const OriginTabs: React.FC<Props> = ({ active, onSelect, icons }) => {
         <div
           ref={scroller}
           role="tablist"
-          aria-label="Origin sections"
+          aria-label={t('Origin sections', 'ส่วนต่าง ๆ ของ origin')}
           onKeyDown={onKeyDown}
           className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
@@ -119,7 +124,7 @@ export const OriginTabs: React.FC<Props> = ({ active, onSelect, icons }) => {
                 <span aria-hidden="true" className={selected ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}>
                   {icons[tab.id]}
                 </span>
-                {tab.label}
+                {labelIn(tab, lang)}
               </button>
             )
           })}

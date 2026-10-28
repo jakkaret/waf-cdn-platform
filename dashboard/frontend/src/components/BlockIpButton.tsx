@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/authStore'
 import { isBlockableIp } from '../lib/alertActions'
 import { originTabPath } from './layout/navigation'
 import type { Origin } from '../types'
+import { useT } from '../i18n'
 
 // "Block IP" from wherever an IP is shown. It never blocks anything itself:
 // it opens the origin's IP access tab with the IP filled in, where the role
@@ -24,6 +25,7 @@ export const BlockIpButton: React.FC<Props> = ({ ip, originId, note, size = 'sm'
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const [open, setOpen] = useState(false)
+  const { t } = useT()
   const rootRef = useRef<HTMLDivElement>(null)
 
   const { data: list = [] } = useQuery({
@@ -63,17 +65,17 @@ export const BlockIpButton: React.FC<Props> = ({ ip, originId, note, size = 'sm'
 
   if (originId) {
     return (
-      <button type="button" className={cls} onClick={() => go(originId)} aria-label={`Block ${ip}`}>
+      <button type="button" className={cls} onClick={() => go(originId)} aria-label={t(`Block ${ip}`, `บล็อก ${ip}`)}>
         <Ban size={12} aria-hidden="true" />
-        Block IP
+        {t('Block IP', 'บล็อก IP')}
       </button>
     )
   }
   if (origins.length === 1) {
     return (
-      <button type="button" className={cls} onClick={() => go(origins[0].origin_id)} aria-label={`Block ${ip} on ${origins[0].label}`}>
+      <button type="button" className={cls} onClick={() => go(origins[0].origin_id)} aria-label={t(`Block ${ip} on ${origins[0].label}`, `บล็อก ${ip} ที่ ${origins[0].label}`)}>
         <Ban size={12} aria-hidden="true" />
-        Block IP
+        {t('Block IP', 'บล็อก IP')}
       </button>
     )
   }
@@ -83,12 +85,12 @@ export const BlockIpButton: React.FC<Props> = ({ ip, originId, note, size = 'sm'
     <div ref={rootRef} className="relative inline-block">
       <button type="button" className={cls} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <Ban size={12} aria-hidden="true" />
-        Block IP
+        {t('Block IP', 'บล็อก IP')}
         <ChevronDown size={12} aria-hidden="true" />
       </button>
       {open && (
-        <div role="menu" aria-label={`Block ${ip} on`} className="absolute right-0 z-30 mt-1 w-60 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface-elevated)] p-1 shadow-lg">
-          <p className="m-0 px-2.5 py-1.5 text-[11.5px] text-[var(--text-muted)]">Block on which origin?</p>
+        <div role="menu" aria-label={t(`Block ${ip} on`, `บล็อก ${ip} ที่`)} className="absolute right-0 z-30 mt-1 w-60 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface-elevated)] p-1 shadow-lg">
+          <p className="m-0 px-2.5 py-1.5 text-[11.5px] text-[var(--text-muted)]">{t('Block on which origin?', 'บล็อกที่ origin ไหน?')}</p>
           {origins.map((o) => (
             <button
               key={o.origin_id}

@@ -20,6 +20,7 @@ import {
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { LoadingSpinner } from './ui/LoadingSpinner'
+import { severityLabel, useT } from '../i18n'
 
 interface Props {
   originId: string
@@ -47,6 +48,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<TenantRuleInput>(EMPTY_RULE)
+  const { t, lang } = useT()
 
   const managedKey = ['managed-rules', originId]
   const rulesKey = ['tenant-rules', originId]
@@ -74,9 +76,9 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
     onSuccess: (res, vars) => {
       queryClient.setQueryData(decoysKey, res.data.decoys)
       queryClient.invalidateQueries({ queryKey: rulesKey })
-      toast.success(vars.enabled ? 'Decoy turned on' : 'Decoy turned off')
+      toast.success(vars.enabled ? t('Decoy turned on', 'เปิด decoy แล้ว') : t('Decoy turned off', 'ปิด decoy แล้ว'))
     },
-    onError: (e) => toast.error(errText(e, 'Failed to change decoy')),
+    onError: (e) => toast.error(errText(e, t('Failed to change decoy', 'เปลี่ยน decoy ไม่สำเร็จ'))),
   })
 
   const applyRecommendedMutation = useMutation({
@@ -84,27 +86,31 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
     onSuccess: (res) => {
       queryClient.setQueryData(decoysKey, res.data.decoys)
       queryClient.invalidateQueries({ queryKey: rulesKey })
-      toast.success('Turned on the recommended decoys')
+      toast.success(t('Turned on the recommended decoys', 'เปิด decoy ที่แนะนำแล้ว'))
     },
-    onError: (e) => toast.error(errText(e, 'Failed to apply recommended decoys')),
+    onError: (e) => toast.error(errText(e, t('Failed to apply recommended decoys', 'เปิด decoy ที่แนะนำไม่สำเร็จ'))),
   })
 
   const modeMutation = useMutation({
     mutationFn: (mode: 'auto' | 'manual') => setManagedMode(originId, mode, managed?.current_version),
     onSuccess: (res) => {
       queryClient.setQueryData(managedKey, res.data)
-      toast.success(`Managed rules set to ${res.data.mode}`)
+      toast.success(
+        res.data.mode === 'auto'
+          ? t('Managed rules now update automatically', 'Managed rules อัปเดตอัตโนมัติแล้ว')
+          : t('Managed rules now update manually', 'Managed rules อัปเดตเองแล้ว'),
+      )
     },
-    onError: (e) => toast.error(errText(e, 'Failed to change mode')),
+    onError: (e) => toast.error(errText(e, t('Failed to change mode', 'เปลี่ยนโหมดไม่สำเร็จ'))),
   })
 
   const updateMutation = useMutation({
     mutationFn: () => updateManagedToLatest(originId),
     onSuccess: (res) => {
       queryClient.setQueryData(managedKey, res.data)
-      toast.success(`Updated to managed ruleset v${res.data.current_version}`)
+      toast.success(t(`Updated to managed ruleset v${res.data.current_version}`, `อัปเดตเป็น managed ruleset v${res.data.current_version} แล้ว`))
     },
-    onError: (e) => toast.error(errText(e, 'Update failed')),
+    onError: (e) => toast.error(errText(e, t('Update failed', 'อัปเดตไม่สำเร็จ'))),
   })
 
   const closeForm = () => {
@@ -118,19 +124,19 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
       editingId === null ? createTenantRule(originId, form) : updateTenantRule(originId, editingId, form),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: rulesKey })
-      toast.success(editingId === null ? 'Rule created' : 'Rule updated')
+      toast.success(editingId === null ? t('Rule created', 'สร้างกฎแล้ว') : t('Rule updated', 'อัปเดตกฎแล้ว'))
       closeForm()
     },
-    onError: (e) => toast.error(errText(e, 'Failed to save rule')),
+    onError: (e) => toast.error(errText(e, t('Failed to save rule', 'บันทึกกฎไม่สำเร็จ'))),
   })
 
   const deleteMutation = useMutation({
     mutationFn: (ruleId: number) => deleteTenantRule(originId, ruleId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: rulesKey })
-      toast.success('Rule deleted')
+      toast.success(t('Rule deleted', 'ลบกฎแล้ว'))
     },
-    onError: (e) => toast.error(errText(e, 'Failed to delete rule')),
+    onError: (e) => toast.error(errText(e, t('Failed to delete rule', 'ลบกฎไม่สำเร็จ'))),
   })
 
   const toggleMutation = useMutation({
@@ -145,7 +151,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
         enabled: !rule.enabled,
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: rulesKey }),
-    onError: (e) => toast.error(errText(e, 'Failed to update rule')),
+    onError: (e) => toast.error(errText(e, t('Failed to update rule', 'อัปเดตกฎไม่สำเร็จ'))),
   })
 
   const startEdit = (rule: TenantRule) => {
@@ -178,10 +184,12 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
       {/* ── Managed ruleset ─────────────────────────────────────────── */}
       <section className="space-y-3">
         <div>
-          <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">Managed Rules</h2>
+          <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">Managed rules</h2>
           <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-            Rules maintained centrally for every origin (known CVEs and exploit patterns). Nobody can edit them;
-            the platform publishes new versions over time.
+            {t(
+              'Rules maintained centrally for every origin (known CVEs and exploit patterns). Nobody can edit them; the platform publishes new versions over time.',
+              'กฎที่ดูแลจากส่วนกลางสำหรับทุก origin (CVE และรูปแบบการโจมตีที่รู้จัก) ไม่มีใครแก้ไขได้ แพลตฟอร์มจะออกเวอร์ชันใหม่เป็นระยะ',
+            )}
           </p>
         </div>
 
@@ -190,11 +198,11 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
         ) : (
           <div className="dash-card p-5 space-y-4">
             <div className="flex flex-wrap items-center gap-3 font-mono text-[12px]">
-              <span className="text-[var(--text-muted)]">Running</span>
+              <span className="text-[var(--text-muted)]">{t('Running', 'ใช้อยู่')}</span>
               <Badge color="brand">v{managed.current_version}</Badge>
-              <span className="text-[var(--text-muted)]">Latest</span>
+              <span className="text-[var(--text-muted)]">{t('Latest', 'ล่าสุด')}</span>
               <Badge color={managed.update_available ? 'warning' : 'success'}>v{managed.latest_version}</Badge>
-              <Badge color="gray">{managed.mode === 'auto' ? 'Auto-update' : 'Manual updates'}</Badge>
+              <Badge color="gray">{managed.mode === 'auto' ? t('Auto-update', 'อัปเดตอัตโนมัติ') : t('Manual updates', 'อัปเดตเอง')}</Badge>
               {canEdit && managed.update_available && (
                 <Button
                   size="sm"
@@ -202,7 +210,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                   onClick={() => updateMutation.mutate()}
                   isLoading={updateMutation.isPending}
                 >
-                  Update to v{managed.latest_version}
+                  {t('Update to', 'อัปเดตเป็น')} v{managed.latest_version}
                 </Button>
               )}
             </div>
@@ -215,9 +223,12 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                   disabled={modeMutation.isPending}
                   onChange={(e) => modeMutation.mutate(e.target.checked ? 'auto' : 'manual')}
                 />
-                Apply new versions automatically
+                {t('Apply new versions automatically', 'ใช้เวอร์ชันใหม่โดยอัตโนมัติ')}
                 <span className="text-[var(--text-muted)]">
-                  (turn off to stay on v{managed.current_version} until you press Update)
+                  {t(
+                    `(turn off to stay on v${managed.current_version} until you press Update)`,
+                    `(ปิดไว้เพื่อใช้ v${managed.current_version} ต่อจนกว่าจะกดอัปเดต)`,
+                  )}
                 </span>
               </label>
             )}
@@ -226,18 +237,18 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
               <table className="dash-table">
                 <thead>
                   <tr>
-                    <th>Rule</th>
-                    <th>Description</th>
-                    <th>Severity</th>
-                    <th>Added</th>
-                    <th>Status</th>
+                    <th>{t('Rule', 'กฎ')}</th>
+                    <th>{t('Description', 'คำอธิบาย')}</th>
+                    <th>{t('Severity', 'ความรุนแรง')}</th>
+                    <th>{t('Added', 'เพิ่มใน')}</th>
+                    <th>{t('Status', 'สถานะ')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {managed.rules.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="py-6 text-center text-[var(--text-muted)] font-mono text-[12px]">
-                        No managed rules published yet.
+                        {t('No managed rules published yet.', 'ยังไม่มี managed rules')}
                       </td>
                     </tr>
                   ) : (
@@ -246,16 +257,16 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                         <td className="font-mono font-bold text-orange-500">{r.id}</td>
                         <td className="text-[12px] text-[var(--text-secondary)]">{r.message}</td>
                         <td>
-                          <Badge color={r.severity === 'CRITICAL' ? 'danger' : 'warning'}>{r.severity}</Badge>
+                          <Badge color={r.severity === 'CRITICAL' ? 'danger' : 'warning'}>{severityLabel(r.severity, lang)}</Badge>
                         </td>
                         <td className="font-mono text-[11.5px]">v{r.introduced_in}</td>
                         <td>
                           {r.retired_in !== null ? (
-                            <Badge color="gray">Retired in v{r.retired_in}</Badge>
+                            <Badge color="gray">{t('Retired in', 'เลิกใช้ใน')} v{r.retired_in}</Badge>
                           ) : r.active ? (
-                            <Badge color="success">Active</Badge>
+                            <Badge color="success">{t('Active', 'ใช้งานอยู่')}</Badge>
                           ) : (
-                            <Badge color="warning">Pending update</Badge>
+                            <Badge color="warning">{t('Pending update', 'รออัปเดต')}</Badge>
                           )}
                         </td>
                       </tr>
@@ -267,7 +278,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
 
             {managed.versions.length > 0 && (
               <details className="text-[12px] font-mono">
-                <summary className="cursor-pointer text-[var(--text-muted)]">Version history</summary>
+                <summary className="cursor-pointer text-[var(--text-muted)]">{t('Version history', 'ประวัติเวอร์ชัน')}</summary>
                 <ul className="mt-2 space-y-1 list-none p-0">
                   {[...managed.versions].reverse().map((v) => (
                     <li key={v.version} className="text-[var(--text-secondary)]">
@@ -285,11 +296,12 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
       <section className="space-y-3">
         <div className="flex justify-between items-start gap-3">
           <div>
-            <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">Decoy Paths</h2>
+            <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">{t('Decoy paths', 'Path ล่อ (decoy)')}</h2>
             <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-              One-click honeypots for URLs bots and scanners probe on every site. When on, the path returns
-              believable fake content instead of reaching your server, and the hit is logged. Recommendations use
-              this origin's tech-stack tags — a path your stack really uses is warned against, not recommended.
+              {t(
+                "One-click honeypots for URLs bots and scanners probe on every site. When on, the path returns believable fake content instead of reaching your server, and the hit is logged. Recommendations use this origin's tech-stack tags — a path your stack really uses is warned against, not recommended.",
+                'กับดัก (honeypot) แบบคลิกเดียวสำหรับ URL ที่บอทและสแกนเนอร์ชอบลองทุกเว็บ เมื่อเปิด path นั้นจะตอบเนื้อหาปลอมที่ดูสมจริงแทนการส่งไปเซิร์ฟเวอร์ของคุณ และบันทึกการเข้าถึงไว้ คำแนะนำอิงจาก tech stack tags ของ origin นี้ — path ที่ระบบของคุณใช้จริงจะได้คำเตือน ไม่ใช่คำแนะนำ',
+              )}
             </p>
           </div>
           {canEdit && recommendedCount > 0 && (
@@ -299,7 +311,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
               disabled={applyRecommendedMutation.isPending}
               isLoading={applyRecommendedMutation.isPending}
             >
-              Turn on {recommendedCount} recommended
+              {t(`Turn on ${recommendedCount} recommended`, `เปิด ${recommendedCount} รายการที่แนะนำ`)}
             </Button>
           )}
         </div>
@@ -309,7 +321,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
           return (
             <div key={tier} className="dash-card p-4">
               <h3 className="text-[11px] font-bold font-mono text-[var(--text-muted)] mb-2">
-                {tier === 'universal' ? 'Safe for any site' : 'Depends on your stack'}
+                {tier === 'universal' ? t('Safe for any site', 'ปลอดภัยกับทุกเว็บ') : t('Depends on your stack', 'ขึ้นกับระบบของคุณ')}
               </h3>
               <div className="space-y-2.5">
                 {rows.map((d) => (
@@ -328,8 +340,8 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                           {d.label}
                         </span>
                         {d.enabled && <Badge color="warning">DECEIVE</Badge>}
-                        {!d.enabled && d.recommended && <Badge color="success">Recommended</Badge>}
-                        {!d.enabled && d.collision && <Badge color="danger">Your stack uses this</Badge>}
+                        {!d.enabled && d.recommended && <Badge color="success">{t('Recommended', 'แนะนำ')}</Badge>}
+                        {!d.enabled && d.collision && <Badge color="danger">{t('Your stack uses this', 'ระบบของคุณใช้ path นี้')}</Badge>}
                       </div>
                       <p className="text-[11px] text-[var(--text-muted)] m-0 mt-0.5">{d.reason}</p>
                     </div>
@@ -345,10 +357,12 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
       <section className="space-y-3">
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">Custom Rules</h2>
+            <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">{t('Custom rules', 'กฎที่กำหนดเอง')}</h2>
             <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-              Rules for this origin only. They apply to requests for this origin's DNS-verified domains and can
-              never affect another origin's traffic.
+              {t(
+                "Rules for this origin only. They apply to requests for this origin's DNS-verified domains and can never affect another origin's traffic.",
+                'กฎเฉพาะ origin นี้ ใช้กับ request ของโดเมนที่ยืนยัน DNS แล้วของ origin นี้เท่านั้น และไม่มีผลกับทราฟฟิกของ origin อื่น',
+              )}
             </p>
           </div>
           {canEdit && (
@@ -356,7 +370,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
               variant={showForm ? 'secondary' : 'brand'}
               onClick={() => (showForm ? closeForm() : setShowForm(true))}
             >
-              {showForm ? 'Cancel' : '+ Add Rule'}
+              {showForm ? t('Cancel', 'ยกเลิก') : t('+ Add rule', '+ เพิ่มกฎ')}
             </Button>
           )}
         </div>
@@ -364,11 +378,11 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
         {canEdit && showForm && options && (
           <div className="dash-card p-5 border-l-2 border-l-orange-500 bg-orange-500/[0.02]">
             <h3 className="text-[13.5px] font-bold text-orange-500 font-mono mb-4">
-              {editingId === null ? 'New rule' : `Edit rule ${editingId}`}
+              {editingId === null ? t('New rule', 'กฎใหม่') : t(`Edit rule ${editingId}`, `แก้ไขกฎ ${editingId}`)}
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[12px]">
               <div>
-                <label className={labelClass}>Look at</label>
+                <label className={labelClass}>{t('Look at', 'ตรวจที่')}</label>
                 <select
                   className={inputClass}
                   value={form.variable}
@@ -382,7 +396,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                 </select>
               </div>
               <div>
-                <label className={labelClass}>Match type</label>
+                <label className={labelClass}>{t('Match type', 'วิธีจับคู่')}</label>
                 <select className={inputClass} value={operatorName} onChange={(e) => setOperatorName(e.target.value)}>
                   {options.operators.map((op) => (
                     <option key={op} value={op}>
@@ -392,16 +406,16 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                 </select>
               </div>
               <div className="md:col-span-2">
-                <label className={labelClass}>Value</label>
+                <label className={labelClass}>{t('Value', 'ค่า')}</label>
                 <input
                   className={inputClass}
-                  placeholder="e.g. /wp-admin"
+                  placeholder={t('e.g. /wp-admin', 'เช่น /wp-admin')}
                   value={operatorValue.join(' ')}
                   onChange={(e) => setOperatorValue(e.target.value)}
                 />
               </div>
               <div>
-                <label className={labelClass}>Action</label>
+                <label className={labelClass}>{t('Action', 'การดำเนินการ')}</label>
                 <select
                   className={inputClass}
                   value={form.action}
@@ -415,7 +429,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                 </select>
               </div>
               <div>
-                <label className={labelClass}>Severity</label>
+                <label className={labelClass}>{t('Severity', 'ความรุนแรง')}</label>
                 <select
                   className={inputClass}
                   value={form.severity}
@@ -423,16 +437,16 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                 >
                   {options.severities.map((s) => (
                     <option key={s} value={s}>
-                      {s}
+                      {severityLabel(s, lang)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="md:col-span-2">
-                <label className={labelClass}>Message (shown in logs)</label>
+                <label className={labelClass}>{t('Message (shown in logs)', 'ข้อความ (แสดงใน log)')}</label>
                 <input
                   className={inputClass}
-                  placeholder="e.g. Block wp-admin probes"
+                  placeholder={t('e.g. Block wp-admin probes', 'เช่น บล็อกการสแกน wp-admin')}
                   value={form.message}
                   onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))}
                 />
@@ -445,7 +459,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                 disabled={!operatorValue.join(' ').trim() || !form.message.trim() || saveMutation.isPending}
                 isLoading={saveMutation.isPending}
               >
-                Save Rule
+                {t('Save rule', 'บันทึกกฎ')}
               </Button>
             </div>
           </div>
@@ -456,25 +470,25 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
             <table className="dash-table">
               <thead>
                 <tr>
-                  <th>Rule</th>
-                  <th>Condition</th>
-                  <th>Action</th>
-                  <th>Message</th>
-                  <th>On</th>
-                  {canEdit && <th className="text-right">Manage</th>}
+                  <th>{t('Rule', 'กฎ')}</th>
+                  <th>{t('Condition', 'เงื่อนไข')}</th>
+                  <th>{t('Action', 'การดำเนินการ')}</th>
+                  <th>{t('Message', 'ข้อความ')}</th>
+                  <th>{t('On', 'เปิด')}</th>
+                  {canEdit && <th className="text-right">{t('Manage', 'จัดการ')}</th>}
                 </tr>
               </thead>
               <tbody>
                 {rulesLoading ? (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-[var(--text-muted)] font-mono text-[12px]">
-                      Loading rules...
+                      {t('Loading rules...', 'กำลังโหลดกฎ...')}
                     </td>
                   </tr>
                 ) : customRules.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-[var(--text-muted)] font-mono text-[12px]">
-                      No custom rules for this origin.
+                      {t('No custom rules for this origin.', 'origin นี้ยังไม่มีกฎที่กำหนดเอง')}
                     </td>
                   </tr>
                 ) : (
@@ -491,7 +505,7 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                       <td>
                         <input
                           type="checkbox"
-                          aria-label={`Rule ${rule.id} enabled`}
+                          aria-label={t(`Rule ${rule.id} enabled`, `เปิดกฎ ${rule.id}`)}
                           checked={rule.enabled}
                           disabled={!canEdit || toggleMutation.isPending}
                           onChange={() => toggleMutation.mutate(rule)}
@@ -503,13 +517,13 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                             onClick={() => startEdit(rule)}
                             className="text-orange-500 hover:text-orange-400 font-mono text-[11px] font-semibold cursor-pointer mr-3"
                           >
-                            Edit
+                            {t('Edit', 'แก้ไข')}
                           </button>
                           <button
                             onClick={() => deleteMutation.mutate(rule.id)}
                             disabled={deleteMutation.isPending}
                             className="text-red-500 hover:text-red-400 cursor-pointer"
-                            aria-label={`Delete rule ${rule.id}`}
+                            aria-label={t(`Delete rule ${rule.id}`, `ลบกฎ ${rule.id}`)}
                           >
                             <Trash2 size={14} />
                           </button>
