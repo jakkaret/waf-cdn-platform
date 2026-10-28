@@ -39,8 +39,18 @@ import { IncidentList } from '../components/alerts/IncidentList'
 import { BKK_LABEL, bkkDateKey, formatBkkDateTime } from '../lib/time'
 import { originTabPath } from '../components/layout/navigation'
 import { alertSeverity, isBlockableIp, logsSearchPath } from '../lib/alertActions'
+import { severityLabel, useT } from '../i18n'
 
 const ALERTS_FETCH_LIMIT = 200
+
+// getDispatchLabel's labels are compared in code ('Not tracked'), so the Thai
+// text is looked up at display time only.
+const DISPATCH_TH: Record<string, string> = {
+  Sent: 'ส่งแล้ว',
+  Failed: 'ส่งไม่สำเร็จ',
+  'Not dispatched': 'ไม่ได้ส่ง',
+  'Not tracked': 'ไม่ได้ติดตาม',
+}
 
 // Clean Alert ID helper (formats cleanly and strips accidental IP suffix)
 const formatAlertId = (rawId?: string | null, fallbackIndex?: number): string => {
@@ -56,6 +66,7 @@ const formatAlertId = (rawId?: string | null, fallbackIndex?: number): string =>
 
 export const Alerts: React.FC = () => {
   const navigate = useNavigate()
+  const { t, lang } = useT()
   const [searchParams, setSearchParams] = useSearchParams()
   // ?alert=<alert_id> opens that alert's details (notification bell, links).
   const linkedAlertId = searchParams.get('alert')
@@ -123,7 +134,7 @@ export const Alerts: React.FC = () => {
   const handleCopy = (text: string, label: string) => {
     navigator.clipboard.writeText(text)
     setCopiedText(text)
-    toast.success(`Copied ${label}`)
+    toast.success(t(`Copied ${label}`, `คัดลอก ${label} แล้ว`))
     setTimeout(() => setCopiedText(null), 2000)
   }
 
@@ -281,16 +292,16 @@ export const Alerts: React.FC = () => {
     a.href = window.URL.createObjectURL(blob)
     a.download = `waf_alert_incidents_${bkkDateKey()}.csv`
     a.click()
-    toast.success('Downloaded incident alerts CSV')
+    toast.success(t('Downloaded the alerts as CSV', 'ดาวน์โหลดการแจ้งเตือนเป็น CSV แล้ว'))
   }
 
   const getSeverityBadge = (severity?: string | null) => {
     const s = alertSeverity(severity)
-    if (s === 'CRITICAL') return <Badge color="danger">Critical</Badge>
-    if (s === 'HIGH') return <Badge color="warning">High</Badge>
-    if (s === 'MEDIUM') return <Badge color="info">Medium</Badge>
-    if (s === 'LOW') return <Badge color="gray">Low</Badge>
-    return <Badge color="gray">Not recorded</Badge>
+    if (s === 'CRITICAL') return <Badge color="danger">{severityLabel(s, lang)}</Badge>
+    if (s === 'HIGH') return <Badge color="warning">{severityLabel(s, lang)}</Badge>
+    if (s === 'MEDIUM') return <Badge color="info">{severityLabel(s, lang)}</Badge>
+    if (s === 'LOW') return <Badge color="gray">{severityLabel(s, lang)}</Badge>
+    return <Badge color="gray">{t('Not recorded', 'ไม่ได้บันทึก')}</Badge>
   }
 
   const isAnyFilterActive = Boolean(
@@ -301,8 +312,11 @@ export const Alerts: React.FC = () => {
     <div className="animate-fade-in pb-12">
       {/* Top Header Bar */}
       <TopBar
-        title="Alerts"
-        subtitle={`Requests the WAF flagged on your sites, grouped into attack incidents. Times are ${BKK_LABEL}.`}
+        title={t('Alerts', 'การแจ้งเตือนภัย')}
+        subtitle={t(
+          `Requests the WAF flagged on your sites, grouped into attack incidents. Times are ${BKK_LABEL}.`,
+          'request ที่ WAF ตรวจพบบนเว็บของคุณ จัดกลุ่มเป็นเหตุการณ์โจมตี เวลาเป็นเวลากรุงเทพฯ',
+        )}
         action={
           <div className="flex items-center gap-2">
             <Link
@@ -310,7 +324,7 @@ export const Alerts: React.FC = () => {
               className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[12.5px] font-medium text-[var(--text-primary)]"
             >
               <Send size={13} aria-hidden="true" />
-              {status?.connected ? 'Telegram connected' : 'Set up Telegram'}
+              {status?.connected ? t('Telegram connected', 'เชื่อม Telegram แล้ว') : t('Set up Telegram', 'ตั้งค่า Telegram')}
             </Link>
             <Button
               variant="secondary"
@@ -318,7 +332,7 @@ export const Alerts: React.FC = () => {
               disabled={isAlertsFetching}
               icon={<RefreshCw size={13} className={isAlertsFetching ? 'animate-spin motion-reduce:animate-none' : ''} />}
             >
-              Refresh
+              {t('Refresh', 'รีเฟรช')}
             </Button>
             <Button
               variant="secondary"
@@ -326,7 +340,7 @@ export const Alerts: React.FC = () => {
               disabled={filteredAlerts.length === 0}
               icon={<Download size={13} />}
             >
-              Export CSV
+              {t('Export CSV', 'ส่งออก CSV')}
             </Button>
           </div>
         }
@@ -334,8 +348,11 @@ export const Alerts: React.FC = () => {
 
       {linkedAlertId && linkMissing && (
         <div role="status" className="mb-4 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] px-4 py-3 text-[12.5px] text-[var(--text-secondary)]">
-          The linked alert is not among the latest {ALERTS_FETCH_LIMIT} alerts visible to your account. Search its IP below, or open{' '}
-          <Link to="/logs" className="text-[var(--accent)] hover:underline">Traffic logs</Link>.
+          {t(
+            `The linked alert is not among the latest ${ALERTS_FETCH_LIMIT} alerts visible to your account. Search its IP below, or open`,
+            `การแจ้งเตือนที่ลิงก์มาไม่อยู่ใน ${ALERTS_FETCH_LIMIT} รายการล่าสุดที่บัญชีของคุณเห็น ค้นหาจาก IP ด้านล่าง หรือเปิด`,
+          )}{' '}
+          <Link to="/logs" className="text-[var(--accent)] hover:underline">{t('Traffic logs', 'Log ทราฟฟิก')}</Link>.
         </div>
       )}
 
@@ -346,14 +363,16 @@ export const Alerts: React.FC = () => {
         <div className="dash-card p-4 sm:p-4.5 flex items-center justify-between">
           <div>
             <span className="text-[11px] font-bold text-[var(--text-muted)] block font-mono mb-1">
-              Alerts listed
+              {t('Alerts listed', 'การแจ้งเตือนที่แสดง')}
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-[24px] font-bold font-mono text-[var(--text-primary)] leading-none">
                 {alertMetrics.total}{alertMetrics.totalIsLowerBound ? '+' : ''}
               </span>
               <span className="text-[11px] text-[var(--text-muted)]">
-                {alertMetrics.totalIsLowerBound ? `latest ${ALERTS_FETCH_LIMIT} loaded` : 'one per flagged request'}
+                {alertMetrics.totalIsLowerBound
+                  ? t(`latest ${ALERTS_FETCH_LIMIT} loaded`, `โหลด ${ALERTS_FETCH_LIMIT} รายการล่าสุด`)
+                  : t('one per flagged request', 'หนึ่งรายการต่อหนึ่ง request ที่ถูกตรวจพบ')}
               </span>
             </div>
           </div>
@@ -365,13 +384,13 @@ export const Alerts: React.FC = () => {
         <div className="dash-card p-4 sm:p-4.5 flex items-center justify-between bg-red-50/40 dark:bg-red-950/[0.08] border-red-200/60 dark:border-red-500/15">
           <div>
             <span className="text-[11px] font-bold text-red-600/80 dark:text-red-400/80 block font-mono mb-1">
-              Critical severity
+              {t('Critical severity', 'ระดับวิกฤต')}
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-[24px] font-bold font-mono text-red-600 dark:text-red-400 leading-none">
                 {alertMetrics.critical}
               </span>
-              <span className="text-[11px] text-red-700/80 dark:text-red-400/80">of the alerts listed</span>
+              <span className="text-[11px] text-red-700/80 dark:text-red-400/80">{t('of the alerts listed', 'จากการแจ้งเตือนที่แสดง')}</span>
             </div>
           </div>
           <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-red-500/10">
@@ -382,13 +401,13 @@ export const Alerts: React.FC = () => {
         <div className="dash-card p-4 sm:p-4.5 flex items-center justify-between">
           <div>
             <span className="text-[11px] font-bold text-[var(--text-muted)] block font-mono mb-1">
-              Attack incidents
+              {t('Attack incidents', 'เหตุการณ์โจมตี')}
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-[24px] font-bold font-mono text-sky-600 dark:text-sky-400 leading-none">
                 {incidents.length}
               </span>
-              <span className="text-[11px] font-mono text-[var(--text-muted)]">Latest, Telegram sent per incident</span>
+              <span className="text-[11px] font-mono text-[var(--text-muted)]">{t('Latest, Telegram sent per incident', 'ล่าสุด ส่ง Telegram ครั้งละเหตุการณ์')}</span>
             </div>
           </div>
           <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-sky-500/10">
@@ -409,7 +428,7 @@ export const Alerts: React.FC = () => {
                 <Search className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={14} />
                 <input
                   type="text"
-                  placeholder="Search Alert ID, IP, URI path, message..."
+                  placeholder={t('Search alert ID, IP, URI path, message...', 'ค้นหา alert ID, IP, path, ข้อความ...')}
                   className="w-full dash-input pl-8 pr-7 py-1.5 text-[12px] font-mono"
                   value={search}
                   onChange={(e) => {
@@ -423,6 +442,7 @@ export const Alerts: React.FC = () => {
                       setSearch('')
                       setPage(1)
                     }}
+                    aria-label={t('Clear search', 'ล้างคำค้นหา')}
                     className="absolute right-2.5 top-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] p-0.5 cursor-pointer"
                   >
                     <X size={13} />
@@ -439,12 +459,12 @@ export const Alerts: React.FC = () => {
                   setPage(1)
                 }}
               >
-                <option value="ALL">All Severities</option>
-                <option value="CRITICAL">Critical</option>
-                <option value="HIGH">High</option>
-                <option value="MEDIUM">Medium</option>
-                <option value="LOW">Low</option>
-                <option value="NONE">Not recorded</option>
+                <option value="ALL">{t('All severities', 'ทุกระดับความรุนแรง')}</option>
+                <option value="CRITICAL">{severityLabel('CRITICAL', lang)}</option>
+                <option value="HIGH">{severityLabel('HIGH', lang)}</option>
+                <option value="MEDIUM">{severityLabel('MEDIUM', lang)}</option>
+                <option value="LOW">{severityLabel('LOW', lang)}</option>
+                <option value="NONE">{t('Not recorded', 'ไม่ได้บันทึก')}</option>
               </select>
 
               {/* Status Filter */}
@@ -456,18 +476,18 @@ export const Alerts: React.FC = () => {
                   setPage(1)
                 }}
               >
-                <option value="ALL">All Alert Status</option>
-                <option value="DISPATCHED">Dispatched (Telegram)</option>
-                <option value="BLOCKED">403 (Blocked)</option>
+                <option value="ALL">{t('All statuses', 'ทุกสถานะ')}</option>
+                <option value="DISPATCHED">{t('Sent to Telegram', 'ส่ง Telegram แล้ว')}</option>
+                <option value="BLOCKED">{t('403 (blocked)', '403 (ถูกบล็อก)')}</option>
               </select>
             </div>
 
             {/* Total Records Counter */}
             <div className="text-[11.5px] font-mono text-[var(--text-muted)]">
-              Showing{' '}
-              <span className="text-[var(--text-primary)] font-semibold">{startRecord}</span> to{' '}
-              <span className="text-[var(--text-primary)] font-semibold">{endRecord}</span> of{' '}
-              <span className="text-orange-600 dark:text-orange-400 font-semibold">{total}</span> incidents
+              {t('Showing', 'แสดง')}{' '}
+              <span className="text-[var(--text-primary)] font-semibold">{startRecord}</span> {t('to', 'ถึง')}{' '}
+              <span className="text-[var(--text-primary)] font-semibold">{endRecord}</span> {t('of', 'จาก')}{' '}
+              <span className="text-orange-600 dark:text-orange-400 font-semibold">{total}</span> {t('alerts', 'รายการ')}
             </div>
           </div>
 
@@ -476,7 +496,7 @@ export const Alerts: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2.5">
               <div className="flex items-center gap-1.5 text-[var(--text-muted)] font-mono text-[11px]">
                 <Calendar size={12} className="text-orange-600 dark:text-orange-400" />
-                <span>Date Presets:</span>
+                <span>{t('Date range:', 'ช่วงวันที่:')}</span>
               </div>
 
               {/* Quick Date Presets */}
@@ -490,7 +510,7 @@ export const Alerts: React.FC = () => {
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   }`}
                 >
-                  All Time
+                  {t('All time', 'ทั้งหมด')}
                 </button>
                 <button
                   type="button"
@@ -501,7 +521,7 @@ export const Alerts: React.FC = () => {
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   }`}
                 >
-                  Today
+                  {t('Today', 'วันนี้')}
                 </button>
                 <button
                   type="button"
@@ -512,7 +532,7 @@ export const Alerts: React.FC = () => {
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   }`}
                 >
-                  Last 7 Days
+                  {t('Last 7 days', '7 วันล่าสุด')}
                 </button>
                 <button
                   type="button"
@@ -523,13 +543,13 @@ export const Alerts: React.FC = () => {
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   }`}
                 >
-                  Last 30 Days
+                  {t('Last 30 days', '30 วันล่าสุด')}
                 </button>
               </div>
 
               {/* Custom Date Pickers */}
               <div className="flex items-center gap-1.5 font-mono text-[11px]">
-                <span className="text-[var(--text-muted)]">From:</span>
+                <span className="text-[var(--text-muted)]">{t('From:', 'จาก:')}</span>
                 <input
                   type="date"
                   className="dash-input py-0.5 px-2 text-[11px] font-mono cursor-pointer"
@@ -540,7 +560,7 @@ export const Alerts: React.FC = () => {
                     setPage(1)
                   }}
                 />
-                <span className="text-[var(--text-muted)]">To:</span>
+                <span className="text-[var(--text-muted)]">{t('To:', 'ถึง:')}</span>
                 <input
                   type="date"
                   className="dash-input py-0.5 px-2 text-[11px] font-mono cursor-pointer"
@@ -568,7 +588,7 @@ export const Alerts: React.FC = () => {
                   className="px-2 py-0.5 text-[11px] font-mono text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 bg-red-50 hover:bg-red-100 dark:bg-red-500/10 rounded border border-red-200 dark:border-red-500/20 transition-colors cursor-pointer flex items-center gap-1"
                 >
                   <X size={11} />
-                  <span>Reset Filters</span>
+                  <span>{t('Reset filters', 'ล้างตัวกรอง')}</span>
                 </button>
               )}
             </div>
@@ -580,14 +600,14 @@ export const Alerts: React.FC = () => {
           <table className="dash-table border-collapse w-full">
             <thead>
               <tr className="border-b border-[var(--bg-border)]">
-                <th className="w-44 border-r border-[var(--bg-border)]">Time ({BKK_LABEL})</th>
-                <th className="w-36 border-r border-[var(--bg-border)]">Source IP</th>
-                <th className="w-28 border-r border-[var(--bg-border)]">Severity</th>
-                <th className="border-r border-[var(--bg-border)]">Detection reason</th>
-                <th className="hidden lg:table-cell border-r border-[var(--bg-border)]">Target URI</th>
+                <th className="w-44 border-r border-[var(--bg-border)]">{t(`Time (${BKK_LABEL})`, 'เวลา (กรุงเทพฯ)')}</th>
+                <th className="w-36 border-r border-[var(--bg-border)]">{t('Source IP', 'IP ต้นทาง')}</th>
+                <th className="w-28 border-r border-[var(--bg-border)]">{t('Severity', 'ความรุนแรง')}</th>
+                <th className="border-r border-[var(--bg-border)]">{t('Detection reason', 'เหตุผลที่ตรวจพบ')}</th>
+                <th className="hidden lg:table-cell border-r border-[var(--bg-border)]">{t('Target URI', 'URI เป้าหมาย')}</th>
                 <th className="hidden xl:table-cell w-28 border-r border-[var(--bg-border)]">Alert ID</th>
                 <th className="hidden xl:table-cell w-36 border-r border-[var(--bg-border)]">Telegram</th>
-                <th className="text-right w-20"><span className="sr-only">Details</span></th>
+                <th className="text-right w-20"><span className="sr-only">{t('Details', 'รายละเอียด')}</span></th>
               </tr>
             </thead>
             <tbody>
@@ -595,7 +615,7 @@ export const Alerts: React.FC = () => {
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-[var(--text-muted)] text-[12px] font-mono">
                     <RefreshCw size={18} className="animate-spin inline mr-2 text-orange-500" />
-                    Fetching incident alert history...
+                    {t('Loading alerts...', 'กำลังโหลดการแจ้งเตือน...')}
                   </td>
                 </tr>
               ) : paginatedAlerts.length === 0 ? (
@@ -604,12 +624,12 @@ export const Alerts: React.FC = () => {
                     <div className="space-y-3">
                       <ShieldCheck size={32} className="mx-auto text-emerald-500 opacity-60" />
                       <p className="text-[13.5px] font-bold font-mono text-[var(--text-primary)] m-0">
-                        No security incident alerts match the specified filters
+                        {t('No alerts match these filters', 'ไม่มีการแจ้งเตือนที่ตรงกับตัวกรอง')}
                       </p>
                       <p className="text-[12px] text-[var(--text-muted)] font-mono m-0 max-w-sm mx-auto">
                         {isAnyFilterActive
-                          ? 'Try resetting the search filters or adjusting the date range.'
-                          : 'WAF has recorded no critical incident alerts in this window.'}
+                          ? t('Try resetting the search filters or adjusting the date range.', 'ลองล้างตัวกรองหรือปรับช่วงวันที่')
+                          : t('The WAF has recorded no alerts in this window.', 'WAF ยังไม่มีการแจ้งเตือนในช่วงนี้')}
                       </p>
                     </div>
                   </td>
@@ -656,7 +676,7 @@ export const Alerts: React.FC = () => {
                       <td className="text-[12.5px] text-[var(--text-secondary)] max-w-[300px] border-r border-[var(--bg-border-subtle)]" title={alert.message}>
                         <span className="block truncate">{alert.message || '—'}</span>
                         {alert.rule_id && (
-                          <span className="block font-mono text-[11px] text-[var(--text-muted)]">Rule {alert.rule_id}</span>
+                          <span className="block font-mono text-[11px] text-[var(--text-muted)]">{t('Rule', 'กฎ')} {alert.rule_id}</span>
                         )}
                       </td>
 
@@ -688,11 +708,11 @@ export const Alerts: React.FC = () => {
                                 : 'bg-[var(--bg-surface-elevated)] text-[var(--text-muted)] border-[var(--bg-border)]'
                           return (
                             <span
-                              title={alert.status ? `WAF response: HTTP ${alert.status}` : undefined}
+                              title={alert.status ? t(`WAF response: HTTP ${alert.status}`, `WAF ตอบ: HTTP ${alert.status}`) : undefined}
                               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] font-mono font-semibold border ${tone}`}
                             >
                               <Send size={10} />
-                              <span>{d.label}</span>
+                              <span>{lang === 'th' ? DISPATCH_TH[d.label] ?? d.label : d.label}</span>
                             </span>
                           )
                         })()}
@@ -705,10 +725,10 @@ export const Alerts: React.FC = () => {
                             e.stopPropagation()
                             setSelectedAlert(alert)
                           }}
-                          aria-label={`Details of the alert from ${alert.ip}`}
+                          aria-label={t(`Details of the alert from ${alert.ip}`, `รายละเอียดการแจ้งเตือนจาก ${alert.ip}`)}
                           className="px-2 py-1 text-[12px] font-medium rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--bg-border-hover)] transition-colors cursor-pointer"
                         >
-                          Details
+                          {t('Details', 'รายละเอียด')}
                         </button>
                       </td>
                     </tr>
@@ -723,16 +743,17 @@ export const Alerts: React.FC = () => {
         <div className="px-4 py-3 border-t border-[var(--bg-border)] bg-[var(--bg-surface)] flex items-center justify-between gap-4 flex-wrap text-[12px] font-mono">
           <form onSubmit={handleJumpPage} className="flex items-center gap-2 text-[var(--text-secondary)]">
             <span>
-              Page <strong className="text-[var(--text-primary)]">{page}</strong> of{' '}
+              {t('Page', 'หน้า')} <strong className="text-[var(--text-primary)]">{page}</strong> {t('of', 'จาก')}{' '}
               <strong className="text-[var(--text-primary)]">{totalPages.toLocaleString()}</strong>
             </span>
             <span className="opacity-30">|</span>
-            <span className="text-[11px] text-[var(--text-muted)]">Go to:</span>
+            <span className="text-[11px] text-[var(--text-muted)]">{t('Go to:', 'ไปหน้า:')}</span>
             <input
               type="number"
               min={1}
               max={totalPages}
               placeholder="#"
+              aria-label={t('Page number', 'เลขหน้า')}
               value={pageInput}
               onChange={(e) => setPageInput(e.target.value)}
               className="w-14 dash-input py-0.5 px-2 text-center text-[12px] font-mono"
@@ -742,16 +763,17 @@ export const Alerts: React.FC = () => {
               disabled={!pageInput}
               className="bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] px-2.5 py-1 text-[11.5px] font-semibold rounded disabled:opacity-40 hover:bg-[var(--bg-hover)] cursor-pointer"
             >
-              Jump
+              {t('Jump', 'ไป')}
             </button>
-            {isAlertsFetching && <span className="ml-1 text-orange-500 text-[11px] animate-pulse">Syncing...</span>}
+            {isAlertsFetching && <span className="ml-1 text-orange-500 text-[11px] animate-pulse">{t('Syncing...', 'กำลังอัปเดต...')}</span>}
           </form>
 
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => setPage(1)}
               disabled={page <= 1}
-              title="First Page"
+              title={t('First page', 'หน้าแรก')}
+              aria-label={t('First page', 'หน้าแรก')}
               className="p-1.5 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] disabled:opacity-30 cursor-pointer"
             >
               <ChevronsLeft size={14} />
@@ -761,7 +783,7 @@ export const Alerts: React.FC = () => {
               disabled={page <= 1}
               className="flex items-center gap-1 px-2.5 py-1 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] disabled:opacity-30 cursor-pointer"
             >
-              <ChevronLeft size={13} /> Prev
+              <ChevronLeft size={13} /> {t('Prev', 'ก่อนหน้า')}
             </button>
 
             {getPageNumbers().map((num, idx) =>
@@ -789,12 +811,13 @@ export const Alerts: React.FC = () => {
               disabled={page >= totalPages}
               className="flex items-center gap-1 px-2.5 py-1 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] disabled:opacity-30 cursor-pointer"
             >
-              Next <ChevronRight size={13} />
+              {t('Next', 'ถัดไป')} <ChevronRight size={13} />
             </button>
             <button
               onClick={() => setPage(totalPages)}
               disabled={page >= totalPages}
-              title="Last Page"
+              title={t('Last page', 'หน้าสุดท้าย')}
+              aria-label={t('Last page', 'หน้าสุดท้าย')}
               className="p-1.5 rounded border border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] disabled:opacity-30 cursor-pointer"
             >
               <ChevronsRight size={14} />
@@ -811,7 +834,7 @@ export const Alerts: React.FC = () => {
         title={
           <span className="inline-flex items-center gap-2">
             <ShieldAlert size={16} className="text-red-600 dark:text-red-400 shrink-0" aria-hidden="true" />
-            <span>Alert details</span>
+            <span>{t('Alert details', 'รายละเอียดการแจ้งเตือน')}</span>
           </span>
         }
       >
@@ -827,7 +850,7 @@ export const Alerts: React.FC = () => {
                   onClick={() => navigate(logsSearchPath(selectedAlert.ip))}
                   icon={<Search size={13} />}
                 >
-                  View this IP in traffic logs
+                  {t('View this IP in traffic logs', 'ดู IP นี้ใน log ทราฟฟิก')}
                 </Button>
                 {selectedAlert.origin_id && isBlockableIp(selectedAlert.ip) ? (
                   <Button
@@ -838,11 +861,11 @@ export const Alerts: React.FC = () => {
                     }
                     icon={<Shield size={13} />}
                   >
-                    Block this IP on the origin
+                    {t('Block this IP on the origin', 'บล็อก IP นี้ที่ origin')}
                   </Button>
                 ) : (
                   <span className="self-center text-[12px] text-[var(--text-muted)]">
-                    This alert is not linked to one of your origins, so it cannot be blocked from here.
+                    {t('This alert is not linked to one of your origins, so it cannot be blocked from here.', 'การแจ้งเตือนนี้ไม่ได้ผูกกับ origin ของคุณ จึงบล็อกจากตรงนี้ไม่ได้')}
                   </span>
                 )}
               </div>
@@ -859,7 +882,7 @@ export const Alerts: React.FC = () => {
                   <button
                     onClick={() => handleCopy(formatAlertId(selectedAlert.alert_id), 'Alert ID')}
                     className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded cursor-pointer"
-                    title="Copy Alert ID" aria-label="Copy Alert ID"
+                    title={t('Copy alert ID', 'คัดลอก alert ID')} aria-label={t('Copy alert ID', 'คัดลอก alert ID')}
                   >
                     {copiedText === formatAlertId(selectedAlert.alert_id) ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                   </button>
@@ -867,7 +890,7 @@ export const Alerts: React.FC = () => {
 
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
                   <span className="text-[10.5px] font-bold text-[var(--text-muted)] block mb-1">
-                    Event Timestamp ({BKK_LABEL})
+                    {t(`Event time (${BKK_LABEL})`, 'เวลาที่เกิด (กรุงเทพฯ)')}
                   </span>
                   <span className="text-[var(--text-primary)] font-bold">
                     {formatBkkDateTime(selectedAlert.timestamp)}
@@ -877,14 +900,14 @@ export const Alerts: React.FC = () => {
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)] flex items-center justify-between">
                   <div>
                     <span className="text-[10.5px] font-bold text-[var(--text-muted)] block mb-1">
-                      Attacking Client IP
+                      {t('Attacking client IP', 'IP ผู้โจมตี')}
                     </span>
                     <span className="text-[var(--text-primary)] font-bold">{selectedAlert.ip}</span>
                   </div>
                   <button
-                    onClick={() => handleCopy(selectedAlert.ip, 'IP Address')}
+                    onClick={() => handleCopy(selectedAlert.ip, 'IP')}
                     className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded cursor-pointer"
-                    title="Copy IP" aria-label="Copy IP address"
+                    title={t('Copy IP', 'คัดลอก IP')} aria-label={t('Copy IP address', 'คัดลอก IP')}
                   >
                     {copiedText === selectedAlert.ip ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                   </button>
@@ -894,12 +917,12 @@ export const Alerts: React.FC = () => {
               <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[10.5px] font-bold text-[var(--text-muted)]">
-                    Target Request URI
+                    {t('Target request URI', 'URI ที่ถูกโจมตี')}
                   </span>
                   <button
-                    onClick={() => handleCopy(selectedAlert.url, 'Target URI')}
+                    onClick={() => handleCopy(selectedAlert.url, 'URI')}
                     className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded cursor-pointer"
-                    title="Copy URI" aria-label="Copy target request URI"
+                    title={t('Copy URI', 'คัดลอก URI')} aria-label={t('Copy target request URI', 'คัดลอก URI')}
                   >
                     {copiedText === selectedAlert.url ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                   </button>
@@ -910,24 +933,30 @@ export const Alerts: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
                   <span className="text-[10.5px] font-bold text-[var(--text-muted)] block mb-1">
-                    Threat Severity Level
+                    {t('Severity', 'ระดับความรุนแรง')}
                   </span>
                   {getSeverityBadge(selectedAlert.severity)}
                 </div>
 
                 <div className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--bg-border)]">
                   <span className="text-[12px] font-medium text-[var(--text-muted)] block mb-1">
-                    Telegram delivery
+                    {t('Telegram delivery', 'การส่ง Telegram')}
                   </span>
                   {/* Same label as the table: the backend does not record
                       whether this alert was sent, so the bot being connected
                       says nothing about this particular alert. */}
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[12px] font-medium bg-[var(--bg-surface-elevated)] text-[var(--text-secondary)] border border-[var(--bg-border)]">
                     <Send size={11} aria-hidden="true" />
-                    <span>{getDispatchLabel(selectedAlert).label}</span>
+                    <span>
+                      {lang === 'th'
+                        ? DISPATCH_TH[getDispatchLabel(selectedAlert).label] ?? getDispatchLabel(selectedAlert).label
+                        : getDispatchLabel(selectedAlert).label}
+                    </span>
                   </span>
                   <span className="block mt-1 text-[11.5px] text-[var(--text-muted)]">
-                    {status?.connected ? 'Your Telegram is connected; attacks are sent once per incident.' : 'Telegram is not connected.'}
+                    {status?.connected
+                      ? t('Your Telegram is connected; attacks are sent once per incident.', 'เชื่อม Telegram แล้ว การโจมตีจะถูกส่งครั้งละเหตุการณ์')
+                      : t('Telegram is not connected.', 'ยังไม่ได้เชื่อม Telegram')}
                   </span>
                 </div>
               </div>
@@ -935,14 +964,14 @@ export const Alerts: React.FC = () => {
               <div className="p-3.5 rounded-lg bg-red-50 dark:bg-red-500/[0.08] border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-400 space-y-1.5">
                 <div className="flex items-center gap-1.5 font-bold text-[11px]">
                   <ShieldAlert size={14} />
-                  <span>Detection & Alert Reason</span>
+                  <span>{t('Detection reason', 'เหตุผลที่ตรวจพบ')}</span>
                 </div>
                 <p className="text-[12px] text-[var(--text-primary)] font-sans m-0 leading-relaxed">
                   {selectedAlert.message}
                 </p>
                 {selectedAlert.rule_id && (
                   <p className="text-[11px] text-[var(--text-muted)] font-mono m-0 mt-1">
-                    Trigger Rule Reference: <span className="text-orange-600 dark:text-orange-400 font-bold">{selectedAlert.rule_id}</span>
+                    {t('Triggered rule:', 'กฎที่ตรงกัน:')} <span className="text-orange-600 dark:text-orange-400 font-bold">{selectedAlert.rule_id}</span>
                   </p>
                 )}
               </div>

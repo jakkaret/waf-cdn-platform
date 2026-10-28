@@ -6,6 +6,7 @@ import { alertsApi } from '../../api/alerts'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { tr, useT } from '../../i18n'
 
 // Link this account to the Telegram bot (moved here from the Alert center,
 // 2026-10-28). Pairing: the backend issues a one-time code, the person sends
@@ -16,6 +17,7 @@ export const TelegramConnection: React.FC = () => {
   const [botUsername, setBotUsername] = useState<string>('WAF_Project_Bot')
   const [copied, setCopied] = useState(false)
   const [confirmDisconnect, setConfirmDisconnect] = useState(false)
+  const { t } = useT()
 
   const { data: status, isLoading, isError } = useQuery({
     queryKey: ['telegram-status'],
@@ -29,7 +31,7 @@ export const TelegramConnection: React.FC = () => {
       setCode(data.code)
       if (data.bot_username) setBotUsername(data.bot_username)
     },
-    onError: () => toast.error('Could not start the Telegram connection. Try again.'),
+    onError: () => toast.error(t('Could not start the Telegram connection. Try again.', 'เริ่มเชื่อม Telegram ไม่สำเร็จ ลองใหม่อีกครั้ง')),
   })
 
   const disconnectMutation = useMutation({
@@ -37,9 +39,9 @@ export const TelegramConnection: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['telegram-status'] })
       queryClient.invalidateQueries({ queryKey: ['notification-prefs'] })
-      toast.success('Telegram disconnected')
+      toast.success(t('Telegram disconnected', 'ยกเลิกการเชื่อม Telegram แล้ว'))
     },
-    onError: () => toast.error('Could not disconnect Telegram. Try again.'),
+    onError: () => toast.error(t('Could not disconnect Telegram. Try again.', 'ยกเลิกการเชื่อม Telegram ไม่สำเร็จ ลองใหม่อีกครั้ง')),
     onSettled: () => setConfirmDisconnect(false),
   })
 
@@ -52,10 +54,10 @@ export const TelegramConnection: React.FC = () => {
           setCode(null)
           queryClient.invalidateQueries({ queryKey: ['telegram-status'] })
           queryClient.invalidateQueries({ queryKey: ['notification-prefs'] })
-          toast.success('Telegram connected')
+          toast.success(tr('Telegram connected', 'เชื่อม Telegram แล้ว'))
         } else if (res.status === 'expired') {
           setCode(null)
-          toast.error('The pairing code expired. Start again to get a new one.')
+          toast.error(tr('The pairing code expired. Start again to get a new one.', 'รหัสจับคู่หมดอายุแล้ว เริ่มใหม่เพื่อรับรหัสใหม่'))
         }
       } catch {
         // A failed poll is retried on the next tick.
@@ -68,7 +70,7 @@ export const TelegramConnection: React.FC = () => {
     if (!code) return
     navigator.clipboard.writeText(code)
     setCopied(true)
-    toast.success('Pairing code copied')
+    toast.success(t('Pairing code copied', 'คัดลอกรหัสจับคู่แล้ว'))
     setTimeout(() => setCopied(false), 2000)
   }
 
@@ -83,12 +85,12 @@ export const TelegramConnection: React.FC = () => {
             <div className="flex items-center gap-2 flex-wrap">
               <h2 id="telegram-heading" className="m-0 text-[14px] font-semibold text-[var(--text-primary)]">Telegram</h2>
               {isLoading ? (
-                <Badge color="gray" size="sm">Checking…</Badge>
+                <Badge color="gray" size="sm">{t('Checking…', 'กำลังตรวจ…')}</Badge>
               ) : isError ? (
-                <Badge color="gray" size="sm">Status unavailable</Badge>
+                <Badge color="gray" size="sm">{t('Status unavailable', 'ไม่มีข้อมูลสถานะ')}</Badge>
               ) : (
                 <Badge color={status?.connected ? 'success' : 'warning'} size="sm" dot>
-                  {status?.connected ? 'Connected' : 'Not connected'}
+                  {status?.connected ? t('Connected', 'เชื่อมแล้ว') : t('Not connected', 'ยังไม่เชื่อม')}
                 </Badge>
               )}
             </div>
@@ -96,10 +98,10 @@ export const TelegramConnection: React.FC = () => {
               {status?.connected ? (
                 <span className="inline-flex items-center gap-1">
                   <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-                  Messages go to chat <span className="font-mono">{status.chat_id}</span>
+                  {t('Messages go to chat', 'ส่งข้อความไปที่แชท')} <span className="font-mono">{status.chat_id}</span>
                 </span>
               ) : (
-                'Get attack, outage and certificate notices for your sites in a Telegram chat.'
+                t('Get attack, outage and certificate notices for your sites in a Telegram chat.', 'รับแจ้งการโจมตี เว็บล่ม และใบรับรองของเว็บคุณทางแชท Telegram')
               )}
             </p>
           </div>
@@ -115,12 +117,12 @@ export const TelegramConnection: React.FC = () => {
               disabled={isLoading || isError}
               icon={<Send size={12} />}
             >
-              Connect Telegram
+              {t('Connect Telegram', 'เชื่อม Telegram')}
             </Button>
           )}
           {status?.connected && (
             <Button variant="outline" size="sm" onClick={() => setConfirmDisconnect(true)}>
-              Disconnect
+              {t('Disconnect', 'ยกเลิกการเชื่อม')}
             </Button>
           )}
         </div>
@@ -129,8 +131,8 @@ export const TelegramConnection: React.FC = () => {
       {code && (
         <div className="mt-4 pt-4 border-t border-[var(--bg-border-subtle)] space-y-2.5 text-[12.5px]">
           <ol className="m-0 pl-5 space-y-1 text-[var(--text-secondary)]">
-            <li>Open the bot in Telegram.</li>
-            <li>Send it this pairing code. The page updates by itself once the bot answers.</li>
+            <li>{t('Open the bot in Telegram.', 'เปิดบอทใน Telegram')}</li>
+            <li>{t('Send it this pairing code. The page updates by itself once the bot answers.', 'ส่งรหัสจับคู่นี้ให้บอท หน้านี้จะอัปเดตเองเมื่อบอทตอบ')}</li>
           </ol>
           <div className="flex flex-wrap items-center gap-2.5">
             <span className="inline-flex items-center gap-1.5 font-mono font-semibold text-sky-800 dark:text-sky-300 bg-sky-500/10 border border-sky-500/25 px-2.5 py-1 rounded">
@@ -139,7 +141,7 @@ export const TelegramConnection: React.FC = () => {
                 type="button"
                 onClick={copyCode}
                 className="p-0.5 hover:text-sky-900 dark:hover:text-white cursor-pointer"
-                aria-label="Copy pairing code"
+                aria-label={t('Copy pairing code', 'คัดลอกรหัสจับคู่')}
               >
                 {copied ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
               </button>
@@ -150,12 +152,12 @@ export const TelegramConnection: React.FC = () => {
               rel="noreferrer"
               className="inline-flex items-center gap-1 px-2.5 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded text-[12px] font-medium"
             >
-              Open @{botUsername}
+              {t('Open', 'เปิด')} @{botUsername}
               <ExternalLink size={11} aria-hidden="true" />
             </a>
             <span className="text-[12px] text-[var(--text-muted)] inline-flex items-center gap-1">
               <RefreshCw size={11} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-              Waiting for the bot…
+              {t('Waiting for the bot…', 'รอบอทตอบ…')}
             </span>
           </div>
         </div>
@@ -167,9 +169,12 @@ export const TelegramConnection: React.FC = () => {
         onConfirm={() => {
           if (!disconnectMutation.isPending) disconnectMutation.mutate()
         }}
-        title="Disconnect Telegram?"
-        message="You will stop receiving notifications in this chat until you connect again. Your per-site choices are kept."
-        confirmText={disconnectMutation.isPending ? 'Disconnecting…' : 'Disconnect'}
+        title={t('Disconnect Telegram?', 'ยกเลิกการเชื่อม Telegram?')}
+        message={t(
+          'You will stop receiving notifications in this chat until you connect again. Your per-site choices are kept.',
+          'คุณจะไม่ได้รับการแจ้งเตือนในแชทนี้จนกว่าจะเชื่อมใหม่ การตั้งค่าของแต่ละเว็บยังเก็บไว้',
+        )}
+        confirmText={disconnectMutation.isPending ? t('Disconnecting…', 'กำลังยกเลิก…') : t('Disconnect', 'ยกเลิกการเชื่อม')}
         isDanger
       />
     </section>

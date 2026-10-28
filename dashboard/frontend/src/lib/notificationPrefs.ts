@@ -19,21 +19,25 @@ export interface NotificationPrefs {
   sites: SitePrefs[]
 }
 
-export const PREF_KINDS: { kind: PrefKind; label: string }[] = [
-  { kind: 'attacks', label: 'Attack started or ended' },
-  { kind: 'outages', label: 'Site unreachable or tunnel agent offline' },
-  { kind: 'certs', label: 'HTTPS certificate about to expire' },
-  { kind: 'team', label: 'Someone else changed this site' },
-  { kind: 'digest', label: 'Daily summary at 08:00' },
+export const PREF_KINDS: { kind: PrefKind; label: string; labelTh: string }[] = [
+  { kind: 'attacks', label: 'Attack started or ended', labelTh: 'การโจมตีเริ่มหรือจบ' },
+  { kind: 'outages', label: 'Site unreachable or tunnel agent offline', labelTh: 'เข้าเว็บไม่ได้ หรือ tunnel agent ออฟไลน์' },
+  { kind: 'certs', label: 'HTTPS certificate about to expire', labelTh: 'ใบรับรอง HTTPS ใกล้หมดอายุ' },
+  { kind: 'team', label: 'Someone else changed this site', labelTh: 'มีคนอื่นแก้ไขเว็บนี้' },
+  { kind: 'digest', label: 'Daily summary at 08:00', labelTh: 'สรุปรายวันเวลา 08:00' },
 ]
 
 export const SENSITIVITY_LABEL: Record<Sensitivity, string> = { low: 'Low', medium: 'Medium', high: 'High' }
+export const SENSITIVITY_LABEL_TH: Record<Sensitivity, string> = { low: 'ต่ำ', medium: 'ปานกลาง', high: 'สูง' }
 
 export const ROLE_LABEL: Record<SitePrefs['role'], string> = { owner: 'Owner', editor: 'Editor', viewer: 'Viewer' }
 
-export const sensitivityHint = (level: Sensitivity, levels: NotificationPrefs['levels']): string => {
+export const sensitivityHint = (level: Sensitivity, levels: NotificationPrefs['levels'], lang: 'en' | 'th' = 'en'): string => {
   const l = levels[level]
-  return l ? `Alerts when ${l.total} or more requests are blocked in 5 minutes, or ${l.per_ip} or more from one IP` : ''
+  if (!l) return ''
+  return lang === 'th'
+    ? `แจ้งเมื่อมี request ถูกบล็อกตั้งแต่ ${l.total} ครั้งใน 5 นาที หรือจาก IP เดียวตั้งแต่ ${l.per_ip} ครั้ง`
+    : `Alerts when ${l.total} or more requests are blocked in 5 minutes, or ${l.per_ip} or more from one IP`
 }
 
 // Kinds this person can see for the site: what their role may change, plus
