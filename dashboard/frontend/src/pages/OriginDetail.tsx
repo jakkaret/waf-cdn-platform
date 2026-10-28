@@ -28,6 +28,10 @@ import { OriginIpAccess } from '../components/OriginIpAccess'
 import { OriginMlProtection } from '../components/OriginMlProtection'
 import { OriginRateLimits } from '../components/OriginRateLimits'
 import { ShieldActivity } from '../components/ShieldActivity'
+import { OriginTabs } from '../components/OriginTabs'
+import { getSiteRateRules } from '../api/siteAccess'
+import { originUpstreamLabel } from '../lib/originUpstream'
+import { isOriginTab, type OriginTabId } from '../components/layout/navigation'
 import {
   ModeSelector,
   ExcludePathsField,
@@ -94,16 +98,26 @@ export const OriginDetail: React.FC = () => {
   const guard = useVerifiedGuard()
   const [viewerEmailInput, setViewerEmailInput] = useState('')
   const [editorEmailInput, setEditorEmailInput] = useState('')
-  type OriginTab = 'overview' | 'domains' | 'waf' | 'ml' | 'ip-access' | 'rate-limits' | 'shield' | 'team' | 'postmortem'
-  const [searchParams] = useSearchParams()
-  // ?tab=domains lands a just-connected site on its setup status. The old
-  // ?tab=ssl link target is now part of the Domains tab.
+  const [searchParams, setSearchParams] = useSearchParams()
+  // The tab lives in the URL (?tab=), so a link from All rules, Alerts or the
+  // quick search opens the right one and Back/refresh keep it. ?tab=domains
+  // lands a just-connected site on its setup status; the old ?tab=ssl link
+  // target is now part of the Domains tab.
   const requestedTab = searchParams.get('tab') === 'ssl' ? 'domains' : searchParams.get('tab')
-  const [activeTab, setActiveTab] = useState<OriginTab>(
-    (['overview', 'domains', 'waf', 'ml', 'ip-access', 'rate-limits', 'shield', 'team', 'postmortem'] as const).includes(requestedTab as OriginTab)
-      ? (requestedTab as OriginTab)
-      : 'overview'
-  )
+  const activeTab: OriginTabId = isOriginTab(requestedTab) ? requestedTab : 'overview'
+  const setActiveTab = (tab: OriginTabId) => {
+    const p = new URLSearchParams(searchParams)
+    p.set('tab', tab)
+    // Prefill values (?ip=, ?note=) belong to the tab they were sent to.
+    if (tab !== 'ip-access') {
+      p.delete('ip')
+      p.delete('note')
+    }
+    setSearchParams(p, { replace: true })
+  }
+  // "Block IP" links from Alerts / the dashboard / logs prefill the form.
+  const prefillIp = activeTab === 'ip-access' ? searchParams.get('ip') : null
+  const prefillNote = activeTab === 'ip-access' ? searchParams.get('note') : null
   const [pmStart, setPmStart] = useState('')
   const [pmEnd, setPmEnd] = useState('')
   const [selectedPostmortemId, setSelectedPostmortemId] = useState<string | null>(null)
@@ -120,6 +134,14 @@ export const OriginDetail: React.FC = () => {
     queryFn: () => getOrigin(id!),
     enabled: !!id,
   })
+
+  // Same key as the Rate limits tab (OriginRateLimits), so both agree.
+  const { data: rateRules, isLoading: rateRulesLoading, isError: rateRulesError } = useQuery({
+    queryKey: ['site-rate-limits', id],
+    queryFn: () => getSiteRateRules(id!),
+    enabled: !!id && activeTab === 'overview',
+  })
+  const activeRateRules = (rateRules ?? []).filter((r) => r.enabled).length
 
   const originHasTags = (data?.data?.tech_stack_tags || []).length > 0
   const { data: cveData, isLoading: cveLoading, isError: cveError } = useQuery({
@@ -571,7 +593,7 @@ export const OriginDetail: React.FC = () => {
               </Badge>
             </div>
             <p className="text-[12px] font-mono text-[var(--text-muted)] mt-1 m-0">
-              Proxy Upstream: {origin.connection_mode === 'direct' ? `${origin.origin_scheme || 'http'}://` : ''}{origin.ip}:{origin.port}
+              Upstream: {originUpstreamLabel(origin)}
             </p>
           </div>
         </div>
@@ -606,35 +628,24 @@ export const OriginDetail: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-[var(--bg-border)] font-mono text-[12.5px] overflow-x-auto">
-        {[
-          { id: 'overview', label: 'Pool Overview', icon: <Server size={14} /> },
-          { id: 'domains', label: 'Domains & DNS', icon: <Globe size={14} /> },
-          { id: 'waf', label: 'WAF Policies', icon: <Shield size={14} /> },
-          { id: 'ml', label: 'ML Protection', icon: <Brain size={14} /> },
-          { id: 'ip-access', label: 'IP Access', icon: <ListChecks size={14} /> },
-          { id: 'rate-limits', label: 'Rate Limits', icon: <Gauge size={14} /> },
-          { id: 'shield', label: 'Bot & Login Shield', icon: <Bot size={14} /> },
-          { id: 'team', label: 'Team & Audit Log', icon: <Users size={14} /> },
-          { id: 'postmortem', label: 'Incident Postmortem', icon: <FileText size={14} /> },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`flex items-center gap-2 px-4 py-2.5 font-semibold border-b-2 whitespace-nowrap transition-all cursor-pointer ${
-              activeTab === tab.id
-                ? 'border-orange-500 text-orange-500'
-                : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            {tab.icon}
-            <span>{tab.label}</span>
-          </button>
-        ))}
-      </div>
+      <OriginTabs
+        active={activeTab}
+        onSelect={setActiveTab}
+        icons={{
+          overview: <Server size={14} />,
+          domains: <Globe size={14} />,
+          waf: <Shield size={14} />,
+          ml: <Brain size={14} />,
+          'ip-access': <ListChecks size={14} />,
+          'rate-limits': <Gauge size={14} />,
+          shield: <Bot size={14} />,
+          team: <Users size={14} />,
+          postmortem: <FileText size={14} />,
+        }}
+      />
 
       {/* Tab Panels */}
-      <div className="py-2">
+      <div id="origin-tab-panel" role="tabpanel" aria-labelledby={`origin-tab-${activeTab}`} className="py-2">
         {activeTab === 'overview' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <OriginTarget originId={id!} origin={origin} canEdit={isAdmin} />
@@ -662,15 +673,25 @@ export const OriginDetail: React.FC = () => {
                   <Badge color="success">AUTO CADDY</Badge>
                 </div>
                 <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
-                  <span className="text-[var(--text-muted)]">Rate Limiting</span>
-                  {/* Was a hardcoded "100 REQ/MIN" -- matched only the
-                      global fallback default (api/limiter.py), not the
-                      per-rule-configurable real values (see
-                      RateLimiting.tsx), and even that fallback's real
-                      window is 10s not 60s. No per-origin rate-limit value
-                      is fetched on this page, so this states what's true
-                      without a specific number. */}
-                  <Badge color="brand">ENABLED</Badge>
+                  <span className="text-[var(--text-muted)]">Rate limits</span>
+                  {/* From the origin's own rate-limit rules (the same query
+                      as the Rate limits tab). It used to say ENABLED with no
+                      data behind it while that tab showed none. */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('rate-limits')}
+                    className="cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded"
+                  >
+                    {rateRulesLoading ? (
+                      <Badge color="gray">Checking…</Badge>
+                    ) : rateRulesError ? (
+                      <Badge color="gray">Unavailable</Badge>
+                    ) : activeRateRules > 0 ? (
+                      <Badge color="success">{activeRateRules} active</Badge>
+                    ) : (
+                      <Badge color="gray">None set</Badge>
+                    )}
+                  </button>
                 </div>
                 <div className="flex justify-between items-center py-1.5">
                   <span className="text-[var(--text-muted)]">Attached Domains</span>
@@ -940,7 +961,9 @@ export const OriginDetail: React.FC = () => {
 
         {activeTab === 'waf' && id && <OriginWafRules originId={id} canEdit={isAdmin} />}
         {activeTab === 'ml' && id && <OriginMlProtection originId={id} canEdit={isAdmin} />}
-        {activeTab === 'ip-access' && id && <OriginIpAccess originId={id} canEdit={isAdmin} />}
+        {activeTab === 'ip-access' && id && (
+          <OriginIpAccess originId={id} canEdit={isAdmin} prefillIp={prefillIp} prefillNote={prefillNote} />
+        )}
         {activeTab === 'rate-limits' && id && <OriginRateLimits originId={id} canEdit={isAdmin} />}
 
         {activeTab === 'shield' && (
@@ -1249,7 +1272,7 @@ export const OriginDetail: React.FC = () => {
                       <option value="email">Email</option>
                     </select>
                     <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0">
-                      More channels later -- SMS/etc need their own delivery integration first.
+                      Email is the only delivery channel for codes today.
                     </p>
                   </div>
 

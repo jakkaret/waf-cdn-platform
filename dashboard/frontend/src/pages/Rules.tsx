@@ -26,6 +26,7 @@ import {
 import { WafRule } from '../types'
 import toast from 'react-hot-toast'
 import { CRS_VERSION } from '../lib/crsVersion'
+import { OriginRulesTable } from '../components/rules/OriginRulesTable'
 
 const PAGE_SIZE = 10
 
@@ -45,6 +46,8 @@ export const Rules: React.FC = () => {
   const [pageInput, setPageInput] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
   
+  // Operators see their platform-wide rules next to the per-origin ones.
+  const [view, setView] = useState<'origins' | 'platform'>('origins')
   const [isTestingBlastRadius, setIsTestingBlastRadius] = useState(false)
   const [blastRadiusResult, setBlastRadiusResult] = useState<any | null>(null)
 
@@ -236,24 +239,14 @@ export const Rules: React.FC = () => {
     return `SecRule ${variable} "${op}" "id:${rawId},phase:2,deny,status:${status},msg:'${msg}'"`
   }, [editingRule])
 
+  const originSubtitle =
+    'WAF rules, IP access entries and rate limits of every origin you can open. Create and edit them on the origin itself; Open takes you there.'
+
   if (!isAdmin) {
     return (
       <div className="animate-fade-in pb-10">
-        <TopBar
-          title="WAF Rules"
-          subtitle="Global rule policies are managed by the platform administrator"
-        />
-        <div className="dash-card p-5 mt-3.5 font-mono text-[12px] text-[var(--text-muted)] space-y-2">
-          <p className="m-0 text-[var(--text-primary)] font-bold">
-            Your rules live on each origin.
-          </p>
-          <p className="m-0">
-            Open an origin and use its <strong>WAF Policies</strong> tab to see the managed ruleset
-            version, update it, and create rules that apply only to that origin's domains. Its{' '}
-            <strong>IP Access</strong> and <strong>Rate Limits</strong> tabs hold that origin's own
-            block/allow list and request limits.
-          </p>
-        </div>
+        <TopBar title="All rules" subtitle={originSubtitle} />
+        <OriginRulesTable />
       </div>
     )
   }
@@ -262,14 +255,14 @@ export const Rules: React.FC = () => {
     <div className="animate-fade-in pb-10">
       {/* Top Header Bar */}
       <TopBar
-        title="WAF Custom Rule Policies"
-        subtitle="Manage ModSecurity SecRule definitions, edge inspection logic, and custom attack signatures"
-        badge={
-          <Badge color="brand" dot>
-            {rules.length} ACTIVE POLICIES
-          </Badge>
+        title="All rules"
+        subtitle={
+          view === 'origins'
+            ? originSubtitle
+            : 'Platform rules apply to every origin on the WAF. Only the platform operator manages them.'
         }
         action={
+          view === 'origins' ? undefined : (
           <div className="flex items-center gap-2">
             <button
               onClick={() => refetch()}
@@ -296,9 +289,31 @@ export const Rules: React.FC = () => {
               </>
             )}
           </div>
+          )
         }
       />
 
+      <div role="tablist" aria-label="Rule scope" className="mb-5 inline-flex rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] p-0.5">
+        {([
+          { id: 'origins', label: 'Origin rules' },
+          { id: 'platform', label: `Platform rules (${rules.length})` },
+        ] as const).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={view === t.id}
+            onClick={() => setView(t.id)}
+            className={`h-8 px-3 rounded-md text-[13px] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
+              view === t.id ? 'bg-[var(--nav-active)] font-medium text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'origins' ? <OriginRulesTable /> : (<>
       {/* ═══ Section 1: Overview Stats Strip ═══ */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
         <div className="dash-card p-4 sm:p-5 flex items-center justify-between">
@@ -875,6 +890,7 @@ export const Rules: React.FC = () => {
               </div>
             </form>
       </Drawer>
+      </>)}
     </div>
   )
 }

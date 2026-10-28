@@ -32,6 +32,7 @@ import { useAuthStore } from '../store/authStore'
 import { originRoleOf } from '../lib/roles'
 import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
 import { bkkDateKey } from '../lib/time'
+import { originUpstreamLabel } from '../lib/originUpstream'
 
 export const Origins: React.FC = () => {
   const navigate = useNavigate()
@@ -281,9 +282,9 @@ export const Origins: React.FC = () => {
 
                   <div className="mt-4 pt-3 border-t border-[var(--bg-border-subtle)] space-y-2 text-[12px] font-mono">
                     <div className="flex justify-between text-[var(--text-secondary)]">
-                      <span className="text-[var(--text-muted)]">Proxy Target:</span>
-                      <span className="text-[var(--text-primary)] font-semibold">
-                        http://{origin.ip}:{origin.port}
+                      <span className="text-[var(--text-muted)]">Upstream</span>
+                      <span className="text-[var(--text-primary)] font-semibold truncate">
+                        {originUpstreamLabel(origin)}
                       </span>
                     </div>
                     <div className="flex justify-between text-[var(--text-secondary)]">
