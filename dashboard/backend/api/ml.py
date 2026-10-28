@@ -251,6 +251,7 @@ async def gate_relay(request: Request):
         logger.warning("ML gate relay failed open: %s", exc)
         return _gate_answer("pass", error="error")
     action = ml_gate.decide(score, policy)
+    ml_gate.remember_action(request.headers.get("X-Original-Request-ID", ""), action)
     ml_verdicts.enqueue({**verdict, "action": action}, body=body)
     return _gate_answer(action, score)
 

@@ -29,6 +29,22 @@ SEVERITY_NUM_MAP = {
 }
 
 
+# The inline ML gate (services/ml_gate.py) answers a request itself: its 403 or
+# challenge page is not a ModSecurity block, so its row must not read as one.
+ML_RULE_ID = "ML-GEN3"
+ML_ATTACK_TYPES = {"block": "ML Block", "challenge": "ML Challenge"}
+
+
+def label_ml_action(row, action):
+    """A normalize_cdn_access row, relabelled when the ML gate blocked or
+    challenged the request (ml_gate.recalled_action)."""
+    attack_type = ML_ATTACK_TYPES.get(action)
+    if attack_type:
+        row["attack_type"] = attack_type
+        row["rule_id"] = ML_RULE_ID
+    return row
+
+
 def normalize_cdn_access(data, region):
     method = data.get("method", "")
     # Prioritize actual request URI with query parameters over internal error_page path

@@ -14,7 +14,8 @@ from services.rbac import require_viewer_or_above, get_current_user, verify_orig
 from services import audit_log, cdn_purge as purge_queue
 from services.rate_limiter import limiter
 from services.clickhouse_service import ClickHouseService
-from services.log_normalize import normalize_cdn_access
+from services import ml_gate
+from services.log_normalize import label_ml_action, normalize_cdn_access
 from services.telegram_listener import record_alert
 from services.pii_masker import pii_masker
 from services.edge_tunnel import EDGE_TUNNEL_IPS
@@ -545,7 +546,8 @@ def _store_cdn_log_batch(entries: list, region: str) -> Tuple[int, list]:
     normalized = []
     for entry in entries:
         try:
-            normalized.append(normalize_cdn_access(entry, region))
+            row = normalize_cdn_access(entry, region)
+            normalized.append(label_ml_action(row, ml_gate.recalled_action(row.get("request_id"))))
         except Exception:
             logger.exception("cdn log ingest: failed to normalize one entry from region=%s", region)
     if not normalized or not ch.connected:
