@@ -1,10 +1,14 @@
 import { api } from './axios'
-import { Origin, OriginAdjusted, OriginCveReport } from '../types'
+import { Origin, OriginAdjusted, OriginCveReport, OriginOverview } from '../types'
 
 export const getOrigins = (opts?: { forceRefreshStatus?: boolean }) =>
   api.get<{ origins: Origin[] }>('/origins', {
     params: opts?.forceRefreshStatus ? { refresh_status: true } : undefined,
   })
+
+// Summary columns for the Origins list (24 h traffic, protections, domains).
+export const getOriginsOverview = () =>
+  api.get<{ origins: OriginOverview[] }>('/origins/overview')
 
 export const createOrigin = (data: { ip: string; port: number; label: string }) =>
   api.post<Origin>('/origins', data)

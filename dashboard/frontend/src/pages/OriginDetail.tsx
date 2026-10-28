@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getOrigin, deleteOrigin, restoreOrigin, updateOrigin, getOriginCves } from '../api/origins'
+import { getOrigin, getOrigins, getOriginsOverview, deleteOrigin, restoreOrigin, updateOrigin, getOriginCves } from '../api/origins'
 import { getDomains, deleteDomain } from '../api/domains'
 import { onboardingApi } from '../api/onboarding'
 import { getCaptchaConfig, updateCaptchaConfig } from '../api/captcha'
@@ -9,7 +9,6 @@ import { getOtpConfig, updateOtpConfig } from '../api/otp'
 import { getOriginViewers, addOriginViewer, removeOriginViewer } from '../api/origin_viewers'
 import { getOriginEditors, addOriginEditor, removeOriginEditor } from '../api/origin_editors'
 import { getOriginAuditLog } from '../api/origin_audit_log'
-import { createPostmortem, getPostmortems, getPostmortem } from '../api/postmortems'
 import { useAuthStore } from '../store/authStore'
 import { tunnelConnectivityBadge } from '../lib/tunnelStatus'
 import { CRS_VERSION } from '../lib/crsVersion'
@@ -17,7 +16,6 @@ import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { LoadingSpinner } from '../components/ui/LoadingSpinner'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
-import { EmptyState } from '../components/ui/EmptyState'
 import { ConnectSiteFlow } from '../components/ConnectSiteFlow'
 import { OriginTarget } from '../components/OriginTarget'
 import { PurgeCache } from '../components/PurgeCache'
@@ -28,11 +26,13 @@ import { OriginIpAccess } from '../components/OriginIpAccess'
 import { OriginMlProtection } from '../components/OriginMlProtection'
 import { OriginRateLimits } from '../components/OriginRateLimits'
 import { ShieldActivity } from '../components/ShieldActivity'
-import { OriginTabs } from '../components/OriginTabs'
-import { LanguageToggle } from '../components/ui/LanguageToggle'
+import { OriginReports } from '../components/reports/OriginReports'
 import { getSiteRateRules } from '../api/siteAccess'
 import { originUpstreamLabel } from '../lib/originUpstream'
-import { isOriginTab, type OriginTabId } from '../components/layout/navigation'
+import { ORIGIN_VIEWS, resolveOriginTab, type OriginTabId, type OriginViewId } from '../components/layout/navigation'
+import { OriginHeader } from '../components/origins/OriginHeader'
+import { OriginViewTabs, ProtectionAccordion } from '../components/origins/OriginViewTabs'
+import { originHealth, protectionStates, PROT_TAB, PROT_KEYS, type ProtKey } from '../lib/originSummary'
 import {
   ModeSelector,
   ExcludePathsField,
@@ -50,8 +50,6 @@ import { toast } from 'react-hot-toast'
 import { Domain, CaptchaShieldConfig, OtpShieldConfig } from '../types'
 import { parseListInput, formatListInput } from '../lib/captchaForm'
 import {
-  ArrowLeft,
-  Server,
   Globe,
   Shield,
   Lock,
@@ -65,17 +63,12 @@ import {
   Bot,
   Mail,
   Users,
-  FileText,
   Bug,
   ExternalLink,
-  ListChecks,
-  Gauge,
-  Brain,
 } from 'lucide-react'
 import { ORIGIN_ROLE_LABEL, canEditOrigin, canManageOrigin, originRoleOf } from '../lib/roles'
 import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
-import { ReportText } from '../components/ai/ReportText'
-import { BKK_LABEL, formatBkkDateTime } from '../lib/time'
+import { formatBkkDateTime } from '../lib/time'
 import { severityLabel, statusWord, useT } from '../i18n'
 
 const cveSeverityClass = (sev: string): string => {
@@ -96,9 +89,9 @@ const cveSeverityClass = (sev: string): string => {
 export const OriginDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { t, lang } = useT()
   const currentUser = useAuthStore((s) => s.user)
   const guard = useVerifiedGuard()
-  const { t, lang } = useT()
   const [viewerEmailInput, setViewerEmailInput] = useState('')
   const [editorEmailInput, setEditorEmailInput] = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
@@ -106,9 +99,10 @@ export const OriginDetail: React.FC = () => {
   // quick search opens the right one and Back/refresh keep it. ?tab=domains
   // lands a just-connected site on its setup status; the old ?tab=ssl link
   // target is now part of the Domains tab.
-  const requestedTab = searchParams.get('tab') === 'ssl' ? 'domains' : searchParams.get('tab')
-  const activeTab: OriginTabId = isOriginTab(requestedTab) ? requestedTab : 'overview'
-  const setActiveTab = (tab: OriginTabId) => {
+  const { view: activeView, section } = resolveOriginTab(searchParams.get('tab'))
+  // A section id (one of the nine old tabs), or Protection with nothing open.
+  const activeTab: OriginTabId | 'protection' = section ?? 'protection'
+  const setActiveTab = (tab: OriginTabId | 'protection') => {
     const p = new URLSearchParams(searchParams)
     p.set('tab', tab)
     // Prefill values (?ip=, ?note=) belong to the tab they were sent to.
@@ -121,9 +115,6 @@ export const OriginDetail: React.FC = () => {
   // "Block IP" links from Alerts / the dashboard / logs prefill the form.
   const prefillIp = activeTab === 'ip-access' ? searchParams.get('ip') : null
   const prefillNote = activeTab === 'ip-access' ? searchParams.get('note') : null
-  const [pmStart, setPmStart] = useState('')
-  const [pmEnd, setPmEnd] = useState('')
-  const [selectedPostmortemId, setSelectedPostmortemId] = useState<string | null>(null)
   const [techTagInput, setTechTagInput] = useState('')
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false)
@@ -136,6 +127,20 @@ export const OriginDetail: React.FC = () => {
     queryKey: ['origin', id],
     queryFn: () => getOrigin(id!),
     enabled: !!id,
+  })
+
+  // Header facts and previous/next: the same queries the Origins list uses.
+  const { data: overviewList } = useQuery({
+    queryKey: ['origins-overview'],
+    queryFn: () => getOriginsOverview(),
+    enabled: !!id,
+    refetchInterval: 60000,
+  })
+  const { data: originsList } = useQuery({
+    queryKey: ['origins'],
+    queryFn: () => getOrigins(),
+    enabled: !!id,
+    staleTime: 15000,
   })
 
   // Same key as the Rate limits tab (OriginRateLimits), so both agree.
@@ -463,34 +468,6 @@ export const OriginDetail: React.FC = () => {
   })
   const auditEvents = auditLogData?.data?.events || []
 
-  // AI Incident Postmortem (2026-09-22): owner-only, matching the backend
-  // (a postmortem merges in global-scope audit events an editor/viewer of
-  // this one origin has no business seeing).
-  const { data: postmortemsData, isLoading: postmortemsLoading } = useQuery({
-    queryKey: ['origin-postmortems', id],
-    queryFn: () => getPostmortems(id!),
-    enabled: !!id && isAdmin && activeTab === 'postmortem',
-  })
-  const postmortems = postmortemsData?.data?.postmortems || []
-
-  const { data: selectedPostmortemData, isLoading: selectedPostmortemLoading } = useQuery({
-    queryKey: ['origin-postmortem', id, selectedPostmortemId],
-    queryFn: () => getPostmortem(id!, selectedPostmortemId!),
-    enabled: !!id && !!selectedPostmortemId,
-  })
-  const selectedPostmortem = selectedPostmortemData?.data?.postmortem || null
-
-  const createPostmortemMutation = useMutation({
-    mutationFn: () => createPostmortem(id!, pmStart.replace('T', ' ') + ':00', pmEnd.replace('T', ' ') + ':00'),
-    onSuccess: (res) => {
-      toast.success(t('Postmortem report created', 'สร้างรายงาน Postmortem สำเร็จ'))
-      queryClient.invalidateQueries({ queryKey: ['origin-postmortems', id] })
-      queryClient.setQueryData(['origin-postmortem', id, res.data.postmortem.id], res)
-      setSelectedPostmortemId(res.data.postmortem.id)
-    },
-    onError: (e: any) => toast.error(e.response?.data?.detail || t('Failed to generate postmortem', 'สร้างรายงาน postmortem ไม่สำเร็จ')),
-  })
-
   // CVE Auto-Patch (2026-09-22): feeds POST /api/ml-rules/cve-scan's
   // matching -- self-declared, no real fingerprinting.
   const updateTechTagsMutation = useMutation({
@@ -562,426 +539,37 @@ export const OriginDetail: React.FC = () => {
     )
   }
 
-  return (
-    <div className="space-y-6 max-w-6xl mx-auto animate-fade-in">
-      {/* Top Header Card */}
-      <div className="dash-card p-5 sm:p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => navigate('/origins')}
-            className="p-2 bg-[var(--bg-primary)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--bg-border)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
-            title={t('Back to Origins', 'กลับไปหน้า Origins')}
-            aria-label={t('Back to Origins', 'กลับไปหน้า Origins')}
-          >
-            <ArrowLeft size={16} />
-          </button>
-          <div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-[20px] font-bold text-[var(--text-primary)] font-mono m-0">
-                {origin.label}
-              </h1>
-              {myOriginRole && (
-                <Badge color="info">{t('You:', 'คุณ:')} {ORIGIN_ROLE_LABEL[myOriginRole]}</Badge>
-              )}
-              <Badge
-                color={
-                  origin.status === 'active'
-                    ? 'success'
-                    : origin.status === 'pending'
-                    ? 'warning'
-                    : 'gray'
-                }
-                dot
-              >
-                {statusWord(origin.status.toUpperCase(), lang)}
-              </Badge>
-            </div>
-            <p className="text-[12px] font-mono text-[var(--text-muted)] mt-1 m-0">
-              {t('Upstream:', 'ปลายทาง:')} {originUpstreamLabel(origin, lang)}
-            </p>
-          </div>
-        </div>
+  const overviewRow = (overviewList?.data?.origins || []).find((r) => r.origin_id === origin.origin_id)
+  const health = originHealth(origin, overviewRow?.domains, lang)
+  const protStates = protectionStates(overviewRow?.protection, lang)
+  // Previous / next in the list's order: problems first, then by traffic blocked.
+  const listed = (originsList?.data?.origins || [])
+    .filter((o) => o.status !== 'archived' || o.origin_id === origin.origin_id)
+    .map((o) => {
+      const ov = (overviewList?.data?.origins || []).find((r) => r.origin_id === o.origin_id)
+      return { o, h: originHealth(o, ov?.domains), blocked: ov?.blocked_24h ?? -1 }
+    })
+    .sort((x, y) =>
+      Number(y.h.needsAction) - Number(x.h.needsAction) ||
+      (x.h.needsAction ? x.h.rank - y.h.rank : y.blocked - x.blocked) ||
+      x.o.label.localeCompare(y.o.label),
+    )
+  const at = listed.findIndex((x) => x.o.origin_id === origin.origin_id)
+  const position =
+    at >= 0 && listed.length > 1
+      ? {
+          index: at,
+          total: listed.length,
+          prevId: listed[(at - 1 + listed.length) % listed.length].o.origin_id,
+          nextId: listed[(at + 1) % listed.length].o.origin_id,
+          prevLabel: listed[(at - 1 + listed.length) % listed.length].o.label,
+          nextLabel: listed[(at + 1) % listed.length].o.label,
+        }
+      : undefined
 
-        <div className="flex items-center gap-2.5">
-          {/* Archive / restore / cancel are Owner-only (lib/roles). */}
-          {!isOwner ? null : origin.status === 'archived' ? (
-            <Button
-              variant="brand"
-              onClick={() => setIsRestoreModalOpen(true)}
-              icon={<RotateCcw size={14} />}
-            >
-              {t('Restore origin', 'กู้คืน origin')}
-            </Button>
-          ) : origin.status === 'pending' ? (
-            <Button
-              variant="outline"
-              onClick={() => setIsDeleteModalOpen(true)}
-            >
-              {t('Cancel setup', 'ยกเลิกการตั้งค่า')}
-            </Button>
-          ) : (
-            <Button
-              variant="danger"
-              onClick={() => setIsDeleteModalOpen(true)}
-              icon={<Trash2 size={14} />}
-            >
-              {t('Archive origin', 'เก็บ origin ถาวร')}
-            </Button>
-          )}
-          {/* This page has no TopBar, so the language switch sits here. */}
-          <LanguageToggle />
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <OriginTabs
-        active={activeTab}
-        onSelect={setActiveTab}
-        icons={{
-          overview: <Server size={14} />,
-          domains: <Globe size={14} />,
-          waf: <Shield size={14} />,
-          ml: <Brain size={14} />,
-          'ip-access': <ListChecks size={14} />,
-          'rate-limits': <Gauge size={14} />,
-          shield: <Bot size={14} />,
-          team: <Users size={14} />,
-          postmortem: <FileText size={14} />,
-        }}
-      />
-
-      {/* Tab Panels */}
-      <div id="origin-tab-panel" role="tabpanel" aria-labelledby={`origin-tab-${activeTab}`} className="py-2">
-        {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <OriginTarget originId={id!} origin={origin} canEdit={isAdmin} />
-
-            <div className="dash-card p-5 space-y-4">
-              <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)]">
-                {t('Security & protection status', 'สถานะความปลอดภัยและการป้องกัน')}
-              </h3>
-              <div className="space-y-3 font-mono text-[12px]">
-                {origin.is_tunnel && (
-                  <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
-                    <span className="text-[var(--text-muted)]">{t('Tunnel connectivity', 'การเชื่อมต่อ tunnel')}</span>
-                    {(() => {
-                      const b = tunnelConnectivityBadge(origin.live_connected)
-                      return <Badge color={b.color}>{statusWord(b.label, lang)}</Badge>
-                    })()}
-                  </div>
-                )}
-                <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
-                  <span className="text-[var(--text-muted)]">ModSecurity WAF</span>
-                  <Badge color="success">{t('ENABLED', 'เปิดใช้งาน')} (CRS {CRS_VERSION})</Badge>
-                </div>
-                <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
-                  <span className="text-[var(--text-muted)]">SSL / TLS termination</span>
-                  <Badge color="success">{t('AUTO (CADDY)', 'อัตโนมัติ (CADDY)')}</Badge>
-                </div>
-                <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
-                  <span className="text-[var(--text-muted)]">Rate limit</span>
-                  {/* From the origin's own rate-limit rules (the same query
-                      as the Rate limits tab). It used to say ENABLED with no
-                      data behind it while that tab showed none. */}
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('rate-limits')}
-                    className="cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded"
-                  >
-                    {rateRulesLoading ? (
-                      <Badge color="gray">{t('Checking…', 'กำลังตรวจ…')}</Badge>
-                    ) : rateRulesError ? (
-                      <Badge color="gray">{t('Unavailable', 'ไม่มีข้อมูล')}</Badge>
-                    ) : activeRateRules > 0 ? (
-                      <Badge color="success">{activeRateRules} {t('active', 'ใช้งานอยู่')}</Badge>
-                    ) : (
-                      <Badge color="gray">{t('None set', 'ยังไม่ได้ตั้ง')}</Badge>
-                    )}
-                  </button>
-                </div>
-                <div className="flex justify-between items-center py-1.5">
-                  <span className="text-[var(--text-muted)]">{t('Attached domains', 'โดเมนที่ผูกไว้')}</span>
-                  <span className="font-bold text-[var(--text-primary)]">{domains.length} {t('domain(s)', 'โดเมน')}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="md:col-span-2">
-              <PurgeCache
-                domains={domains.filter((d: Domain) => d.verification_status === 'verified').map((d: Domain) => d.domain_name)}
-                canEdit={isAdmin}
-              />
-            </div>
-
-            {isAdmin && (
-              <div className="dash-card p-5 space-y-4 md:col-span-2">
-                <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)]">
-                  Tech stack tags
-                </h3>
-                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                  {t(
-                    'Self-declared, not auto-detected. Feeds CVE Auto-Patch: a scan matches these tags against the real NVD CVE feed and drafts a proposal into the ML Anomaly Rules queue for review -- it never applies anything automatically.',
-                    'กรอกเอง ระบบไม่ได้ตรวจหาให้ ใช้กับ CVE Auto-Patch: ระบบจับคู่ tag เหล่านี้กับฐานข้อมูล CVE ของ NVD แล้วร่างข้อเสนอเข้าคิว ML Anomaly Rules ให้ตรวจ — ไม่มีการนำไปใช้อัตโนมัติ',
-                  )}
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={techTagInput}
-                    onChange={(e) => setTechTagInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      // isPending guard matches the Add Tag button and the
-                      // remove buttons below -- without it, two fast Enter
-                      // presses fire two updateOrigin calls built off the
-                      // same stale origin.tech_stack_tags, and the second
-                      // overwrites the first (lost-update race).
-                      if (e.key === 'Enter' && techTagInput.trim() && !updateTechTagsMutation.isPending) {
-                        const current = origin.tech_stack_tags || []
-                        if (!current.includes(techTagInput.trim())) {
-                          updateTechTagsMutation.mutate([...current, techTagInput.trim()])
-                        } else {
-                          setTechTagInput('')
-                        }
-                      }
-                    }}
-                    placeholder={t('e.g. nginx, wordpress, php 8.1', 'เช่น nginx, wordpress, php 8.1')}
-                    className="flex-1 bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
-                  />
-                  <Button
-                    size="sm"
-                    icon={<Plus size={14} />}
-                    onClick={() => {
-                      if (!techTagInput.trim()) return
-                      const current = origin.tech_stack_tags || []
-                      if (!current.includes(techTagInput.trim())) {
-                        updateTechTagsMutation.mutate([...current, techTagInput.trim()])
-                      } else {
-                        setTechTagInput('')
-                      }
-                    }}
-                    disabled={!techTagInput.trim() || updateTechTagsMutation.isPending}
-                  >
-                    {t('Add tag', 'เพิ่ม tag')}
-                  </Button>
-                </div>
-                {(origin.tech_stack_tags || []).length === 0 ? (
-                  <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                    {t('No tags set yet -- CVE Auto-Patch has nothing to match against this origin.', 'ยังไม่มี tag — CVE Auto-Patch จึงยังไม่มีอะไรให้จับคู่กับ origin นี้')}
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {(origin.tech_stack_tags || []).map((tag) => (
-                      <span
-                        key={tag}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] text-[12px] font-mono text-[var(--text-primary)]"
-                      >
-                        {tag}
-                        <button
-                          onClick={() =>
-                            updateTechTagsMutation.mutate((origin.tech_stack_tags || []).filter((t) => t !== tag))
-                          }
-                          disabled={updateTechTagsMutation.isPending}
-                          className="text-[var(--text-muted)] hover:text-red-500"
-                          title={t('Remove tag', 'ลบ tag')}
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="dash-card p-5 space-y-4 md:col-span-2">
-              <div className="flex items-center justify-between pb-3 border-b border-[var(--bg-border-subtle)]">
-                <h3 className="flex items-center gap-2 text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
-                  <Bug size={15} className="text-red-500" />
-                  {t('Known CVEs', 'CVE ที่เกี่ยวข้อง')}
-                </h3>
-                <span className="text-[11px] text-[var(--text-muted)] font-mono">
-                  {t('matched against tech stack tags', 'จับคู่กับ tech stack tags')}
-                </span>
-              </div>
-              <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                {t(
-                  "CVEs from the NVD feed that match this origin's tech stack tags. Advisory only -- nothing is blocked until a virtual-patch proposal is reviewed and approved in ML Anomaly Rules.",
-                  'CVE จาก NVD ที่ตรงกับ tech stack tags ของ origin นี้ เป็นข้อมูลแนะนำเท่านั้น — จะยังไม่บล็อกอะไรจนกว่าข้อเสนอ virtual patch จะผ่านการตรวจและอนุมัติใน ML Anomaly Rules',
-                )}
-              </p>
-              {!originHasTags ? (
-                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                  {t(
-                    'No tech stack tags on this origin yet, so there is nothing to match. An admin of this origin can add tags such as nginx or wordpress.',
-                    'origin นี้ยังไม่มี tech stack tags จึงยังไม่มีอะไรให้จับคู่ ผู้ดูแล origin เพิ่ม tag เช่น nginx หรือ wordpress ได้',
-                  )}
-                </p>
-              ) : cveLoading ? (
-                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                  {t(
-                    `Searching the NVD feed for ${(origin.tech_stack_tags || []).join(', ')}... the first search can take up to 30 seconds.`,
-                    `กำลังค้นหา ${(origin.tech_stack_tags || []).join(', ')} ใน NVD... การค้นหาครั้งแรกอาจใช้เวลาถึง 30 วินาที`,
-                  )}
-                </p>
-              ) : cveError ? (
-                <p className="text-[12px] text-red-500 font-mono m-0">
-                  {t('Could not load CVEs. Reload the page to try again.', 'โหลด CVE ไม่สำเร็จ รีโหลดหน้าเพื่อลองใหม่')}
-                </p>
-              ) : originCves.length === 0 ? (
-                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                  {t(
-                    `No CVEs modified in the last ${cveData?.data?.window_days ?? 14} days match ${(cveData?.data?.keywords_searched || []).join(', ')}.`,
-                    `ไม่มี CVE ที่แก้ไขในช่วง ${cveData?.data?.window_days ?? 14} วันล่าสุดที่ตรงกับ ${(cveData?.data?.keywords_searched || []).join(', ')}`,
-                  )}
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {(cveData?.data?.total ?? 0) > originCves.length && (
-                    <p className="text-[11px] text-[var(--text-muted)] font-mono m-0">
-                      {t(
-                        `Showing the ${originCves.length} highest CVSS scores of ${cveData?.data?.total} matches.`,
-                        `แสดง ${originCves.length} รายการที่ CVSS สูงสุด จากทั้งหมด ${cveData?.data?.total} รายการ`,
-                      )}
-                    </p>
-                  )}
-                  {originCves.map((cve) => (
-                    <div
-                      key={cve.cve_id}
-                      className="flex flex-col gap-2 p-3 rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)]"
-                    >
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span
-                          className={`px-2 py-0.5 rounded border text-[11px] font-bold font-mono ${cveSeverityClass(cve.severity)}`}
-                        >
-                          {severityLabel(cve.severity, lang)}
-                        </span>
-                        <a
-                          href={`https://nvd.nist.gov/vuln/detail/${cve.cve_id}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 text-[12px] font-bold font-mono text-[var(--text-primary)] hover:text-[var(--accent)]"
-                        >
-                          {cve.cve_id}
-                          <ExternalLink size={11} />
-                        </a>
-                        {cve.cvss_score !== null && (
-                          <span className="text-[11px] text-[var(--text-muted)] font-mono">
-                            CVSS {cve.cvss_score.toFixed(1)}
-                          </span>
-                        )}
-                        <span className="ml-auto text-[11px] text-[var(--text-muted)] font-mono">
-                          tag: {cve.matched_tag}
-                        </span>
-                      </div>
-                      <p className="text-[12px] text-[var(--text-secondary)] font-mono m-0 leading-relaxed">
-                        {cve.description}
-                      </p>
-                      {cve.published && (
-                        <span className="text-[11px] text-[var(--text-muted)] font-mono">
-                          {t('published', 'เผยแพร่')} {cve.published.slice(0, 10)}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'domains' && (
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
-              <div>
-                <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">
-                  {t('Domains', 'โดเมน')}
-                </h2>
-                <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-                  {progress
-                    ? t(
-                        `Point the domain's CNAME to ${progress.domains[0]?.dns.instructions.cname_record.value ?? 'our edge'} — DNS, connection and HTTPS are checked automatically`,
-                        `ชี้ CNAME ของโดเมนไปที่ ${progress.domains[0]?.dns.instructions.cname_record.value ?? 'edge ของเรา'} — DNS, การเชื่อมต่อ และ HTTPS ตรวจให้อัตโนมัติ`,
-                      )
-                    : t('DNS, connection and HTTPS are checked automatically', 'DNS, การเชื่อมต่อ และ HTTPS ตรวจให้อัตโนมัติ')}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {tabDomains.length > 0 && (
-                  <Button variant="ghost" size="sm" onClick={() => refetchProgress()} isLoading={progressFetching}>
-                    {t('Check now', 'ตรวจเดี๋ยวนี้')}
-                  </Button>
-                )}
-                {isAdmin && tabDomains.length > 0 && (
-                  <Button variant="brand" size="sm" onClick={() => setIsDomainWizardOpen(true)} icon={<Plus size={14} />}>
-                    {t('Add domain', 'เพิ่มโดเมน')}
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            {!progress ? (
-              <div className="dash-card p-8 flex justify-center">
-                <LoadingSpinner />
-              </div>
-            ) : tabDomains.length === 0 ? (
-              <div className="dash-card p-12 text-center space-y-3 border-dashed">
-                <Globe size={36} className="mx-auto text-[var(--text-muted)] opacity-40" />
-                <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
-                  {t('No domains yet', 'ยังไม่มีโดเมน')}
-                </h3>
-                <p className="text-[12px] text-[var(--text-muted)] m-0 font-mono">
-                  {t('Add a domain so visitors pass through the WAF before reaching this server', 'เพิ่มโดเมนเพื่อให้ผู้เข้าชมวิ่งผ่าน WAF ก่อนถึงเซิร์ฟเวอร์นี้')}
-                </p>
-                {isAdmin && (
-                  <Button variant="brand" onClick={() => setIsDomainWizardOpen(true)} icon={<Plus size={14} />}>
-                    {t('Add domain', 'เพิ่มโดเมน')}
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {tabDomains.map((item) => (
-                  <DomainStatusCard
-                    key={item.domain_id}
-                    item={item}
-                    mode={progress.connection_mode}
-                    originPort={progress.origin_port}
-                    egressIps={progress.origin_egress_ips}
-                    canEdit={isAdmin && progress.can_edit}
-                    canMintAgent={progress.can_mint_agent}
-                    onRemove={(domainId) => setDomainToDelete(domainId)}
-                  />
-                ))}
-              </div>
-            )}
-
-            <Modal open={isDomainWizardOpen} onClose={() => setIsDomainWizardOpen(false)} title={t('Add domain', 'เพิ่มโดเมน')}>
-              <ConnectSiteFlow
-                existingOriginId={id!}
-                onCancel={() => setIsDomainWizardOpen(false)}
-                onDone={() => {
-                  setIsDomainWizardOpen(false)
-                  refetchDomains()
-                  refetchProgress()
-                }}
-              />
-            </Modal>
-
-            <ConfirmDialog
-              open={!!domainToDelete}
-              onCancel={() => setDomainToDelete(null)}
-              onConfirm={handleDeleteDomain}
-              title={t('Remove domain', 'ลบโดเมน')}
-              message={t(
-                'Are you sure you want to remove this domain? Web traffic through this hostname will stop immediately.',
-                'ต้องการลบโดเมนนี้ใช่ไหม? ทราฟฟิกที่เข้าผ่านชื่อนี้จะหยุดทันที',
-              )}
-              confirmText={t('Remove domain', 'ลบโดเมน')}
-              isDanger={true}
-            />
-          </div>
-        )}
-
+  // The five protection editors, shown inside the open accordion row.
+  const protectionBody = (
+    <>
         {activeTab === 'waf' && id && <OriginWafRules originId={id} canEdit={isAdmin} />}
         {activeTab === 'ml' && id && <OriginMlProtection originId={id} canEdit={isAdmin} />}
         {activeTab === 'ip-access' && id && (
@@ -1026,11 +614,7 @@ export const OriginDetail: React.FC = () => {
                     </div>
                     <div>
                       <p className="font-bold text-[13.5px] text-[var(--text-primary)] font-mono m-0">
-                        {!shieldForm.enabled
-                          ? t('Shield is off', 'Shield ปิดอยู่')
-                          : shieldForm.mode === 'log_only'
-                            ? t('Shield is logging only', 'Shield บันทึก log อย่างเดียว')
-                            : t('Shield is active', 'Shield ทำงานอยู่')}
+                        {!shieldForm.enabled ? t('Shield is off', 'Shield ปิดอยู่') : shieldForm.mode === 'log_only' ? t('Shield is logging only', 'Shield บันทึก log อย่างเดียว') : t('Shield is active', 'Shield ทำงานอยู่')}
                       </p>
                       <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
                         {shieldForm.enabled
@@ -1225,11 +809,7 @@ export const OriginDetail: React.FC = () => {
                     </div>
                     <div>
                       <p className="font-bold text-[13.5px] text-[var(--text-primary)] font-mono m-0">
-                        {!otpForm.enabled
-                          ? t('OTP Shield is off', 'OTP Shield ปิดอยู่')
-                          : otpForm.mode === 'log_only'
-                            ? t('OTP Shield is logging only', 'OTP Shield บันทึก log อย่างเดียว')
-                            : t('OTP Shield is active', 'OTP Shield ทำงานอยู่')}
+                        {!otpForm.enabled ? t('OTP Shield is off', 'OTP Shield ปิดอยู่') : otpForm.mode === 'log_only' ? t('OTP Shield is logging only', 'OTP Shield บันทึก log อย่างเดียว') : t('OTP Shield is active', 'OTP Shield ทำงานอยู่')}
                       </p>
                       <p className="text-[11.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
                         {otpForm.enabled
@@ -1420,6 +1000,396 @@ export const OriginDetail: React.FC = () => {
           </div>
         )}
 
+    </>
+  )
+
+  return (
+    <div className="space-y-6 max-w-6xl mx-auto animate-fade-in">
+      <OriginHeader
+        origin={origin}
+        role={myOriginRole}
+        health={health}
+        overview={overviewRow}
+        prot={protStates}
+        canEdit={isAdmin}
+        position={position}
+        actions={
+          <>
+          {/* Archive / restore / cancel are Owner-only (lib/roles). */}
+          {!isOwner ? null : origin.status === 'archived' ? (
+            <Button
+              variant="brand"
+              onClick={() => setIsRestoreModalOpen(true)}
+              icon={<RotateCcw size={14} />}
+            >
+              {t('Restore origin', 'กู้คืน origin')}
+            </Button>
+          ) : origin.status === 'pending' ? (
+            <Button
+              variant="outline"
+              onClick={() => setIsDeleteModalOpen(true)}
+            >
+              {t('Cancel setup', 'ยกเลิกการตั้งค่า')}
+            </Button>
+          ) : (
+            <Button
+              variant="danger"
+              onClick={() => setIsDeleteModalOpen(true)}
+              icon={<Trash2 size={14} />}
+            >
+              {t('Archive origin', 'เก็บ origin ถาวร')}
+            </Button>
+          )}
+          </>
+        }
+      />
+
+      <OriginViewTabs
+        active={activeView}
+        onSelect={(v: OriginViewId) =>
+          setActiveTab(v === 'protection' ? 'protection' : ORIGIN_VIEWS.find((x) => x.id === v)!.sections[0])
+        }
+      />
+
+      {/* Tab Panels */}
+      <div id="origin-tab-panel" role="tabpanel" aria-labelledby={`origin-view-${activeView}`} className="py-2">
+        {activeTab === 'overview' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <OriginTarget originId={id!} origin={origin} canEdit={isAdmin} />
+
+            <div className="dash-card p-5 space-y-4">
+              <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)]">
+                {t('Security & protection status', 'สถานะความปลอดภัยและการป้องกัน')}
+              </h3>
+              <div className="space-y-3 font-mono text-[12px]">
+                {origin.is_tunnel && (
+                  <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
+                    <span className="text-[var(--text-muted)]">{t('Tunnel connectivity', 'การเชื่อมต่อ tunnel')}</span>
+                    {(() => {
+                      const b = tunnelConnectivityBadge(origin.live_connected)
+                      return <Badge color={b.color}>{statusWord(b.label, lang)}</Badge>
+                    })()}
+                  </div>
+                )}
+                <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
+                  <span className="text-[var(--text-muted)]">ModSecurity WAF</span>
+                  <Badge color="success">{t('ENABLED', 'เปิดใช้งาน')} (CRS {CRS_VERSION})</Badge>
+                </div>
+                <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
+                  <span className="text-[var(--text-muted)]">SSL / TLS Termination</span>
+                  <Badge color="success">{t('AUTO (CADDY)', 'อัตโนมัติ (CADDY)')}</Badge>
+                </div>
+                <div className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]">
+                  <span className="text-[var(--text-muted)]">Rate limits</span>
+                  {/* From the origin's own rate-limit rules (the same query
+                      as the Rate limits tab). It used to say ENABLED with no
+                      data behind it while that tab showed none. */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('rate-limits')}
+                    className="cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded"
+                  >
+                    {rateRulesLoading ? (
+                      <Badge color="gray">{t('Checking…', 'กำลังตรวจ…')}</Badge>
+                    ) : rateRulesError ? (
+                      <Badge color="gray">{t('Unavailable', 'ไม่มีข้อมูล')}</Badge>
+                    ) : activeRateRules > 0 ? (
+                      <Badge color="success">{activeRateRules} {t('active', 'ใช้งานอยู่')}</Badge>
+                    ) : (
+                      <Badge color="gray">{t('None set', 'ยังไม่ได้ตั้ง')}</Badge>
+                    )}
+                  </button>
+                </div>
+                <div className="flex justify-between items-center py-1.5">
+                  <span className="text-[var(--text-muted)]">{t('Attached domains', 'โดเมนที่ผูกไว้')}</span>
+                  <span className="font-bold text-[var(--text-primary)]">{domains.length} {t('domain(s)', 'โดเมน')}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="md:col-span-2">
+              <PurgeCache
+                domains={domains.filter((d: Domain) => d.verification_status === 'verified').map((d: Domain) => d.domain_name)}
+                canEdit={isAdmin}
+              />
+            </div>
+
+            {isAdmin && (
+              <div className="dash-card p-5 space-y-4 md:col-span-2">
+                <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)]">
+                  Tech Stack Tags
+                </h3>
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  {t(
+                    'Self-declared, not auto-detected. Feeds CVE Auto-Patch: a scan matches these tags against the real NVD CVE feed and drafts a proposal into the ML Anomaly Rules queue for review -- it never applies anything automatically.',
+                    'กรอกเอง ระบบไม่ได้ตรวจหาให้ ใช้กับ CVE Auto-Patch: ระบบจับคู่ tag เหล่านี้กับฐานข้อมูล CVE ของ NVD แล้วร่างข้อเสนอเข้าคิว ML Anomaly Rules ให้ตรวจ — ไม่มีการนำไปใช้อัตโนมัติ',
+                  )}
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={techTagInput}
+                    onChange={(e) => setTechTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      // isPending guard matches the Add Tag button and the
+                      // remove buttons below -- without it, two fast Enter
+                      // presses fire two updateOrigin calls built off the
+                      // same stale origin.tech_stack_tags, and the second
+                      // overwrites the first (lost-update race).
+                      if (e.key === 'Enter' && techTagInput.trim() && !updateTechTagsMutation.isPending) {
+                        const current = origin.tech_stack_tags || []
+                        if (!current.includes(techTagInput.trim())) {
+                          updateTechTagsMutation.mutate([...current, techTagInput.trim()])
+                        } else {
+                          setTechTagInput('')
+                        }
+                      }
+                    }}
+                    placeholder={t('e.g. nginx, wordpress, php 8.1', 'เช่น nginx, wordpress, php 8.1')}
+                    className="flex-1 bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
+                  />
+                  <Button
+                    size="sm"
+                    icon={<Plus size={14} />}
+                    onClick={() => {
+                      if (!techTagInput.trim()) return
+                      const current = origin.tech_stack_tags || []
+                      if (!current.includes(techTagInput.trim())) {
+                        updateTechTagsMutation.mutate([...current, techTagInput.trim()])
+                      } else {
+                        setTechTagInput('')
+                      }
+                    }}
+                    disabled={!techTagInput.trim() || updateTechTagsMutation.isPending}
+                  >
+                    {t('Add tag', 'เพิ่ม tag')}
+                  </Button>
+                </div>
+                {(origin.tech_stack_tags || []).length === 0 ? (
+                  <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                    {t('No tags set yet -- CVE Auto-Patch has nothing to match against this origin.', 'ยังไม่มี tag — CVE Auto-Patch จึงยังไม่มีอะไรให้จับคู่กับ origin นี้')}
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {(origin.tech_stack_tags || []).map((tag) => (
+                      <span
+                        key={tag}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] text-[12px] font-mono text-[var(--text-primary)]"
+                      >
+                        {tag}
+                        <button
+                          onClick={() =>
+                            updateTechTagsMutation.mutate((origin.tech_stack_tags || []).filter((x) => x !== tag))
+                          }
+                          disabled={updateTechTagsMutation.isPending}
+                          className="text-[var(--text-muted)] hover:text-red-500"
+                          title={t('Remove tag', 'ลบ tag')}
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="dash-card p-5 space-y-4 md:col-span-2">
+              <div className="flex items-center justify-between pb-3 border-b border-[var(--bg-border-subtle)]">
+                <h3 className="flex items-center gap-2 text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
+                  <Bug size={15} className="text-red-500" />
+                  {t('Known CVEs', 'CVE ที่เกี่ยวข้อง')}
+                </h3>
+                <span className="text-[11px] text-[var(--text-muted)] font-mono">
+                  {t('matched against tech stack tags', 'จับคู่กับ tech stack tags')}
+                </span>
+              </div>
+              <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                {t(
+                  "CVEs from the NVD feed that match this origin's tech stack tags. Advisory only -- nothing is blocked until a virtual-patch proposal is reviewed and approved in ML Anomaly Rules.",
+                  'CVE จาก NVD ที่ตรงกับ tech stack tags ของ origin นี้ เป็นข้อมูลแนะนำเท่านั้น — จะยังไม่บล็อกอะไรจนกว่าข้อเสนอ virtual patch จะผ่านการตรวจและอนุมัติใน ML Anomaly Rules',
+                )}
+              </p>
+              {!originHasTags ? (
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  {t(
+                    'No tech stack tags on this origin yet, so there is nothing to match. An admin of this origin can add tags such as nginx or wordpress.',
+                    'origin นี้ยังไม่มี tech stack tags จึงยังไม่มีอะไรให้จับคู่ ผู้ดูแล origin เพิ่ม tag เช่น nginx หรือ wordpress ได้',
+                  )}
+                </p>
+              ) : cveLoading ? (
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  {t(
+                    `Searching the NVD feed for ${(origin.tech_stack_tags || []).join(', ')}... the first search can take up to 30 seconds.`,
+                    `กำลังค้นหา ${(origin.tech_stack_tags || []).join(', ')} ใน NVD... การค้นหาครั้งแรกอาจใช้เวลาถึง 30 วินาที`,
+                  )}
+                </p>
+              ) : cveError ? (
+                <p className="text-[12px] text-red-500 font-mono m-0">
+                  {t('Could not load CVEs. Reload the page to try again.', 'โหลด CVE ไม่สำเร็จ รีโหลดหน้าเพื่อลองใหม่')}
+                </p>
+              ) : originCves.length === 0 ? (
+                <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
+                  {t(
+                    `No CVEs modified in the last ${cveData?.data?.window_days ?? 14} days match ${(cveData?.data?.keywords_searched || []).join(', ')}.`,
+                    `ไม่มี CVE ที่แก้ไขในช่วง ${cveData?.data?.window_days ?? 14} วันล่าสุดที่ตรงกับ ${(cveData?.data?.keywords_searched || []).join(', ')}`,
+                  )}
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {(cveData?.data?.total ?? 0) > originCves.length && (
+                    <p className="text-[11px] text-[var(--text-muted)] font-mono m-0">
+                      {t(
+                        `Showing the ${originCves.length} highest CVSS scores of ${cveData?.data?.total} matches.`,
+                        `แสดง ${originCves.length} รายการที่ CVSS สูงสุด จากทั้งหมด ${cveData?.data?.total} รายการ`,
+                      )}
+                    </p>
+                  )}
+                  {originCves.map((cve) => (
+                    <div
+                      key={cve.cve_id}
+                      className="flex flex-col gap-2 p-3 rounded bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)]"
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`px-2 py-0.5 rounded border text-[11px] font-bold font-mono ${cveSeverityClass(cve.severity)}`}
+                        >
+                          {severityLabel(cve.severity, lang)}
+                        </span>
+                        <a
+                          href={`https://nvd.nist.gov/vuln/detail/${cve.cve_id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 text-[12px] font-bold font-mono text-[var(--text-primary)] hover:text-[var(--accent)]"
+                        >
+                          {cve.cve_id}
+                          <ExternalLink size={11} />
+                        </a>
+                        {cve.cvss_score !== null && (
+                          <span className="text-[11px] text-[var(--text-muted)] font-mono">
+                            CVSS {cve.cvss_score.toFixed(1)}
+                          </span>
+                        )}
+                        <span className="ml-auto text-[11px] text-[var(--text-muted)] font-mono">
+                          tag: {cve.matched_tag}
+                        </span>
+                      </div>
+                      <p className="text-[12px] text-[var(--text-secondary)] font-mono m-0 leading-relaxed">
+                        {cve.description}
+                      </p>
+                      {cve.published && (
+                        <span className="text-[11px] text-[var(--text-muted)] font-mono">
+                          {t('published', 'เผยแพร่')} {cve.published.slice(0, 10)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'domains' && (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
+              <div>
+                <h2 className="text-[15px] font-bold text-[var(--text-primary)] font-mono m-0">
+                  {t('Domains', 'โดเมน')}
+                </h2>
+                <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
+                  {progress
+                    ? t(
+                        `Point the domain's CNAME to ${progress.domains[0]?.dns.instructions.cname_record.value ?? 'our edge'} — DNS, connection and HTTPS are checked automatically`,
+                        `ชี้ CNAME ของโดเมนไปที่ ${progress.domains[0]?.dns.instructions.cname_record.value ?? 'edge ของเรา'} — DNS, การเชื่อมต่อ และ HTTPS ตรวจให้อัตโนมัติ`,
+                      )
+                    : t('DNS, connection and HTTPS are checked automatically', 'DNS, การเชื่อมต่อ และ HTTPS ตรวจให้อัตโนมัติ')}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {tabDomains.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={() => refetchProgress()} isLoading={progressFetching}>
+                    {t('Check now', 'ตรวจเดี๋ยวนี้')}
+                  </Button>
+                )}
+                {isAdmin && tabDomains.length > 0 && (
+                  <Button variant="brand" size="sm" onClick={() => setIsDomainWizardOpen(true)} icon={<Plus size={14} />}>
+                    {t('Add domain', 'เพิ่มโดเมน')}
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {!progress ? (
+              <div className="dash-card p-8 flex justify-center">
+                <LoadingSpinner />
+              </div>
+            ) : tabDomains.length === 0 ? (
+              <div className="dash-card p-12 text-center space-y-3 border-dashed">
+                <Globe size={36} className="mx-auto text-[var(--text-muted)] opacity-40" />
+                <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
+                  {t('No domains yet', 'ยังไม่มีโดเมน')}
+                </h3>
+                <p className="text-[12px] text-[var(--text-muted)] m-0 font-mono">
+                  {t('Add a domain so visitors pass through the WAF before reaching this server', 'เพิ่มโดเมนเพื่อให้ผู้เข้าชมวิ่งผ่าน WAF ก่อนถึงเซิร์ฟเวอร์นี้')}
+                </p>
+                {isAdmin && (
+                  <Button variant="brand" onClick={() => setIsDomainWizardOpen(true)} icon={<Plus size={14} />}>
+                    {t('Add domain', 'เพิ่มโดเมน')}
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {tabDomains.map((item) => (
+                  <DomainStatusCard
+                    key={item.domain_id}
+                    item={item}
+                    mode={progress.connection_mode}
+                    originPort={progress.origin_port}
+                    egressIps={progress.origin_egress_ips}
+                    canEdit={isAdmin && progress.can_edit}
+                    canMintAgent={progress.can_mint_agent}
+                    onRemove={(domainId) => setDomainToDelete(domainId)}
+                  />
+                ))}
+              </div>
+            )}
+
+            <Modal open={isDomainWizardOpen} onClose={() => setIsDomainWizardOpen(false)} title={t('Add domain', 'เพิ่มโดเมน')}>
+              <ConnectSiteFlow
+                existingOriginId={id!}
+                onCancel={() => setIsDomainWizardOpen(false)}
+                onDone={() => {
+                  setIsDomainWizardOpen(false)
+                  refetchDomains()
+                  refetchProgress()
+                }}
+              />
+            </Modal>
+
+            <ConfirmDialog
+              open={!!domainToDelete}
+              onCancel={() => setDomainToDelete(null)}
+              onConfirm={handleDeleteDomain}
+              title={t('Remove domain', 'ลบโดเมน')}
+              message={t('Are you sure you want to remove this domain? Web traffic through this hostname will stop immediately.', 'ต้องการลบโดเมนนี้ใช่ไหม? ทราฟฟิกที่เข้าผ่านชื่อนี้จะหยุดทันที')}
+              confirmText={t('Remove domain', 'ลบโดเมน')}
+              isDanger={true}
+            />
+          </div>
+        )}
+
+        {activeView === 'protection' && (
+          <ProtectionAccordion
+            open={(PROT_KEYS.find((k) => PROT_TAB[k] === activeTab) ?? null) as ProtKey | null}
+            states={protStates}
+            onToggle={(k) => setActiveTab(PROT_TAB[k] === activeTab ? 'protection' : PROT_TAB[k])}
+          >
+            {protectionBody}
+          </ProtectionAccordion>
+        )}
+
         {activeTab === 'team' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {isOwner && (
@@ -1579,185 +1549,7 @@ export const OriginDetail: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'postmortem' && (
-          <div className="space-y-5">
-            {!isAdmin ? (
-              <EmptyState
-                icon={<FileText size={24} />}
-                title={t('Admins only', 'เฉพาะผู้ดูแล')}
-                subtitle={t(
-                  "Incident Postmortem reports are visible to this origin's Owner and Editors only -- they can include system-wide settings changes, not just this origin's own activity.",
-                  'รายงานหลังเหตุการณ์ดูได้เฉพาะ Owner และ Editor ของ origin นี้ เพราะอาจมีการเปลี่ยนการตั้งค่าทั้งระบบ ไม่ใช่แค่กิจกรรมของ origin นี้',
-                )}
-              />
-            ) : (
-              <>
-                <div className="dash-card p-5 space-y-4">
-                  <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)] flex items-center gap-2">
-                    <FileText size={14} /> {t('Generate incident report', 'สร้างรายงานเหตุการณ์')}
-                  </h3>
-                  <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                    {t(
-                      'Pick a time range around an incident. The report correlates real traffic/alert volume in that window against the real audit trail -- including system-wide settings and ML rule changes -- and asks AI to draft an executive summary, timeline, root-cause hypothesis, and recommendations.',
-                      'เลือกช่วงเวลารอบเหตุการณ์ รายงานจะเทียบปริมาณทราฟฟิก/การแจ้งเตือนจริงในช่วงนั้นกับประวัติการแก้ไขจริง รวมถึงการตั้งค่าทั้งระบบและการเปลี่ยนกฎ ML แล้วให้ AI ร่างบทสรุปผู้บริหาร ไทม์ไลน์ สมมติฐานต้นเหตุ และข้อแนะนำ',
-                    )}
-                  </p>
-                  <div className="flex flex-wrap items-end gap-3">
-                    <div className="space-y-1">
-                      <label className="block text-[11px] text-[var(--text-muted)] font-mono">{t(`Start (${BKK_LABEL})`, 'เริ่ม (เวลากรุงเทพฯ)')}</label>
-                      <input
-                        type="datetime-local"
-                        value={pmStart}
-                        onChange={(e) => setPmStart(e.target.value)}
-                        className="bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[11px] text-[var(--text-muted)] font-mono">{t(`End (${BKK_LABEL})`, 'สิ้นสุด (เวลากรุงเทพฯ)')}</label>
-                      <input
-                        type="datetime-local"
-                        value={pmEnd}
-                        onChange={(e) => setPmEnd(e.target.value)}
-                        className="bg-[var(--bg-surface-elevated)] border border-[var(--bg-border-subtle)] rounded px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]"
-                      />
-                    </div>
-                    <Button
-                      icon={<FileText size={14} />}
-                      onClick={() => createPostmortemMutation.mutate()}
-                      disabled={!pmStart || !pmEnd || createPostmortemMutation.isPending}
-                      isLoading={createPostmortemMutation.isPending}
-                    >
-                      {t('Generate report', 'สร้างรายงาน')}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="dash-card p-5 space-y-4">
-                  <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0 pb-3 border-b border-[var(--bg-border-subtle)]">
-                    {t('Past reports', 'รายงานที่ผ่านมา')}
-                  </h3>
-                  {postmortemsLoading ? (
-                    <LoadingSpinner />
-                  ) : postmortems.length === 0 ? (
-                    <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                      {t('No reports generated yet.', 'ยังไม่มีรายงาน')}
-                    </p>
-                  ) : (
-                    <div className="space-y-2 font-mono text-[12px]">
-                      {postmortems.map((p) => (
-                        <button
-                          key={p.id}
-                          onClick={() => setSelectedPostmortemId(p.id)}
-                          className={`w-full text-left flex justify-between items-center py-2 px-3 rounded border transition-colors cursor-pointer ${
-                            selectedPostmortemId === p.id
-                              ? 'border-orange-500 bg-[var(--bg-hover)]'
-                              : 'border-[var(--bg-border-subtle)] hover:bg-[var(--bg-hover)]'
-                          }`}
-                        >
-                          <span className="text-[var(--text-primary)]">
-                            {p.start_time} &rarr; {p.end_time}
-                          </span>
-                          <span className="flex items-center gap-2 text-[var(--text-muted)]">
-                            {p.stats?.total_alerts ?? 0} {t('alerts', 'การแจ้งเตือน')}
-                            {p.has_ai_narrative && <Badge color="brand">AI</Badge>}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {selectedPostmortemId && (
-                  <div className="dash-card p-5 space-y-4">
-                    {selectedPostmortemLoading ? (
-                      <LoadingSpinner />
-                    ) : !selectedPostmortem ? (
-                      <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                        {t('Report not found.', 'ไม่พบรายงาน')}
-                      </p>
-                    ) : (
-                      <>
-                        <div className="flex justify-between items-start gap-3 pb-3 border-b border-[var(--bg-border-subtle)]">
-                          <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
-                            {t('Report:', 'รายงาน:')} {selectedPostmortem.start_time} &rarr; {selectedPostmortem.end_time}
-                          </h3>
-                          <button
-                            onClick={() => setSelectedPostmortemId(null)}
-                            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-[11px] font-mono"
-                          >
-                            {t('Close', 'ปิด')}
-                          </button>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-3 font-mono text-[12px]">
-                          <div className="dash-card p-3 text-center">
-                            <div className="text-[var(--text-muted)] text-[11px]">{t('Total requests', 'Request ทั้งหมด')}</div>
-                            <div className="text-[18px] font-bold text-[var(--text-primary)]">
-                              {selectedPostmortem.stats?.total_requests ?? 0}
-                            </div>
-                          </div>
-                          <div className="dash-card p-3 text-center">
-                            <div className="text-[var(--text-muted)] text-[11px]">{t('Alerts / blocked', 'การแจ้งเตือน / ถูกบล็อก')}</div>
-                            <div className="text-[18px] font-bold text-orange-500">
-                              {selectedPostmortem.stats?.total_alerts ?? 0}
-                            </div>
-                          </div>
-                          <div className="dash-card p-3 text-center">
-                            <div className="text-[var(--text-muted)] text-[11px]">{t('Top attack type', 'ประเภทการโจมตีที่พบมากสุด')}</div>
-                            <div className="text-[14px] font-bold text-[var(--text-primary)]">
-                              {selectedPostmortem.stats?.top_attack_types?.[0]?.type || '-'}
-                            </div>
-                          </div>
-                        </div>
-
-                        {selectedPostmortem.ai_narrative ? (
-                          <div className="space-y-2">
-                            {selectedPostmortem.ai_narrative_degraded && (
-                              <Badge color="warning">{t('AI summary may be truncated', 'สรุปจาก AI อาจไม่ครบ')}</Badge>
-                            )}
-                            <ReportText
-                              text={selectedPostmortem.ai_narrative}
-                              className="text-[12.5px] bg-[var(--bg-surface-elevated)] rounded p-4"
-                            />
-                          </div>
-                        ) : (
-                          <p className="text-[12px] text-[var(--text-muted)] font-mono m-0">
-                            {t('AI summary unavailable for this report -- showing raw data below.', 'รายงานนี้ไม่มีสรุปจาก AI — แสดงข้อมูลดิบด้านล่าง')}
-                          </p>
-                        )}
-
-                        <details className="font-mono text-[12px]">
-                          <summary className="cursor-pointer text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
-                            {t(
-                              `Raw timeline (${selectedPostmortem.audit_events?.length ?? 0} audit event(s), ${selectedPostmortem.hourly_buckets?.length ?? 0} hourly bucket(s))`,
-                              `ไทม์ไลน์ดิบ (${selectedPostmortem.audit_events?.length ?? 0} เหตุการณ์ในประวัติ, ${selectedPostmortem.hourly_buckets?.length ?? 0} ช่วงรายชั่วโมง)`,
-                            )}
-                          </summary>
-                          <div className="mt-3 space-y-2">
-                            {(selectedPostmortem.audit_events || []).map((ev) => (
-                              <div
-                                key={ev.event_id}
-                                className="flex justify-between items-center py-1.5 border-b border-[var(--bg-border-subtle)]"
-                              >
-                                <span className="text-[var(--text-primary)]">{ev.summary}</span>
-                                <span className="flex items-center gap-2">
-                                  <Badge color={ev.scope === 'global' ? 'warning' : 'gray'}>{ev.scope}</Badge>
-                                  <span className="text-[var(--text-muted)] text-[11px]">
-                                    {formatBkkDateTime(ev.timestamp)}
-                                  </span>
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                      </>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
+        {activeTab === 'postmortem' && id && <OriginReports originId={id} canWrite={isAdmin} />}
       </div>
 
       <ConfirmDialog
@@ -1781,10 +1573,7 @@ export const OriginDetail: React.FC = () => {
         onCancel={() => setIsRestoreModalOpen(false)}
         onConfirm={handleRestore}
         title={t('Restore origin', 'กู้คืน origin')}
-        message={t(
-          `Are you sure you want to restore origin "${origin.label}" back to active service?`,
-          `ต้องการกู้คืน origin "${origin.label}" ให้กลับมาใช้งานใช่ไหม?`,
-        )}
+        message={t(`Are you sure you want to restore origin "${origin.label}" back to active service?`, `ต้องการกู้คืน origin "${origin.label}" ให้กลับมาใช้งานใช่ไหม?`)}
         confirmText={t('Restore origin', 'กู้คืน origin')}
         isDanger={false}
       />

@@ -155,6 +155,22 @@ export interface Origin {
   origin_scheme?: 'http' | 'https' | null
 }
 
+// GET /api/origins/overview (services/origin_overview.py): the Origins
+// list's summary columns. null = that store could not be read.
+export interface OriginOverview {
+  origin_id: string
+  requests_24h: number | null
+  blocked_24h: number | null
+  protection: {
+    waf: { custom_rules: number | null; decoys: number | null }
+    ml: { mode: 'log' | 'enforce' | string; challenge_score: number | null; block_score: number | null } | null
+    ip: { block: number; allow: number } | null
+    rate: { rules: number; enabled: number } | null
+    shield: { captcha: boolean | null; otp: boolean | null }
+  }
+  domains: { total: number; verified: number }
+}
+
 // The backend changed what was asked for: a server that answers http:80 with
 // a redirect to https on the same domain is moved to https:443 (it would
 // otherwise redirect forever behind the WAF).

@@ -174,6 +174,11 @@ def fake_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(deception_module, "ClickHouseService", _NoClickHouse)
     monkeypatch.setattr(deception_module.deception_service, "_ch", _NoClickHouse())
 
+    # The Origins list overview (services/origin_overview.py) builds a real
+    # ClickHouseService on first use; never let a test reach a real store.
+    from services import origin_overview as origin_overview_module
+    monkeypatch.setattr(origin_overview_module, "_CH", _NoClickHouse())
+
     # Rate limiter storage is a module-level singleton shared across the
     # whole test session; reset it so one test's register/login calls never
     # trip another test's 5-per-minute/10-per-minute limits.
