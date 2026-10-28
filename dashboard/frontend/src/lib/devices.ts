@@ -29,10 +29,10 @@ const SYSTEMS: [RegExp, string][] = [
   [/Linux/, 'Linux'],
 ]
 
-export function describeUserAgent(ua: string): string {
+export function describeUserAgent(ua: string, lang: 'en' | 'th' = 'en'): string {
   const text = ua || ''
   const browser = BROWSERS.find(([re]) => re.test(text))?.[1]
   const system = SYSTEMS.find(([re]) => re.test(text))?.[1]
-  if (browser && system) return `${browser} on ${system}`
-  return browser || system || (text ? text.slice(0, 60) : 'Unknown device')
+  if (browser && system) return lang === 'th' ? `${browser} บน ${system}` : `${browser} on ${system}`
+  return browser || system || (text ? text.slice(0, 60) : lang === 'th' ? 'อุปกรณ์ที่ไม่รู้จัก' : 'Unknown device')
 }

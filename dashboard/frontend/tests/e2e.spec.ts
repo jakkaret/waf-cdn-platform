@@ -84,10 +84,11 @@ test.describe('Origins Management', () => {
 
     // Domain-first flow (ConnectSiteFlow): skip the DNS probe, use the agent.
     await page.getByRole('button', { name: /add origin/i }).click()
-    await page.getByLabel('โดเมนของคุณ').fill(domain)
-    await page.getByRole('button', { name: 'ข้ามการตรวจ ตั้งค่าเอง' }).click()
-    await page.getByLabel('เว็บรันที่ port').fill('8080')
-    await page.getByRole('button', { name: /เชื่อมต่อ/ }).click()
+    // The tests run with the UI language set to English (playwright.config.ts).
+    await page.getByLabel('Your domain').fill(domain)
+    await page.getByRole('button', { name: 'Skip the check, set up manually' }).click()
+    await page.getByLabel('The site runs on port').fill('8080')
+    await page.getByRole('button', { name: 'Connect', exact: true }).click()
 
     // The origin's Domains tab shows the domain with its CNAME instructions.
     await expect(page).toHaveURL(/\/origins\/.+\?tab=domains/, { timeout: 8_000 })

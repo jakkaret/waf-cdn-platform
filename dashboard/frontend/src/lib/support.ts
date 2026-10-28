@@ -56,23 +56,40 @@ export const LEVEL_LABEL: Record<SupportGrant['level'], string> = {
   editor: 'can edit',
 }
 
+export const LEVEL_LABEL_TH: Record<SupportGrant['level'], string> = {
+  viewer: 'ดูได้อย่างเดียว',
+  editor: 'แก้ไขได้',
+}
+
+// Text helpers take the UI language last (English by default).
+type Lang = 'en' | 'th'
+
 export function activeGrant(grants: SupportGrant[]): SupportGrant | undefined {
   return grants.find((g) => g.active)
 }
 
 // "3h 20m left" style remaining time; "expired" once past.
-export function remainingText(expiresAt: string, now: Date = new Date()): string {
+export function remainingText(expiresAt: string, now: Date = new Date(), lang: Lang = 'en'): string {
+  const th = lang === 'th'
   const ms = new Date(expiresAt).getTime() - now.getTime()
-  if (!(ms > 0)) return 'expired'
+  if (!(ms > 0)) return th ? 'หมดอายุแล้ว' : 'expired'
   const mins = Math.floor(ms / 60000)
   const h = Math.floor(mins / 60)
   const m = mins % 60
+  if (th) {
+    if (h === 0) return `เหลือ ${m} นาที`
+    return m === 0 ? `เหลือ ${h} ชม.` : `เหลือ ${h} ชม. ${m} นาที`
+  }
   if (h === 0) return `${m}m left`
   return m === 0 ? `${h}h left` : `${h}h ${m}m left`
 }
 
-export function grantSummary(grants: SupportGrant[], now: Date = new Date()): string {
+export function grantSummary(grants: SupportGrant[], now: Date = new Date(), lang: Lang = 'en'): string {
   const g = activeGrant(grants)
+  if (lang === 'th') {
+    if (!g) return 'ทีม support ไม่มีสิทธิ์เข้าถึง origin นี้'
+    return `สิทธิ์ของ support: ${LEVEL_LABEL_TH[g.level]} (${remainingText(g.expires_at, now, lang)})`
+  }
   if (!g) return 'Support has no access to this origin'
   return `Support access: ${LEVEL_LABEL[g.level]} (${remainingText(g.expires_at, now)})`
 }
