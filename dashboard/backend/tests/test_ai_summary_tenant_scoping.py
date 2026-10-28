@@ -135,7 +135,7 @@ def _scoped_owner(client, register_user, auth_header):
 def _clickhouse_with_traffic(monkeypatch, total):
     def fake_query(sql, parameters=None):
         result = MagicMock()
-        result.result_rows = [(total, 1)] if "count() AS total" in sql else []
+        result.result_rows = [(total, 1)] if "AS blocked" in sql else []
         return result
     monkeypatch.setattr(ai_summary_module.ch, "connected", True)
     monkeypatch.setattr(ai_summary_module.ch, "client", MagicMock(query=MagicMock(side_effect=fake_query)))

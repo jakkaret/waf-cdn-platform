@@ -17,6 +17,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from services import ml_gate
+from services.request_count import requests_sql
 from services.captcha_config import get_origin_config as get_captcha_config
 from services.otp_config import get_origin_config as get_otp_config
 from services.tenant_service import verified_scope_keywords
@@ -62,7 +63,7 @@ def traffic_24h(ch, origins: List[Dict[str, Any]], domain_rows: List[Dict[str, A
     try:
         res = ch.client.query(
             f"""
-            SELECT host, count() AS total, countIf({BLOCKED_SQL}) AS blocked
+            SELECT host, {requests_sql()} AS total, {requests_sql(BLOCKED_SQL)} AS blocked
             FROM access_logs
             WHERE timestamp >= now() - INTERVAL 24 HOUR AND host IN {{hosts:Array(String)}}
             GROUP BY host

@@ -166,6 +166,15 @@ look like the edge's access log row (`api/cdn.py` ingest). One candidate is the 
 Before fixing it, trace one id through both paths. Do not just delete rows: the
 second row is often the only one that has the real rule id.
 
+Partial fix (2026-10-28): the Origins list ("Blocked · 24 h"), incident reports
+(stats, hourly chart, PDF) and the AI range summary now count distinct request
+ids, and their attack-type tables keep the row with the real rule
+(`services/request_count.py`). On Main over 7 days that is 6,857 blocked
+requests instead of 8,099 rows, and "WAF Security Block" drops from 6,042 to
+4,800. Still counting rows: the main Overview, the Logs histogram, incidents
+and alerts. The cause is still open. Reports made before this fix keep their
+old numbers.
+
 ## Handling
 
 Re-check the relevant runtime evidence before acting. Update this register when the

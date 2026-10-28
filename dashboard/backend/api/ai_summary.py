@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import uuid
 from services.gemini_service import gemini_service, clip
+from services.request_count import one_row_per_request_sql, requests_sql
 from services.ai_quota import check_ai_quota
 from services.clickhouse_service import ClickHouseService
 from services.dynamodb_service import DynamoDBService, invalidate_alerts_cache
@@ -152,11 +153,13 @@ async def summarize_threat_range(
                 origin_clause = build_tenant_origin_filter("ALL", user_domains, is_admin)
                 scope_sql = f"AND {origin_clause}" if origin_clause else ""
 
-                # Total & Blocked
+                # Total & Blocked: requests, not rows (services/request_count.py)
+                total_sql = requests_sql()
+                blocked_sql = requests_sql("alert = 1 OR status_code IN (403, 429)")
                 count_query = f"""
                     SELECT
-                        count() AS total,
-                        countIf(alert = 1 OR status_code IN (403, 429)) AS blocked
+                        {total_sql} AS total,
+                        {blocked_sql} AS blocked
                     FROM access_logs
                     WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} {scope_sql}
                 """
@@ -166,10 +169,11 @@ async def summarize_threat_range(
                     stats["blocked_attacks"] = int(count_res.result_rows[0][1])
 
                 # Top attack types
+                window_sql = f"timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} {scope_sql}"
                 type_query = f"""
                     SELECT attack_type, count() AS cnt
-                    FROM access_logs
-                    WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} AND attack_type != '' {scope_sql}
+                    FROM {one_row_per_request_sql(window_sql)}
+                    WHERE attack_type != ''
                     GROUP BY attack_type ORDER BY cnt DESC LIMIT 5
                 """
                 type_res = ch.client.query(type_query, parameters=time_params)
@@ -412,8 +416,11 @@ def build_incident_timeline(origin: Dict[str, Any], start_dt: datetime, end_dt: 
         try:
             scope_sql = _build_origin_scope_sql(origin)
 
+            # Requests, not rows: one request can be two rows (services/request_count.py).
+            total_sql = requests_sql()
+            blocked_sql = requests_sql("alert = 1 OR status_code IN (403, 429)")
             count_query = f"""
-                SELECT count() AS total, countIf(alert = 1 OR status_code IN (403, 429)) AS blocked
+                SELECT {total_sql} AS total, {blocked_sql} AS blocked
                 FROM access_logs
                 WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} AND {scope_sql}
             """
@@ -422,18 +429,19 @@ def build_incident_timeline(origin: Dict[str, Any], start_dt: datetime, end_dt: 
                 stats["total_requests"] = int(count_res.result_rows[0][0])
                 stats["total_alerts"] = int(count_res.result_rows[0][1])
 
+            window_sql = f"timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} AND {scope_sql}"
             type_query = f"""
                 SELECT attack_type, count() AS cnt
-                FROM access_logs
-                WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} AND attack_type != '' AND {scope_sql}
+                FROM {one_row_per_request_sql(window_sql)}
+                WHERE attack_type != ''
                 GROUP BY attack_type ORDER BY cnt DESC LIMIT 5
             """
             type_res = ch.client.query(type_query, parameters=time_params)
             stats["top_attack_types"] = [{"type": row[0], "count": int(row[1])} for row in type_res.result_rows]
 
             bucket_query = f"""
-                SELECT toStartOfHour(timestamp) AS bucket, count() AS total,
-                       countIf(alert = 1 OR status_code IN (403, 429)) AS alerts
+                SELECT toStartOfHour(timestamp) AS bucket, {total_sql} AS total,
+                       {blocked_sql} AS alerts
                 FROM access_logs
                 WHERE timestamp >= {{start:DateTime}} AND timestamp <= {{end:DateTime}} AND {scope_sql}
                 GROUP BY bucket ORDER BY bucket ASC
