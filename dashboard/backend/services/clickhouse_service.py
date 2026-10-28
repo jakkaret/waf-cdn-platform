@@ -280,6 +280,13 @@ class ClickHouseService:
                 "ALTER TABLE ml_verdicts ADD COLUMN IF NOT EXISTS body_sample String DEFAULT ''")
         except ClickHouseError as e:
             print(f"⚠️ Error initializing ClickHouse table ml_verdicts: {e}")
+        # What attackers did in the honeypot (services/honeypot.py). Own try,
+        # like ml_verdicts: a failure here leaves the timeline empty, never the logs.
+        try:
+            from services.honeypot import CREATE_TABLE as HONEYPOT_TABLE
+            self.client.command(HONEYPOT_TABLE)
+        except ClickHouseError as e:
+            print(f"⚠️ Error initializing ClickHouse table honeypot_events: {e}")
 
     ACCESS_LOG_COLUMNS = [
         'id', 'timestamp', 'client_ip', 'method', 'url', 'status_code',

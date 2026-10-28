@@ -51,8 +51,10 @@ def day_stats(origin_id: str, day: dt.date) -> Dict[str, Any]:
                         "AND opened_at >= %s AND opened_at < %s", (origin_id, start, end))
     outages = pool.q1("SELECT count(*)::int AS n FROM site_outages WHERE origin_id = %s::uuid "
                       "AND started_at >= %s AND started_at < %s", (origin_id, start, end))
+    from services import honeypot
     return {"blocked": head["n"], "ips": head["ips"], "prev_blocked": prev["n"],
-            "types": [(r["t"], r["n"]) for r in types], "incidents": incidents["n"], "outages": outages["n"]}
+            "types": [(r["t"], r["n"]) for r in types], "incidents": incidents["n"], "outages": outages["n"],
+            "honeypot": honeypot.day_counts(origin_id, start, end)}
 
 
 def format_digest(label: str, day: dt.date, s: Dict[str, Any]) -> str:
@@ -66,6 +68,14 @@ def format_digest(label: str, day: dt.date, s: Dict[str, Any]) -> str:
         if kinds:
             lines.append(f"ประเภทหลัก: {kinds}")
     lines.append(f"เหตุการณ์โจมตี {s['incidents']} ครั้ง · เว็บเปิดไม่ได้ {s['outages']} ครั้ง")
+    hp = s.get("honeypot") or {}
+    if hp.get("sessions"):
+        deeper = [f"ได้ข้อมูลลับปลอม {hp['loot']}" if hp.get("loot") else "",
+                  f"พยายามเจาะ {hp['exploit']}" if hp.get("exploit") else "",
+                  f"ใช้ credential ปลอม {hp['credential_use']}" if hp.get("credential_use") else "",
+                  f"พยายามฝังไฟล์ {hp['persistence']}" if hp.get("persistence") else ""]
+        detail = " · ".join(d for d in deeper if d)
+        lines.append(f"🍯 Honeypot {hp['sessions']:,} session จาก {hp['ips']:,} IP" + (f" ({detail})" if detail else ""))
     return "\n".join(lines)
 
 

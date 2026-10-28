@@ -8,6 +8,7 @@ import logging
 import re
 import threading
 import time
+import urllib.parse
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -19,6 +20,19 @@ from services.payload_normalizer import payload_normalizer
 from services.pii_masker import pii_masker
 
 logger = logging.getLogger("waf.deception")
+
+
+def _unquote_plus(text: str) -> str:
+    out = text or ""
+    for _ in range(3):
+        try:
+            nxt = urllib.parse.unquote_plus(out)
+        except Exception:  # noqa: BLE001 - attacker-shaped input
+            break
+        if nxt == out:
+            break
+        out = nxt
+    return out.replace("\x00", "")
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +289,11 @@ class DeceptionService:
         # Normalized representations
         normalized_uri = payload_normalizer.normalize_string(safe_uri)
         normalized_body = payload_normalizer.normalize_string(safe_body)
-        corpus_list = [c for c in (safe_uri, safe_body, normalized_uri, normalized_body) if c]
+        # Forms encode a space as "+", which the normalizer leaves alone: without
+        # this, "id=1'+UNION+SELECT..." (what browsers and curl send) was not SQLi.
+        form_body = _unquote_plus(safe_body)
+        form_uri = _unquote_plus(safe_uri)
+        corpus_list = [c for c in (safe_uri, safe_body, normalized_uri, normalized_body, form_uri, form_body) if c]
 
         # Tier 2: Signature pattern matching
         for regex, tid in (
@@ -284,7 +302,7 @@ class DeceptionService:
         ):
             if any(regex.search(c) for c in corpus_list):
                 return AttackClassification(CATEGORIES[tid], tid, 0.95)
-        decoded = normalized_uri + " " + normalized_body
+        decoded = normalized_uri + " " + normalized_body + " " + form_body
         if deception_content.ssrf_target(decoded):
             return AttackClassification(CATEGORIES["ssrf"], "ssrf", 0.9)
         if deception_content._CMD.search(decoded):
@@ -569,6 +587,18 @@ class DeceptionService:
 
         except Exception as ch_err:
             logger.warning("ClickHouse deception log write error (non-blocking): %s", ch_err)
+
+
+    def log_honeypot_event(self, event: Dict[str, Any]) -> bool:
+        """Store one honeypot_events row (services/honeypot.py) on the same
+        client and lock as the rest of the deception logging. Fail-safe."""
+        try:
+            from services import honeypot
+            with _CH_WRITE_LOCK:
+                return honeypot.store_event(self.ch, event)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("honeypot event logging failed (isolated): %s", exc)
+            return False
 
 
 # ClickHouseService.client is one shared object that is not documented as

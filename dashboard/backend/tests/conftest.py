@@ -179,6 +179,12 @@ def fake_infrastructure(monkeypatch, tmp_path):
     from services import origin_overview as origin_overview_module
     monkeypatch.setattr(origin_overview_module, "_CH", _NoClickHouse())
 
+    # Honeypot sessions (services/honeypot.py) read through their own lazy
+    # client; its host -> site map is cached across tests otherwise.
+    from services import honeypot as honeypot_module
+    monkeypatch.setattr(honeypot_module, "_CH", _NoClickHouse())
+    monkeypatch.setattr(honeypot_module, "_HOST_CACHE", {"at": 0.0, "map": {}})
+
     # Rate limiter storage is a module-level singleton shared across the
     # whole test session; reset it so one test's register/login calls never
     # trip another test's 5-per-minute/10-per-minute limits.

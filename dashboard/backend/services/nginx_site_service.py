@@ -83,6 +83,7 @@ def _deception_locations() -> str:
         proxy_set_header X-Original-URI $request_uri;
         proxy_set_header X-Original-Method $request_method;
         proxy_set_header X-Original-Host $host;
+        proxy_set_header X-Edge-Peer $realip_remote_addr;
         proxy_set_header X-Deception-Template "";
         proxy_set_header X-Matched-Rule-ID "";
         proxy_hide_header X-Deception-Engine;

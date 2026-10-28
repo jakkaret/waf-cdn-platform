@@ -20,6 +20,7 @@ from services.deception_service import (
     DeceptionResponse,
     deception_service,
 )
+from services import honeypot
 from services.rbac import require_admin
 
 logger = logging.getLogger("waf.deception")
@@ -123,10 +124,11 @@ async def respond_deception(
 
     # 2. Extract request body safely (bounded at 64 KB)
     raw_body = ""
+    body_bytes = b""
     try:
-        body_bytes = await request.body()
+        body_bytes = (await request.body())[:65536]
         if body_bytes:
-            raw_body = body_bytes[:65536].decode("utf-8", errors="replace")
+            raw_body = body_bytes.decode("utf-8", errors="replace")
     except Exception as e:
         logger.debug("Failed reading request body in deception handler: %s", e)
 
@@ -165,6 +167,10 @@ async def respond_deception(
 
     # 5. Enqueue non-blocking fail-safe audit logging
     latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    # Which edge handed us the request: Main's nginx passes the address that
+    # connected to it (an edge's WireGuard address, or the visitor's own).
+    edge_node = honeypot.edge_for_peer(request.headers.get("X-Edge-Peer", ""))
+    host = (request.headers.get("X-Original-Host") or "")[:255]
     log_event = DeceptionLogEvent(
         request_id=req_id,
         timestamp=int(time.time()),
@@ -177,13 +183,28 @@ async def respond_deception(
         method=orig_method,
         url=orig_uri,
         user_agent=request.headers.get("User-Agent", ""),
-        edge_node="edge-th",
-        host=(request.headers.get("X-Original-Host") or "")[:255],
+        edge_node=edge_node,
+        host=host,
         latency_ms=latency_ms,
         body_bytes_sent=len(dec_response.body.encode("utf-8")),
         datetime=datetime.utcnow().isoformat() + "Z",
     )
     background_tasks.add_task(deception_service.log_deception_event, log_event)
+
+    # What this request did, for the honeypot timeline (services/honeypot.py).
+    try:
+        hp_event = honeypot.build_event(
+            request_id=req_id, host=host, client_ip=client_ip,
+            user_agent=request.headers.get("User-Agent", ""), method=orig_method, uri=orig_uri,
+            referer=request.headers.get("Referer", ""), content_type=request.headers.get("Content-Type", ""),
+            body=raw_body, raw_body=body_bytes, template_id=dec_response.template_id,
+            category=dec_response.category, rule_id=rule_id, response_body=dec_response.body,
+            delay_seconds=dec_response.delay_seconds, edge_peer=request.headers.get("X-Edge-Peer", ""),
+        )
+        background_tasks.add_task(deception_service.log_honeypot_event, hp_event)
+        background_tasks.add_task(honeypot.notify, hp_event)
+    except Exception as exc:  # noqa: BLE001 - the timeline must never break the decoy
+        logger.warning("honeypot event build failed: %s", exc)
 
     # 6. Return HTTP 200 synthetic response immediately with anti-cache headers
     headers = dict(dec_response.headers)
