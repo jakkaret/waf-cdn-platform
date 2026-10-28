@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/axios'
 import { useAuthStore } from '../store/authStore'
+import { LanguageToggle } from '../components/ui/LanguageToggle'
 import { tr, useT } from '../i18n'
 
 // Landing page of an origin-sharing invitation (N9/H64). Access goes to the
@@ -43,7 +44,10 @@ const AcceptInvite: React.FC = () => {
   else body = <p>{state === 'working' ? t('Accepting the invitation...', 'กำลังรับคำเชิญ...') : message}</p>
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
+    <div className="relative min-h-screen flex items-center justify-center p-6">
+      <div className="absolute top-4 right-4">
+        <LanguageToggle />
+      </div>
       <div className="max-w-md w-full rounded-xl border p-6 space-y-3">
         <h1 className="text-lg font-semibold">{t('Origin invitation', 'คำเชิญเข้าร่วม origin')}</h1>
         {body}

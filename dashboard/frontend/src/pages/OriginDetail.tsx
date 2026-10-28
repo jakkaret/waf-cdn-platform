@@ -29,6 +29,7 @@ import { OriginMlProtection } from '../components/OriginMlProtection'
 import { OriginRateLimits } from '../components/OriginRateLimits'
 import { ShieldActivity } from '../components/ShieldActivity'
 import { OriginTabs } from '../components/OriginTabs'
+import { LanguageToggle } from '../components/ui/LanguageToggle'
 import { getSiteRateRules } from '../api/siteAccess'
 import { originUpstreamLabel } from '../lib/originUpstream'
 import { isOriginTab, type OriginTabId } from '../components/layout/navigation'
@@ -627,6 +628,8 @@ export const OriginDetail: React.FC = () => {
               {t('Archive origin', 'เก็บ origin ถาวร')}
             </Button>
           )}
+          {/* This page has no TopBar, so the language switch sits here. */}
+          <LanguageToggle />
         </div>
       </div>
 

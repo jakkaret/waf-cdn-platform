@@ -2,14 +2,16 @@ import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { publicStatusApi, StatusComponent } from '../api/publicStatus'
 import { ThemeToggle } from '../components/ui/ThemeToggle'
+import { LanguageToggle } from '../components/ui/LanguageToggle'
 import { Shield, CheckCircle2, AlertTriangle, HelpCircle, Info } from 'lucide-react'
 import { BKK_LABEL, formatBkkDateTime } from '../lib/time'
 import { BRAND_NAME } from '../components/ui/BrandMark'
+import { useT } from '../i18n'
 
-const STATUS_META: Record<StatusComponent['status'], { label: string; color: string; dot: string }> = {
-  operational: { label: 'Operational', color: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
-  degraded: { label: 'Degraded', color: 'text-red-600 dark:text-red-400', dot: 'bg-red-500' },
-  unknown: { label: 'Unknown', color: 'text-[var(--text-muted)]', dot: 'bg-[var(--text-muted)]' },
+const STATUS_META: Record<StatusComponent['status'], { label: string; labelTh: string; color: string; dot: string }> = {
+  operational: { label: 'Operational', labelTh: 'ทำงานปกติ', color: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
+  degraded: { label: 'Degraded', labelTh: 'ทำงานไม่เต็มที่', color: 'text-red-600 dark:text-red-400', dot: 'bg-red-500' },
+  unknown: { label: 'Unknown', labelTh: 'ไม่ทราบ', color: 'text-[var(--text-muted)]', dot: 'bg-[var(--text-muted)]' },
 }
 
 const dayColor = (pct: number | null): string => {
@@ -20,6 +22,7 @@ const dayColor = (pct: number | null): string => {
 }
 
 export const StatusPage: React.FC = () => {
+  const { t } = useT()
   const { data: status, isLoading } = useQuery({
     queryKey: ['public-status'],
     queryFn: publicStatusApi.getStatus,
@@ -45,13 +48,16 @@ export const StatusPage: React.FC = () => {
               <Shield size={18} />
             </div>
             <div>
-              <h1 className="text-[16px] font-bold font-mono m-0">{BRAND_NAME} Status</h1>
+              <h1 className="text-[16px] font-bold font-mono m-0">{t(`${BRAND_NAME} Status`, `สถานะ ${BRAND_NAME}`)}</h1>
               <p className="text-[11px] text-[var(--text-muted)] font-mono m-0">
-                Live health of the WAF + CDN platform
+                {t('Live health of the WAF + CDN platform', 'สถานะการทำงานของแพลตฟอร์ม WAF + CDN แบบสด')}
               </p>
             </div>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <LanguageToggle />
+          </div>
         </div>
 
         {/* Overall banner */}
@@ -74,16 +80,16 @@ export const StatusPage: React.FC = () => {
           <div>
             <div className={`font-mono font-bold text-[14px] ${overallMeta.color}`}>
               {isLoading
-                ? 'Checking...'
+                ? t('Checking...', 'กำลังตรวจ...')
                 : overall === 'operational'
-                ? 'All systems operational'
+                ? t('All systems operational', 'ทุกระบบทำงานปกติ')
                 : overall === 'degraded'
-                ? 'Some systems are degraded'
-                : 'Status unknown'}
+                ? t('Some systems are degraded', 'บางระบบทำงานไม่เต็มที่')
+                : t('Status unknown', 'ไม่ทราบสถานะ')}
             </div>
             {status?.checked_at && (
               <div className="text-[10.5px] text-[var(--text-muted)] font-mono">
-                Last checked: {formatBkkDateTime(status.checked_at)} ({BKK_LABEL})
+                {t('Last checked:', 'ตรวจล่าสุด:')} {formatBkkDateTime(status.checked_at)} ({t(BKK_LABEL, 'เวลากรุงเทพฯ')})
               </div>
             )}
           </div>
@@ -101,14 +107,14 @@ export const StatusPage: React.FC = () => {
                     <span className={`w-2 h-2 rounded-full ${meta.dot}`} />
                     <span className="font-mono font-semibold text-[13px]">{c.name}</span>
                   </div>
-                  <span className={`font-mono text-[11.5px] font-bold ${meta.color}`}>{meta.label}</span>
+                  <span className={`font-mono text-[11.5px] font-bold ${meta.color}`}>{t(meta.label, meta.labelTh)}</span>
                 </div>
                 {days.length > 0 && (
-                  <div className="flex items-end gap-[2px]" title="Last 90 days">
+                  <div className="flex items-end gap-[2px]" title={t('Last 90 days', '90 วันล่าสุด')}>
                     {days.map((d) => (
                       <div
                         key={d.date}
-                        title={`${d.date}: ${d.uptime_pct === null ? 'no data' : `${d.uptime_pct}% uptime`}`}
+                        title={`${d.date}: ${d.uptime_pct === null ? t('no data', 'ไม่มีข้อมูล') : t(`${d.uptime_pct}% uptime`, `uptime ${d.uptime_pct}%`)}`}
                         className={`h-6 flex-1 rounded-[1.5px] ${dayColor(d.uptime_pct)}`}
                       />
                     ))}
@@ -118,7 +124,7 @@ export const StatusPage: React.FC = () => {
             )
           })}
           {isLoading && (
-            <div className="p-6 text-center text-[12px] text-[var(--text-muted)] font-mono">Loading...</div>
+            <div className="p-6 text-center text-[12px] text-[var(--text-muted)] font-mono">{t('Loading...', 'กำลังโหลด...')}</div>
           )}
         </div>
 
@@ -126,12 +132,13 @@ export const StatusPage: React.FC = () => {
         <div className="dash-card p-4 space-y-1.5 text-[11.5px] font-mono text-[var(--text-secondary)] leading-relaxed">
           <div className="flex items-center gap-1.5 font-bold text-[var(--text-primary)]">
             <Info size={13} className="text-sky-500" />
-            <span>เกี่ยวกับหน้านี้</span>
+            <span>{t('About this page', 'เกี่ยวกับหน้านี้')}</span>
           </div>
           <p className="m-0">
-            หน้านี้เช็คสถานะจริงของแต่ละ component ทุก 30 วินาที (cache กันยิง health check ถี่เกินไป) แถบสี่เหลี่ยมด้านล่าง
-            แต่ละแถวคือ uptime ย้อนหลัง 90 วัน สีเขียว = uptime ≥99.9% เหลือง = มีสะดุดบ้าง แดง = มีปัญหาชัดเจน เทา = ยังไม่มีข้อมูลวันนั้น
-            (ระบบเพิ่งเริ่มเก็บ history วันนี้ ข้อมูลย้อนหลังจะค่อยๆ เต็มขึ้นเรื่อยๆ)
+            {t(
+              'This page checks the real state of each component every 30 seconds (cached so health checks are not sent too often). Each row of squares is the uptime of the last 90 days: green = uptime ≥99.9%, yellow = some interruptions, red = clear problems, grey = no data for that day yet (history collection started recently, so older days fill in over time).',
+              'หน้านี้เช็คสถานะจริงของแต่ละ component ทุก 30 วินาที (cache กันยิง health check ถี่เกินไป) แถบสี่เหลี่ยมแต่ละแถวคือ uptime ย้อนหลัง 90 วัน สีเขียว = uptime ≥99.9% เหลือง = มีสะดุดบ้าง แดง = มีปัญหาชัดเจน เทา = ยังไม่มีข้อมูลวันนั้น (ระบบเพิ่งเริ่มเก็บ history ข้อมูลย้อนหลังจะค่อยๆ เต็มขึ้นเรื่อยๆ)',
+            )}
           </p>
         </div>
       </div>
