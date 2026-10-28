@@ -34,9 +34,11 @@ import { originRoleOf } from '../lib/roles'
 import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
 import { bkkDateKey } from '../lib/time'
 import { originUpstreamLabel } from '../lib/originUpstream'
+import { statusWord, useT } from '../i18n'
 
 export const Origins: React.FC = () => {
   const navigate = useNavigate()
+  const { t, lang } = useT()
   const queryClient = useQueryClient()
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const guard = useVerifiedGuard()
@@ -62,7 +64,7 @@ export const Origins: React.FC = () => {
       const res = await getOrigins({ forceRefreshStatus: true })
       queryClient.setQueryData(['origins'], res)
     } catch {
-      toast.error('Failed to refresh tunnel status')
+      toast.error(t('Failed to refresh tunnel status', 'รีเฟรชสถานะ tunnel ไม่สำเร็จ'))
     } finally {
       setIsRefreshingStatus(false)
     }
@@ -89,10 +91,10 @@ export const Origins: React.FC = () => {
     if (!originToDelete) return
     try {
       await deleteOrigin(originToDelete.origin_id)
-      toast.success('Origin archived successfully')
+      toast.success(t('Origin archived', 'เก็บ origin ถาวรแล้ว'))
       refetch()
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Failed to archive origin')
+      toast.error(error.response?.data?.detail || t('Failed to archive origin', 'เก็บ origin ถาวรไม่สำเร็จ'))
     } finally {
       setOriginToDelete(null)
     }
@@ -102,10 +104,10 @@ export const Origins: React.FC = () => {
     if (!originToRestore) return
     try {
       await restoreOrigin(originToRestore.origin_id)
-      toast.success('Origin restored successfully')
+      toast.success(t('Origin restored', 'กู้คืน origin แล้ว'))
       refetch()
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Failed to restore origin')
+      toast.error(error.response?.data?.detail || t('Failed to restore origin', 'กู้คืน origin ไม่สำเร็จ'))
     } finally {
       setOriginToRestore(null)
     }
@@ -123,11 +125,14 @@ export const Origins: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       <TopBar
-        title="Origins"
-        subtitle="The websites the WAF protects. Open one to manage its domains, rules, IP access and team."
+        title={t('Origins', 'Origins')}
+        subtitle={t(
+          'The websites the WAF protects. Open one to manage its domains, rules, IP access and team.',
+          'เว็บไซต์ที่ WAF ป้องกันอยู่ เปิดแต่ละรายการเพื่อจัดการโดเมน กฎ การเข้าถึงตาม IP และทีม',
+        )}
         badge={
           <Badge color="gray">
-            {isLoading ? '—' : origins.filter((o: Origin) => o.status !== 'archived').length} active
+            {isLoading ? '—' : origins.filter((o: Origin) => o.status !== 'archived').length} {t('active', 'ใช้งานอยู่')}
           </Badge>
         }
         action={
@@ -139,18 +144,18 @@ export const Origins: React.FC = () => {
               variant="secondary"
               onClick={() => navigate('/tunnels')}
               icon={<Cable size={14} />}
-              title="For a server without a public IP: it connects out to the WAF through a tunnel agent"
+              title={t('For a server without a public IP: it connects out to the WAF through a tunnel agent', 'สำหรับเซิร์ฟเวอร์ที่ไม่มี public IP: เชื่อมออกมาหา WAF ผ่าน tunnel agent')}
             >
-              Connect through a tunnel
+              {t('Connect through a tunnel', 'เชื่อมผ่าน tunnel')}
             </Button>
             <Button
               variant="brand"
               onClick={() => guard('create_origin', () => setIsAddModalOpen(true))}
               disabled={quotaFull}
               icon={<Plus size={14} />}
-              title={quotaFull ? 'Your origin quota is full' : 'Add a site by its domain'}
+              title={quotaFull ? t('Your origin quota is full', 'โควตา origin ของคุณเต็มแล้ว') : t('Add a site by its domain', 'เพิ่มเว็บจากโดเมน')}
             >
-              Add origin
+              {t('Add origin', 'เพิ่ม origin')}
             </Button>
           </div>
         }
@@ -161,7 +166,7 @@ export const Origins: React.FC = () => {
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span className="text-[13.5px] font-semibold text-[var(--text-primary)]">
-              Origin quota
+              {t('Origin quota', 'โควตา origin')}
             </span>
             <span
               className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded ${
@@ -173,12 +178,16 @@ export const Origins: React.FC = () => {
               }`}
             >
               {quotaReady
-                ? `${quotaUsed} / ${quotaMax} slots used (${quotaPct}%)`
-                : isQuotaLoading ? 'Loading quota...' : 'Quota unavailable'}
+                ? t(`${quotaUsed} / ${quotaMax} slots used (${quotaPct}%)`, `ใช้ไป ${quotaUsed} / ${quotaMax} (${quotaPct}%)`)
+                : isQuotaLoading
+                  ? t('Loading quota...', 'กำลังโหลดโควตา...')
+                  : t('Quota unavailable', 'ไม่มีข้อมูลโควตา')}
             </span>
           </div>
           <p className="text-[12px] text-[var(--text-muted)] m-0">
-            {quotaFull ? 'Your quota is full. Archive an origin you no longer need to add another.' : 'How many origins this account can add.'}
+            {quotaFull
+              ? t('Your quota is full. Archive an origin you no longer need to add another.', 'โควตาเต็มแล้ว เก็บ origin ที่ไม่ใช้แล้วถาวรก่อนจึงจะเพิ่มใหม่ได้')
+              : t('How many origins this account can add.', 'จำนวน origin ที่บัญชีนี้เพิ่มได้')}
           </p>
         </div>
 
@@ -200,7 +209,7 @@ export const Origins: React.FC = () => {
           <Search className="absolute left-3 top-2.5 text-[var(--text-muted)]" size={14} />
           <input
             type="text"
-            placeholder="Search by label or IP address..."
+            placeholder={t('Search by label or IP address...', 'ค้นหาจากชื่อหรือ IP...')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full dash-input pl-8 py-1.5 text-[12px] font-mono"
@@ -208,22 +217,23 @@ export const Origins: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 w-full md:w-auto font-mono text-[12px]">
-          <span className="text-[var(--text-muted)] text-[11px]">Filter:</span>
+          <span className="text-[var(--text-muted)] text-[11px]">{t('Filter:', 'กรอง:')}</span>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as any)}
             className="dash-input py-1 text-[12px] font-mono cursor-pointer"
           >
-            <option value="all">Active Only (Excl. Archived)</option>
-            <option value="active">Active</option>
-            <option value="pending">Pending Setup</option>
-            <option value="error">Unreachable / Error</option>
-            <option value="archived">Archived</option>
+            <option value="all">{t('All except archived', 'ทั้งหมด (ยกเว้นที่เก็บถาวร)')}</option>
+            <option value="active">{t('Active', 'ใช้งานอยู่')}</option>
+            <option value="pending">{t('Pending setup', 'รอตั้งค่า')}</option>
+            <option value="error">{t('Unreachable / error', 'เชื่อมต่อไม่ได้ / ผิดพลาด')}</option>
+            <option value="archived">{t('Archived', 'เก็บถาวร')}</option>
           </select>
           <button
             onClick={handleRefreshStatus}
             disabled={isRefreshingStatus}
-            title="Force-check tunnel connectivity now (bypasses the 60s cache)"
+            aria-label={t('Refresh tunnel status', 'รีเฟรชสถานะ tunnel')}
+            title={t('Force-check tunnel connectivity now (bypasses the 60s cache)', 'ตรวจการเชื่อมต่อ tunnel ทันที (ข้าม cache 60 วินาที)')}
             className="p-1.5 rounded-lg border border-[var(--bg-border)] text-[var(--text-secondary)] hover:text-orange-500 hover:border-orange-500/40 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             <RefreshCw size={14} className={isRefreshingStatus ? 'animate-spin' : ''} />
@@ -234,18 +244,21 @@ export const Origins: React.FC = () => {
       {/* Origins Cards Grid */}
       {isLoading ? (
         <div className="text-center py-16 text-[var(--text-muted)] font-mono text-[12px]">
-          Loading origin servers...
+          {t('Loading origin servers...', 'กำลังโหลด origin server...')}
         </div>
       ) : filteredOrigins.length === 0 ? (
         <div className="dash-card p-12 text-center space-y-3">
           <Server size={36} className="mx-auto text-[var(--text-muted)] opacity-40" />
           <h3 className="text-[14px] font-bold text-[var(--text-primary)] font-mono m-0">
-            No Origin Servers Found
+            {t('No origin servers found', 'ไม่พบ origin server')}
           </h3>
           <p className="text-[12px] text-[var(--text-muted)] m-0 font-mono">
             {origins.length === 0
-              ? 'เริ่มจากโดเมนของคุณ — ระบบหาเซิร์ฟเวอร์ให้และบอกสิ่งที่ต้องตั้งค่า'
-              : 'No origins match the current search or status filter criteria.'}
+              ? t(
+                  'Start with your domain: we find the server behind it and tell you what to set up.',
+                  'เริ่มจากโดเมนของคุณ — ระบบหาเซิร์ฟเวอร์ให้และบอกสิ่งที่ต้องตั้งค่า',
+                )
+              : t('No origins match the current search or status filter.', 'ไม่มี origin ที่ตรงกับคำค้นหาหรือตัวกรองสถานะ')}
           </p>
           {origins.length === 0 && (
             <button
@@ -253,7 +266,7 @@ export const Origins: React.FC = () => {
               onClick={() => setIsAddModalOpen(true)}
               className="mt-1 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-orange-700 hover:bg-orange-800 text-white text-[12px] font-mono font-semibold transition-colors cursor-pointer"
             >
-              เชื่อมเว็บแรกของคุณ
+              {t('Connect your first site', 'เชื่อมเว็บแรกของคุณ')}
             </button>
           )}
         </div>
@@ -289,7 +302,7 @@ export const Origins: React.FC = () => {
                       const b = originStatusBadge(origin.status, origin.is_tunnel, origin.live_connected)
                       return (
                         <Badge color={b.color} dot>
-                          {b.label}
+                          {statusWord(b.label, lang)}
                         </Badge>
                       )
                     })()}
@@ -297,13 +310,13 @@ export const Origins: React.FC = () => {
 
                   <div className="mt-4 pt-3 border-t border-[var(--bg-border-subtle)] space-y-2 text-[12px] font-mono">
                     <div className="flex justify-between text-[var(--text-secondary)]">
-                      <span className="text-[var(--text-muted)]">Upstream</span>
+                      <span className="text-[var(--text-muted)]">{t('Upstream', 'ปลายทาง')}</span>
                       <span className="text-[var(--text-primary)] font-semibold truncate">
-                        {originUpstreamLabel(origin)}
+                        {originUpstreamLabel(origin, lang)}
                       </span>
                     </div>
                     <div className="flex justify-between text-[var(--text-secondary)]">
-                      <span className="text-[var(--text-muted)]">Added on:</span>
+                      <span className="text-[var(--text-muted)]">{t('Added on:', 'เพิ่มเมื่อ:')}</span>
                       <span>{bkkDateKey(origin.created_at)}</span>
                     </div>
                   </div>
@@ -311,7 +324,7 @@ export const Origins: React.FC = () => {
 
                 <div className="mt-5 pt-3 border-t border-[var(--bg-border)] flex justify-between items-center text-[12px]">
                   <span className="font-semibold text-orange-500 flex items-center gap-1 group-hover:gap-1.5 transition-all font-mono">
-                    <span>Manage Pool</span>
+                    <span>{t('Manage', 'จัดการ')}</span>
                     <ArrowRight size={13} />
                   </span>
 
@@ -322,7 +335,7 @@ export const Origins: React.FC = () => {
                         setOriginToRestore(origin)
                       }}
                       className="p-1.5 text-emerald-500 hover:bg-emerald-500/10 rounded transition-colors"
-                      title="Restore origin"
+                      title={t('Restore origin', 'กู้คืน origin')}
                     >
                       <RotateCcw size={14} />
                     </button>
@@ -333,7 +346,7 @@ export const Origins: React.FC = () => {
                         setOriginToDelete(origin)
                       }}
                       className="p-1.5 text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 rounded transition-colors"
-                      title={isPending ? 'Cancel setup' : 'Archive origin'}
+                      title={isPending ? t('Cancel setup', 'ยกเลิกการตั้งค่า') : t('Archive origin', 'เก็บ origin ถาวร')}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -350,8 +363,8 @@ export const Origins: React.FC = () => {
       <Modal
         open={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        title="เชื่อมเว็บของคุณ"
-        description="ระบบจะตรวจ DNS และเซิร์ฟเวอร์ของโดเมนให้ก่อนเชื่อมต่อ"
+        title={t('Connect your site', 'เชื่อมเว็บของคุณ')}
+        description={t('We check the domain’s DNS and server before connecting.', 'ระบบจะตรวจ DNS และเซิร์ฟเวอร์ของโดเมนให้ก่อนเชื่อมต่อ')}
       >
         <ConnectSiteFlow
           onCancel={() => setIsAddModalOpen(false)}
@@ -367,15 +380,21 @@ export const Origins: React.FC = () => {
         open={!!originToDelete}
         onCancel={() => setOriginToDelete(null)}
         onConfirm={handleDeleteConfirm}
-        title={originToDelete?.status === 'pending' ? 'Cancel Setup' : 'Archive Origin'}
+        title={originToDelete?.status === 'pending' ? t('Cancel setup', 'ยกเลิกการตั้งค่า') : t('Archive origin', 'เก็บ origin ถาวร')}
         message={
           originToDelete
             ? originToDelete.status === 'pending'
-              ? `Are you sure you want to cancel the setup of the origin "${originToDelete.label}"?`
-              : `Are you sure you want to archive the origin "${originToDelete.label}"? This will hide it from the active dashboard.`
+              ? t(
+                  `Are you sure you want to cancel the setup of the origin "${originToDelete.label}"?`,
+                  `ต้องการยกเลิกการตั้งค่า origin "${originToDelete.label}" ใช่ไหม?`,
+                )
+              : t(
+                  `Are you sure you want to archive the origin "${originToDelete.label}"? This will hide it from the active dashboard.`,
+                  `ต้องการเก็บ origin "${originToDelete.label}" ถาวรใช่ไหม? origin นี้จะไม่แสดงในแดชบอร์ดอีก`,
+                )
             : ''
         }
-        confirmText={originToDelete?.status === 'pending' ? 'Cancel Setup' : 'Archive Origin'}
+        confirmText={originToDelete?.status === 'pending' ? t('Cancel setup', 'ยกเลิกการตั้งค่า') : t('Archive origin', 'เก็บ origin ถาวร')}
         isDanger={true}
       />
 
@@ -383,13 +402,16 @@ export const Origins: React.FC = () => {
         open={!!originToRestore}
         onCancel={() => setOriginToRestore(null)}
         onConfirm={handleRestoreConfirm}
-        title="Restore Origin"
+        title={t('Restore origin', 'กู้คืน origin')}
         message={
           originToRestore
-            ? `Are you sure you want to restore origin "${originToRestore.label}" back to active service?`
+            ? t(
+                `Are you sure you want to restore origin "${originToRestore.label}" back to active service?`,
+                `ต้องการกู้คืน origin "${originToRestore.label}" ให้กลับมาใช้งานใช่ไหม?`,
+              )
             : ''
         }
-        confirmText="Restore Origin"
+        confirmText={t('Restore origin', 'กู้คืน origin')}
         isDanger={false}
       />
     </div>

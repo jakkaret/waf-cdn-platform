@@ -70,6 +70,32 @@ export const severityLabel = (sev: string, lang: Lang): string => {
   return up ? up.charAt(0) + up.slice(1).toLowerCase() : sev
 }
 
+// Upper-case status words the lib/ helpers return (ONLINE, PENDING, ...).
+const STATUS_TH: Record<string, string> = {
+  ONLINE: 'ออนไลน์',
+  OFFLINE: 'ออฟไลน์',
+  CONNECTED: 'เชื่อมต่อแล้ว',
+  DISCONNECTED: 'ไม่ได้เชื่อมต่อ',
+  'TUNNEL DISCONNECTED': 'Tunnel ไม่ได้เชื่อมต่อ',
+  ACTIVE: 'ใช้งานอยู่',
+  PENDING: 'รอตั้งค่า',
+  ARCHIVED: 'เก็บถาวร',
+  ERROR: 'ผิดพลาด',
+  DEGRADED: 'ทำงานไม่เต็มที่',
+  UNKNOWN: 'ไม่ทราบ',
+  'ONLINE & READY': 'ออนไลน์และพร้อมใช้',
+  'PARTIALLY ONLINE': 'ออนไลน์บางส่วน',
+}
+
+// Keeps a leading emoji ("🟢 ONLINE" -> "🟢 ออนไลน์").
+export const statusWord = (label: string, lang: Lang): string => {
+  if (lang !== 'th' || !label) return label
+  const m = label.match(/^(\P{L}*?)\s*([A-Z][A-Z &]*)$/u)
+  if (!m) return STATUS_TH[label] ?? label
+  const th = STATUS_TH[m[2]]
+  return th ? `${m[1] ? m[1] + ' ' : ''}${th}` : label
+}
+
 export function useT() {
   const lang = useLangStore((s) => s.lang)
   return { t: pick(lang), lang, locale: localeOf(lang) }

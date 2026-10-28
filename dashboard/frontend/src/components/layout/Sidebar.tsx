@@ -7,7 +7,7 @@ import { api } from '../../api/axios'
 import { getOrigins } from '../../api/origins'
 import { ChevronRight, ChevronUp, LogOut, Monitor, Moon, Search, Sun, UserRound, X, Link2 } from 'lucide-react'
 import { CRS_VERSION } from '../../lib/crsVersion'
-import { isOperator, platformRoleLabel } from '../../lib/permissions'
+import { isOperator } from '../../lib/permissions'
 import { useVerifiedGuard } from '../auth/EmailVerifyGate'
 import { useT } from '../../i18n'
 import type { Origin } from '../../types'
@@ -530,7 +530,7 @@ const ProfileMenu: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-[12.5px] font-medium text-[var(--text-primary)] truncate">{user?.username || t('User', 'ผู้ใช้')}</span>
-          <span className="block text-[11px] text-[var(--text-muted)]">{platformRoleLabel(user)}</span>
+          <span className="block text-[11px] text-[var(--text-muted)]">{isOperator(user) ? t('Platform operator', 'ผู้ดูแลแพลตฟอร์ม') : t('User', 'ผู้ใช้')}</span>
         </span>
         <ChevronUp size={14} aria-hidden="true" className={`shrink-0 text-[var(--text-muted)] transition-transform ${open ? '' : 'rotate-180'}`} />
       </button>

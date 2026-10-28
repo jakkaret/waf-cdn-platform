@@ -8,6 +8,7 @@ import { Badge } from './ui/Badge'
 import type { ConnectionMode, ProgressDomain } from '../api/onboarding'
 import { buildTunnelCommands } from '../lib/tunnelCommands'
 import { dnsCheck, connectionCheck, httpsCheck, liveElsewhere, CheckView } from '../lib/connectProgress'
+import { useT } from '../i18n'
 
 // One card per domain on the origin's Domains tab: the three things that must
 // be true before visitors reach the site through the WAF -- DNS points at us,
@@ -18,20 +19,21 @@ import { dnsCheck, connectionCheck, httpsCheck, liveElsewhere, CheckView } from 
 
 const CopyField: React.FC<{ label: string; value: string }> = ({ label, value }) => {
   const [copied, setCopied] = useState(false)
+  const { t } = useT()
   return (
     <div className="flex items-center gap-2 min-w-0">
       <span className="text-[10.5px] font-bold text-[var(--text-muted)] w-14 shrink-0">{label}</span>
       <code className="flex-1 min-w-0 truncate px-2 py-1 rounded bg-[var(--bg-primary)] border border-[var(--bg-border)] text-[11.5px]">{value}</code>
       <button
         type="button"
-        title="คัดลอก"
+        title={t('Copy', 'คัดลอก')}
         onClick={async () => {
           try {
             await navigator.clipboard.writeText(value)
             setCopied(true)
             setTimeout(() => setCopied(false), 1500)
           } catch {
-            toast.error('คัดลอกไม่สำเร็จ')
+            toast.error(t('Could not copy', 'คัดลอกไม่สำเร็จ'))
           }
         }}
         className="shrink-0 p-1.5 rounded-md border border-[var(--bg-border)] text-[var(--text-muted)] hover:text-orange-500 cursor-pointer"
@@ -51,6 +53,7 @@ const StateIcon: React.FC<{ state: CheckView['state'] }> = ({ state }) => {
 
 const AgentCommand: React.FC<{ domain: string; port: number }> = ({ domain, port }) => {
   const [enabled, setEnabled] = useState(false)
+  const { t } = useT()
   // The command embeds a 90-day, domain-scoped tunnel token: mint it only
   // on an explicit click and never keep it cached (same rule as Tunnels.tsx).
   const { data, isFetching, isError } = useQuery({
@@ -66,18 +69,21 @@ const AgentCommand: React.FC<{ domain: string; port: number }> = ({ domain, port
   if (!enabled) {
     return (
       <Button variant="secondary" size="sm" onClick={() => setEnabled(true)}>
-        แสดงคำสั่งติดตั้ง Agent
+        {t('Show the Agent install command', 'แสดงคำสั่งติดตั้ง Agent')}
       </Button>
     )
   }
-  if (isFetching) return <p className="text-[11.5px] text-[var(--text-muted)] m-0">กำลังสร้างคำสั่ง (เฉพาะโดเมนนี้)...</p>
-  if (isError || !cmds) return <p className="text-[11.5px] text-red-500 m-0">สร้างคำสั่งไม่สำเร็จ ลองใหม่อีกครั้ง</p>
+  if (isFetching) return <p className="text-[11.5px] text-[var(--text-muted)] m-0">{t('Creating the command (for this domain only)...', 'กำลังสร้างคำสั่ง (เฉพาะโดเมนนี้)...')}</p>
+  if (isError || !cmds) return <p className="text-[11.5px] text-red-500 m-0">{t('Could not create the command. Please try again.', 'สร้างคำสั่งไม่สำเร็จ ลองใหม่อีกครั้ง')}</p>
   return (
     <div className="space-y-1.5">
       <CopyField label="Linux" value={cmds.linux} />
       {cmds.docker && <CopyField label="Docker" value={cmds.docker} />}
       <p className="text-[10.5px] text-[var(--text-muted)] m-0">
-        รันบนเครื่องที่เว็บรันอยู่ (port {port}) — คำสั่งมี token ของโดเมนนี้ อย่าแชร์ต่อ · ต้องออก internet ไปที่พอร์ต 7000 ได้
+        {t(
+          `Run it on the machine the site runs on (port ${port}). The command holds this domain’s token, do not share it · outbound internet to port 7000 is needed`,
+          `รันบนเครื่องที่เว็บรันอยู่ (port ${port}) — คำสั่งมี token ของโดเมนนี้ อย่าแชร์ต่อ · ต้องออก internet ไปที่พอร์ต 7000 ได้`,
+        )}
       </p>
     </div>
   )
@@ -97,9 +103,10 @@ interface DomainStatusCardProps {
 
 export const DomainStatusCard: React.FC<DomainStatusCardProps> = ({ item, mode, originPort, egressIps, canEdit, canMintAgent, onRemove }) => {
   const [showTxt, setShowTxt] = useState(false)
-  const dns = dnsCheck(item)
-  const conn = connectionCheck(item, mode)
-  const https = httpsCheck(item)
+  const { t, lang } = useT()
+  const dns = dnsCheck(item, lang)
+  const conn = connectionCheck(item, mode, lang)
+  const https = httpsCheck(item, lang)
   const rec = item.dns.instructions
   const verified = item.dns.status === 'verified'
   const live = liveElsewhere(item)
@@ -124,11 +131,11 @@ export const DomainStatusCard: React.FC<DomainStatusCardProps> = ({ item, mode, 
       <div className="flex items-start justify-between gap-3 mb-1">
         <div className="flex items-center gap-2.5 min-w-0">
           <h3 className="text-[15px] font-bold text-[var(--text-primary)] m-0 truncate">{item.domain_name}</h3>
-          <Badge color={item.ready ? 'success' : 'warning'} size="sm">{item.ready ? 'LIVE' : 'SETTING UP'}</Badge>
+          <Badge color={item.ready ? 'success' : 'warning'} size="sm">{item.ready ? t('LIVE', 'ใช้งานแล้ว') : t('SETTING UP', 'กำลังตั้งค่า')}</Badge>
         </div>
         {canEdit && (
-          <Button variant="ghost" size="sm" onClick={() => onRemove(item.domain_id)} icon={<Trash2 size={13} />} title="Remove domain">
-            <span className="sr-only">Remove</span>
+          <Button variant="ghost" size="sm" onClick={() => onRemove(item.domain_id)} icon={<Trash2 size={13} />} title={t('Remove domain', 'ลบโดเมน')}>
+            <span className="sr-only">{t('Remove', 'ลบ')}</span>
           </Button>
         )}
       </div>
@@ -138,12 +145,17 @@ export const DomainStatusCard: React.FC<DomainStatusCardProps> = ({ item, mode, 
         live && !verified && rec.txt_record.value ? (
           <>
             <p className="m-0 text-[11.5px] text-[var(--text-secondary)]">
-              <b>ขั้นที่ 1</b> เพิ่ม TXT นี้ที่ผู้ให้บริการ DNS (ไม่กระทบเว็บที่ใช้อยู่)
+              <b>{t('Step 1', 'ขั้นที่ 1')}</b>{' '}
+              {t('Add this TXT record at your DNS provider (the live site is not affected)', 'เพิ่ม TXT นี้ที่ผู้ให้บริการ DNS (ไม่กระทบเว็บที่ใช้อยู่)')}
             </p>
             <CopyField label="TXT" value={rec.txt_record.name} />
             <CopyField label="Value" value={rec.txt_record.value} />
             <p className="m-0 text-[11.5px] text-[var(--text-muted)]">
-              <b>ขั้นที่ 2</b> หลังขั้นที่ 1 ผ่าน: แก้ CNAME เดิมของชื่อนี้ให้ชี้มาที่ค่าด้านล่าง (แก้ record เดิม ไม่ต้องสร้างใหม่)
+              <b>{t('Step 2', 'ขั้นที่ 2')}</b>{' '}
+              {t(
+                'After step 1 passes: change this name’s existing CNAME to point to the value below (edit the existing record, do not create a new one)',
+                'หลังขั้นที่ 1 ผ่าน: แก้ CNAME เดิมของชื่อนี้ให้ชี้มาที่ค่าด้านล่าง (แก้ record เดิม ไม่ต้องสร้างใหม่)',
+              )}
             </p>
             <CopyField label="Type" value={rec.cname_record.type} />
             <CopyField label="Name" value={rec.cname_record.name} />
@@ -152,7 +164,11 @@ export const DomainStatusCard: React.FC<DomainStatusCardProps> = ({ item, mode, 
         ) : live && verified ? (
           <>
             <p className="m-0 text-[11.5px] text-[var(--text-secondary)]">
-              <b>ขั้นที่ 2</b> แก้ record เดิมของชื่อนี้ที่ผู้ให้บริการ DNS ให้เป็น CNAME นี้ (ใบรับรองออกให้ทันทีที่ traffic มาถึง เว็บไม่สะดุด)
+              <b>{t('Step 2', 'ขั้นที่ 2')}</b>{' '}
+              {t(
+                'Change this name’s existing record at your DNS provider to this CNAME (the certificate is issued as soon as traffic arrives, the site does not go down)',
+                'แก้ record เดิมของชื่อนี้ที่ผู้ให้บริการ DNS ให้เป็น CNAME นี้ (ใบรับรองออกให้ทันทีที่ traffic มาถึง เว็บไม่สะดุด)',
+              )}
             </p>
             <CopyField label="Type" value={rec.cname_record.type} />
             <CopyField label="Name" value={rec.cname_record.name} />
@@ -161,7 +177,10 @@ export const DomainStatusCard: React.FC<DomainStatusCardProps> = ({ item, mode, 
         ) : (
         <>
           <p className="m-0 text-[11.5px] text-[var(--text-muted)]">
-            ที่ผู้ให้บริการ DNS ของคุณ: ลบ A record เดิมของชื่อนี้ (ถ้ามี) แล้วเพิ่ม 1 record
+            {t(
+              'At your DNS provider: delete this name’s existing A record (if any), then add 1 record',
+              'ที่ผู้ให้บริการ DNS ของคุณ: ลบ A record เดิมของชื่อนี้ (ถ้ามี) แล้วเพิ่ม 1 record',
+            )}
           </p>
           <CopyField label="Type" value={rec.cname_record.type} />
           <CopyField label="Name" value={rec.cname_record.name} />
@@ -171,13 +190,19 @@ export const DomainStatusCard: React.FC<DomainStatusCardProps> = ({ item, mode, 
             onClick={() => setShowTxt((v) => !v)}
             className="flex items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-orange-500 cursor-pointer"
           >
-            {showTxt ? <ChevronDown size={12} /> : <ChevronRight size={12} />} ตั้ง CNAME ไม่ได้? (โดเมนหลักไม่มี sub หรือใช้ proxy ของ CDN อื่น)
+            {showTxt ? <ChevronDown size={12} /> : <ChevronRight size={12} />}{' '}
+            {t(
+              'Cannot set a CNAME? (apex domain, or another CDN’s proxy)',
+              'ตั้ง CNAME ไม่ได้? (โดเมนหลักไม่มี sub หรือใช้ proxy ของ CDN อื่น)',
+            )}
           </button>}
           {showTxt && rec.txt_record.value && (
             <div className="space-y-1.5 pl-1">
               <p className="m-0 text-[11px] text-[var(--text-muted)]">
-                ยืนยันความเป็นเจ้าของด้วย TXT แทน แล้วชี้ชื่อนี้มาที่ {rec.cname_record.value} ด้วย ALIAS / ANAME / CNAME flattening
-                ถ้าผู้ให้บริการรองรับ (ถ้าใช้ Cloudflare ให้ปิด proxy เป็นเมฆสีเทา)
+                {t(
+                  `Prove ownership with TXT instead, then point this name to ${rec.cname_record.value} with ALIAS / ANAME / CNAME flattening if your provider supports it (on Cloudflare, turn the proxy off: grey cloud)`,
+                  `ยืนยันความเป็นเจ้าของด้วย TXT แทน แล้วชี้ชื่อนี้มาที่ ${rec.cname_record.value} ด้วย ALIAS / ANAME / CNAME flattening ถ้าผู้ให้บริการรองรับ (ถ้าใช้ Cloudflare ให้ปิด proxy เป็นเมฆสีเทา)`,
+                )}
               </p>
               <CopyField label="TXT" value={rec.txt_record.name} />
               <CopyField label="Value" value={rec.txt_record.value} />
@@ -192,7 +217,9 @@ export const DomainStatusCard: React.FC<DomainStatusCardProps> = ({ item, mode, 
           canMintAgent ? (
             <AgentCommand domain={item.domain_name} port={originPort} />
           ) : (
-            <p className="m-0 text-[11px] text-[var(--text-muted)]">เจ้าของ origin เป็นผู้สร้างคำสั่งติดตั้ง Agent</p>
+            <p className="m-0 text-[11px] text-[var(--text-muted)]">
+              {t('The origin owner creates the Agent install command', 'เจ้าของ origin เป็นผู้สร้างคำสั่งติดตั้ง Agent')}
+            </p>
           )
         ) : undefined
       )}
@@ -202,8 +229,10 @@ export const DomainStatusCard: React.FC<DomainStatusCardProps> = ({ item, mode, 
         <div className="mt-2 p-2.5 rounded-lg border border-sky-500/25 bg-sky-500/5 text-[11px] text-[var(--text-secondary)] flex gap-2">
           <ShieldCheck size={14} className="text-sky-500 shrink-0 mt-0.5" />
           <span>
-            แนะนำ: IP เดิมของเซิร์ฟเวอร์อาจยังถูกยิงตรงได้ (ข้าม WAF) ตั้ง firewall ให้รับ HTTP/HTTPS
-            {egressIps.length ? ` เฉพาะจาก ${egressIps.join(', ')}` : ' เฉพาะจาก IP ของ WAF'} หรือเปลี่ยนไปใช้ Agent ซึ่งไม่ต้องเปิดพอร์ต
+            {t(
+              `Recommended: the server’s own IP can still be hit directly (bypassing the WAF). Set the firewall to accept HTTP/HTTPS only from ${egressIps.length ? egressIps.join(', ') : 'the WAF’s IPs'}, or switch to the Agent, which needs no open port.`,
+              `แนะนำ: IP เดิมของเซิร์ฟเวอร์อาจยังถูกยิงตรงได้ (ข้าม WAF) ตั้ง firewall ให้รับ HTTP/HTTPS เฉพาะจาก ${egressIps.length ? egressIps.join(', ') : 'IP ของ WAF'} หรือเปลี่ยนไปใช้ Agent ซึ่งไม่ต้องเปิดพอร์ต`,
+            )}
           </span>
         </div>
       )}

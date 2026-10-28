@@ -19,6 +19,7 @@ import { Button } from './ui/Button'
 import { onboardingApi, ConnectionMode, InspectResult } from '../api/onboarding'
 import { createDomain } from '../api/domains'
 import { describeInspect, describeOriginAdjusted, normalizeDomainInput, InspectView } from '../lib/connectProgress'
+import { useT } from '../i18n'
 
 // One flow for every "connect a site" entry point (Origins → Add Origin, the
 // Onboarding page, and Add Domain on an existing origin). It replaces the old
@@ -60,6 +61,7 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
   const [port, setPort] = useState(3000)
   const [scheme, setScheme] = useState<'http' | 'https'>('http')
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const { t, lang } = useT()
 
   const cleanDomain = normalizeDomainInput(domain)
 
@@ -74,7 +76,7 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
 
   const validDomain = (): boolean => {
     if (!HOSTNAME_RE.test(cleanDomain)) {
-      setDomainError('กรอกชื่อโดเมนให้ถูกรูปแบบ เช่น shop.example.com')
+      setDomainError(t('Enter a valid domain name, e.g. shop.example.com', 'กรอกชื่อโดเมนให้ถูกรูปแบบ เช่น shop.example.com'))
       return false
     }
     // Show the hostname that will be used, e.g. after "https://…/" was pasted.
@@ -85,11 +87,11 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
 
   const inspectMutation = useMutation({
     mutationFn: () => onboardingApi.inspect(cleanDomain),
-    onSuccess: (r: InspectResult) => applyView(describeInspect(r)),
+    onSuccess: (r: InspectResult) => applyView(describeInspect(r, lang)),
     onError: (err: any) => {
       // The probe is optional; the manual path below still works.
-      toast.error(err.response?.data?.detail || 'ตรวจโดเมนไม่สำเร็จ — ตั้งค่าเองได้ด้านล่าง')
-      applyView(describeInspect({ domain: cleanDomain, already_registered: false, reason: 'no_address' }))
+      toast.error(err.response?.data?.detail || t('Could not check the domain — you can set it up below', 'ตรวจโดเมนไม่สำเร็จ — ตั้งค่าเองได้ด้านล่าง'))
+      applyView(describeInspect({ domain: cleanDomain, already_registered: false, reason: 'no_address' }, lang))
     },
   })
 
@@ -102,26 +104,30 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
         ...(mode === 'direct' ? { origin_address: address.trim(), scheme } : {}),
       }),
     onSuccess: (res) => {
-      toast.success(res.verified ? 'เชื่อมต่อแล้ว — DNS ชี้มาที่เราอยู่แล้ว' : 'สร้างแล้ว — ตั้ง DNS 1 record ตามการ์ดของโดเมน')
-      const adjusted = describeOriginAdjusted(res.origin_adjusted)
+      toast.success(
+        res.verified
+          ? t('Connected — DNS already points to us', 'เชื่อมต่อแล้ว — DNS ชี้มาที่เราอยู่แล้ว')
+          : t('Created — set the 1 DNS record shown on the domain card', 'สร้างแล้ว — ตั้ง DNS 1 record ตามการ์ดของโดเมน'),
+      )
+      const adjusted = describeOriginAdjusted(res.origin_adjusted, lang)
       if (adjusted) toast.success(adjusted, { duration: 8000 })
       onDone(res.origin_id)
     },
-    onError: (err: any) => toast.error(err.response?.data?.detail || 'เชื่อมต่อไม่สำเร็จ'),
+    onError: (err: any) => toast.error(err.response?.data?.detail || t('Could not connect', 'เชื่อมต่อไม่สำเร็จ')),
   })
 
   const addDomainMutation = useMutation({
     mutationFn: () => createDomain(existingOriginId as string, { domain_name: cleanDomain }),
     onSuccess: () => {
-      toast.success('เพิ่มโดเมนแล้ว — ตั้ง DNS 1 record ตามการ์ดของโดเมน')
+      toast.success(t('Domain added — set the 1 DNS record shown on the domain card', 'เพิ่มโดเมนแล้ว — ตั้ง DNS 1 record ตามการ์ดของโดเมน'))
       onDone(existingOriginId as string)
     },
-    onError: (err: any) => toast.error(err.response?.data?.detail || 'เพิ่มโดเมนไม่สำเร็จ'),
+    onError: (err: any) => toast.error(err.response?.data?.detail || t('Could not add the domain', 'เพิ่มโดเมนไม่สำเร็จ')),
   })
 
   const domainField = (
     <div>
-      <label htmlFor="connect-domain" className={labelClass}>โดเมนของคุณ</label>
+      <label htmlFor="connect-domain" className={labelClass}>{t('Your domain', 'โดเมนของคุณ')}</label>
       <div className="relative mt-1.5">
         <Globe
           size={16}
@@ -153,7 +159,7 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
       ) : (
         !view && (
           <p id="connect-domain-hint" className={hintClass}>
-            วางลิงก์ของเว็บมาทั้งลิงก์ก็ได้ ระบบจะใช้เฉพาะชื่อโดเมน
+            {t('You can paste the full site link; only the domain name is used.', 'วางลิงก์ของเว็บมาทั้งลิงก์ก็ได้ ระบบจะใช้เฉพาะชื่อโดเมน')}
           </p>
         )
       )}
@@ -165,7 +171,7 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
     <div className="pt-4 border-t border-[var(--bg-border-subtle)] flex justify-end gap-2.5">
       {onCancel && (
         <Button variant="ghost" size="lg" type="button" onClick={onCancel}>
-          ยกเลิก
+          {t('Cancel', 'ยกเลิก')}
         </Button>
       )}
       {submit}
@@ -183,11 +189,14 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
       >
         {domainField}
         <p className="m-0 text-[12.5px] leading-relaxed text-[var(--text-muted)]">
-          ใช้การเชื่อมต่อเดิมของ origin นี้ — หลังเพิ่มแล้วตั้ง DNS แค่ 1 record (CNAME)
+          {t(
+            'Uses this origin’s existing connection — after adding it, set just 1 DNS record (CNAME).',
+            'ใช้การเชื่อมต่อเดิมของ origin นี้ — หลังเพิ่มแล้วตั้ง DNS แค่ 1 record (CNAME)',
+          )}
         </p>
         {footer(
           <Button variant="brand" size="lg" type="submit" isLoading={addDomainMutation.isPending}>
-            เพิ่มโดเมน
+            {t('Add domain', 'เพิ่มโดเมน')}
           </Button>,
         )}
       </form>
@@ -231,7 +240,7 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
             {title}
             {recommended && (
               <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-px text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
-                แนะนำ
+                {t('Recommended', 'แนะนำ')}
               </span>
             )}
           </span>
@@ -256,16 +265,16 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
         {!view && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
             <Button variant="brand" size="lg" type="submit" isLoading={inspectMutation.isPending} icon={<Search size={15} />}>
-              ตรวจสอบโดเมน
+              {t('Check domain', 'ตรวจสอบโดเมน')}
             </Button>
             <button
               type="button"
               className="text-[12.5px] text-[var(--text-secondary)] hover:text-[var(--accent)] underline decoration-[var(--bg-border-hover)] underline-offset-4 hover:decoration-current cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               onClick={() => {
-                if (validDomain()) applyView(describeInspect({ domain: cleanDomain, already_registered: false, reason: 'no_address' }))
+                if (validDomain()) applyView(describeInspect({ domain: cleanDomain, already_registered: false, reason: 'no_address' }, lang))
               }}
             >
-              ข้ามการตรวจ ตั้งค่าเอง
+              {t('Skip the check, set up manually', 'ข้ามการตรวจ ตั้งค่าเอง')}
             </button>
           </div>
         )}
@@ -286,23 +295,35 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
 
           {!blocked && (
             <fieldset className="space-y-2 m-0 p-0 border-0">
-              <legend className={`${labelClass} mb-2`}>วิธีเชื่อมต่อ</legend>
-              {modeOption('direct', Server, 'ต่อตรงไปที่เซิร์ฟเวอร์', 'เซิร์ฟเวอร์มี public IP — ไม่ต้องติดตั้งอะไร', () => {
+              <legend className={`${labelClass} mb-2`}>{t('How to connect', 'วิธีเชื่อมต่อ')}</legend>
+              {modeOption(
+                'direct',
+                Server,
+                t('Connect directly to the server', 'ต่อตรงไปที่เซิร์ฟเวอร์'),
+                t('The server has a public IP — nothing to install', 'เซิร์ฟเวอร์มี public IP — ไม่ต้องติดตั้งอะไร'),
+                () => {
                 setMode('direct')
                 // Detected values when there are some, else the common HTTPS default.
                 setPort(view.mode === 'direct' ? view.port : 443)
                 setScheme(view.mode === 'direct' ? view.scheme : 'https')
-              })}
-              {modeOption('agent', Terminal, 'ใช้ Agent', 'เครื่องอยู่หลัง NAT/firewall — ไม่ต้องเปิดพอร์ตขาเข้า', () => {
+                },
+              )}
+              {modeOption(
+                'agent',
+                Terminal,
+                t('Use the Agent', 'ใช้ Agent'),
+                t('The machine is behind NAT/firewall — no inbound port needed', 'เครื่องอยู่หลัง NAT/firewall — ไม่ต้องเปิดพอร์ตขาเข้า'),
+                () => {
                 setMode('agent')
                 setPort(3000)
-              })}
+                },
+              )}
             </fieldset>
           )}
 
           {!blocked && mode === 'agent' && (
             <div className="max-w-[200px]">
-              <label htmlFor="connect-port" className={labelClass}>เว็บรันที่ port</label>
+              <label htmlFor="connect-port" className={labelClass}>{t('The site runs on port', 'เว็บรันที่ port')}</label>
               <input
                 id="connect-port"
                 type="number"
@@ -319,13 +340,13 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
             view.mode === 'direct' && !showAdvanced ? (
               <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] px-3.5 py-2.5">
                 <div className="min-w-0">
-                  <span className="block text-[12px] text-[var(--text-muted)]">ส่ง traffic ไปที่</span>
+                  <span className="block text-[12px] text-[var(--text-muted)]">{t('Send traffic to', 'ส่ง traffic ไปที่')}</span>
                   <span className="block truncate font-mono text-[13.5px] text-[var(--text-primary)]">
                     {scheme}://{address}:{port}
                   </span>
                 </div>
                 <Button variant="secondary" size="sm" type="button" onClick={() => setShowAdvanced(true)} icon={<Pencil size={13} />}>
-                  แก้ไข
+                  {t('Edit', 'แก้ไข')}
                 </Button>
               </div>
             ) : (
@@ -339,7 +360,7 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
                     </select>
                   </div>
                   <div className="col-span-2 row-start-2 sm:col-span-1 sm:row-start-auto">
-                    <label htmlFor="connect-address" className={labelClass}>IP ของเซิร์ฟเวอร์</label>
+                    <label htmlFor="connect-address" className={labelClass}>{t('Server IP', 'IP ของเซิร์ฟเวอร์')}</label>
                     <input id="connect-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="203.0.113.10" className={inputClass} />
                   </div>
                   <div>
@@ -353,7 +374,7 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
                     onClick={() => setShowAdvanced(false)}
                     className="text-[12.5px] text-[var(--text-secondary)] hover:text-[var(--accent)] cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                   >
-                    ซ่อน
+                    {t('Hide', 'ซ่อน')}
                   </button>
                 )}
               </div>
@@ -362,7 +383,7 @@ export const ConnectSiteFlow: React.FC<ConnectSiteFlowProps> = ({ existingOrigin
 
           {footer(
             <Button variant="brand" size="lg" type="submit" disabled={!canConnect} isLoading={connectMutation.isPending}>
-              เชื่อมต่อ <ArrowRight size={15} aria-hidden="true" />
+              {t('Connect', 'เชื่อมต่อ')} <ArrowRight size={15} aria-hidden="true" />
             </Button>,
           )}
         </form>
