@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from './store/authStore'
 import { useThemeStore } from './store/themeStore'
+import { useLangStore } from './i18n'
 import { AppLayout } from './components/layout/AppLayout'
 import { Toaster } from 'react-hot-toast'
 
@@ -76,6 +77,11 @@ const PublicOnlyRoute = ({ children }: { children: React.ReactNode }) => {
 
 export const App: React.FC = () => {
   const { theme } = useThemeStore()
+  const lang = useLangStore((s) => s.lang)
+
+  useEffect(() => {
+    document.documentElement.lang = lang
+  }, [lang])
 
   // Confirm the session with the server on load (H79): a stale or revoked
   // session clears the store through the 401 interceptor.

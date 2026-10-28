@@ -156,3 +156,21 @@ describe('origin tabs', () => {
     expect(originTabPath('abc', 'ip-access', { ip: '1.2.3.4' })).toBe('/origins/abc?tab=ip-access&ip=1.2.3.4')
   })
 })
+
+describe('Thai labels', () => {
+  it('gives every menu entry and origin tab a Thai label', () => {
+    for (const link of flattenLinks(NAV_SECTIONS)) expect(link.labelTh, link.id).toBeTruthy()
+    for (const section of NAV_SECTIONS) if (section.label) expect(section.labelTh, section.id).toBeTruthy()
+    for (const tab of ORIGIN_TABS) expect(tab.labelTh, tab.id).toBeTruthy()
+  })
+
+  it('builds the breadcrumb in the chosen language', () => {
+    expect(breadcrumbFor(NAV_SECTIONS, '/alerts', 'th')).toEqual(['การเฝ้าระวัง', 'การแจ้งเตือนภัย'])
+    expect(breadcrumbFor(NAV_SECTIONS, '/alerts')).toEqual(['Monitoring', 'Alerts'])
+  })
+
+  it('finds pages and origin tabs by their Thai label', () => {
+    expect(paths(filterSections(NAV_SECTIONS, 'กฎทั้งหมด'))).toEqual(['/rules'])
+    expect(filterOriginTabs('โดเมน').map((t) => t.id)).toEqual(['domains'])
+  })
+})

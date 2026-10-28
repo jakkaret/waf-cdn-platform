@@ -2,7 +2,9 @@ import React, { useState } from 'react'
 import { NotificationCenter } from '../NotificationCenter'
 import { AISummaryModal } from '../AISummaryModal'
 import { OriginSelector } from './OriginSelector'
+import { LanguageToggle } from '../ui/LanguageToggle'
 import { Sparkles } from 'lucide-react'
+import { useT } from '../../i18n'
 
 interface TopBarProps {
   title: string
@@ -18,6 +20,7 @@ interface TopBarProps {
 
 export const TopBar: React.FC<TopBarProps> = ({ title, subtitle, badge, action, scope = false }) => {
   const [isAiModalOpen, setIsAiModalOpen] = useState(false)
+  const { t } = useT()
 
   return (
     // Side by side only from xl: below that the action row (origin scope,
@@ -45,11 +48,11 @@ export const TopBar: React.FC<TopBarProps> = ({ title, subtitle, badge, action, 
               type="button"
               onClick={() => setIsAiModalOpen(true)}
               className="h-9 px-3 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--bg-border)] text-[12.5px] font-medium flex items-center gap-1.5 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-              title="Summarise traffic and threats for a time range"
+              title={t('Summarise traffic and threats for a time range', 'สรุปทราฟฟิกและภัยคุกคามตามช่วงเวลาที่เลือก')}
             >
               <Sparkles size={14} className="text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
-              <span className="hidden sm:inline">AI summary</span>
-              <span className="sm:hidden sr-only">AI summary</span>
+              <span className="hidden sm:inline">{t('AI summary', 'สรุปด้วย AI')}</span>
+              <span className="sm:hidden sr-only">{t('AI summary', 'สรุปด้วย AI')}</span>
             </button>
           </>
         )}
@@ -58,6 +61,9 @@ export const TopBar: React.FC<TopBarProps> = ({ title, subtitle, badge, action, 
 
         {/* The one entry point to alerts on every page. */}
         <NotificationCenter />
+
+        {/* Language switch sits in the top-right corner of every page. */}
+        <LanguageToggle />
       </div>
 
       {scope && <AISummaryModal isOpen={isAiModalOpen} onClose={() => setIsAiModalOpen(false)} />}

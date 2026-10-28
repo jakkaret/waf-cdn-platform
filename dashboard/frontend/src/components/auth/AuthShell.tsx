@@ -1,6 +1,7 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
 import { ThemeToggle } from '../ui/ThemeToggle'
+import { LanguageToggle } from '../ui/LanguageToggle'
 
 // Page frame of the sign-in family (same header as Login and Register) for
 // the pages around them: email verification and password reset.
@@ -15,7 +16,10 @@ export const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children })
             <span className="block text-[10px] font-mono tracking-[0.12em] text-[var(--text-muted)]">WAF &amp; CDN</span>
           </div>
         </Link>
-        <ThemeToggle />
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <LanguageToggle />
+        </div>
       </div>
     </header>
     <main className="flex-1 mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-10 lg:py-14 w-full">{children}</main>

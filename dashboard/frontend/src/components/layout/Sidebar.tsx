@@ -9,6 +9,7 @@ import { ChevronRight, ChevronUp, LogOut, Monitor, Moon, Search, Sun, UserRound,
 import { CRS_VERSION } from '../../lib/crsVersion'
 import { isOperator, platformRoleLabel } from '../../lib/permissions'
 import { useVerifiedGuard } from '../auth/EmailVerifyGate'
+import { useT } from '../../i18n'
 import type { Origin } from '../../types'
 import {
   NAV_SECTIONS,
@@ -17,6 +18,7 @@ import {
   filterSections,
   flattenLinks,
   isPathActive,
+  labelIn,
   originTabPath,
   visibleSections,
   type NavGroup,
@@ -78,6 +80,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const searchRef = useRef<HTMLInputElement>(null)
+  const { t, lang } = useT()
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
   const [expanded, setExpanded] = useState<Record<string, boolean>>(loadExpanded)
@@ -202,7 +205,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
             className={`shrink-0 ${active ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}
           />
         )}
-        <span className="truncate">{link.label}</span>
+        <span className="truncate">{labelIn(link, lang)}</span>
         {link.badge && (
           <span className="ml-auto rounded px-1.5 py-px text-[10.5px] font-medium text-[var(--text-muted)] border border-[var(--bg-border)]">
             {link.badge}
@@ -232,7 +235,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
             aria-hidden="true"
             className={`shrink-0 ${holdsActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}
           />
-          <span className="truncate">{group.label}</span>
+          <span className="truncate">{labelIn(group, lang)}</span>
           <ChevronRight
             size={14}
             aria-hidden="true"
@@ -272,7 +275,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
       )}
       <aside
         role="navigation"
-        aria-label="Main"
+        aria-label={t('Main', 'เมนูหลัก')}
         className={`w-[240px] bg-[var(--bg-surface)] flex flex-col h-screen fixed left-0 top-0 border-r border-[var(--bg-border)] z-50 select-none transition-transform duration-200 ease-out md:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
@@ -292,7 +295,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
           <button
             type="button"
             onClick={onMobileClose}
-            aria-label="Close navigation menu"
+            aria-label={t('Close navigation menu', 'ปิดเมนู')}
             className="md:hidden p-1.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
           >
             <X size={18} />
@@ -309,15 +312,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleSearchKey}
-              placeholder="Search pages and settings"
-              aria-label="Search pages and origin settings"
+              placeholder={t('Search pages and settings', 'ค้นหาหน้าและการตั้งค่า')}
+              aria-label={t('Search pages and origin settings', 'ค้นหาหน้าและการตั้งค่าของ origin')}
               aria-describedby="nav-search-hint"
               className="min-w-0 flex-1 bg-transparent text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none [&::-webkit-search-cancel-button]:hidden"
             />
             <kbd className="shrink-0 text-[10.5px] font-sans text-[var(--text-muted)]">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
           </label>
           <span id="nav-search-hint" className="sr-only">
-            Use the up and down arrow keys to pick a result and Enter to open it. Escape clears the search.
+            {t(
+              'Use the up and down arrow keys to pick a result and Enter to open it. Escape clears the search.',
+              'กดลูกศรขึ้น/ลงเพื่อเลือกผลลัพธ์ กด Enter เพื่อเปิด และกด Escape เพื่อล้างคำค้นหา',
+            )}
           </span>
         </div>
 
@@ -326,7 +332,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
           {shown.map((section) => (
             <div key={section.id} className={section.label ? 'mt-5 first:mt-0' : ''}>
               {section.label && (
-                <p className="px-3 pb-1.5 text-[12px] font-medium text-[var(--text-muted)]">{section.label}</p>
+                <p className="px-3 pb-1.5 text-[12px] font-medium text-[var(--text-muted)]">{labelIn(section, lang)}</p>
               )}
               <div className="space-y-0.5">
                 {section.entries.map((entry) => (entry.kind === 'link' ? renderLink(entry, false) : renderGroup(entry)))}
@@ -336,9 +342,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
 
           {searching && (tabResults.length > 0 || (tabMatches.length > 0 && originsLoading)) && (
             <div className={shown.length ? 'mt-5' : ''}>
-              <p className="px-3 pb-1.5 text-[12px] font-medium text-[var(--text-muted)]">Inside an origin</p>
+              <p className="px-3 pb-1.5 text-[12px] font-medium text-[var(--text-muted)]">{t('Inside an origin', 'ภายใน origin')}</p>
               {originsLoading && tabResults.length === 0 ? (
-                <p className="px-3 py-1 text-[12.5px] text-[var(--text-muted)]">Looking up your origins…</p>
+                <p className="px-3 py-1 text-[12.5px] text-[var(--text-muted)]">{t('Looking up your origins…', 'กำลังค้นหา origin ของคุณ…')}</p>
               ) : (
                 <div className="space-y-0.5">
                   {tabResults.map((r) => (
@@ -352,9 +358,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
                       className={`${rowBase} ${rowIdle} h-auto py-1.5 text-left ${highlightKey === r.key ? rowHighlight : ''}`}
                     >
                       <span className="min-w-0">
-                        <span className="block truncate">{r.tab.label}</span>
+                        <span className="block truncate">{labelIn(r.tab, lang)}</span>
                         <span className="block truncate text-[11.5px] text-[var(--text-muted)]">
-                          {r.origin ? r.origin.label || r.origin.ip : liveOrigins.length ? 'Pick an origin first' : 'Add an origin first'}
+                          {r.origin ? r.origin.label || r.origin.ip : liveOrigins.length ? t('Pick an origin first', 'เลือก origin ก่อน') : t('Add an origin first', 'เพิ่ม origin ก่อน')}
                         </span>
                       </span>
                     </button>
@@ -366,9 +372,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
 
           {nothingFound && (
             <div className="px-3 py-2 text-[12.5px] text-[var(--text-muted)] space-y-1.5">
-              <p className="m-0">Nothing matches “{query.trim()}”.</p>
+              <p className="m-0">{t(`Nothing matches “${query.trim()}”.`, `ไม่พบรายการที่ตรงกับ “${query.trim()}”`)}</p>
               <p className="m-0">
-                Try a task such as{' '}
+                {t('Try a task such as', 'ลองค้นหางาน เช่น')}{' '}
                 {['block ip', 'rate limit', 'alerts', 'origins'].map((s, i, all) => (
                   <React.Fragment key={s}>
                     <button
@@ -400,6 +406,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
 const ProfileMenu: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
   const { user, logout } = useAuthStore()
   const { theme, toggleTheme } = useThemeStore()
+  const { t } = useT()
   const navigate = useNavigate()
   const guard = useVerifiedGuard()
   const [open, setOpen] = useState(false)
@@ -458,7 +465,7 @@ const ProfileMenu: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
         <div
           ref={menuRef}
           role="menu"
-          aria-label="Account"
+          aria-label={t('Account', 'บัญชี')}
           onKeyDown={handleMenuKey}
           className="absolute bottom-full left-3 right-3 mb-1 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface-elevated)] p-1 shadow-lg"
         >
@@ -473,7 +480,7 @@ const ProfileMenu: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
             }}
           >
             <Monitor size={15} aria-hidden="true" />
-            Signed-in devices
+            {t('Signed-in devices', 'อุปกรณ์ที่ลงชื่อเข้าใช้')}
           </button>
           <button
             type="button"
@@ -487,7 +494,7 @@ const ProfileMenu: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
             }}
           >
             <Link2 size={15} aria-hidden="true" />
-            Link Google account
+            {t('Link Google account', 'เชื่อมบัญชี Google')}
           </button>
           <button
             type="button"
@@ -496,7 +503,7 @@ const ProfileMenu: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
             onClick={() => toggleTheme()}
           >
             {theme === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
-            {theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            {theme === 'dark' ? t('Switch to light mode', 'เปลี่ยนเป็นโหมดสว่าง') : t('Switch to dark mode', 'เปลี่ยนเป็นโหมดมืด')}
           </button>
           <div className="my-1 h-px bg-[var(--bg-border-subtle)]" role="separator" />
           <button
@@ -506,7 +513,7 @@ const ProfileMenu: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
             onClick={handleLogout}
           >
             <LogOut size={15} aria-hidden="true" />
-            Sign out
+            {t('Sign out', 'ออกจากระบบ')}
           </button>
         </div>
       )}
@@ -522,7 +529,7 @@ const ProfileMenu: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
           <UserRound size={15} aria-hidden="true" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[12.5px] font-medium text-[var(--text-primary)] truncate">{user?.username || 'User'}</span>
+          <span className="block text-[12.5px] font-medium text-[var(--text-primary)] truncate">{user?.username || t('User', 'ผู้ใช้')}</span>
           <span className="block text-[11px] text-[var(--text-muted)]">{platformRoleLabel(user)}</span>
         </span>
         <ChevronUp size={14} aria-hidden="true" className={`shrink-0 text-[var(--text-muted)] transition-transform ${open ? '' : 'rotate-180'}`} />

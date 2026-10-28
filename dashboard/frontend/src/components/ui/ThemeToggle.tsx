@@ -1,9 +1,11 @@
 import React, { useEffect } from 'react'
 import { useThemeStore } from '../../store/themeStore'
+import { useT } from '../../i18n'
 import { Sun, Moon } from 'lucide-react'
 
 export const ThemeToggle: React.FC<{ className?: string }> = ({ className = '' }) => {
   const { theme, toggleTheme } = useThemeStore()
+  const { t } = useT()
 
   useEffect(() => {
     const root = document.documentElement
@@ -21,14 +23,14 @@ export const ThemeToggle: React.FC<{ className?: string }> = ({ className = '' }
             ? 'bg-[var(--bg-surface-elevated)] text-[var(--text-secondary)] border-[var(--bg-border)] hover:text-[var(--text-primary)] hover:border-[var(--bg-border-hover)]'
             : 'bg-white text-[var(--text-secondary)] border-[var(--bg-border)] hover:text-[var(--text-primary)] shadow-sm'
         } ${className}`}
-      title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+      title={theme === 'dark' ? t('Switch to Light Mode', 'เปลี่ยนเป็นโหมดสว่าง') : t('Switch to Dark Mode', 'เปลี่ยนเป็นโหมดมืด')}
     >
       {theme === 'dark' ? (
         <Sun size={13.5} className="text-amber-400" />
       ) : (
         <Moon size={13.5} className="text-slate-600" />
       )}
-      <span className="hidden sm:inline font-mono">{theme === 'dark' ? 'Dark' : 'Light'}</span>
+      <span className="hidden sm:inline font-mono">{theme === 'dark' ? t('Dark', 'มืด') : t('Light', 'สว่าง')}</span>
     </button>
   )
 }

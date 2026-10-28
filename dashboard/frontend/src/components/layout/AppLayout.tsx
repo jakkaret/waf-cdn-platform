@@ -6,11 +6,13 @@ import { isUnverified } from '../auth/EmailVerifyGate'
 import { Sidebar } from './Sidebar'
 import { NAV_SECTIONS, breadcrumbFor } from './navigation'
 import { AICopilotWidget } from '../copilot/AICopilotWidget'
+import { useT } from '../../i18n'
 
 export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const location = useLocation()
-  const crumbs = breadcrumbFor(NAV_SECTIONS, location.pathname)
+  const { t, lang } = useT()
+  const crumbs = breadcrumbFor(NAV_SECTIONS, location.pathname, lang)
   const user = useAuthStore((s) => s.user)
 
   useEffect(() => {
@@ -25,7 +27,7 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
           <button
             type="button"
             onClick={() => setMobileNavOpen(true)}
-            aria-label="Open navigation menu"
+            aria-label={t('Open navigation menu', 'เปิดเมนู')}
             className="p-1.5 -ml-1.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
           >
             <Menu size={20} />
@@ -38,19 +40,27 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
             <div className="max-w-[1560px] mx-auto mb-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-[10px] border border-[var(--bg-border)] bg-[var(--bg-surface)] px-4 py-3 text-[12.5px]">
               <MailCheck size={16} className="text-orange-500 shrink-0 hidden sm:block" />
               <p className="m-0 flex-1 text-[var(--text-secondary)] leading-5">
-                <span className="font-semibold text-[var(--text-primary)]">Verify</span>{' '}
-                <span className="font-mono">{user?.email}</span> to add sites, invite your team and use every feature.
+                {t(
+                  <>
+                    <span className="font-semibold text-[var(--text-primary)]">Verify</span>{' '}
+                    <span className="font-mono">{user?.email}</span> to add sites, invite your team and use every feature.
+                  </>,
+                  <>
+                    <span className="font-semibold text-[var(--text-primary)]">ยืนยันอีเมล</span>{' '}
+                    <span className="font-mono">{user?.email}</span> เพื่อเพิ่มเว็บไซต์ เชิญทีม และใช้งานได้ทุกฟีเจอร์
+                  </>,
+                )}
               </p>
               <Link
                 to={`/verify-email?next=${encodeURIComponent(location.pathname + location.search)}`}
                 className="inline-flex items-center justify-center gap-1.5 shrink-0 rounded-md bg-[var(--accent-fill)] hover:bg-[var(--accent-fill-hover)] px-3 h-9 text-[13px] font-medium text-white transition-colors"
               >
-                Verify email
+                {t('Verify email', 'ยืนยันอีเมล')}
               </Link>
             </div>
           )}
           {crumbs.length > 0 && (
-            <nav aria-label="Breadcrumb" className="max-w-[1560px] mx-auto mb-3">
+            <nav aria-label={t('Breadcrumb', 'ตำแหน่งหน้า')} className="max-w-[1560px] mx-auto mb-3">
               <ol className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-[var(--text-muted)]">
                 {crumbs.map((crumb, i) => (
                   <li key={crumb} className="flex items-center gap-1.5">
