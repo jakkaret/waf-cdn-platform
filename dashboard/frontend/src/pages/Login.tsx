@@ -4,6 +4,7 @@ import { authApi } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
 import { ThemeToggle } from '../components/ui/ThemeToggle'
 import { LanguageToggle } from '../components/ui/LanguageToggle'
+import { BRAND_NAME, BrandName } from '../components/ui/BrandMark'
 import { Button } from '../components/ui/Button'
 import { DecisionPipeline } from '../components/auth/DecisionPipeline'
 import toast from 'react-hot-toast'
@@ -82,13 +83,11 @@ export const Login: React.FC = () => {
       <header className="border-b border-[var(--bg-border-subtle)] bg-[var(--bg-app)]/85 backdrop-blur">
         <div className="max-w-7xl mx-auto flex justify-between items-center px-4 sm:px-8 py-4">
           <Link to="/" className="flex items-center gap-2.5 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500/50">
-            <img src="/itkku-logo.png" alt="IT KKU" className="w-9 h-9 object-contain" />
+            <img src="/itkku-logo.png" alt="" className="w-9 h-9 object-contain" />
             <div className="leading-tight">
-              <span className="block font-bold text-[15px] tracking-tight">
-                <span className="text-[#a34830] dark:text-[#d0674a]">IT</span> <span className="text-[#89898a] dark:text-[#a3a3a4]">KKU</span>
-              </span>
+              <BrandName className="block font-bold text-[15px] tracking-tight" />
               <span className="block text-[10px] font-mono tracking-[0.12em] text-[var(--text-muted)]">
-                WAF &amp; CDN
+                Web Application Firewall
               </span>
             </div>
           </Link>
@@ -156,7 +155,7 @@ export const Login: React.FC = () => {
                       {t('Sign in', 'ลงชื่อเข้าใช้')}
                     </h2>
                     <p className="mt-1 mb-0 text-[12.5px] leading-5 text-[var(--text-muted)]">
-                      {t('Continue to the IT KKU WAF operations console.', 'เข้าสู่ศูนย์ควบคุม IT KKU WAF')}
+                      {t(`Continue to the ${BRAND_NAME} operations console.`, `เข้าสู่ศูนย์ควบคุม ${BRAND_NAME}`)}
                     </p>
                   </div>
                   <div className="rounded-lg border border-orange-500/20 bg-orange-500/10 p-2 text-orange-600 dark:text-orange-400">

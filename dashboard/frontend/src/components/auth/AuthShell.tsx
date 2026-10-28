@@ -2,6 +2,7 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import { ThemeToggle } from '../ui/ThemeToggle'
 import { LanguageToggle } from '../ui/LanguageToggle'
+import { BrandName } from '../ui/BrandMark'
 
 // Page frame of the sign-in family (same header as Login and Register) for
 // the pages around them: email verification and password reset.
@@ -10,10 +11,10 @@ export const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children })
     <header className="border-b border-[var(--bg-border-subtle)] bg-[var(--bg-app)]/85 backdrop-blur">
       <div className="max-w-7xl mx-auto flex justify-between items-center px-4 sm:px-8 py-4">
         <Link to="/" className="flex items-center gap-2.5 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500/50">
-          <img src="/itkku-logo.png" alt="IT KKU" className="w-9 h-9 object-contain" />
+          <img src="/itkku-logo.png" alt="" className="w-9 h-9 object-contain" />
           <div className="leading-tight">
-            <span className="block font-bold text-[15px] tracking-tight"><span className="text-[#a34830] dark:text-[#d0674a]">IT</span> <span className="text-[#89898a] dark:text-[#a3a3a4]">KKU</span></span>
-            <span className="block text-[10px] font-mono tracking-[0.12em] text-[var(--text-muted)]">WAF &amp; CDN</span>
+            <BrandName className="block font-bold text-[15px] tracking-tight" />
+            <span className="block text-[10px] font-mono tracking-[0.12em] text-[var(--text-muted)]">Web Application Firewall</span>
           </div>
         </Link>
         <div className="flex items-center gap-2">

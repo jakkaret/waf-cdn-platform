@@ -7,6 +7,7 @@ import { Sidebar } from './Sidebar'
 import { NAV_SECTIONS, breadcrumbFor } from './navigation'
 import { AICopilotWidget } from '../copilot/AICopilotWidget'
 import { useT } from '../../i18n'
+import { BrandName } from '../ui/BrandMark'
 
 export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -32,7 +33,7 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
           >
             <Menu size={20} />
           </button>
-          <span className="text-[14px] font-bold"><span className="text-[#a34830] dark:text-[#d0674a]">IT</span> <span className="text-[#89898a] dark:text-[#a3a3a4]">KKU</span></span>
+          <BrandName className="text-[14px] font-bold" />
         </div>
         {/* pb-20 keeps the last row clear of the AI copilot button. */}
         <main className="flex-1 p-4 pb-20 sm:p-7 sm:pb-20 min-w-0">

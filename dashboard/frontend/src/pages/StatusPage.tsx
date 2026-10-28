@@ -4,6 +4,7 @@ import { publicStatusApi, StatusComponent } from '../api/publicStatus'
 import { ThemeToggle } from '../components/ui/ThemeToggle'
 import { Shield, CheckCircle2, AlertTriangle, HelpCircle, Info } from 'lucide-react'
 import { BKK_LABEL, formatBkkDateTime } from '../lib/time'
+import { BRAND_NAME } from '../components/ui/BrandMark'
 
 const STATUS_META: Record<StatusComponent['status'], { label: string; color: string; dot: string }> = {
   operational: { label: 'Operational', color: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
@@ -44,7 +45,7 @@ export const StatusPage: React.FC = () => {
               <Shield size={18} />
             </div>
             <div>
-              <h1 className="text-[16px] font-bold font-mono m-0">IT KKU WAF Status</h1>
+              <h1 className="text-[16px] font-bold font-mono m-0">{BRAND_NAME} Status</h1>
               <p className="text-[11px] text-[var(--text-muted)] font-mono m-0">
                 Live health of the WAF + CDN platform
               </p>

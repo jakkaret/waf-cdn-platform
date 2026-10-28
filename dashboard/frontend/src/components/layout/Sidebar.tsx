@@ -10,6 +10,7 @@ import { CRS_VERSION } from '../../lib/crsVersion'
 import { isOperator } from '../../lib/permissions'
 import { useVerifiedGuard } from '../auth/EmailVerifyGate'
 import { useT } from '../../i18n'
+import { BrandName } from '../ui/BrandMark'
 import type { Origin } from '../../types'
 import {
   NAV_SECTIONS,
@@ -285,10 +286,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
           <div className="flex items-center gap-2.5">
             <img src="/itkku-logo.png" alt="" className="w-9 h-9 object-contain" />
             <div>
-              <span className="block text-[15px] font-semibold tracking-tight leading-tight">
-                <span className="text-[#a34830] dark:text-[#d0674a]">IT</span> <span className="text-[#6b6b6c] dark:text-[#a3a3a4]">KKU</span>{' '}
-                <span className="text-[var(--text-primary)]">WAF</span>
-              </span>
+              <BrandName className="block text-[15px] font-semibold tracking-tight leading-tight" />
               <span className="block text-[11px] text-[var(--text-muted)] mt-0.5">ModSecurity CRS {CRS_VERSION}</span>
             </div>
           </div>

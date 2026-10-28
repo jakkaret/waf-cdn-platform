@@ -94,12 +94,12 @@ def void(user_id: str) -> None:
 
 
 _SUBJECTS = {
-    "verify": "รหัสยืนยันอีเมล IT KKU WAF",
-    "reset": "รหัสตั้งรหัสผ่านใหม่ IT KKU WAF",
+    "verify": "รหัสยืนยันอีเมล AegisWAF CDN",
+    "reset": "รหัสตั้งรหัสผ่านใหม่ AegisWAF CDN",
 }
 _LEADS = {
-    "verify": "ใช้รหัสนี้ยืนยันอีเมลของบัญชี IT KKU WAF",
-    "reset": "มีคำขอตั้งรหัสผ่านใหม่ของบัญชี IT KKU WAF ที่ใช้อีเมลนี้ ใช้รหัสนี้เพื่อตั้งรหัสผ่านใหม่",
+    "verify": "ใช้รหัสนี้ยืนยันอีเมลของบัญชี AegisWAF CDN",
+    "reset": "มีคำขอตั้งรหัสผ่านใหม่ของบัญชี AegisWAF CDN ที่ใช้อีเมลนี้ ใช้รหัสนี้เพื่อตั้งรหัสผ่านใหม่",
 }
 _FOOTS = {
     "verify": "ถ้าคุณไม่ได้สมัคร ไม่ต้องทำอะไร บัญชีที่ไม่ได้ยืนยันจะใช้ส่วนที่สำคัญไม่ได้",
@@ -115,9 +115,9 @@ def send_code_email(to_addr: str, purpose: str, code: str) -> bool:
         '<div style="max-width:440px;margin:0 auto;background:#101827;border:1px solid #1e293b;border-radius:14px;'
         'padding:28px;color:#f1f5f9">'
         '<div style="font:700 15px Inter,Segoe UI,Arial,sans-serif;letter-spacing:-.01em">'
-        '<span style="color:#d0674a">IT</span> <span style="color:#a3a3a4">KKU</span></div>'
+        '<span style="color:#d0674a">Aegis</span>WAF <span style="color:#a3a3a4">CDN</span></div>'
         '<div style="font:10px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.12em;color:#7d8ba3;'
-        'text-transform:uppercase;margin-bottom:22px">WAF &amp; CDN</div>'
+        'text-transform:uppercase;margin-bottom:22px">Web Application Firewall</div>'
         f'<p style="margin:0 0 18px;color:#94a3b8;font-size:14px;line-height:1.6">{lead}</p>'
         '<div style="font:700 32px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.35em;text-align:center;'
         'padding:16px 0;border:1px solid rgba(243,128,32,.25);background:rgba(243,128,32,.12);border-radius:10px;'
