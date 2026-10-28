@@ -1,49 +1,30 @@
 import React, { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { settingsApi, SystemSettings } from '../api/settings'
-import { systemApi } from '../api/system'
-import { authApi } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
-import { useVerifiedGuard } from '../components/auth/EmailVerifyGate'
 import { TopBar } from '../components/layout/TopBar'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import toast from 'react-hot-toast'
+import { isOperator } from '../lib/permissions'
 import {
   Shield,
   Globe,
   Save,
-  AlertTriangle,
-  Server,
-  Activity,
   Zap,
   RotateCw,
   Sliders,
-  Radio,
   Lock,
-  Check,
-  Cpu,
-  Layers,
 } from 'lucide-react'
 
 export const Settings: React.FC = () => {
   const { user } = useAuthStore()
-  const guard = useVerifiedGuard()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = isOperator(user)
   const queryClient = useQueryClient()
 
-  const [activeTab, setActiveTab] = useState<'waf' | 'edge' | 'system'>('waf')
-
-  // Stack Diagnostics (tab 4): was fully static JSX with a hardcoded green
-  // pulsing dot and "ONLINE" for all 4 services regardless of real state --
-  // wired to the same GET /api/system/status Dashboard.tsx already uses,
-  // which checks each service's real TCP port.
-  const { data: systemStatus, isLoading: isSystemStatusLoading } = useQuery({
-    queryKey: ['system-status-settings'],
-    queryFn: () => systemApi.getSystemStatus(),
-    refetchInterval: 10000,
-    enabled: activeTab === 'system',
-  })
+  // Stack diagnostics moved to its own operator page (/diagnostics), and the
+  // account buttons (devices, Google link) to the profile menu (2026-10-28).
+  const [activeTab, setActiveTab] = useState<'waf' | 'edge'>('waf')
 
   // Settings State Form
   const [form, setForm] = useState<Partial<SystemSettings>>({
@@ -103,40 +84,36 @@ export const Settings: React.FC = () => {
     <div className="animate-fade-in pb-12">
       {/* Top Header Bar */}
       <TopBar
-        title="System Settings"
-        subtitle="Configure WAF operational modes, anomaly scoring thresholds, edge delivery, and notifications"
+        title="Platform settings"
+        subtitle="WAF mode and anomaly scoring for every origin on the platform, and how edges sync with the control plane."
         badge={
-          <Badge color={isBlocking ? 'success' : 'warning'} dot pulse={isBlocking}>
-            {isBlocking ? 'ACTIVE BLOCKING' : 'DETECTION ONLY'}
+          <Badge color={isBlocking ? 'success' : 'warning'} dot>
+            {isBlocking ? 'Blocking' : 'Detection only'}
           </Badge>
         }
         action={
-          <div className="flex items-center gap-2">
+          isAdmin ? (
             <Button
-              variant="secondary"
-              onClick={() => guard('link_google', () => { window.location.href = '/api/auth/google?link=true' })}
+              variant="brand"
+              onClick={handleSave}
+              isLoading={saveMutation.isPending}
+              icon={<Save size={14} />}
             >
-              Link Google account
+              Save changes
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => { window.location.href = '/settings/devices' }}
-            >
-              Signed-in devices
-            </Button>
-            {isAdmin && (
-              <Button
-                variant="brand"
-                onClick={handleSave}
-                isLoading={saveMutation.isPending}
-                icon={<Save size={14} />}
-              >
-                Save Settings
-              </Button>
-            )}
-          </div>
+          ) : undefined
         }
       />
+
+      {!isAdmin && (
+        <div role="note" className="mb-5 flex items-start gap-2.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] px-4 py-3 text-[13px] text-[var(--text-secondary)]">
+          <Lock size={15} className="mt-0.5 shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
+          <p className="m-0">
+            Read only. These values apply to the whole platform and only the platform operator can change them. Your own
+            sites have per-origin settings on their origin page, for example the anomaly threshold in Rule proposals.
+          </p>
+        </div>
+      )}
 
       {/* Main 12-Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
@@ -169,19 +146,12 @@ export const Settings: React.FC = () => {
               <Globe size={14} />
               <span>Edge & CDN Delivery</span>
             </button>
-
-            <button
-              onClick={() => setActiveTab('system')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-all cursor-pointer whitespace-nowrap ${
-                activeTab === 'system'
-                  ? 'bg-orange-500 text-white shadow-sm'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-              }`}
-            >
-              <Server size={14} />
-              <span>Stack Diagnostics</span>
-            </button>
           </div>
+
+          {/* disabled on a fieldset turns every control inside read-only for
+              non-operators; POST /api/settings/ still enforces require_admin. */}
+          <fieldset disabled={!isAdmin} className="m-0 p-0 border-0 min-w-0 disabled:[&_label]:cursor-default">
+          <legend className="sr-only">{isAdmin ? 'Platform settings' : 'Platform settings (read only)'}</legend>
 
           {/* ═══ Tab 1: WAF & Core Engine ═══ */}
           {activeTab === 'waf' && (
@@ -293,8 +263,8 @@ export const Settings: React.FC = () => {
                       value={form.inbound_anomaly_threshold}
                       onChange={(e) => setForm({ ...form, inbound_anomaly_threshold: parseInt(e.target.value, 10) || 5 })}
                     />
-                    <span className="text-[10px] text-[var(--text-dim)] mt-0.5 block font-mono">
-                      Score ≥ limit triggers 403 (Default: 10)
+                    <span className="text-[11px] text-[var(--text-muted)] mt-0.5 block">
+                      A request scoring at or above this is blocked. Origins without their own threshold use this value.
                     </span>
                   </div>
 
@@ -309,8 +279,8 @@ export const Settings: React.FC = () => {
                       value={form.outbound_anomaly_threshold}
                       onChange={(e) => setForm({ ...form, outbound_anomaly_threshold: parseInt(e.target.value, 10) || 5 })}
                     />
-                    <span className="text-[10px] text-[var(--text-dim)] mt-0.5 block font-mono">
-                      Data leak prevention (Default: 10)
+                    <span className="text-[11px] text-[var(--text-muted)] mt-0.5 block">
+                      Score limit for responses leaving the origin (data leak checks).
                     </span>
                   </div>
                 </div>
@@ -326,8 +296,8 @@ export const Settings: React.FC = () => {
                     value={form.real_ip_header}
                     onChange={(e) => setForm({ ...form, real_ip_header: e.target.value })}
                   />
-                  <span className="text-[10.5px] text-[var(--text-muted)] font-mono mt-1 block">
-                    Not applied yet: saved here, but nginx does not read this setting.
+                  <span className="text-[11px] text-amber-700 dark:text-amber-400 mt-1 block">
+                    Saved only. The WAF does not use this value yet, so changing it has no effect on traffic.
                   </span>
                 </div>
               </div>
@@ -360,7 +330,7 @@ export const Settings: React.FC = () => {
                       Automatic Edge Cache Purge on Origin Rule Update
                     </span>
                     <span className="text-[11.5px] text-[var(--text-muted)] leading-relaxed block mt-0.5">
-                      Not applied yet: saved here, but no cache purge runs when rules change.
+                      Saved only. Changing rules does not purge edge caches yet; purge a site from its origin page instead.
                     </span>
                   </div>
                 </label>
@@ -377,93 +347,16 @@ export const Settings: React.FC = () => {
                     value={form.edge_sync_interval_seconds}
                     onChange={(e) => setForm({ ...form, edge_sync_interval_seconds: parseInt(e.target.value, 10) || 5 })}
                   />
-                  <span className="text-[10.5px] text-[var(--text-muted)] font-mono mt-1 block">
-                    Not applied yet: the edges use SYNC_INTERVAL_SEC from their own compose file.
+                  <span className="text-[11px] text-amber-700 dark:text-amber-400 mt-1 block">
+                    Saved only. Edge nodes use their own configured interval, not this value.
                   </span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ═══ Tab 4: Stack Diagnostics ═══ */}
-          {activeTab === 'system' && (
-            <div className="dash-card p-5 sm:p-6 space-y-5 animate-fade-in">
-              <div>
-                <h3 className="text-[14.5px] font-bold text-[var(--text-primary)] font-mono m-0 mb-1 flex items-center gap-2">
-                  <Server size={16} className="text-orange-600 dark:text-orange-400" />
-                  Stack Connectivity & Microservice Health
-                </h3>
-                <p className="text-[12px] text-[var(--text-muted)] m-0">
-                  Real-time status of backend security services and container mesh.
-                </p>
-              </div>
+          </fieldset>
 
-              {isSystemStatusLoading ? (
-                <div className="text-[12px] text-[var(--text-muted)] font-mono">Checking service ports...</div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {[
-                    { key: 'waf_nginx', label: 'ModSecurity CRS (waf-nginx)' },
-                    { key: 'redis', label: 'Redis Sliding Window (waf-redis)' },
-                    { key: 'clickhouse', label: 'ClickHouse OLAP (waf-clickhouse)' },
-                    // F-105: the backend also probes these; they were hidden.
-                    { key: 'frps', label: 'FRP Tunnel Server (frps)' },
-                    { key: 'control_api', label: 'WAF Control API (control-api)' },
-                    { key: 'database', label: 'DynamoDB (tenants, rules, alerts)' },
-                  ].map(({ key, label }) => {
-                    const svc =
-                      key === 'database'
-                        ? systemStatus?.db && { status: systemStatus.db.status, port: undefined, desc: systemStatus.db.detail }
-                        : systemStatus?.services?.[key]
-                    const online = svc?.status === 'online'
-                    return (
-                      <div
-                        key={key}
-                        className="p-3.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] flex items-center justify-between"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <span
-                            className={`w-2.5 h-2.5 rounded-full ${online ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}
-                          />
-                          <div>
-                            <div className="font-mono font-bold text-[12.5px] text-[var(--text-primary)]">
-                              {label}
-                            </div>
-                            <div className="text-[10.5px] text-[var(--text-muted)] font-mono">
-                              Port {svc?.port ?? '—'} • {svc?.desc || (svc ? 'unreachable' : 'unknown')}
-                            </div>
-                          </div>
-                        </div>
-                        <span
-                          className={`mono-chip font-bold ${online ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
-                        >
-                          {svc ? (online ? 'ONLINE' : 'OFFLINE') : 'UNKNOWN'}
-                        </span>
-                      </div>
-                    )
-                  })}
-
-                  {/* Caddy isn't in the backend's checked SERVICES map (see
-                      main.py's GET /api/system/status) -- shown as
-                      unmonitored rather than a fabricated ONLINE. */}
-                  <div className="p-3.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] flex items-center justify-between opacity-70">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[var(--text-muted)]" />
-                      <div>
-                        <div className="font-mono font-bold text-[12.5px] text-[var(--text-primary)]">
-                          Caddy SSL Reverse Proxy
-                        </div>
-                        <div className="text-[10.5px] text-[var(--text-muted)] font-mono">
-                          Port 80 / 443 • Not monitored by this check
-                        </div>
-                      </div>
-                    </div>
-                    <span className="mono-chip text-[var(--text-muted)] font-bold">UNKNOWN</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
         </div>
 

@@ -10,7 +10,8 @@ import { RefreshCw, Check, X, Sparkles, RotateCcw } from 'lucide-react'
 // Each proposal tunes the inbound anomaly threshold of one origin, from that
 // origin's own block rate, and only its Owner can generate, approve, reject
 // or roll back (api/threshold_proposals.py). Editors and Viewers read only.
-export const ThresholdProposals: React.FC = () => {
+// `embedded`: rendered inside Rule proposals, which owns the page header.
+export const ThresholdProposals: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const queryClient = useQueryClient()
   const [picked, setPicked] = useState('')
 
@@ -65,7 +66,7 @@ export const ThresholdProposals: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <TopBar title="Self-Tuning Anomaly Proposals" />
+      {!embedded && <TopBar title="Tuning proposals" />}
 
       <div className="dash-card">
         <div className="dash-card-header flex justify-between items-center bg-[var(--bg-surface-elevated)]">
@@ -76,7 +77,7 @@ export const ThresholdProposals: React.FC = () => {
           {isOwner && (
             <Button onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending} isLoading={generateMutation.isPending}>
               <RefreshCw size={14} className={generateMutation.isPending ? 'animate-spin' : ''} />
-              Generate Proposal
+              Generate proposal
             </Button>
           )}
         </div>
@@ -86,7 +87,7 @@ export const ThresholdProposals: React.FC = () => {
             <div className="p-6 text-center text-[var(--text-muted)]">Loading origins...</div>
           ) : origins.length === 0 ? (
             <div className="p-6 text-center border border-dashed border-[var(--bg-border)] rounded-xl text-[var(--text-muted)]">
-              คุณยังไม่ได้เป็นสมาชิกของ origin ใด tuning proposal เป็นของแต่ละ origin และ Owner ของ origin นั้นเป็นคนตัดสิน
+              You are not a member of any origin yet. Each tuning proposal belongs to one origin, and that origin's Owner decides it.
             </div>
           ) : (
             <>
@@ -105,14 +106,14 @@ export const ThresholdProposals: React.FC = () => {
                 {origin && (
                   <div className="text-[12.5px] leading-relaxed text-[var(--text-muted)]">
                     <p className="m-0">
-                      Inbound anomaly threshold ที่ใช้กับ origin นี้: <strong className="text-[var(--text-primary)]">{origin.effective_threshold}</strong>
+                      Inbound anomaly threshold in use for this origin: <strong className="text-[var(--text-primary)]">{origin.effective_threshold}</strong>
                       {origin.anomaly_threshold == null
-                        ? ` (ค่ากลางของแพลตฟอร์ม ${originsRes?.platform_threshold})`
-                        : ` (ค่าของ origin นี้เอง ค่ากลางคือ ${originsRes?.platform_threshold})`}
+                        ? ` (the platform value, currently ${originsRes?.platform_threshold})`
+                        : ` (this origin's own value; the platform value is currently ${originsRes?.platform_threshold})`}
                     </p>
                     <p className="m-0">
-                      ระบบวิเคราะห์ block rate จาก traffic ของ {origin.hosts.length ? origin.hosts.join(', ') : 'โดเมนของ origin นี้'} เท่านั้น
-                      ค่าที่อนุมัติมีผลเฉพาะ origin นี้ {isOwner ? '' : 'ดูได้อย่างเดียว เฉพาะ Owner ที่สร้างและตัดสิน proposal ได้'}
+                      Proposals are based on the block rate of {origin.hosts.length ? origin.hosts.join(', ') : "this origin's domains"} only,
+                      and an approved value applies to this origin only.{isOwner ? '' : ' You can view proposals; only the Owner can generate and decide them.'}
                     </p>
                   </div>
                 )}
@@ -123,7 +124,7 @@ export const ThresholdProposals: React.FC = () => {
                   <div className="p-6 text-center text-[var(--text-muted)]">Loading proposals...</div>
                 ) : proposals.length === 0 ? (
                   <div className="p-6 text-center border border-dashed border-[var(--bg-border)] rounded-xl text-[var(--text-muted)]">
-                    ยังไม่มี proposal ของ origin นี้{isOwner ? ' กด Generate Proposal เพื่อให้ระบบวิเคราะห์' : ''}
+                    No proposals for this origin yet.{isOwner ? ' Select Generate proposal to analyse its recent traffic.' : ''}
                   </div>
                 ) : (
                   proposals.map((p) => (

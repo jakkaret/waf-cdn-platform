@@ -1,29 +1,32 @@
 import type { LucideIcon } from 'lucide-react'
 import {
+  Activity,
   Bell,
+  BellRing,
   Brain,
+  Cable,
   Globe,
   LayoutDashboard,
   LifeBuoy,
+  ListChecks,
   ListFilter,
+  Gauge,
   Server,
   Settings,
-  Shield,
-  ShieldAlert,
+  ShieldCheck,
   Users,
+  Wand2,
 } from 'lucide-react'
 
-// Sidebar structure, Cloudflare style: the most-used pages sit at the top
-// without a heading, related pages are grouped under a collapsible parent,
-// and sections carry a short heading.
+// Sidebar structure (UX reorganization 2026-10-28): sections follow the
+// jobs a site owner does -- look after my websites, watch what happens,
+// review rules, set up notifications -- and the platform operator's pages sit
+// in their own section that regular users never see.
 //
 // `access` decides who sees an entry. "operator" entries are hidden from
-// regular users. It mirrors today's visibility; role-3 plan Phase 6 moves the
-// platform-wide pages (rules, IP list, rate limits, settings) to "operator"
-// together with the backend guards. ML anomaly rules is "member": the backend
-// lists only the rules of the caller's origins and lets their Owner or Editor
-// review them. Tuning proposals is "member": each proposal belongs to one
-// origin and only that origin's Owner decides it.
+// regular users; the backend guards those pages on its own (hiding a link is
+// not the protection). Rule proposals is "member": the backend lists only the
+// ML rules and tuning proposals of the caller's origins.
 
 export type NavAccess = 'member' | 'operator'
 
@@ -59,52 +62,94 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: 'main',
     entries: [
-      { kind: 'link', id: 'dashboard', label: 'Security dashboard', path: '/', icon: LayoutDashboard, access: 'member', keywords: ['overview', 'home'] },
-      { kind: 'link', id: 'origins', label: 'Origin servers', path: '/origins', icon: Server, access: 'member', keywords: ['sites', 'domains'] },
-      { kind: 'link', id: 'logs', label: 'Traffic logs', path: '/logs', icon: ListFilter, access: 'member', keywords: ['requests'] },
-      { kind: 'link', id: 'alerts', label: 'Alert center', path: '/alerts', icon: Bell, access: 'member', keywords: ['notifications', 'telegram'] },
+      { kind: 'link', id: 'dashboard', label: 'Dashboard', path: '/', icon: LayoutDashboard, access: 'member', keywords: ['overview', 'home', 'security dashboard', 'kpi'] },
     ],
   },
   {
-    id: 'protect',
-    label: 'Protect & connect',
+    id: 'sites',
+    label: 'My websites',
     entries: [
-      {
-        kind: 'group',
-        id: 'security-rules',
-        label: 'Security rules',
-        icon: ShieldAlert,
-        children: [
-          { kind: 'link', id: 'rules', label: 'WAF rules', path: '/rules', access: 'member', keywords: ['modsecurity', 'crs'] },
-          { kind: 'link', id: 'ip-rules', label: 'IP access list', path: '/ip-rules', access: 'operator', keywords: ['block', 'allow'] },
-          { kind: 'link', id: 'rate-limits', label: 'Rate limiting', path: '/rate-limits', access: 'operator' },
-          { kind: 'link', id: 'ml-rules', label: 'ML anomaly rules', path: '/ml-rules', access: 'member' },
-        ],
-      },
-      {
-        kind: 'group',
-        id: 'detection',
-        label: 'Detection & response',
-        icon: Brain,
-        children: [
-          { kind: 'link', id: 'ml-analyst', label: 'AI security analyst', path: '/ml-analyst', access: 'member' },
-          { kind: 'link', id: 'threshold-proposals', label: 'Tuning proposals', path: '/threshold-proposals', access: 'member', keywords: ['threshold'] },
-        ],
-      },
-      { kind: 'link', id: 'tunnels', label: 'Zero Trust tunnels', path: '/tunnels', icon: Shield, access: 'member' },
-      { kind: 'link', id: 'cdn', label: 'CDN edge nodes', path: '/cdn', icon: Globe, access: 'member', keywords: ['cache', 'purge'] },
+      { kind: 'link', id: 'origins', label: 'Origins', path: '/origins', icon: Server, access: 'member', keywords: ['sites', 'websites', 'domains', 'add origin', 'origin servers', 'dns'] },
+      { kind: 'link', id: 'tunnels', label: 'Private tunnels', path: '/tunnels', icon: Cable, access: 'member', keywords: ['tunnel', 'frp', 'zero trust', 'no public ip', 'connect'] },
+    ],
+  },
+  {
+    id: 'monitoring',
+    label: 'Monitoring',
+    entries: [
+      { kind: 'link', id: 'logs', label: 'Traffic logs', path: '/logs', icon: ListFilter, access: 'member', keywords: ['requests', 'access log', 'blocked requests'] },
+      { kind: 'link', id: 'alerts', label: 'Alerts', path: '/alerts', icon: Bell, access: 'member', keywords: ['alert center', 'incidents', 'notifications'] },
+      { kind: 'link', id: 'ml-analyst', label: 'ML insights', path: '/ml-analyst', icon: Brain, access: 'member', keywords: ['ai security analyst', 'anomaly', 'machine learning', 'ml verdicts'] },
+    ],
+  },
+  {
+    id: 'rules',
+    label: 'Rules',
+    entries: [
+      { kind: 'link', id: 'rule-proposals', label: 'Rule proposals', path: '/rule-proposals', icon: Wand2, access: 'member', keywords: ['ml anomaly rules', 'tuning proposals', 'threshold', 'approve', 'review'] },
+      { kind: 'link', id: 'rules', label: 'All rules', path: '/rules', icon: ListChecks, access: 'member', keywords: ['waf rules', 'waf policy', 'modsecurity', 'crs', 'custom rule'] },
+    ],
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    entries: [
+      { kind: 'link', id: 'notifications', label: 'Notifications', path: '/notifications', icon: BellRing, access: 'member', keywords: ['telegram', 'alert delivery', 'email'] },
+      { kind: 'link', id: 'support', label: 'Support', path: '/support', icon: LifeBuoy, access: 'member', keywords: ['help', 'ticket', 'support tickets'] },
     ],
   },
   {
     id: 'admin',
     label: 'Administration',
     entries: [
+      { kind: 'link', id: 'settings', label: 'Platform settings', path: '/settings', icon: Settings, access: 'operator', keywords: ['system settings', 'paranoia', 'anomaly limit', 'waf mode'] },
+      { kind: 'link', id: 'cdn', label: 'CDN edge nodes', path: '/cdn', icon: Globe, access: 'operator', keywords: ['cache', 'purge', 'edge', 'pop'] },
+      { kind: 'link', id: 'diagnostics', label: 'Stack diagnostics', path: '/diagnostics', icon: Activity, access: 'operator', keywords: ['services', 'health', 'postgres', 'clickhouse', 'redis'] },
+      { kind: 'link', id: 'ip-rules', label: 'Platform IP list', path: '/ip-rules', icon: ShieldCheck, access: 'operator', keywords: ['block ip', 'allow ip', 'ip access list'] },
+      { kind: 'link', id: 'rate-limits', label: 'Platform rate limits', path: '/rate-limits', icon: Gauge, access: 'operator', keywords: ['rate', 'rate limit', 'throttle'] },
       { kind: 'link', id: 'users', label: 'Access control', path: '/users', icon: Users, access: 'operator', keywords: ['users', 'roles'] },
-      { kind: 'link', id: 'support', label: 'Support tickets', path: '/support', icon: LifeBuoy, access: 'member', keywords: ['help', 'ticket'] },
-      { kind: 'link', id: 'settings', label: 'System settings', path: '/settings', icon: Settings, access: 'member' },
     ],
   },
 ]
+
+// The tabs of an origin's page. OriginDetail renders these labels and the
+// quick search offers them per origin, so both say the same thing.
+export type OriginTabId =
+  | 'overview'
+  | 'domains'
+  | 'waf'
+  | 'ml'
+  | 'ip-access'
+  | 'rate-limits'
+  | 'shield'
+  | 'team'
+  | 'postmortem'
+
+export interface OriginTabDef {
+  id: OriginTabId
+  label: string
+  keywords: string[]
+}
+
+export const ORIGIN_TABS: OriginTabDef[] = [
+  { id: 'overview', label: 'Overview', keywords: ['purge cache', 'cache', 'tech stack', 'cve', 'upstream'] },
+  { id: 'domains', label: 'Domains & DNS', keywords: ['domain', 'dns', 'ssl', 'https', 'certificate'] },
+  { id: 'waf', label: 'WAF policies', keywords: ['waf policy', 'waf rules', 'custom rule', 'managed ruleset', 'decoy', 'crs'] },
+  { id: 'ml', label: 'ML protection', keywords: ['ml gate', 'anomaly', 'enforce', 'machine learning'] },
+  { id: 'ip-access', label: 'IP access', keywords: ['block ip', 'allow ip', 'ip block', 'blocklist', 'allowlist', 'ban'] },
+  { id: 'rate-limits', label: 'Rate limits', keywords: ['rate', 'rate limit', 'throttle', 'requests per minute'] },
+  { id: 'shield', label: 'Bot & login shield', keywords: ['bot', 'captcha', 'otp', 'login'] },
+  { id: 'team', label: 'Team & audit log', keywords: ['members', 'invite', 'editor', 'viewer', 'audit'] },
+  { id: 'postmortem', label: 'Incident postmortem', keywords: ['incident report', 'postmortem', 'report'] },
+]
+
+export const isOriginTab = (value: string | null | undefined): value is OriginTabId =>
+  ORIGIN_TABS.some((t) => t.id === value)
+
+export const originTabPath = (originId: string, tab: OriginTabId, extra?: Record<string, string>) => {
+  const params = new URLSearchParams({ tab, ...(extra ?? {}) })
+  return `/origins/${encodeURIComponent(originId)}?${params.toString()}`
+}
 
 // Drop entries the user may not see, then groups and sections left empty.
 export function visibleSections(sections: NavSection[], operator: boolean): NavSection[] {
@@ -122,7 +167,7 @@ export function visibleSections(sections: NavSection[], operator: boolean): NavS
 }
 
 // "/" matches only the dashboard itself; other paths also match their
-// sub-pages (/origins/123 keeps "Origin servers" active).
+// sub-pages (/origins/123 keeps "Origins" active).
 export function isPathActive(path: string, pathname: string): boolean {
   if (path === '/') return pathname === '/'
   return pathname === path || pathname.startsWith(`${path}/`)
@@ -139,37 +184,51 @@ export function activeGroupId(sections: NavSection[], pathname: string): string 
   return null
 }
 
+// Every word of the query has to appear somewhere in the label or keywords,
+// so "block ip" finds "IP access" through its keyword and "rate limit" finds
+// "Rate limits".
+export function matchesQuery(query: string, label: string, keywords: string[] = []): boolean {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (!words.length) return true
+  const haystack = [label, ...keywords].join(' ').toLowerCase()
+  return words.every((w) => haystack.includes(w))
+}
+
 // Quick search. A group whose own label matches keeps all its children.
 export function filterSections(sections: NavSection[], query: string): NavSection[] {
   const q = query.trim().toLowerCase()
   if (!q) return sections
-  const matches = (label: string, keywords: string[] = []) =>
-    [label, ...keywords].some((text) => text.toLowerCase().includes(q))
   return sections
     .map((section) => ({
       ...section,
       entries: section.entries.flatMap((entry): NavEntry[] => {
-        if (entry.kind === 'link') return matches(entry.label, entry.keywords) ? [entry] : []
-        if (matches(entry.label)) return [entry]
-        const children = entry.children.filter((c) => matches(c.label, c.keywords))
+        if (entry.kind === 'link') return matchesQuery(q, entry.label, entry.keywords) ? [entry] : []
+        if (matchesQuery(q, entry.label)) return [entry]
+        const children = entry.children.filter((c) => matchesQuery(q, c.label, c.keywords))
         return children.length ? [{ ...entry, children }] : []
       }),
     }))
     .filter((section) => section.entries.length > 0)
 }
 
-// Breadcrumb trail for the content header, BunkerWeb style:
-// ["Security rules", "WAF rules"] for /rules, ["Origin servers"] for
-// /origins/abc. Empty when the page is not in the menu.
+export function filterOriginTabs(query: string): OriginTabDef[] {
+  if (!query.trim()) return []
+  return ORIGIN_TABS.filter((t) => matchesQuery(query, t.label, t.keywords))
+}
+
+// Breadcrumb trail for the content header: ["Monitoring", "Alerts"] for
+// /alerts, ["My websites", "Origins"] for /origins/abc. Empty when the page
+// is not in the menu.
 export function breadcrumbFor(sections: NavSection[], pathname: string): string[] {
   for (const section of sections) {
+    const prefix = section.label ? [section.label] : []
     for (const entry of section.entries) {
       if (entry.kind === 'link') {
-        if (isPathActive(entry.path, pathname)) return [entry.label]
+        if (isPathActive(entry.path, pathname)) return [...prefix, entry.label]
         continue
       }
       const child = entry.children.find((c) => isPathActive(c.path, pathname))
-      if (child) return [entry.label, child.label]
+      if (child) return [...prefix, entry.label, child.label]
     }
   }
   return []

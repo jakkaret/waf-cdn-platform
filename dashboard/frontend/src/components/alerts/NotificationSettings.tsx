@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
+import React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Send } from 'lucide-react'
+import { Send } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { alertsApi } from '../../api/alerts'
 import { Button } from '../ui/Button'
@@ -21,7 +21,7 @@ const Switch: React.FC<{ on: boolean; disabled?: boolean; label: string; onChang
     aria-label={label}
     disabled={disabled}
     onClick={() => onChange(!on)}
-    className={`relative w-9 h-5 rounded-full shrink-0 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${on ? 'bg-orange-500' : 'bg-[var(--bg-border)]'}`}
+    className={`relative w-9 h-5 rounded-full shrink-0 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${on ? 'bg-orange-500' : 'bg-[var(--bg-border)]'}`}
   >
     <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-4' : ''}`} />
   </button>
@@ -34,28 +34,28 @@ const SiteCard: React.FC<{ site: SitePrefs; levels: NotificationPrefs['levels'] 
     mutationFn: (changes: Partial<Record<PrefKind, boolean>>) => alertsApi.setPreferences(site.origin_id, changes),
     onSuccess: () => {
       refresh()
-      toast.success('บันทึกการแจ้งเตือนแล้ว')
+      toast.success('Notification settings saved')
     },
-    onError: () => toast.error('บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง'),
+    onError: () => toast.error('Could not save. Try again.'),
   })
   const level = useMutation({
     mutationFn: (s: Sensitivity) => alertsApi.setSensitivity(site.origin_id, s),
     onSuccess: (s) => {
       refresh()
       qc.invalidateQueries({ queryKey: ['alert-incidents'] })
-      toast.success(`ตั้งความไวเป็น ${SENSITIVITY_LABEL[s]} แล้ว`)
+      toast.success(`Sensitivity set to ${SENSITIVITY_LABEL[s]}`)
     },
-    onError: () => toast.error('เปลี่ยนความไวไม่สำเร็จ'),
+    onError: () => toast.error('Could not change the sensitivity'),
   })
 
   return (
     <div className="rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] p-3.5 space-y-3 min-w-0">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[13px] font-semibold text-[var(--text-primary)] break-words">{site.label || 'เว็บไม่มีชื่อ'}</div>
-          <div className="text-[11.5px] text-[var(--text-muted)]">คุณเป็น {ROLE_LABEL[site.role]}</div>
+          <div className="text-[13px] font-semibold text-[var(--text-primary)] break-words">{site.label || 'Unnamed site'}</div>
+          <div className="text-[11.5px] text-[var(--text-muted)]">You are {ROLE_LABEL[site.role]}</div>
         </div>
-        <div className="inline-flex rounded-md border border-[var(--bg-border)] overflow-hidden text-[12px]" role="radiogroup" aria-label="ความไวการแจ้งเตือนการโจมตี">
+        <div className="inline-flex rounded-md border border-[var(--bg-border)] overflow-hidden text-[12px]" role="radiogroup" aria-label="Attack alert sensitivity">
           {LEVELS.map((l) => (
             <button
               key={l}
@@ -63,9 +63,9 @@ const SiteCard: React.FC<{ site: SitePrefs; levels: NotificationPrefs['levels'] 
               role="radio"
               aria-checked={site.sensitivity === l}
               disabled={!site.can_set_sensitivity || level.isPending}
-              title={site.can_set_sensitivity ? undefined : 'Owner หรือ Editor เป็นคนตั้งความไวของเว็บนี้'}
+              title={site.can_set_sensitivity ? undefined : "The site's Owner or Editor sets its sensitivity"}
               onClick={() => site.sensitivity !== l && level.mutate(l)}
-              className={`px-3 py-1 cursor-pointer disabled:cursor-not-allowed ${site.sensitivity === l ? 'bg-orange-500 text-white font-semibold' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+              className={`px-3 py-1 cursor-pointer disabled:cursor-not-allowed ${site.sensitivity === l ? 'bg-orange-600 text-white font-semibold' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
             >
               {SENSITIVITY_LABEL[l]}
             </button>
@@ -73,7 +73,7 @@ const SiteCard: React.FC<{ site: SitePrefs; levels: NotificationPrefs['levels'] 
         </div>
       </div>
       <p className="m-0 text-[11.5px] text-[var(--text-muted)]">
-        ความไว “{SENSITIVITY_LABEL[site.sensitivity]}”: {sensitivityHint(site.sensitivity, levels)}
+        {SENSITIVITY_LABEL[site.sensitivity]} sensitivity: {sensitivityHint(site.sensitivity, levels)}
       </p>
       <ul className="m-0 p-0 list-none space-y-2">
         {visibleKinds(site).map(({ kind, label }) => (
@@ -93,58 +93,51 @@ const SiteCard: React.FC<{ site: SitePrefs; levels: NotificationPrefs['levels'] 
 }
 
 export const NotificationSettings: React.FC = () => {
-  const [open, setOpen] = useState(false)
-  const { data } = useQuery({ queryKey: ['notification-prefs'], queryFn: alertsApi.getPreferences })
+  const { data, isLoading, isError } = useQuery({ queryKey: ['notification-prefs'], queryFn: alertsApi.getPreferences })
   const sites = data?.sites ?? []
   const test = useMutation({
     mutationFn: alertsApi.sendTest,
-    onSuccess: () => toast.success('ส่งแล้ว เปิด Telegram ดูได้เลย'),
-    onError: (err: any) => toast.error(err.response?.data?.detail || 'ส่งไม่สำเร็จ ลองใหม่อีกครั้ง'),
+    onSuccess: () => toast.success('Test message sent. Check Telegram.'),
+    onError: (err: any) => toast.error(err.response?.data?.detail || 'Could not send the test message. Try again.'),
   })
 
   return (
-    <div className="dash-card overflow-hidden mt-3.5">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left cursor-pointer hover:bg-[var(--bg-hover)]"
-      >
-        <div className="min-w-0">
-          <h3 className="m-0 text-[13.5px] font-bold text-[var(--text-primary)]">ตั้งค่าการแจ้งเตือน</h3>
-          <p className="m-0 text-[11.5px] text-[var(--text-muted)]">
-            เลือกว่าจะรับเรื่องไหนของแต่ละเว็บทาง Telegram{sites.length ? ` · ${sites.length} เว็บ` : ''}
+    <section className="dash-card overflow-hidden" aria-labelledby="notif-sites-heading">
+      <div className="px-4 py-3 border-b border-[var(--bg-border-subtle)]">
+        <h2 id="notif-sites-heading" className="m-0 text-[14px] font-semibold text-[var(--text-primary)]">What each site sends you</h2>
+        <p className="m-0 text-[12px] text-[var(--text-muted)]">
+          Pick which events of each site reach your Telegram.
+        </p>
+      </div>
+      <div className="p-4 space-y-3">
+        {isLoading && <p className="m-0 text-[12.5px] text-[var(--text-muted)]">Loading your sites…</p>}
+        {isError && <p className="m-0 text-[12.5px] text-red-600 dark:text-red-400">Could not load notification settings. Reload the page to try again.</p>}
+        {data && !data.telegram_connected && (
+          <p className="m-0 text-[12px] text-amber-700 dark:text-amber-400">
+            Telegram is not connected. You can set these now; messages start once you connect.
           </p>
-        </div>
-        <ChevronDown size={15} className={`shrink-0 text-[var(--text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div className="px-4 pb-4 space-y-3">
-          {data && !data.telegram_connected && (
-            <p className="m-0 text-[12px] text-amber-600 dark:text-amber-400">ยังไม่ได้เชื่อม Telegram ตั้งค่าไว้ก่อนได้ จะเริ่มส่งเมื่อเชื่อมแล้ว</p>
-          )}
-          {data?.telegram_connected && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] px-3.5 py-2.5">
-              <p className="m-0 min-w-0 text-[12px] text-[var(--text-muted)]">
-                ส่งข้อความทดสอบเข้า Telegram ของคุณคนเดียว พร้อมรายการเรื่องที่คุณรับอยู่ตอนนี้
-              </p>
-              <Button variant="secondary" size="sm" icon={<Send size={13} />} isLoading={test.isPending} onClick={() => test.mutate()}>
-                ส่งข้อความทดสอบ
-              </Button>
-            </div>
-          )}
-          {sites.length === 0 ? (
-            <p className="m-0 text-[12.5px] text-[var(--text-muted)]">ยังไม่มีเว็บในบัญชีนี้</p>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {sites.map((s) => (
-                <SiteCard key={s.origin_id} site={s} levels={data!.levels} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+        )}
+        {data?.telegram_connected && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-primary)] px-3.5 py-2.5">
+            <p className="m-0 min-w-0 text-[12px] text-[var(--text-muted)]">
+              Send a test message to your Telegram only, listing what you currently receive.
+            </p>
+            <Button variant="secondary" size="sm" icon={<Send size={13} />} isLoading={test.isPending} onClick={() => test.mutate()}>
+              Send test message
+            </Button>
+          </div>
+        )}
+        {data && sites.length === 0 ? (
+          <p className="m-0 text-[12.5px] text-[var(--text-muted)]">This account has no sites yet. Add an origin to choose its notifications.</p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {sites.map((s) => (
+              <SiteCard key={s.origin_id} site={s} levels={data!.levels} />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 

@@ -96,7 +96,8 @@ interface PendingApproval {
   warning: string | null
 }
 
-export const MLRules: React.FC = () => {
+// `embedded`: rendered inside Rule proposals, which owns the page header.
+export const MLRules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const { user } = useAuthStore()
   const queryClient = useQueryClient()
 
@@ -539,31 +540,36 @@ export const MLRules: React.FC = () => {
   }
 
   return (
-    <div className="animate-fade-in pb-12">
-      <TopBar
-        title="ML anomaly rules"
-        subtitle={
-          isAdmin
-            ? 'กฎที่ ML เสนอจาก request ที่ตรวจพบ ทุกกฎต้องผ่านการอนุมัติก่อนถึงจะมีผลกับ ModSecurity'
-            : 'กฎที่ ML เสนอสำหรับ origin ที่คุณเป็นสมาชิก Owner หรือ Editor อนุมัติแล้วกฎจะมีผลเฉพาะ origin นั้น'
-        }
-        action={
+    <div className={embedded ? '' : 'animate-fade-in pb-12'}>
+      {(() => {
+        const subtitle = isAdmin
+          ? 'Rules the ML model proposed from detected requests. A rule has no effect on ModSecurity until someone approves it.'
+          : "Rules the ML model proposed for origins you belong to. Once an Owner or Editor approves one, it applies to that origin only."
+        const actions = (
           <div className="flex items-center gap-2">
             {canScan && (
               <Button variant="secondary" onClick={openScan} isLoading={cveScan.isPending} icon={<Bug size={14} />}>
-                สแกน CVE
+                Scan for CVEs
               </Button>
             )}
             <Button
               variant="secondary"
               onClick={() => refetch()}
-              aria-label="รีเฟรชรายการกฎ"
-              title="รีเฟรช"
+              aria-label="Refresh the rule list"
+              title="Refresh"
               icon={<RefreshCw size={14} className={isFetching ? 'animate-spin motion-reduce:animate-none' : ''} />}
             />
           </div>
-        }
-      />
+        )
+        return embedded ? (
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="m-0 text-[13px] text-[var(--text-muted)] max-w-[72ch]">{subtitle}</p>
+            {actions}
+          </div>
+        ) : (
+          <TopBar title="ML anomaly rules" subtitle={subtitle} action={actions} />
+        )
+      })()}
 
       {isAdmin && legacyPending > 0 && (
         <div className="mb-4 flex flex-col gap-3 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">

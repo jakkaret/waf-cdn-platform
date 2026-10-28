@@ -26,7 +26,9 @@ import SupportTicket from './pages/SupportTicket'
 import Alerts from './pages/Alerts'
 import Users from './pages/Users'
 import CDN from './pages/CDN'
-import MLRules from './pages/MLRules'
+import RuleProposals from './pages/RuleProposals'
+import Notifications from './pages/Notifications'
+import StackDiagnostics from './pages/StackDiagnostics'
 import Origins from './pages/Origins'
 import OriginDetail from './pages/OriginDetail'
 import MLAnalyst from './pages/MLAnalyst'
@@ -36,7 +38,6 @@ import Onboarding from './pages/Onboarding'
 import NotFound from './pages/NotFound'
 import { queryClient } from './lib/queryClient'
 import { authApi } from './api/auth'
-import ThresholdProposals from './pages/ThresholdProposals'
 
 
 const ProtectedRoute = ({
@@ -136,11 +137,33 @@ export const App: React.FC = () => {
               </ProtectedRoute>
             }
           />
+          {/* ML anomaly rules and tuning proposals share one review page;
+              the old paths keep working as deep links into it. */}
           <Route
-            path="/threshold-proposals"
+            path="/rule-proposals"
             element={
               <ProtectedRoute>
-                <ThresholdProposals />
+                <RuleProposals />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/threshold-proposals" element={<Navigate to="/rule-proposals?type=tuning" replace />} />
+          <Route path="/ml-rules" element={<Navigate to="/rule-proposals?type=ml" replace />} />
+          <Route
+            path="/notifications"
+            element={
+              <ProtectedRoute>
+                <Notifications />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/diagnostics"
+            element={
+              <ProtectedRoute>
+                <OperatorOnly>
+                  <StackDiagnostics />
+                </OperatorOnly>
               </ProtectedRoute>
             }
           />
@@ -165,14 +188,6 @@ export const App: React.FC = () => {
             }
           />
           <Route
-            path="/ml-rules"
-            element={
-              <ProtectedRoute>
-                <MLRules />
-              </ProtectedRoute>
-            }
-          />
-          <Route
             path="/alerts"
             element={
               <ProtectedRoute>
@@ -184,7 +199,9 @@ export const App: React.FC = () => {
             path="/cdn"
             element={
               <ProtectedRoute>
-                <CDN />
+                <OperatorOnly originTab="Overview (cache purge)">
+                  <CDN />
+                </OperatorOnly>
               </ProtectedRoute>
             }
           />
@@ -283,7 +300,7 @@ export const App: React.FC = () => {
             color: 'var(--text-primary)',
             border: '1px solid var(--bg-border)',
             fontSize: '12.5px',
-            fontFamily: 'Inter, sans-serif',
+            fontFamily: 'inherit',
             boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)',
           },
           success: {

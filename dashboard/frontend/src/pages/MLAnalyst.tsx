@@ -10,8 +10,9 @@ import { MLInsights } from '../components/ml/MLInsights'
 export const MLAnalyst: React.FC = () => (
   <div className="space-y-6 animate-fade-in">
     <TopBar
-      title="AI Security Analyst"
-      subtitle="ML Insights: คะแนนจากโมเดล Gen 3 ของ traffic จริงทุก request เจ้าของเว็บเสนอกฎจาก request ที่ถูกตั้งข้อสังเกตได้จากรายการด้านล่าง"
+      scope
+      title="ML insights"
+      subtitle="Anomaly scores from the ML model for every request your sites receive. A score is an estimate, not a confirmed attack. Owners and Editors can propose a rule from a flagged request; it waits in Rule proposals for approval."
     />
     <MLInsights />
   </div>

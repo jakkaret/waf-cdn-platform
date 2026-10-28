@@ -5,7 +5,7 @@ const levels = { low: { total: 200, per_ip: 100 }, medium: { total: 50, per_ip: 
 
 describe('notificationPrefs', () => {
   it('words the thresholds of a level', () => {
-    expect(sensitivityHint('medium', levels)).toBe('แจ้งเมื่อบล็อก ≥ 50 ครั้งใน 5 นาที หรือ IP เดียว ≥ 30 ครั้ง')
+    expect(sensitivityHint('medium', levels)).toBe('Alerts when 50 or more requests are blocked in 5 minutes, or 30 or more from one IP')
   })
   it('hides team changes from people who cannot receive them', () => {
     const viewer = { changeable: ['attacks', 'outages', 'certs', 'digest'] as const, prefs: { attacks: true, outages: false, certs: false, team: false, digest: false } }

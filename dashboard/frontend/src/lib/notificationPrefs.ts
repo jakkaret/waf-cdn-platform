@@ -20,20 +20,20 @@ export interface NotificationPrefs {
 }
 
 export const PREF_KINDS: { kind: PrefKind; label: string }[] = [
-  { kind: 'attacks', label: 'ถูกโจมตี (เริ่ม / จบ)' },
-  { kind: 'outages', label: 'เว็บเปิดไม่ได้ หรือ agent หลุด' },
-  { kind: 'certs', label: 'ใบรับรอง HTTPS ใกล้หมดอายุ' },
-  { kind: 'team', label: 'คนอื่นแก้เว็บนี้' },
-  { kind: 'digest', label: 'สรุปรายวัน 08:00' },
+  { kind: 'attacks', label: 'Attack started or ended' },
+  { kind: 'outages', label: 'Site unreachable or tunnel agent offline' },
+  { kind: 'certs', label: 'HTTPS certificate about to expire' },
+  { kind: 'team', label: 'Someone else changed this site' },
+  { kind: 'digest', label: 'Daily summary at 08:00' },
 ]
 
-export const SENSITIVITY_LABEL: Record<Sensitivity, string> = { low: 'ต่ำ', medium: 'กลาง', high: 'สูง' }
+export const SENSITIVITY_LABEL: Record<Sensitivity, string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
 export const ROLE_LABEL: Record<SitePrefs['role'], string> = { owner: 'Owner', editor: 'Editor', viewer: 'Viewer' }
 
 export const sensitivityHint = (level: Sensitivity, levels: NotificationPrefs['levels']): string => {
   const l = levels[level]
-  return l ? `แจ้งเมื่อบล็อก ≥ ${l.total} ครั้งใน 5 นาที หรือ IP เดียว ≥ ${l.per_ip} ครั้ง` : ''
+  return l ? `Alerts when ${l.total} or more requests are blocked in 5 minutes, or ${l.per_ip} or more from one IP` : ''
 }
 
 // Kinds this person can see for the site: what their role may change, plus

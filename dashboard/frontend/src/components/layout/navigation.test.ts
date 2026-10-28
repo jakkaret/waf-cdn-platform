@@ -1,52 +1,62 @@
 import { describe, expect, it } from 'vitest'
 import {
   NAV_SECTIONS,
+  ORIGIN_TABS,
   activeGroupId,
   breadcrumbFor,
+  filterOriginTabs,
   filterSections,
   flattenLinks,
+  isOriginTab,
   isPathActive,
+  matchesQuery,
+  originTabPath,
   visibleSections,
 } from './navigation'
 
 const paths = (sections = NAV_SECTIONS) => flattenLinks(sections).map((l) => l.path)
 
 describe('NAV_SECTIONS', () => {
-  it('keeps every page the old sidebar linked to, once', () => {
+  it('links every page once', () => {
     const all = paths()
     expect(new Set(all).size).toBe(all.length)
     expect([...all].sort()).toEqual(
       [
-        '/', '/logs', '/origins', '/rules', '/ip-rules', '/rate-limits', '/ml-rules',
-        '/ml-analyst', '/threshold-proposals', '/alerts', '/cdn', '/tunnels', '/users',
-        '/settings', '/support',
+        '/', '/origins', '/tunnels', '/logs', '/alerts', '/ml-analyst', '/rule-proposals', '/rules',
+        '/notifications', '/support', '/settings', '/cdn', '/diagnostics', '/ip-rules', '/rate-limits', '/users',
       ].sort(),
     )
   })
 
-  it('no longer links the removed BOLA and concept pages', () => {
-    expect(paths()).not.toContain('/bola')
-    expect(paths().some((p) => p.startsWith('/concepts'))).toBe(false)
+  it('no longer links the pages merged into Rule proposals', () => {
+    expect(paths()).not.toContain('/ml-rules')
+    expect(paths()).not.toContain('/threshold-proposals')
   })
 
-  it('puts the most-used pages first', () => {
-    expect(paths().slice(0, 4)).toEqual(['/', '/origins', '/logs', '/alerts'])
+  it('keeps ML insights in one place only', () => {
+    expect(paths().filter((p) => p === '/ml-analyst')).toHaveLength(1)
+  })
+
+  it('orders sections by the job they serve', () => {
+    expect(NAV_SECTIONS.map((s) => s.id)).toEqual(['main', 'sites', 'monitoring', 'rules', 'settings', 'admin'])
   })
 })
 
 describe('visibleSections', () => {
   it('shows everything to an operator', () => {
-    expect(paths(visibleSections(NAV_SECTIONS, true))).toHaveLength(15)
+    expect(paths(visibleSections(NAV_SECTIONS, true))).toHaveLength(16)
   })
 
-  it('hides operator-only pages from a regular user', () => {
-    const visible = paths(visibleSections(NAV_SECTIONS, false))
-    expect(visible).not.toContain('/ip-rules') // a site's own list is on its origin page
-    expect(visible).not.toContain('/rate-limits')
-    expect(visible).not.toContain('/users')
-    expect(visible).toContain('/support') // every member can reach support
-    expect(visible).toContain('/ml-rules') // filtered to the user's own origins server-side
-    expect(visible).toHaveLength(12)
+  it('hides the whole administration section from a regular user', () => {
+    const visible = visibleSections(NAV_SECTIONS, false)
+    expect(visible.map((s) => s.id)).not.toContain('admin')
+    const visiblePaths = paths(visible)
+    for (const p of ['/settings', '/cdn', '/diagnostics', '/ip-rules', '/rate-limits', '/users']) {
+      expect(visiblePaths).not.toContain(p)
+    }
+    expect(visiblePaths).toContain('/support')
+    expect(visiblePaths).toContain('/rule-proposals')
+    expect(visiblePaths).toHaveLength(10)
   })
 
   it('drops a group whose children are all hidden', () => {
@@ -68,35 +78,38 @@ describe('isPathActive', () => {
 
   it('matches sub-pages but not look-alike prefixes', () => {
     expect(isPathActive('/origins', '/origins/abc')).toBe(true)
-    expect(isPathActive('/ml-rules', '/ml-rules')).toBe(true)
     expect(isPathActive('/rules', '/rules-old')).toBe(false)
+    expect(isPathActive('/settings', '/settings/devices')).toBe(true)
   })
 })
 
 describe('activeGroupId', () => {
-  it('finds the group holding the current page', () => {
-    expect(activeGroupId(NAV_SECTIONS, '/ip-rules')).toBe('security-rules')
-    expect(activeGroupId(NAV_SECTIONS, '/threshold-proposals')).toBe('detection')
-  })
-
-  it('returns null for top-level pages', () => {
+  it('returns null when the menu has no groups', () => {
     expect(activeGroupId(NAV_SECTIONS, '/logs')).toBeNull()
     expect(activeGroupId(NAV_SECTIONS, '/origins/abc')).toBeNull()
   })
 })
 
 describe('breadcrumbFor', () => {
-  it('includes the group for grouped pages', () => {
-    expect(breadcrumbFor(NAV_SECTIONS, '/rules')).toEqual(['Security rules', 'WAF rules'])
+  it('starts with the section label', () => {
+    expect(breadcrumbFor(NAV_SECTIONS, '/alerts')).toEqual(['Monitoring', 'Alerts'])
+    expect(breadcrumbFor(NAV_SECTIONS, '/origins/abc')).toEqual(['My websites', 'Origins'])
   })
 
-  it('uses the page alone for top-level pages and their sub-pages', () => {
-    expect(breadcrumbFor(NAV_SECTIONS, '/')).toEqual(['Security dashboard'])
-    expect(breadcrumbFor(NAV_SECTIONS, '/origins/abc')).toEqual(['Origin servers'])
+  it('uses the page alone in the unlabeled top section', () => {
+    expect(breadcrumbFor(NAV_SECTIONS, '/')).toEqual(['Dashboard'])
   })
 
   it('is empty for pages outside the menu', () => {
     expect(breadcrumbFor(NAV_SECTIONS, '/onboarding')).toEqual([])
+  })
+})
+
+describe('matchesQuery', () => {
+  it('needs every word somewhere in the label or keywords', () => {
+    expect(matchesQuery('block ip', 'IP access', ['block ip'])).toBe(true)
+    expect(matchesQuery('rate limit', 'Rate limits')).toBe(true)
+    expect(matchesQuery('rate zzz', 'Rate limits')).toBe(false)
   })
 })
 
@@ -105,20 +118,41 @@ describe('filterSections', () => {
     expect(filterSections(NAV_SECTIONS, '  ')).toBe(NAV_SECTIONS)
   })
 
-  it('matches labels case-insensitively, inside groups too', () => {
-    expect(paths(filterSections(NAV_SECTIONS, 'rate'))).toEqual(['/rate-limits'])
-    expect(paths(filterSections(NAV_SECTIONS, 'IP ACCESS'))).toEqual(['/ip-rules'])
+  it('matches labels case-insensitively', () => {
+    expect(paths(filterSections(NAV_SECTIONS, 'ML INSIGHTS'))).toEqual(['/ml-analyst'])
   })
 
-  it('matches keywords', () => {
+  it('matches old page names through keywords', () => {
+    expect(paths(filterSections(NAV_SECTIONS, 'tuning'))).toEqual(['/rule-proposals'])
+    expect(paths(filterSections(NAV_SECTIONS, 'telegram'))).toEqual(['/notifications'])
     expect(paths(filterSections(NAV_SECTIONS, 'purge'))).toEqual(['/cdn'])
-  })
-
-  it('keeps all children when the group label matches', () => {
-    expect(paths(filterSections(NAV_SECTIONS, 'detection'))).toEqual(['/ml-analyst', '/threshold-proposals'])
   })
 
   it('returns nothing when nothing matches', () => {
     expect(filterSections(NAV_SECTIONS, 'zzz')).toEqual([])
+  })
+})
+
+describe('origin tabs', () => {
+  it('finds the tabs the review could not reach from the search', () => {
+    expect(filterOriginTabs('rate').map((t) => t.id)).toEqual(['rate-limits'])
+    expect(filterOriginTabs('block ip').map((t) => t.id)).toEqual(['ip-access'])
+    expect(filterOriginTabs('IP access').map((t) => t.id)).toEqual(['ip-access'])
+    expect(filterOriginTabs('waf policy').map((t) => t.id)).toEqual(['waf'])
+  })
+
+  it('offers nothing for an empty query', () => {
+    expect(filterOriginTabs(' ')).toEqual([])
+  })
+
+  it('recognises only known tab ids', () => {
+    expect(ORIGIN_TABS).toHaveLength(9)
+    expect(isOriginTab('rate-limits')).toBe(true)
+    expect(isOriginTab('ssl')).toBe(false)
+    expect(isOriginTab(null)).toBe(false)
+  })
+
+  it('builds a deep link with the tab and extra params', () => {
+    expect(originTabPath('abc', 'ip-access', { ip: '1.2.3.4' })).toBe('/origins/abc?tab=ip-access&ip=1.2.3.4')
   })
 })

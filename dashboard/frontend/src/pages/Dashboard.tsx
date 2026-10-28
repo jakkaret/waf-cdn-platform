@@ -192,8 +192,9 @@ export const Dashboard: React.FC = () => {
     <div className="animate-fade-in pb-8">
       {/* Top Header Bar */}
       <TopBar
-        title="Security Operations Center"
-        subtitle="Real-time WAF inspection, threat mitigation & traffic analytics"
+        scope
+        title="Dashboard"
+        subtitle="Traffic and threats across your sites"
         badge={
           <Badge color="success" dot pulse>
             WAF ENGINE ONLINE

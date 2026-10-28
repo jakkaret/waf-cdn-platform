@@ -1,0 +1,75 @@
+import React from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { TopBar } from '../components/layout/TopBar'
+import MLRules from './MLRules'
+import ThresholdProposals from './ThresholdProposals'
+
+// One review queue for everything that changes how the WAF blocks (UX
+// reorganization 2026-10-28): rules the ML model proposed and anomaly
+// threshold tuning. The two keep their own workflows and backends -- an ML
+// rule is approved by the origin's Owner or Editor, a threshold proposal by
+// its Owner -- so this page only puts them side by side behind a type filter.
+// ?type=ml|tuning keeps the old /ml-rules and /threshold-proposals links
+// landing on the right list.
+
+export type ProposalType = 'ml' | 'tuning'
+
+const TYPES: { id: ProposalType; label: string; hint: string }[] = [
+  { id: 'ml', label: 'ML anomaly rules', hint: 'Block rules proposed from detected requests' },
+  { id: 'tuning', label: 'Threshold tuning', hint: 'Changes to an origin’s anomaly score threshold' },
+]
+
+export const proposalTypeFrom = (value: string | null): ProposalType => (value === 'tuning' ? 'tuning' : 'ml')
+
+export const RuleProposals: React.FC = () => {
+  const [params, setParams] = useSearchParams()
+  const type = proposalTypeFrom(params.get('type'))
+
+  const select = (next: ProposalType) => {
+    const p = new URLSearchParams(params)
+    p.set('type', next)
+    setParams(p, { replace: true })
+  }
+
+  return (
+    <div className="animate-fade-in pb-12">
+      <TopBar
+        title="Rule proposals"
+        subtitle="Changes the system suggests for your origins. Nothing here affects traffic until someone with the right role approves it."
+      />
+
+      <div role="tablist" aria-label="Proposal type" className="mb-5 flex flex-wrap gap-2">
+        {TYPES.map((t) => {
+          const active = t.id === type
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              id={`proposal-tab-${t.id}`}
+              aria-selected={active}
+              aria-controls={`proposal-panel-${t.id}`}
+              onClick={() => select(t.id)}
+              className={`min-w-[200px] text-left rounded-lg border px-3.5 py-2.5 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
+                active
+                  ? 'border-[var(--accent)] bg-[var(--nav-active)]'
+                  : 'border-[var(--bg-border)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)]'
+              }`}
+            >
+              <span className={`block text-[13.5px] ${active ? 'font-semibold text-[var(--text-primary)]' : 'font-medium text-[var(--text-secondary)]'}`}>
+                {t.label}
+              </span>
+              <span className="block text-[12px] text-[var(--text-muted)]">{t.hint}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      <div role="tabpanel" id={`proposal-panel-${type}`} aria-labelledby={`proposal-tab-${type}`}>
+        {type === 'ml' ? <MLRules embedded /> : <ThresholdProposals embedded />}
+      </div>
+    </div>
+  )
+}
+
+export default RuleProposals
