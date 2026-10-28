@@ -10,7 +10,7 @@ status: VERIFIED
 
 Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/api/system/*`, ไฟล์ static) อยู่นอกขอบเขตของไฟล์นี้
 
-พบทั้งหมด **183 endpoints** ใน **29 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 30 รายการ
+พบทั้งหมด **189 endpoints** ใน **30 ไฟล์** — router ที่ `main.py` ลงทะเบียน (`include_router`) มี 31 รายการ
 
 ## `api/ai_summary.py`
 
@@ -122,6 +122,19 @@ Route ที่ประกาศใน `main.py` เอง (`/api/health`, `/ap
 | POST | `/api/origins/{origin_id}/domains` | `create_domain_under_origin` | login |  |
 | DELETE | `/api/origins/{origin_id}/domains/{domain_id}` | `delete_domain_under_origin` | login |  |
 | POST | `/api/origins/{origin_id}/domains/{domain_id}/verify` | `verify_domain_now_under_origin` | login |  |
+
+## `api/honeypot.py`
+
+สถานะการลงทะเบียน: ลงทะเบียนใน main.py
+
+| Method | Path | Handler | Auth | คำอธิบาย (docstring) |
+|---|---|---|---|---|
+| GET | `/api/origins/{origin_id}/honeypot/decoys/{key}/probe` | `honeypot_decoy_probe` | origin edit |  |
+| GET | `/api/origins/{origin_id}/honeypot/sessions` | `honeypot_sessions` | origin edit |  |
+| GET | `/api/origins/{origin_id}/honeypot/sessions/{sid}` | `honeypot_session` | origin edit |  |
+| POST | `/api/origins/{origin_id}/honeypot/sessions/{sid}/block` | `honeypot_block_session` | origin edit, login |  |
+| POST | `/api/origins/{origin_id}/honeypot/sessions/{sid}/story` | `honeypot_story` | origin edit |  |
+| GET | `/api/origins/{origin_id}/honeypot/summary` | `honeypot_summary` | origin edit |  |
 
 ## `api/invites.py`
 

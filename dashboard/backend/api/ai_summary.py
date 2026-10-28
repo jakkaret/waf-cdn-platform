@@ -466,6 +466,11 @@ def build_incident_timeline(origin: Dict[str, Any], start_dt: datetime, end_dt: 
     merged_events = origin_events + global_events
     merged_events.sort(key=lambda e: e.get("timestamp", ""))
 
+    # Visitors who went into this site's decoys in the same window, and how
+    # far they got (services/honeypot.py; zeros when its store is down).
+    from services import honeypot
+    stats["honeypot"] = honeypot.day_counts(origin_id, start_utc, end_utc)
+
     return {
         "origin_id": origin_id,
         "start_time": start_dt.strftime("%Y-%m-%d %H:%M:%S"),

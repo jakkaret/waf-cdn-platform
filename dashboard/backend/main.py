@@ -282,6 +282,7 @@ from api import managed_rules as managed_rules_api
 from api import invites as invites_api
 from api import support as support_api
 from api import site_access as site_access_api
+from api import honeypot as honeypot_api
 from api import ml_protection as ml_protection_api
 from api import quick_tunnels as quick_tunnels_api
 app.include_router(ml.router)
@@ -308,6 +309,7 @@ app.include_router(managed_rules_api.router)
 app.include_router(invites_api.router)
 app.include_router(support_api.router)
 app.include_router(site_access_api.router)
+app.include_router(honeypot_api.router)
 app.include_router(ml_protection_api.router)
 
 # Error Handlers

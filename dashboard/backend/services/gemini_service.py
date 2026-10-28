@@ -516,6 +516,45 @@ class GeminiService:
             logger.error("Failed to summarize incident: %s", e)
         return None
 
+    async def summarize_honeypot_session(self, session: Dict[str, Any]) -> Optional[str]:
+        """What one visitor did inside the site's decoys (api/honeypot.py),
+        as a few Thai lines. The input is the session's structured fields
+        only; paths in it come from the attacker. None when Gemini did not
+        answer, so the page shows the timeline alone and never labels
+        template text as AI."""
+        prompt = (
+            "สรุปพฤติกรรมของผู้มาเยือนหนึ่งรายที่เข้ามาในกับดัก (honeypot) ของเว็บ จากข้อมูลต่อไปนี้\n"
+            "ทุกคำขอในข้อมูลไปไม่ถึงเว็บจริง ระบบตอบด้วยเนื้อหาปลอมทั้งหมด\n"
+            f"{UNTRUSTED_DATA_RULE}\n{data_block(session)}\n\n"
+            "ตอบเป็นรายการ 3-5 ข้อ:\n"
+            "- ผู้มาเยือนเป็นใครโดยประมาณ (เครื่องมือ, คนหรือบอท) จาก tool และจังหวะเวลา\n"
+            "- ทำอะไรตามลำดับ อ้าง stage และรหัส MITRE ATT&CK ที่ให้มา\n"
+            "- ได้อะไรไป (ข้อมูลลับปลอม) และเอาไปใช้ต่อหรือไม่\n"
+            "- ข้อสุดท้ายขึ้นต้นด้วย 'ควรทำ:' แล้วตามด้วยสิ่งเดียวที่ควรทำ\n"
+            "ห้ามระบุ IP ห้ามเดารหัสผ่าน\n\n"
+            f"{REPORT_STYLE}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                res = await client.post(
+                    BASE_URL,
+                    headers=gemini_headers(self.api_key),
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 600},
+                    },
+                )
+                if res.status_code == 200:
+                    candidates = res.json().get("candidates", [])
+                    if candidates:
+                        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                        return text[:2000] or None
+                else:
+                    logger.error("Gemini honeypot summary error: %s", res.status_code)
+        except Exception as e:
+            logger.error("Failed to summarize honeypot session: %s", e)
+        return None
+
     async def generate_postmortem_narrative(self, timeline: Dict[str, Any]) -> Dict[str, Any]:
         """AI Incident Postmortem (2026-09-22). Deliberately NOT a reuse of
         generate_range_summary: that method's maxOutputTokens=800/timeout=15s
