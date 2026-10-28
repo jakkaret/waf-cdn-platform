@@ -23,7 +23,11 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  Legend,
 } from 'recharts'
+import { buildTimeline, bucketLabel } from '../lib/timeline'
+import { BlockIpButton } from '../components/BlockIpButton'
+import { logsSearchPath } from '../lib/alertActions'
 import {
   ShieldAlert,
   Activity,
@@ -46,7 +50,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { CRS_VERSION } from '../lib/crsVersion'
-import { formatBkkTime } from '../lib/time'
+import { BKK_LABEL, formatBkkDateTime, formatBkkTime } from '../lib/time'
 
 // Full English country name for an ISO alpha-2 code, from the browser's own
 // data (always complete and current) rather than a list we maintain. The API's
@@ -68,13 +72,14 @@ const countryDisplayName = (code: string, fallback?: string): string => {
 }
 
 export const Dashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'security' | 'infrastructure'>('security')
+  const [tab, setActiveTab] = useState<'security' | 'infrastructure'>('security')
   const [chartView, setChartView] = useState<'area' | 'bar'>('area')
   const [copiedIp, setCopiedIp] = useState<string | null>(null)
   const { theme } = useThemeStore()
   const { selectedOrigin, selectedOriginLabel, setSelectedOrigin } = useOriginFilterStore()
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin'
+  const activeTab = isAdmin ? tab : 'security'
 
   const { data: logs = [], isLoading: isLogsLoading, isFetching: isLogsFetching, refetch: refetchLogs } = useQuery({
     queryKey: ['logs-dashboard', selectedOrigin],
@@ -142,50 +147,33 @@ export const Dashboard: React.FC = () => {
     setTimeout(() => setCopiedIp(null), 2000)
   }
 
-  // Calculations
-  const totalRequests = analytics?.total_requests ?? logs.length
-  const blockedCount = analytics?.blocked_requests ?? logs.filter((l) => l.status === 403 || l.status === 429).length
-  const uniqueIPs = analytics?.unique_ips ?? new Set(logs.map((l) => l.ip)).size
-  const blockRate = totalRequests > 0 ? ((blockedCount / totalRequests) * 100).toFixed(1) : '0.0'
+  // KPIs come from /analytics/summary only. They used to fall back to counts
+  // over the 200 log rows below, which mixed two different populations into
+  // one card; a missing summary now shows "—".
+  const totalRequests = analytics?.total_requests ?? null
+  const blockedCount = analytics?.blocked_requests ?? null
+  const uniqueIPs = analytics?.unique_ips ?? null
+  const blockRate =
+    totalRequests && blockedCount !== null ? ((blockedCount / totalRequests) * 100).toFixed(1) : null
+  const kpi = (v: number | null) => (isAnalyticsLoading || v === null ? '—' : v.toLocaleString())
+  const attackTypeTotal = Object.values(analytics?.attack_types ?? {}).reduce((a, b) => a + b, 0)
 
-  // Time aggregated timeline. log.datetime is a ClickHouse-sourced,
-  // offset-less string ("2026-09-22 06:14:00") -- treated as UTC and
-  // rendered in Asia/Bangkok, matching lib/time.ts like every other
-  // page. Previously read as raw browser-local time here,
-  // so the same event plotted up to 7 hours off from where it shows on
-  // those other pages.
-  // logs arrive newest-first; reverse to oldest-first so time runs
-  // left->right, then keep the most recent 20 buckets.
-  const chartData = [...logs]
-    .reverse()
-    .reduce((acc, log) => {
-      const time = formatBkkTime(log.datetime, { seconds: true })
-      const existing = acc.find((d: any) => d.time === time)
-      const isBlocked = log.status === 403
-      const isLimited = log.status === 429
-      const isAllowed = !isBlocked && !isLimited
-
-      if (existing) {
-        if (isBlocked) existing.blocked++
-        else if (isLimited) existing.limited++
-        else existing.allowed++
-        existing.total++
-      } else {
-        acc.push({
-          time,
-          allowed: isAllowed ? 1 : 0,
-          blocked: isBlocked ? 1 : 0,
-          limited: isLimited ? 1 : 0,
-          total: 1,
-        })
-      }
-      return acc
-    }, [] as any[])
-    .slice(-20)
+  // Timeline of the latest log rows on a real time axis (lib/timeline.ts):
+  // empty buckets are kept, so uneven gaps show as gaps. log.datetime is
+  // UTC from ClickHouse and is shown in Bangkok time like everywhere else.
+  const timeline = buildTimeline(logs)
+  const chartData = timeline.buckets
 
   const isDark = theme === 'dark'
   const gridColor = isDark ? '#1a2436' : '#e2e8f0'
-  const axisColor = isDark ? '#64748b' : '#94a3b8'
+  const axisColor = isDark ? '#94a3b8' : '#64748b'
+  const chartTooltipStyle = {
+    backgroundColor: isDark ? '#101827' : '#ffffff',
+    borderColor: isDark ? '#2a374d' : '#e2e8f0',
+    borderRadius: '8px',
+    fontSize: '12px',
+    color: isDark ? '#f1f5f9' : '#0f172a',
+  }
   const isSyncing = isLogsFetching || isAnalyticsFetching || isSystemFetching
 
   return (
@@ -195,14 +183,11 @@ export const Dashboard: React.FC = () => {
         scope
         title="Dashboard"
         subtitle="Traffic and threats across your sites"
-        badge={
-          <Badge color="success" dot pulse>
-            WAF ENGINE ONLINE
-          </Badge>
-        }
         action={
           <div className="flex items-center gap-2">
-            {/* View Switcher */}
+            {/* View Switcher: the infrastructure view (node addresses,
+                ports, internal services) is for the platform operator. */}
+            {isAdmin && (
             <div className="flex rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] p-0.5" role="tablist" aria-label="Dashboard perspective tabs">
               <button
                 role="tab"
@@ -231,6 +216,7 @@ export const Dashboard: React.FC = () => {
                 Infrastructure & Nodes
               </button>
             </div>
+            )}
 
             {/* Refresh Button */}
             <button
@@ -319,7 +305,7 @@ export const Dashboard: React.FC = () => {
               )}
               {pendingRuleCount > 0 && (
                 <Link
-                  to="/ml-rules"
+                  to="/rule-proposals?type=ml"
                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-amber-300/50 dark:border-amber-500/20 text-[12px] font-mono hover:border-amber-400 dark:hover:border-amber-500/40 transition-colors"
                 >
                   <FlaskConical size={13} className="text-amber-600 dark:text-amber-400" />
@@ -330,15 +316,22 @@ export const Dashboard: React.FC = () => {
                 </Link>
               )}
               {offlineNodes.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('infrastructure')}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-amber-300/50 dark:border-amber-500/20 text-[12px] font-mono hover:border-amber-400 dark:hover:border-amber-500/40 transition-colors cursor-pointer"
-                >
-                  <WifiOff size={13} className="text-amber-600 dark:text-amber-400" />
-                  <span className="font-semibold text-[var(--text-primary)]">{offlineNodes.length}</span>
-                  <span className="text-[var(--text-muted)]">node{offlineNodes.length === 1 ? '' : 's'} offline</span>
-                </button>
+                isAdmin ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('infrastructure')}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-amber-300/50 dark:border-amber-500/20 text-[12px] hover:border-amber-400 dark:hover:border-amber-500/40 transition-colors cursor-pointer"
+                  >
+                    <WifiOff size={13} className="text-amber-600 dark:text-amber-400" />
+                    <span className="font-semibold text-[var(--text-primary)]">{offlineNodes.length}</span>
+                    <span className="text-[var(--text-muted)]">node{offlineNodes.length === 1 ? '' : 's'} offline</span>
+                  </button>
+                ) : (
+                  <span className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-amber-300/50 dark:border-amber-500/20 text-[12px]">
+                    <WifiOff size={13} className="text-amber-600 dark:text-amber-400" />
+                    <span className="text-[var(--text-secondary)]">Part of the platform is degraded right now, so some requests may be slow or fail.</span>
+                  </span>
+                )
               )}
             </div>
           </div>
@@ -349,31 +342,41 @@ export const Dashboard: React.FC = () => {
         <div id="security-panel" role="tabpanel" aria-label="Security Analytics Dashboard" className="animate-fade-in">
 
           {/* ═══ Section 1: KPI Summary Strip ═══ */}
+          {/* /analytics/summary queries access_logs with no time filter, so
+              the cards cover every request still stored, not a recent window. */}
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2.5">
+            <h2 className="m-0 text-[14px] font-semibold text-[var(--text-primary)]">
+              {selectedOrigin === 'ALL' ? (isAdmin ? 'All platform traffic' : 'All your origins') : selectedOriginLabel}
+            </h2>
+            <span className="text-[12px] text-[var(--text-muted)]">
+              All stored traffic, no time limit{analytics?.source === 'offline' ? ' (log store offline, figures unavailable)' : ''}
+            </span>
+          </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
 
             {/* Primary KPI: Total Traffic */}
             <div className="dash-card p-4 sm:p-5 flex flex-col justify-between">
               <div className="flex items-center justify-between gap-2 mb-3">
-                <span className="text-[11px] font-semibold tracking-wide text-[var(--text-muted)] uppercase font-mono">
-                  Inbound Traffic
+                <span className="text-[12.5px] font-medium text-[var(--text-secondary)]">
+                  Requests
                 </span>
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-sky-500/10">
                   <Activity size={15} className="text-sky-600 dark:text-sky-400" />
                 </div>
               </div>
               <span className="text-[26px] font-bold font-mono tracking-tight leading-none text-[var(--text-primary)]">
-                {isAnalyticsLoading ? '—' : (analytics?.total_requests ?? totalRequests).toLocaleString()}
+                {kpi(totalRequests)}
               </span>
-              <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11px]">
-                <span className="text-[var(--text-muted)] font-mono">HTTP/S Analyzed</span>
+              <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11.5px]">
+                <span className="text-[var(--text-muted)]">Requests inspected</span>
               </div>
             </div>
 
             {/* Decision KPI: Threats Mitigated */}
             <div className="dash-card p-4 sm:p-5 flex flex-col justify-between bg-red-50/50 dark:bg-red-950/[0.08] border-red-200/60 dark:border-red-500/15">
               <div className="flex items-center justify-between gap-2 mb-3">
-                <span className="text-[11px] font-semibold tracking-wide text-red-600/70 dark:text-red-400/70 uppercase font-mono">
-                  Threats Mitigated
+                <span className="text-[12.5px] font-medium text-red-800 dark:text-red-300">
+                  Blocked or flagged
                 </span>
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-red-500/10">
                   <ShieldAlert size={15} className="text-red-600 dark:text-red-400" />
@@ -381,32 +384,34 @@ export const Dashboard: React.FC = () => {
               </div>
               <div className="flex items-baseline gap-2">
                 <span className="text-[26px] font-bold font-mono tracking-tight leading-none text-red-600 dark:text-red-400">
-                  {isAnalyticsLoading ? '—' : (analytics?.blocked_requests ?? blockedCount).toLocaleString()}
+                  {kpi(blockedCount)}
                 </span>
-                <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-500/15 border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-400 font-mono">
-                  {blockRate}%
-                </span>
+                {blockRate !== null && (
+                  <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-500/15 border border-red-200 dark:border-red-500/20 text-red-700 dark:text-red-400 font-mono">
+                    {blockRate}%
+                  </span>
+                )}
               </div>
-              <div className="mt-3 pt-2.5 border-t border-red-200/40 dark:border-red-500/10 flex items-center text-[11px]">
-                <span className="text-red-600/60 dark:text-red-400/50 font-mono">CRS & Custom Rules</span>
+              <div className="mt-3 pt-2.5 border-t border-red-200/40 dark:border-red-500/10 flex items-center text-[11.5px]">
+                <span className="text-red-800/80 dark:text-red-300/70">Requests blocked (403), rate limited (429) or flagged</span>
               </div>
             </div>
 
             {/* Supporting: Unique IPs */}
             <div className="dash-card p-4 sm:p-5 flex flex-col justify-between">
               <div className="flex items-center justify-between gap-2 mb-3">
-                <span className="text-[11px] font-semibold tracking-wide text-[var(--text-muted)] uppercase font-mono">
-                  Distinct Client IPs
+                <span className="text-[12.5px] font-medium text-[var(--text-secondary)]">
+                  Unique visitor IPs
                 </span>
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-amber-500/10">
                   <Globe size={15} className="text-amber-600 dark:text-amber-400" />
                 </div>
               </div>
               <span className="text-[26px] font-bold font-mono tracking-tight leading-none text-amber-600 dark:text-amber-400">
-                {isLogsLoading ? '—' : uniqueIPs.toLocaleString()}
+                {kpi(uniqueIPs)}
               </span>
-              <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11px]">
-                <span className="text-[var(--text-muted)] font-mono">Unique Origin Addresses</span>
+              <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11.5px]">
+                <span className="text-[var(--text-muted)]">Visitor IP addresses seen</span>
               </div>
             </div>
 
@@ -417,8 +422,8 @@ export const Dashboard: React.FC = () => {
                 secondary badge with a fake "14ms" fallback. */}
             <div className="dash-card p-4 sm:p-5 flex flex-col justify-between">
               <div className="flex items-center justify-between gap-2 mb-3">
-                <span className="text-[11px] font-semibold tracking-wide text-[var(--text-muted)] uppercase font-mono">
-                  Avg Response Time
+                <span className="text-[12.5px] font-medium text-[var(--text-secondary)]">
+                  Average response time
                 </span>
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10">
                   <ShieldCheck size={15} className="text-emerald-600 dark:text-emerald-400" />
@@ -426,22 +431,26 @@ export const Dashboard: React.FC = () => {
               </div>
               <div className="flex items-baseline gap-2">
                 <span className="text-[26px] font-bold font-mono tracking-tight leading-none text-emerald-600 dark:text-emerald-400">
-                  {isAnalyticsLoading ? '—' : analytics?.average_latency_ms != null ? `${analytics.average_latency_ms}ms` : '—'}
+                  {isAnalyticsLoading ? '—' : analytics?.average_latency_ms != null ? `${analytics.average_latency_ms} ms` : '—'}
                 </span>
               </div>
-              <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11px]">
-                <span className="text-[var(--text-muted)] font-mono">ModSecurity v3 + CRS {CRS_VERSION}</span>
+              <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11.5px]">
+                <span className="text-[var(--text-muted)]">
+                  {analytics && analytics.average_latency_ms == null ? 'No response times recorded' : 'Mean time to answer a request'}
+                </span>
               </div>
             </div>
           </div>
 
           {/* AI Threat Summary Banner */}
+          {/* The backend writes this sentence from the same totals as the
+              cards above (api/analytics.py), not with a language model. */}
           {analytics?.ai_summary && (
-            <div className="mt-4 p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)] flex items-start gap-3 text-[12.5px] font-mono shadow-sm">
-              <Sparkles size={18} className="text-orange-500 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <span className="font-bold text-[var(--text-primary)]">AI Traffic & Threat Summary</span>
-                <p className="text-[var(--text-secondary)] m-0 leading-relaxed">{analytics.ai_summary}</p>
+            <div className="mt-4 p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)] flex items-start gap-3 text-[13px]">
+              <Sparkles size={16} className="text-[var(--text-muted)] shrink-0 mt-0.5" aria-hidden="true" />
+              <div className="space-y-0.5">
+                <span className="font-semibold text-[var(--text-primary)]">In short</span>
+                <p className="text-[var(--text-secondary)] m-0 leading-relaxed max-w-[90ch]">{analytics.ai_summary}</p>
               </div>
             </div>
           )}
@@ -454,7 +463,12 @@ export const Dashboard: React.FC = () => {
               <div className="dash-card-header">
                 <div className="flex items-center gap-2">
                   <Activity size={15} className="text-orange-600 dark:text-orange-400" />
-                  <h3>Traffic & Threat Timeline</h3>
+                  <div>
+                    <h3>Traffic timeline</h3>
+                    <p className="m-0 text-[12px] text-[var(--text-muted)]">
+                      Latest {logs.length.toLocaleString()} requests, counted {bucketLabel(timeline.bucketMs)}, {BKK_LABEL} time
+                    </p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="flex rounded border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5 text-[11px] font-mono" role="group" aria-label="Chart render type">
@@ -481,9 +495,7 @@ export const Dashboard: React.FC = () => {
                       Bar
                     </button>
                   </div>
-                  <Badge color="gray" size="sm">
-                    LIVE 8s
-                  </Badge>
+                  <span className="text-[11.5px] text-[var(--text-muted)] hidden sm:inline">Updates every 8 s</span>
                 </div>
               </div>
 
@@ -493,91 +505,68 @@ export const Dashboard: React.FC = () => {
                 aria-label="Traffic and Threat Telemetry Timeline Chart"
               >
                 <div className="h-[280px] w-full flex-1">
+                  {isLogsLoading ? (
+                    <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">Loading requests…</div>
+                  ) : chartData.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">No requests recorded for this scope yet.</div>
+                  ) : (
                   <ResponsiveContainer width="100%" height="100%">
+                    {/* Numeric time axis: ticks and spacing follow real time.
+                        Step lines, so a count of 1 or 2 reads as a level, not
+                        as a smooth wave. */}
                     {chartView === 'area' ? (
-                      <AreaChart data={chartData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="colorAllowed" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={isDark ? '#38bdf8' : '#0284c7'} stopOpacity={0.35} />
-                            <stop offset="95%" stopColor={isDark ? '#38bdf8' : '#0284c7'} stopOpacity={0.0} />
-                          </linearGradient>
-                          <linearGradient id="colorBlocked" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.5} />
-                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0.0} />
-                          </linearGradient>
-                        </defs>
+                      <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                         <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="time" stroke={axisColor} fontSize={10} tickLine={false} tickMargin={8} />
-                        <YAxis stroke={axisColor} fontSize={10} tickLine={false} axisLine={false} />
+                        <XAxis
+                          dataKey="t"
+                          type="number"
+                          scale="time"
+                          domain={['dataMin', 'dataMax']}
+                          tickFormatter={(t: number) => formatBkkTime(t)}
+                          stroke={axisColor}
+                          fontSize={11}
+                          tickLine={false}
+                          tickMargin={8}
+                          minTickGap={40}
+                        />
+                        <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} width={36} label={{ value: 'Requests', angle: -90, position: 'insideLeft', fill: axisColor, fontSize: 11 }} />
                         <Tooltip
-                          contentStyle={{
-                            backgroundColor: isDark ? '#101827' : '#ffffff',
-                            borderColor: isDark ? '#2a374d' : '#e2e8f0',
-                            borderRadius: '8px',
-                            fontSize: '11px',
-                            fontFamily: 'ui-monospace, monospace',
-                            boxShadow: isDark
-                              ? '0 10px 25px -5px rgba(0, 0, 0, 0.4)'
-                              : '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
-                            color: isDark ? '#f1f5f9' : '#0f172a',
-                          }}
+                          labelFormatter={(t: number) => `${formatBkkDateTime(t, { seconds: false })} (${bucketLabel(timeline.bucketMs)})`}
+                          contentStyle={chartTooltipStyle}
                         />
-                        <Area
-                          type="monotone"
-                          dataKey="allowed"
-                          stroke={isDark ? '#38bdf8' : '#0284c7'}
-                          strokeWidth={2}
-                          fillOpacity={1}
-                          fill="url(#colorAllowed)"
-                          name="Clean Traffic"
-                        />
-                        <Area
-                          type="monotone"
-                          dataKey="blocked"
-                          stroke="#ef4444"
-                          strokeWidth={2}
-                          fillOpacity={1}
-                          fill="url(#colorBlocked)"
-                          name="WAF Mitigated"
-                        />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Area type="stepAfter" dataKey="allowed" stroke={isDark ? '#38bdf8' : '#0369a1'} strokeWidth={1.5} fill={isDark ? '#38bdf8' : '#0369a1'} fillOpacity={0.12} name="Allowed" isAnimationActive={false} />
+                        <Area type="stepAfter" dataKey="limited" stroke="#d97706" strokeWidth={1.5} fill="#d97706" fillOpacity={0.12} name="Rate limited (429)" isAnimationActive={false} />
+                        <Area type="stepAfter" dataKey="blocked" stroke="#dc2626" strokeWidth={1.5} fill="#dc2626" fillOpacity={0.15} name="Blocked (403)" isAnimationActive={false} />
                       </AreaChart>
                     ) : (
-                      <BarChart data={chartData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                      <BarChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                         <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="time" stroke={axisColor} fontSize={10} tickLine={false} tickMargin={8} />
-                        <YAxis stroke={axisColor} fontSize={10} tickLine={false} axisLine={false} />
+                        <XAxis
+                          dataKey="t"
+                          type="number"
+                          scale="time"
+                          domain={['dataMin - ' + timeline.bucketMs / 2, 'dataMax + ' + timeline.bucketMs / 2]}
+                          tickFormatter={(t: number) => formatBkkTime(t)}
+                          stroke={axisColor}
+                          fontSize={11}
+                          tickLine={false}
+                          tickMargin={8}
+                          minTickGap={40}
+                        />
+                        <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} width={36} label={{ value: 'Requests', angle: -90, position: 'insideLeft', fill: axisColor, fontSize: 11 }} />
                         <Tooltip
-                          contentStyle={{
-                            backgroundColor: isDark ? '#101827' : '#ffffff',
-                            borderColor: isDark ? '#2a374d' : '#e2e8f0',
-                            borderRadius: '8px',
-                            fontSize: '11px',
-                            fontFamily: 'ui-monospace, monospace',
-                            boxShadow: isDark
-                              ? '0 10px 25px -5px rgba(0, 0, 0, 0.4)'
-                              : '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
-                            color: isDark ? '#f1f5f9' : '#0f172a',
-                          }}
+                          labelFormatter={(t: number) => `${formatBkkDateTime(t, { seconds: false })} (${bucketLabel(timeline.bucketMs)})`}
+                          contentStyle={chartTooltipStyle}
                         />
-                        <Bar
-                          dataKey="allowed"
-                          stackId="a"
-                          fill={isDark ? '#1e3a5f' : '#bfdbfe'}
-                          radius={[0, 0, 0, 0]}
-                          maxBarSize={28}
-                          name="Clean Traffic"
-                        />
-                        <Bar
-                          dataKey="blocked"
-                          stackId="a"
-                          fill="#ef4444"
-                          radius={[3, 3, 0, 0]}
-                          maxBarSize={28}
-                          name="WAF Mitigated"
-                        />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Bar dataKey="allowed" stackId="a" fill={isDark ? '#1e3a5f' : '#bfdbfe'} maxBarSize={28} name="Allowed" isAnimationActive={false} />
+                        <Bar dataKey="limited" stackId="a" fill="#d97706" maxBarSize={28} name="Rate limited (429)" isAnimationActive={false} />
+                        <Bar dataKey="blocked" stackId="a" fill="#dc2626" radius={[3, 3, 0, 0]} maxBarSize={28} name="Blocked (403)" isAnimationActive={false} />
                       </BarChart>
                     )}
                   </ResponsiveContainer>
+                  )}
                 </div>
               </div>
             </div>
@@ -587,15 +576,22 @@ export const Dashboard: React.FC = () => {
               <div className="dash-card-header">
                 <div className="flex items-center gap-2">
                   <ShieldAlert size={15} className="text-red-500" />
-                  <h3>Detected Threat Types</h3>
+                  <div>
+                    <h3>Requests by attack type</h3>
+                    <p className="m-0 text-[12px] text-[var(--text-muted)]">
+                      {attackTypeTotal.toLocaleString()} classified requests, top 10 types
+                    </p>
+                  </div>
                 </div>
-                <span className="text-[10px] text-[var(--text-dim)] font-mono uppercase">By Severity</span>
               </div>
 
-              <div className="p-4 flex-1 flex flex-col justify-center space-y-3 font-mono text-[12px]">
+              {/* Counts every request the WAF classified with an attack type,
+                  including ones only logged; rate-limited requests carry no
+                  type. So this total is not the blocked count on the left. */}
+              <div className="p-4 flex-1 flex flex-col justify-center space-y-3 text-[12.5px]">
                 {analytics?.attack_types && Object.keys(analytics.attack_types).length > 0 ? (
                   Object.entries(analytics.attack_types).map(([type, count]) => {
-                    const totalAtks = Object.values(analytics.attack_types).reduce((a, b) => a + b, 0) || 1
+                    const totalAtks = attackTypeTotal || 1
                     const pct = Math.round((count / totalAtks) * 100)
                     return (
                       <div key={type} className="space-y-1">
@@ -628,9 +624,11 @@ export const Dashboard: React.FC = () => {
               <div className="dash-card-header">
                 <div className="flex items-center gap-2">
                   <Terminal size={14} className="text-orange-600 dark:text-orange-400" />
-                  <h3>Top Suspicious Sources</h3>
+                  <div>
+                    <h3>Most blocked sources</h3>
+                    <p className="m-0 text-[12px] text-[var(--text-muted)]">Top 5 IPs by blocked or flagged requests, all stored traffic</p>
+                  </div>
                 </div>
-                <span className="text-[10px] text-[var(--text-dim)] font-mono uppercase">By Block Freq</span>
               </div>
 
               <div className="overflow-x-auto">
@@ -638,61 +636,76 @@ export const Dashboard: React.FC = () => {
                   <thead>
                     <tr>
                       <th>Client IP</th>
-                      <th>Mitigated</th>
-                      <th>Total</th>
-                      <th className="text-right">Threat Ratio</th>
+                      <th className="text-right">Blocked</th>
+                      <th className="text-right">All requests</th>
+                      <th className="hidden sm:table-cell text-right">Blocked share</th>
+                      <th><span className="sr-only">Actions</span></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {analytics?.suspicious_ips && analytics.suspicious_ips.length > 0 ? (
+                    {isAnalyticsLoading ? (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-[var(--text-muted)] text-[13px]">Loading…</td>
+                      </tr>
+                    ) : analytics?.suspicious_ips && analytics.suspicious_ips.length > 0 ? (
                       analytics.suspicious_ips.map((item, idx) => {
-                        const totalItem = item.total || item.count || item.blocked || 1
-                        const blockedItem = item.blocked || 0
-                        const ratio = totalItem > 0 ? ((blockedItem / totalItem) * 100).toFixed(0) : '0'
-                        const isHighRisk = Number(ratio) >= 50
+                        // `total` is every request from the IP, `blocked` the
+                        // blocked or flagged ones (api/analytics.py). No
+                        // fallbacks: a missing number shows as "—".
+                        const totalItem = item.total ?? item.count ?? null
+                        const blockedItem = item.blocked ?? null
+                        const ratio =
+                          totalItem && blockedItem !== null ? Math.round((blockedItem / totalItem) * 100) : null
 
                         return (
                           <tr key={item.ip || idx}>
                             <td>
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono font-bold text-[12px] text-[var(--text-primary)]">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono font-semibold text-[12.5px] text-[var(--text-primary)]">
                                   {item.ip}
                                 </span>
                                 <button
                                   type="button"
                                   onClick={() => handleCopyIp(item.ip)}
-                                  className="text-[var(--text-muted)] hover:text-orange-500 transition-colors p-0.5 rounded cursor-pointer focus:outline-none focus:ring-1 focus:ring-orange-500"
-                                  title={`Copy IP ${item.ip}`}
+                                  className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 rounded cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                                   aria-label={`Copy IP ${item.ip}`}
                                 >
-                                  {copiedIp === item.ip ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                                  {copiedIp === item.ip ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
                                 </button>
                               </div>
                             </td>
-                            <td>
-                              <span className="font-mono font-bold text-red-600 dark:text-red-400">{blockedItem}</span>
-                            </td>
-                            <td>
-                              <span className="font-mono text-[var(--text-secondary)]">{totalItem}</span>
+                            <td className="text-right">
+                              <span className="font-mono font-semibold text-red-700 dark:text-red-400 tabular-nums">{blockedItem ?? '—'}</span>
                             </td>
                             <td className="text-right">
-                              <span
-                                className={`inline-flex px-2 py-0.5 rounded text-[11px] font-mono font-semibold ${
-                                  isHighRisk
-                                    ? 'bg-red-100 dark:bg-red-500/10 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-500/20'
-                                    : 'bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20'
-                                }`}
-                              >
-                                {ratio}% Blocked
-                              </span>
+                              <span className="font-mono text-[var(--text-secondary)] tabular-nums">{totalItem ?? '—'}</span>
+                            </td>
+                            <td className="hidden sm:table-cell text-right">
+                              <span className="font-mono text-[12px] text-[var(--text-secondary)] tabular-nums">{ratio === null ? '—' : `${ratio}%`}</span>
+                            </td>
+                            <td className="text-right whitespace-nowrap">
+                              <div className="inline-flex items-center gap-1.5">
+                                <Link
+                                  to={logsSearchPath(item.ip)}
+                                  className="inline-flex items-center h-7 px-2 rounded-md border border-[var(--bg-border)] text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                                  aria-label={`View requests from ${item.ip} in traffic logs`}
+                                >
+                                  Logs
+                                </Link>
+                                <BlockIpButton
+                                  ip={item.ip}
+                                  originId={selectedOrigin !== 'ALL' ? selectedOrigin : null}
+                                  note="Most blocked sources (dashboard)"
+                                />
+                              </div>
                             </td>
                           </tr>
                         )
                       })
                     ) : (
                       <tr>
-                        <td colSpan={4} className="py-8 text-center text-[var(--text-muted)] text-[12px] font-mono">
-                          No suspicious source IPs recorded for this origin.
+                        <td colSpan={5} className="py-8 text-center text-[var(--text-muted)] text-[13px]">
+                          No blocked requests recorded for this scope.
                         </td>
                       </tr>
                     )}
@@ -841,12 +854,12 @@ export const Dashboard: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-2 pt-3 border-t border-[var(--bg-border-subtle)] text-[11px] font-mono">
                 <div>
-                  <span className="text-[var(--text-dim)] block text-[10px] uppercase">Latency</span>
-                  <span className="font-bold text-emerald-400">{thNode.latencyLabel}</span>
+                  <span className="text-[var(--text-muted)] block text-[11px]">Health check round trip</span>
+                  <span className="font-semibold text-[var(--text-primary)]">{thNode.latencyLabel}</span>
                 </div>
                 <div>
-                  <span className="text-[var(--text-dim)] block text-[10px] uppercase">WAF Engine</span>
-                  <span className="font-bold text-emerald-400">CRS {CRS_VERSION} Active</span>
+                  <span className="text-[var(--text-muted)] block text-[11px]">Rule set</span>
+                  <span className="font-semibold text-[var(--text-primary)]">OWASP CRS {CRS_VERSION}</span>
                 </div>
               </div>
             </div>
@@ -870,14 +883,22 @@ export const Dashboard: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-2 gap-2 pt-3 border-t border-[var(--bg-border-subtle)] text-[11px] font-mono">
-                <div>
-                  <span className="text-[var(--text-dim)] block text-[10px] uppercase">OLAP DB</span>
-                  <span className="font-bold text-emerald-400">ClickHouse Connected</span>
-                </div>
-                <div>
-                  <span className="text-[var(--text-dim)] block text-[10px] uppercase">Tunnel Hub</span>
-                  <span className="font-bold text-emerald-400">FRP Core Active</span>
-                </div>
+                {/* From the same /system/status probes as Stack diagnostics
+                    (these two used to be fixed "Connected" / "Active"). */}
+                {([
+                  { key: 'clickhouse', label: 'Log store (ClickHouse)' },
+                  { key: 'frps', label: 'Tunnel server (FRP)' },
+                ] as const).map(({ key, label }) => {
+                  const s = systemStatus?.services?.[key]?.status
+                  return (
+                    <div key={key}>
+                      <span className="text-[var(--text-muted)] block text-[11px]">{label}</span>
+                      <span className={`font-semibold ${s === 'online' ? 'text-emerald-700 dark:text-emerald-400' : s === 'offline' ? 'text-red-700 dark:text-red-400' : 'text-[var(--text-muted)]'}`}>
+                        {s === 'online' ? 'Online' : s === 'offline' ? 'Offline' : 'Unknown'}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </div>

@@ -46,7 +46,7 @@ async def get_analytics_summary(
             "attack_types": {},
             "suspicious_ips": [],
             "top_countries": [],
-            "ai_summary": "ℹ️ ยังไม่มีการผูก Origin Server สำหรับบัญชีนี้ กรุณาเพิ่ม Origin Server ในหน้า Origin Servers เพื่อเริ่มมอนิเตอร์ทราฟฟิกของคุณ"
+            "ai_summary": "This account has no origins yet. Add one under Origins to start seeing its traffic here."
         }
 
     if not ch.connected:
@@ -57,11 +57,12 @@ async def get_analytics_summary(
             "allowed_requests": 0,
             "blocked_requests": 0,
             "unique_ips": 0,
-            "average_latency_ms": 12,
+            # No data, so no number (this used to be a made-up 12 ms).
+            "average_latency_ms": None,
             "attack_types": {},
             "suspicious_ips": [],
             "top_countries": [],
-            "ai_summary": "⚠️ ClickHouse Database Offline"
+            "ai_summary": "Traffic figures are unavailable: the log store is not reachable."
         }
 
     try:
@@ -85,7 +86,7 @@ async def get_analytics_summary(
                 "attack_types": {},
                 "suspicious_ips": [],
                 "top_countries": [],
-                "ai_summary": f"ℹ️ ยังไม่มีบันทึกทราฟฟิกสำหรับ {origin if origin != 'ALL' else 'บัญชีของคุณ'} ในขณะนี้"
+                "ai_summary": "No traffic has been recorded for this scope yet."
             }
 
         # 2. Blocked vs Allowed Requests
@@ -105,7 +106,9 @@ async def get_analytics_summary(
         # avg() over an empty/near-empty set returns NaN (which is truthy), so a
         # bare int(latency_rows[0][0]) crashed the whole summary when there was
         # little data. Guard NaN (x != x is true only for NaN) and None.
-        avg_latency = 12
+        # None when nothing recorded a response time; the dashboard shows "—"
+        # (this used to default to a made-up 12 ms).
+        avg_latency = None
         if latency_rows and latency_rows[0][0] is not None:
             _lat = latency_rows[0][0]
             if not (isinstance(_lat, float) and _lat != _lat):
@@ -114,17 +117,22 @@ async def get_analytics_summary(
         # 5. Attack Type Breakdown
         atk_cond = f"{where_sql} AND attack_type != '' AND attack_type != 'NONE'" if where_sql else "WHERE attack_type != '' AND attack_type != 'NONE'"
         attack_rows = ch.query_stats(f"SELECT attack_type, count() FROM access_logs {atk_cond} GROUP BY attack_type ORDER BY count() DESC LIMIT 10")
+        # Only types the log pipeline actually recorded. There used to be a
+        # fallback {"WAF Security Filter": blocked} here, which presented the
+        # blocked count as if it were a detected attack type.
         attack_types = {str(row[0]): int(row[1]) for row in attack_rows} if attack_rows else {}
-        if not attack_types and blocked > 0:
-            attack_types = {"WAF Security Filter": blocked}
 
-        # 6. Suspicious IPs
-        susp_cond = f"{where_sql} AND (status_code = 403 OR status_code = 429 OR alert = 1) AND client_ip != ''" if where_sql else "WHERE (status_code = 403 OR status_code = 429 OR alert = 1) AND client_ip != ''"
+        # 6. Suspicious IPs: `total` is every request from the IP and
+        # `blocked` the blocked/flagged ones. The WHERE used to keep only
+        # blocked rows, so total always equalled blocked and the dashboard's
+        # "share blocked" was 100% for every IP.
+        susp_cond = f"{where_sql} AND client_ip != ''" if where_sql else "WHERE client_ip != ''"
         ip_rows = ch.query_stats(f"""
             SELECT client_ip, count() as total, sum(status_code = 403 OR status_code = 429 OR alert = 1) as blocked
             FROM access_logs
             {susp_cond}
             GROUP BY client_ip
+            HAVING blocked > 0
             ORDER BY blocked DESC, total DESC
             LIMIT 5
         """)
@@ -165,21 +173,33 @@ async def get_analytics_summary(
         ] if country_rows else []
 
         # 8. AI Threat Summary
+        # English like the rest of the dashboard (UX reorganization 2026-10-28).
         if origin and origin.upper() != "ALL":
-            scope_title = f"Origin: {origin}"
+            scope_title = "This origin"
         elif role == "admin":
             # Admin + ALL is unfiltered (tenant_service), i.e. the whole
             # platform, not "your origins" (F-016).
-            scope_title = "ทราฟฟิกทั้งแพลตฟอร์ม (มุมมองผู้ดูแลระบบ)"
+            scope_title = "Whole platform"
         else:
-            scope_title = "Origin ทั้งหมดของคุณ"
+            scope_title = "Your origins"
+        # Built only from the numbers above, so it can never disagree with
+        # the cards. It used to say the top IP was blocked "{blocked} times"
+        # -- the total over all IPs -- which contradicted the top-sources
+        # table (e.g. 31 here vs 16 there for the same IP).
+        latency_text = f"{avg_latency} ms" if avg_latency is not None else "not recorded"
         if blocked > 0:
-            top_attack = list(attack_types.keys())[0] if attack_types else "Security Filter"
-            top_ip = suspicious_ips[0]["ip"] if suspicious_ips else "Unknown"
             block_ratio = round((blocked / total * 100), 1) if total > 0 else 0
-            ai_summary = f"⚠️ ข้อมูล {scope_title}: ตรวจพบและสกัดกั้นทราฟฟิกผิดปกติแบบ {top_attack} จากไอพี {top_ip} รวม {blocked:,} ครั้ง (คิดเป็น {block_ratio}% ของทราฟฟิก) จากทั้งหมด {total:,} คำขอ ความหน่วงเฉลี่ย {avg_latency}ms สถานะ WAF Engine ทำงานปกติ"
+            parts = [f"{scope_title}: {blocked:,} of {total:,} requests ({block_ratio}%) were blocked or flagged."]
+            if attack_types:
+                top_attack, top_attack_count = next(iter(attack_types.items()))
+                parts.append(f"The most common attack type was {top_attack} ({top_attack_count:,} requests).")
+            if suspicious_ips:
+                top = suspicious_ips[0]
+                parts.append(f"The most blocked IP was {top['ip']} ({top['blocked']:,} of its {top['total']:,} requests).")
+            parts.append(f"Average response time: {latency_text}.")
+            ai_summary = " ".join(parts)
         else:
-            ai_summary = f"🟢 ข้อมูล {scope_title}: วิเคราะห์ทราฟฟิกรวม {total:,} Requests ทั้งหมดผ่านเกณฑ์ความปลอดภัย ความหน่วงเฉลี่ย {avg_latency}ms ไม่พบภัยคุกคามผิดปกติ"
+            ai_summary = f"{scope_title}: {total:,} requests, none blocked or flagged. Average response time: {latency_text}."
 
         return {
             "source": "clickhouse",

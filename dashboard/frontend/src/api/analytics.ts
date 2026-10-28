@@ -23,7 +23,9 @@ export interface AnalyticsSummary {
   allowed_requests: number
   blocked_requests: number
   unique_ips?: number
-  average_latency_ms: number
+  // null when no request recorded a response time (the backend used to send
+  // a made-up 12 ms in that case).
+  average_latency_ms: number | null
   attack_types: Record<string, number>
   suspicious_ips: SuspiciousIp[]
   top_countries?: TopCountry[]
