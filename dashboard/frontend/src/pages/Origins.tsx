@@ -27,6 +27,7 @@ import {
   ArrowRight,
   AlertTriangle,
   RefreshCw,
+  Cable,
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { originRoleOf } from '../lib/roles'
@@ -122,22 +123,36 @@ export const Origins: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       <TopBar
-        title="Origin Server Infrastructure"
-        subtitle="Upstream web server pools protected behind the IT KKU WAF reverse proxy"
+        title="Origins"
+        subtitle="The websites the WAF protects. Open one to manage its domains, rules, IP access and team."
         badge={
-          <Badge color="blue" dot>
-            {isLoading ? '—' : origins.filter((o: Origin) => o.status !== 'archived').length} POOLS CONFIGURED
+          <Badge color="gray">
+            {isLoading ? '—' : origins.filter((o: Origin) => o.status !== 'archived').length} active
           </Badge>
         }
         action={
-          <Button
-            variant="brand"
-            onClick={() => guard('create_origin', () => setIsAddModalOpen(true))}
-            disabled={quotaFull}
-            icon={<Plus size={14} />}
-          >
-            Add Origin Server
-          </Button>
+          // Two ways in, matching what the platform supports: a domain the
+          // WAF reaches over the internet (DNS), or a server without a
+          // public IP that dials out through a private tunnel.
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => navigate('/tunnels')}
+              icon={<Cable size={14} />}
+              title="For a server without a public IP: it connects out to the WAF through a tunnel agent"
+            >
+              Connect through a tunnel
+            </Button>
+            <Button
+              variant="brand"
+              onClick={() => guard('create_origin', () => setIsAddModalOpen(true))}
+              disabled={quotaFull}
+              icon={<Plus size={14} />}
+              title={quotaFull ? 'Your origin quota is full' : 'Add a site by its domain'}
+            >
+              Add origin
+            </Button>
+          </div>
         }
       />
 
@@ -145,8 +160,8 @@ export const Origins: React.FC = () => {
       <div className="dash-card p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <span className="text-[13px] font-bold text-[var(--text-primary)] font-mono">
-              Origin Pool Quota Allocation
+            <span className="text-[13.5px] font-semibold text-[var(--text-primary)]">
+              Origin quota
             </span>
             <span
               className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded ${
@@ -163,7 +178,7 @@ export const Origins: React.FC = () => {
             </span>
           </div>
           <p className="text-[12px] text-[var(--text-muted)] m-0">
-            Each origin server receives dedicated SSL cert provisioning and ModSec reverse proxy routes.
+            {quotaFull ? 'Your quota is full. Archive an origin you no longer need to add another.' : 'How many origins this account can add.'}
           </p>
         </div>
 

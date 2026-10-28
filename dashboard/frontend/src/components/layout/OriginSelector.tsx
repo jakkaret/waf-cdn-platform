@@ -82,7 +82,7 @@ export const OriginSelector: React.FC = () => {
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-2 px-3 py-1.8 rounded-xl border text-[12px] font-semibold transition-all cursor-pointer shadow-sm ${
           selectedOrigin !== 'ALL'
-            ? 'bg-indigo-600/15 border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/25 hover:border-indigo-500/60'
+            ? 'bg-indigo-600/15 border-indigo-500/40 text-indigo-800 dark:text-indigo-300 hover:bg-indigo-600/25 hover:border-indigo-500/60'
             : 'bg-[var(--bg-surface)] border-[var(--bg-border)] text-[var(--text-primary)] hover:border-[var(--bg-border-hover)] hover:bg-[var(--bg-hover)]'
         }`}
         title="Filter dashboard telemetry & logs by Web Origin"
@@ -168,7 +168,7 @@ export const OriginSelector: React.FC = () => {
                     onClick={() => handleSelect(origin.id, origin.label)}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-[12px] transition-all text-left cursor-pointer ${
                       isSelected
-                        ? 'bg-indigo-600/15 text-indigo-300 font-bold border border-indigo-500/30'
+                        ? 'bg-indigo-600/15 text-indigo-800 dark:text-indigo-300 font-bold border border-indigo-500/30'
                         : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
                     }`}
                   >

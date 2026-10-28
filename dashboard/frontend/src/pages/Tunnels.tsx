@@ -169,8 +169,8 @@ export const Tunnels: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       <TopBar
-        title="Private Edge Tunnels"
-        subtitle="Secure outbound reverse tunneling for private origins without public IPs or port forwarding"
+        title="Private tunnels"
+        subtitle="Connect a server that has no public IP. A small agent on it opens an outbound FRP tunnel to the WAF, so no port forwarding is needed."
         badge={
           <Badge color="success" dot>
             {activeCount ?? '—'} TUNNELS ACTIVE
@@ -249,7 +249,7 @@ export const Tunnels: React.FC = () => {
               </p>
             </div>
           </div>
-          <span className="px-2.5 py-1 rounded-full text-[11px] font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold flex items-center gap-1.5">
+          <span className="px-2.5 py-1 rounded-full text-[11px] font-mono bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30 font-semibold flex items-center gap-1.5">
             <Zap size={13} className="text-amber-400" /> 1-Step Setup
           </span>
         </div>
@@ -262,7 +262,7 @@ export const Tunnels: React.FC = () => {
             onClick={() => setMode('quick')}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-mono font-medium flex items-center gap-1.5 transition-all border ${
               mode === 'quick'
-                ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/50'
+                ? 'bg-[var(--nav-active)] text-[var(--text-primary)] border-[var(--accent)] font-semibold'
                 : 'text-[var(--text-secondary)] border-[var(--bg-border)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
             }`}
           >
@@ -274,7 +274,7 @@ export const Tunnels: React.FC = () => {
             onClick={() => setMode('own')}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-mono font-medium flex items-center gap-1.5 transition-all border ${
               mode === 'own'
-                ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/50'
+                ? 'bg-[var(--nav-active)] text-[var(--text-primary)] border-[var(--accent)] font-semibold'
                 : 'text-[var(--text-secondary)] border-[var(--bg-border)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
             }`}
           >
@@ -560,7 +560,7 @@ export const Tunnels: React.FC = () => {
                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                         {t.name}
                       </td>
-                      <td className="py-3 px-3 text-indigo-400 hover:text-indigo-300">
+                      <td className="py-3 px-3 text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300">
                         <a
                           href={`https://${domainName}`}
                           target="_blank"

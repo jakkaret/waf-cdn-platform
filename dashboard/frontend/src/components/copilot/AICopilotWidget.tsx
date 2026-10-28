@@ -165,7 +165,7 @@ export const AICopilotWidget: React.FC = () => {
           <div className="px-4 py-3 bg-[var(--bg-surface-elevated)] border-b border-[var(--bg-border)] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                <Sparkles size={16} className="text-indigo-300" />
+                <Sparkles size={16} className="text-indigo-800 dark:text-indigo-300" />
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
@@ -263,7 +263,7 @@ export const AICopilotWidget: React.FC = () => {
                 key={idx}
                 onClick={() => handleSend(prompt)}
                 disabled={isLoading}
-                className="px-2.5 py-1 rounded-full text-[11px] font-mono text-[var(--text-secondary)] hover:text-indigo-300 hover:bg-indigo-500/10 border border-[var(--bg-border)] hover:border-indigo-500/30 shrink-0 transition-all cursor-pointer disabled:opacity-50"
+                className="px-2.5 py-1 rounded-full text-[11px] font-mono text-[var(--text-secondary)] hover:text-indigo-900 dark:hover:text-indigo-300 hover:bg-indigo-500/10 border border-[var(--bg-border)] hover:border-indigo-500/30 shrink-0 transition-all cursor-pointer disabled:opacity-50"
               >
                 {prompt}
               </button>

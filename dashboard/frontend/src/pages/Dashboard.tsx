@@ -235,12 +235,12 @@ export const Dashboard: React.FC = () => {
 
       {/* Origin Scope Filter Indicator Banner */}
       {selectedOrigin !== 'ALL' && activeTab === 'security' && (
-        <div className="mb-5 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-between gap-3 text-indigo-300 font-mono text-[12px] animate-fade-in">
+        <div className="mb-5 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-between gap-3 text-indigo-800 dark:text-indigo-300 font-mono text-[12px] animate-fade-in">
           <div className="flex items-center gap-2 truncate">
             <Shield size={16} className="text-indigo-400 shrink-0" />
             <span className="truncate">
               Currently Scoped to Origin:{' '}
-              <strong className="text-white font-bold">{selectedOriginLabel}</strong>
+              <strong className="text-[var(--text-primary)] font-semibold">{selectedOriginLabel}</strong>
             </span>
           </div>
           <button

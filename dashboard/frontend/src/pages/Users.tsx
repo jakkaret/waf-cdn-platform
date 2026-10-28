@@ -37,8 +37,8 @@ export const Users: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       <TopBar
-        title="Role-Based Access Control (RBAC)"
-        subtitle="Manage administrator and observer privileges across the IT KKU WAF control plane"
+        title="Access control"
+        subtitle="Platform roles: who is a platform operator and who is a regular user."
         badge={
           <Badge color="brand" dot>
             {users.length} ACCOUNTS

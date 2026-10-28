@@ -130,14 +130,14 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
             <div className="space-y-4 pt-4 border-t border-[var(--bg-border-subtle)] animate-in fade-in slide-in-from-bottom-2 duration-200">
               {/* Range Banner & Stats */}
               <div className="flex items-center justify-between p-3.5 px-4 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
-                <div className="flex items-center gap-2 font-mono text-[12.5px] text-indigo-300">
+                <div className="flex items-center gap-2 font-mono text-[12.5px] text-indigo-800 dark:text-indigo-300">
                   <Clock size={15} />
                   <span>ช่วงเวลาที่วิเคราะห์: <strong>{result.time_range.description}</strong></span>
                 </div>
                 <button
                   type="button"
                   onClick={handleCopy}
-                  className="px-2.5 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 font-mono text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                  className="px-2.5 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-800 dark:text-indigo-200 font-mono text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
                 >
                   {copied ? <Check size={12} /> : <Copy size={12} />}
                   {copied ? 'Copied' : 'Copy Report'}
