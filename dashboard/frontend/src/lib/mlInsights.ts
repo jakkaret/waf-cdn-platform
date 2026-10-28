@@ -68,8 +68,8 @@ export interface MLInsights {
 }
 
 export const RANGES = [
-  { hours: 24, label: '24 ชั่วโมง' },
-  { hours: 168, label: '7 วัน' },
+  { hours: 24, label: '24 hours' },
+  { hours: 168, label: '7 days' },
 ] as const
 
 export type ListMode = 'flagged' | 'watch'
@@ -123,10 +123,10 @@ export function statusView(
   code: number | null,
   action?: GateAction | null,
 ): { text: string; tone: 'ok' | 'blocked' | 'error' | 'unknown' } {
-  if (action === 'block') return { text: '403 ML บล็อก', tone: 'blocked' }
-  if (action === 'challenge') return { text: 'ML ส่ง challenge', tone: 'error' }
-  if (code === null || code === undefined) return { text: 'ยังไม่มีใน log', tone: 'unknown' }
-  if (code === 403 || code === 429) return { text: `${code} ถูกบล็อก`, tone: 'blocked' }
+  if (action === 'block') return { text: '403 blocked by ML', tone: 'blocked' }
+  if (action === 'challenge') return { text: 'Challenged by ML', tone: 'error' }
+  if (code === null || code === undefined) return { text: 'Not in the log yet', tone: 'unknown' }
+  if (code === 403 || code === 429) return { text: `${code} blocked`, tone: 'blocked' }
   if (code >= 500) return { text: `${code}`, tone: 'error' }
   return { text: `${code}`, tone: 'ok' }
 }
@@ -134,8 +134,8 @@ export function statusView(
 // Why an Owner/Editor gets no "propose a rule" button on this request ("" = they do).
 export function proposeHint(r: Pick<InsightRequest, 'can_edit' | 'can_propose' | 'action' | 'is_attack'>): string {
   if (!r.can_edit || r.can_propose) return ''
-  if (r.action === 'block') return 'ML บล็อก request นี้อยู่แล้ว ไม่ต้องมีกฎเพิ่ม'
-  if (!r.is_attack) return 'คะแนนยังต่ำกว่าเกณฑ์ของโมเดล โมเดลจึงไม่เสนอกฎจาก request นี้'
+  if (r.action === 'block') return 'ML already blocks this request, so no extra rule is needed.'
+  if (!r.is_attack) return "The score is below the model's threshold, so the model does not propose a rule from this request."
   return ''
 }
 
@@ -143,14 +143,25 @@ export function proposeHint(r: Pick<InsightRequest, 'can_edit' | 'can_propose' |
 export function suggestReasonText(reason: string): string {
   switch (reason) {
     case 'gen3_not_attack':
-      return 'เมื่อให้คะแนนใหม่จากข้อมูลที่เก็บไว้ (ซ่อนข้อมูลส่วนตัวแล้ว) คะแนนต่ำกว่าเกณฑ์ จึงไม่มีกฎที่เสนอได้'
+      return 'Scored again from the stored (masked) data, the request falls below the threshold, so there is no rule to propose.'
     case 'gen3_no_detector':
-      return 'โมเดลตั้งข้อสังเกตจากโครงสร้างของ request ไม่มี detector ตัวไหนตรง จึงสร้างกฎทั่วไปไม่ได้'
+      return 'The model flagged the shape of the request, but no detector matched, so no general rule can be built from it.'
     case 'generator_error':
-      return 'ตัวสร้างกฎของ ML ตอบผิดพลาด ลองใหม่อีกครั้ง'
+      return 'The ML rule generator returned an error. Try again.'
     default:
-      return reason ? `ไม่มีกฎที่เสนอได้ (${reason})` : ''
+      return reason ? `No rule could be proposed (${reason}).` : ''
   }
+}
+
+// Paths that usually belong to a monitoring, health-check or telemetry
+// service, not a visitor. A rule proposed from one of them tends to block
+// that service (the UX review found a flagged Cloudflare Workers telemetry
+// call), so the page asks for a second look before proposing. A hint only:
+// the person decides.
+const SERVICE_PATH = /(^|\/)(cdn-cgi|healthz?|health-check|status|ping|metrics|telemetry|beacon|rum|collect|_vercel|__nextjs)(\/|$|\?|\.)/i
+
+export function looksLikeServiceTraffic(path: string | null | undefined): boolean {
+  return !!path && SERVICE_PATH.test(path)
 }
 
 export function requestTarget(r: Pick<InsightRequest, 'path' | 'query'>): string {
@@ -158,7 +169,7 @@ export function requestTarget(r: Pick<InsightRequest, 'path' | 'query'>): string
 }
 
 export function emptyReason(summary: InsightsSummary, hasOrigins: boolean, isAdmin: boolean): string {
-  if (!isAdmin && !hasOrigins) return 'ยังไม่มี origin ที่คุณดูได้ เพิ่ม origin หรือขอสิทธิ์จากเจ้าของก่อน'
-  if (!summary.total) return 'ยังไม่มี request ที่ถูกให้คะแนนในช่วงเวลานี้ ระบบเริ่มให้คะแนนเมื่อมี traffic เข้าเว็บ'
+  if (!isAdmin && !hasOrigins) return 'You have no origins to look at yet. Add one, or ask its owner to invite you.'
+  if (!summary.total) return 'No requests were scored in this period. Scoring starts once your sites receive traffic.'
   return ''
 }

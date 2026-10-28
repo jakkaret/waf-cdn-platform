@@ -73,7 +73,7 @@ const RequestRow: React.FC<{ r: InsightRequest; showHost: boolean }> = ({ r, sho
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            aria-label={open ? 'ซ่อนรายละเอียด' : 'ดูรายละเอียด'}
+            aria-label={open ? 'Hide details' : 'Show details'}
             className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
             {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -112,7 +112,7 @@ const RequestRow: React.FC<{ r: InsightRequest; showHost: boolean }> = ({ r, sho
               ))}
             </span>
           ) : (
-            <span className={muted} title="โมเดลให้คะแนนจากโครงสร้างของ request ไม่มี detector ตัวไหนตรง">โครงสร้าง</span>
+            <span className={muted} title="The model scored the shape of the request; no detector matched">Request shape</span>
           )}
         </td>
         <td className={`py-2 pr-3 whitespace-nowrap text-[12px] ${STATUS_TONE[status.tone]}`}>{status.text}</td>
@@ -126,14 +126,14 @@ const RequestRow: React.FC<{ r: InsightRequest; showHost: boolean }> = ({ r, sho
               <dd className="m-0 font-mono break-all text-[var(--text-primary)]">{r.method} {target}</dd>
               <dt className="text-[var(--text-muted)]">Host</dt>
               <dd className="m-0 text-[var(--text-primary)]">{r.host}</dd>
-              <dt className="text-[var(--text-muted)]">คะแนน / เกณฑ์</dt>
+              <dt className="text-[var(--text-muted)]">Score / threshold</dt>
               <dd className="m-0 tabular-nums text-[var(--text-primary)]">{scorePoints(r.score, 2)} / {scorePoints(r.threshold, 2)}</dd>
-              <dt className="text-[var(--text-muted)]">ขนาด body</dt>
+              <dt className="text-[var(--text-muted)]">Body size</dt>
               <dd className="m-0 tabular-nums text-[var(--text-primary)]">
-                {r.body_length.toLocaleString()} bytes {r.has_body ? '(เก็บแบบซ่อนข้อมูลส่วนตัว เจ้าของและ Editor ดูได้)' : '(ไม่ได้เก็บเนื้อหา)'}
+                {r.body_length.toLocaleString()} bytes {r.has_body ? '(a masked copy is kept; the Owner and Editors can open it)' : '(content not kept)'}
               </dd>
-              <dt className="text-[var(--text-muted)]">ผู้ส่ง</dt>
-              <dd className="m-0 text-[var(--text-primary)]">{r.client_ip ?? '-'}{r.country ? ` · ${r.country}` : ''}</dd>
+              <dt className="text-[var(--text-muted)]">Client</dt>
+              <dd className="m-0 text-[var(--text-primary)]">{r.client_ip ?? '-'}{r.country ? ` (${r.country})` : ''}</dd>
               <dt className="text-[var(--text-muted)]">Request ID</dt>
               <dd className="m-0 font-mono break-all text-[var(--text-secondary)]">{r.request_id || '-'}</dd>
             </dl>
@@ -188,21 +188,23 @@ export const MLInsights: React.FC = () => {
         <div className="flex max-w-3xl items-start gap-2.5 rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] px-3 py-2.5">
           <Info size={16} className="mt-0.5 shrink-0 text-[var(--accent)]" aria-hidden="true" />
           <p className="m-0 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">
-            <strong className="font-medium text-[var(--text-primary)]">ค่าเริ่มต้นคือโหมด log:</strong> โมเดล Gen 3 ให้คะแนนทุก request
-            ที่ผ่าน WAF (รวม body) แล้วบันทึกไว้เท่านั้น <strong className="font-medium text-[var(--text-primary)]">ไม่ได้บล็อก</strong>{' '}
-            เจ้าของหรือ Editor เปิดโหมด enforce ได้ที่หน้า Origin แท็บ ML Protection
+            <strong className="font-medium text-[var(--text-primary)]">Log mode by default:</strong> the model scores every request
+            that passes the WAF, body included, and only records the score. It{' '}
+            <strong className="font-medium text-[var(--text-primary)]">does not block</strong>. An Owner or Editor can turn on enforce
+            mode in the origin's ML protection tab.
             {(summary?.blocked ?? 0) + (summary?.challenged ?? 0) > 0 && (
               <>
-                {' '}ช่วงนี้ ML บล็อก{' '}
-                <strong className="font-medium text-[var(--text-primary)]">{(summary?.blocked ?? 0).toLocaleString()}</strong> และส่ง
-                challenge <strong className="font-medium text-[var(--text-primary)]">{(summary?.challenged ?? 0).toLocaleString()}</strong> request
+                {' '}In this period ML blocked{' '}
+                <strong className="font-medium text-[var(--text-primary)]">{(summary?.blocked ?? 0).toLocaleString()}</strong> and
+                challenged <strong className="font-medium text-[var(--text-primary)]">{(summary?.challenged ?? 0).toLocaleString()}</strong> requests.
               </>
             )}
-            {' '}request ที่ถูกตั้งข้อสังเกตอาจไม่ใช่การโจมตีจริงเสมอไป ให้ดูประกอบกับ path และสิ่งที่ตรวจพบ
+            {' '}A flagged request is an estimate, not a confirmed attack: read it together with its path and what was detected. Health
+            checks and monitoring or telemetry calls (for example from Cloudflare Workers) can be flagged too and are usually safe.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-md border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5" role="group" aria-label="ช่วงเวลา">
+          <div className="inline-flex rounded-md border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5" role="group" aria-label="Time range">
             {RANGES.map((r) => (
               <button
                 key={r.hours}
@@ -220,7 +222,7 @@ export const MLInsights: React.FC = () => {
           <button
             type="button"
             onClick={() => refetch()}
-            aria-label="รีเฟรช"
+            aria-label="Refresh"
             className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--bg-border)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
             <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
@@ -229,29 +231,29 @@ export const MLInsights: React.FC = () => {
       </div>
 
       <p className={`m-0 ${muted}`}>
-        กำลังดู: <span className="text-[var(--text-secondary)]">{selectedOrigin === 'ALL' ? (isAdmin ? 'ทุก origin ที่ดูได้' : 'ทุก origin ของคุณ') : selectedOriginLabel}</span>
-        {' '}· เปลี่ยน origin ได้ที่ตัวเลือกด้านบนขวา
+        Showing <span className="text-[var(--text-secondary)]">{selectedOrigin === 'ALL' ? (isAdmin ? 'every origin you can view' : 'all your origins') : selectedOriginLabel}</span>.
+        {' '}Change it with the origin picker at the top.
       </p>
 
       {isLoading && (
         <div className="dash-card flex min-h-[14rem] items-center justify-center gap-2 text-[13px] text-[var(--text-muted)]">
           <span className="h-4 w-4 rounded-full border-2 border-[var(--bg-border)] border-t-[var(--accent)] animate-spin" />
-          กำลังโหลด ML Insights...
+          Loading ML insights…
         </div>
       )}
 
       {isError && (
         <div className="dash-card p-5 text-[13px] text-[var(--text-secondary)]">
           {(error as any)?.response?.status === 503
-            ? 'ระบบเก็บข้อมูล analytics ใช้งานไม่ได้ชั่วคราว ลองใหม่อีกครั้งในสักครู่'
-            : 'โหลด ML Insights ไม่สำเร็จ ลองรีเฟรชหน้านี้'}
+            ? 'The analytics store is unavailable right now. Try again in a minute.'
+            : 'Could not load ML insights. Reload the page to try again.'}
         </div>
       )}
 
       {data && summary && reason && (
         <div className="dash-card flex min-h-[12rem] flex-col items-center justify-center p-8 text-center">
           <ShieldAlert size={32} className="text-[var(--text-dim)]" aria-hidden="true" />
-          <p className="mt-3 mb-1 text-[14px] font-medium text-[var(--text-primary)]">ยังไม่มีข้อมูล</p>
+          <p className="mt-3 mb-1 text-[14px] font-medium text-[var(--text-primary)]">No data yet</p>
           <p className="m-0 max-w-md text-[12.5px] text-[var(--text-muted)]">{reason}</p>
         </div>
       )}
@@ -259,22 +261,22 @@ export const MLInsights: React.FC = () => {
       {data && summary && !reason && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Tile label="Request ที่ให้คะแนนแล้ว" value={summary.total.toLocaleString()} sub={summary.last_seen ? `ล่าสุด ${formatBkkDateTime(summary.last_seen, { seconds: false })}` : undefined} />
-            <Tile label="ML ตั้งข้อสังเกต" value={summary.flagged.toLocaleString()} sub={`${flaggedShare(summary)} ของทั้งหมด`} />
-            <Tile label="ควรจับตา" value={summary.watch.toLocaleString()} sub={`คะแนน ${scorePoints(WATCH_FLOOR, 0)} ขึ้นไป แต่ยังไม่ถึงเกณฑ์`} />
-            <Tile label="เกณฑ์ของโมเดล" value={scorePoints(threshold, 1)} sub="คะแนนตั้งแต่นี้ขึ้นไปถูกตั้งข้อสังเกต" />
+            <Tile label="Requests scored" value={summary.total.toLocaleString()} sub={summary.last_seen ? `Latest ${formatBkkDateTime(summary.last_seen, { seconds: false })}` : undefined} />
+            <Tile label="Flagged by ML" value={summary.flagged.toLocaleString()} sub={`${flaggedShare(summary)} of all scored`} />
+            <Tile label="Worth watching" value={summary.watch.toLocaleString()} sub={`Score ${scorePoints(WATCH_FLOOR, 0)} or more, below the threshold`} />
+            <Tile label="Model threshold" value={scorePoints(threshold, 1)} sub="Scores at or above this are flagged" />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            <section className="dash-card p-4 lg:col-span-8" aria-label="การกระจายคะแนน">
+            <section className="dash-card p-4 lg:col-span-8" aria-label="Score distribution">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className={sectionTitle}>การกระจายคะแนน</h2>
+                <h2 className={sectionTitle}>Score distribution</h2>
                 <span className="flex items-center gap-3 text-[12px] text-[var(--text-secondary)]">
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.below }} />ต่ำกว่าเกณฑ์</span>
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.flagged }} />ถึงเกณฑ์ (ตั้งข้อสังเกต)</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.below }} />Below the threshold</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.flagged }} />At or above (flagged)</span>
                 </span>
               </div>
-              <p className={`m-0 mt-0.5 ${muted}`}>จำนวน request ในแต่ละช่วงคะแนน 0-100 เส้นตั้งคือเกณฑ์ของโมเดล</p>
+              <p className={`m-0 mt-0.5 ${muted}`}>Requests per score band, 0 to 100. The vertical line is the model's threshold.</p>
               <div className="mt-3 h-56">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={bars.map((b) => ({ ...b, below: b.count - b.flagged }))} margin={{ top: 8, right: 4, left: -16, bottom: 0 }} barCategoryGap={2}>
@@ -285,8 +287,8 @@ export const MLInsights: React.FC = () => {
                       cursor={{ fill: 'var(--bg-border)', opacity: 0.4 }}
                       content={
                         <ChartTip
-                          title={(p) => `คะแนน ${p.label}`}
-                          rows={(p) => [['request', p.count.toLocaleString()], ['ตั้งข้อสังเกต', p.flagged.toLocaleString()]]}
+                          title={(p) => `Score ${p.label}`}
+                          rows={(p) => [['Requests', p.count.toLocaleString()], ['Flagged', p.flagged.toLocaleString()]]}
                         />
                       }
                     />
@@ -298,9 +300,9 @@ export const MLInsights: React.FC = () => {
               </div>
             </section>
 
-            <section className="dash-card p-4 lg:col-span-4" aria-label="สิ่งที่ตรวจพบใน request ที่ถูกตั้งข้อสังเกต">
-              <h2 className={sectionTitle}>สิ่งที่ตรวจพบ</h2>
-              <p className={`m-0 mt-0.5 ${muted}`}>ใน request ที่ถูกตั้งข้อสังเกต</p>
+            <section className="dash-card p-4 lg:col-span-4" aria-label="What was detected in flagged requests">
+              <h2 className={sectionTitle}>What was detected</h2>
+              <p className={`m-0 mt-0.5 ${muted}`}>In flagged requests</p>
               {data.detectors.length ? (
                 <ul className="m-0 mt-3 p-0 list-none space-y-2.5">
                   {data.detectors.map((d) => (
@@ -317,15 +319,15 @@ export const MLInsights: React.FC = () => {
                 </ul>
               ) : (
                 <p className={`m-0 mt-3 ${muted}`}>
-                  {summary.flagged ? 'request ที่ถูกตั้งข้อสังเกตไม่มี detector ตัวไหนตรง โมเดลตัดสินจากโครงสร้างของ request' : 'ยังไม่มี request ที่ถูกตั้งข้อสังเกต'}
+                  {summary.flagged ? 'No detector matched the flagged requests; the model judged them by their shape.' : 'No flagged requests yet.'}
                 </p>
               )}
             </section>
           </div>
 
-          <section className="dash-card p-4" aria-label="จำนวนที่ถูกตั้งข้อสังเกตตามเวลา">
-            <h2 className={sectionTitle}>ที่ถูกตั้งข้อสังเกตตามเวลา</h2>
-            <p className={`m-0 mt-0.5 ${muted}`}>ต่อ{longRange ? ' 6 ชั่วโมง' : 'ชั่วโมง'} (เวลาไทย)</p>
+          <section className="dash-card p-4" aria-label="Flagged requests over time">
+            <h2 className={sectionTitle}>Flagged over time</h2>
+            <p className={`m-0 mt-0.5 ${muted}`}>Per {longRange ? '6 hours' : 'hour'}, Bangkok time</p>
             <div className="mt-3 h-36">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={timeline} margin={{ top: 8, right: 4, left: -16, bottom: 0 }} barCategoryGap={2}>
@@ -337,7 +339,7 @@ export const MLInsights: React.FC = () => {
                     content={
                       <ChartTip
                         title={(p) => formatBkkDateTime(p.t)}
-                        rows={(p) => [['ตั้งข้อสังเกต', p.flagged.toLocaleString()], ['request ทั้งหมด', p.count.toLocaleString()]]}
+                        rows={(p) => [['Flagged', p.flagged.toLocaleString()], ['All requests', p.count.toLocaleString()]]}
                       />
                     }
                   />
@@ -347,14 +349,14 @@ export const MLInsights: React.FC = () => {
             </div>
           </section>
 
-          <section className="dash-card p-0 overflow-hidden" aria-label="รายการ request">
+          <section className="dash-card p-0 overflow-hidden" aria-label="Requests">
             <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
               <div>
-                <h2 className={sectionTitle}>Request ล่าสุด</h2>
-                <p className={`m-0 mt-0.5 ${muted}`}>ไม่เก็บ body ค่าที่อ่อนไหวใน query (เช่น token, password) ถูกซ่อน</p>
+                <h2 className={sectionTitle}>Latest requests</h2>
+                <p className={`m-0 mt-0.5 ${muted}`}>Sensitive query values (token, password) are masked. For requests scoring 50 or more a masked copy of the body is kept for 7 days.</p>
               </div>
-              <div className="inline-flex rounded-md border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5" role="group" aria-label="รายการที่แสดง">
-                {([['flagged', 'ถูกตั้งข้อสังเกต'], ['watch', `คะแนน ${scorePoints(WATCH_FLOOR, 0)} ขึ้นไป`]] as const).map(([m, label]) => (
+              <div className="inline-flex rounded-md border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5" role="group" aria-label="Which requests">
+                {([['flagged', 'Flagged'], ['watch', `Score ${scorePoints(WATCH_FLOOR, 0)} or more`]] as const).map(([m, label]) => (
                   <button
                     key={m}
                     type="button"
@@ -374,13 +376,13 @@ export const MLInsights: React.FC = () => {
                 <table className="w-full min-w-[46rem] border-collapse text-left">
                   <thead>
                     <tr className="text-[11.5px] font-medium text-[var(--text-muted)]">
-                      <th className="w-8 py-2 pl-3" aria-label="รายละเอียด" />
-                      <th className="py-2 pr-3 font-medium">เวลา</th>
+                      <th className="w-8 py-2 pl-3" aria-label="Details" />
+                      <th className="py-2 pr-3 font-medium">Time</th>
                       {showHost && <th className="py-2 pr-3 font-medium">Host</th>}
                       <th className="py-2 pr-3 font-medium">Request</th>
-                      <th className="py-2 pr-3 font-medium">คะแนน</th>
-                      <th className="py-2 pr-3 font-medium">สิ่งที่ตรวจพบ</th>
-                      <th className="py-2 pr-3 font-medium">WAF ตอบ</th>
+                      <th className="py-2 pr-3 font-medium">Score</th>
+                      <th className="py-2 pr-3 font-medium">Detected</th>
+                      <th className="py-2 pr-3 font-medium">WAF answer</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -390,7 +392,7 @@ export const MLInsights: React.FC = () => {
               </div>
             ) : (
               <p className={`m-0 px-4 py-8 text-center ${muted}`}>
-                {mode === 'flagged' ? 'ไม่มี request ที่ถูกตั้งข้อสังเกตในช่วงเวลานี้' : 'ไม่มี request ที่คะแนนถึง 50 ในช่วงเวลานี้'}
+                {mode === 'flagged' ? 'No flagged requests in this period.' : 'No requests scored 50 or more in this period.'}
               </p>
             )}
           </section>

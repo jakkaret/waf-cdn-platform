@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
-  detectorLabel, emptyReason, flaggedShare, histogramBars, proposeHint, requestTarget, scorePoints, statusView, suggestReasonText,
+  detectorLabel, emptyReason, flaggedShare, histogramBars, looksLikeServiceTraffic, proposeHint, requestTarget, scorePoints,
+  statusView, suggestReasonText,
 } from './mlInsights'
 
 describe('proposeHint', () => {
   it('explains a missing propose button to an Owner/Editor only', () => {
     expect(proposeHint({ can_edit: true, can_propose: true, action: null, is_attack: true })).toBe('')
-    expect(proposeHint({ can_edit: true, can_propose: false, action: 'block', is_attack: true })).toMatch(/บล็อก/)
-    expect(proposeHint({ can_edit: true, can_propose: false, action: null, is_attack: false })).toMatch(/ต่ำกว่าเกณฑ์/)
+    expect(proposeHint({ can_edit: true, can_propose: false, action: 'block', is_attack: true })).toMatch(/already blocks/)
+    expect(proposeHint({ can_edit: true, can_propose: false, action: null, is_attack: false })).toMatch(/below the model's threshold/)
     expect(proposeHint({ can_edit: false, can_propose: false, action: null, is_attack: true })).toBe('')
   })
 
@@ -52,16 +53,32 @@ describe('histogramBars', () => {
 
 describe('statusView', () => {
   it('says what the WAF answered, or that the log row is not there yet', () => {
-    expect(statusView(403)).toEqual({ text: '403 ถูกบล็อก', tone: 'blocked' })
+    expect(statusView(403)).toEqual({ text: '403 blocked', tone: 'blocked' })
     expect(statusView(200)).toEqual({ text: '200', tone: 'ok' })
     expect(statusView(null).tone).toBe('unknown')
   })
 
   it('names the inline gate as the one that blocked or challenged', () => {
-    expect(statusView(403, 'block')).toEqual({ text: '403 ML บล็อก', tone: 'blocked' })
-    expect(statusView(null, 'challenge').text).toBe('ML ส่ง challenge')
+    expect(statusView(403, 'block')).toEqual({ text: '403 blocked by ML', tone: 'blocked' })
+    expect(statusView(null, 'challenge').text).toBe('Challenged by ML')
     expect(statusView(200, 'pass')).toEqual({ text: '200', tone: 'ok' })
     expect(statusView(200, null)).toEqual({ text: '200', tone: 'ok' })
+  })
+})
+
+describe('looksLikeServiceTraffic', () => {
+  it('spots monitoring and telemetry paths', () => {
+    expect(looksLikeServiceTraffic('/cdn-cgi/rum')).toBe(true)
+    expect(looksLikeServiceTraffic('/healthz')).toBe(true)
+    expect(looksLikeServiceTraffic('/api/telemetry/events')).toBe(true)
+    expect(looksLikeServiceTraffic('/_vercel/insights/view')).toBe(true)
+  })
+
+  it('leaves ordinary paths alone', () => {
+    expect(looksLikeServiceTraffic('/login')).toBe(false)
+    expect(looksLikeServiceTraffic('/products/status-board')).toBe(false)
+    expect(looksLikeServiceTraffic('')).toBe(false)
+    expect(looksLikeServiceTraffic(null)).toBe(false)
   })
 })
 
