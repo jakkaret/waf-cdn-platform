@@ -4,7 +4,8 @@ import { MailCheck, ShieldAlert, ArrowRight } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { useAuthStore } from '../../store/authStore'
-import { GATE_COPY, GateAction, WHY_VERIFY, useEmailGateStore } from '../../lib/emailGate'
+import { GateAction, gateCopy, useEmailGateStore, whyVerify } from '../../lib/emailGate'
+import { useT } from '../../i18n'
 
 // What an unverified account sees when it reaches a locked feature: the
 // dialog (opened by a guarded button or by the axios interceptor on a 403
@@ -20,10 +21,11 @@ const verifyHref = (action: GateAction | null, next: string) =>
 // Amber box only for 'caution' actions (a live site or other people); the
 // rest get one plain line so the dialog is no louder than the action.
 const GateReasons: React.FC<{ action: GateAction | null }> = ({ action }) => {
+  const { lang } = useT()
   if (!action) {
-    return <p className="m-0 text-[12.5px] leading-5 text-[var(--text-secondary)]">{WHY_VERIFY[1]}</p>
+    return <p className="m-0 text-[12.5px] leading-5 text-[var(--text-secondary)]">{whyVerify(lang)[1]}</p>
   }
-  const { level, reasons } = GATE_COPY[action]
+  const { level, reasons } = gateCopy(action, lang)
   if (level === 'info') {
     return (
       <div className="space-y-1 text-[12.5px] leading-5 text-[var(--text-secondary)]">
@@ -52,14 +54,24 @@ export const EmailVerifyModal: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
   const location = useLocation()
-  const title = action ? GATE_COPY[action].title : 'ยืนยันอีเมลก่อนใช้งานส่วนนี้'
+  const { t, lang } = useT()
+  const title = action ? gateCopy(action, lang).title : t('Verify your email before using this feature', 'ยืนยันอีเมลก่อนใช้งานส่วนนี้')
 
   return (
-    <Modal open={open} onClose={close} title={title} description={user?.email ? `กรอกรหัส 6 หลักที่ส่งไปที่ ${user.email} ใช้เวลาไม่ถึงนาที` : undefined}>
+    <Modal
+      open={open}
+      onClose={close}
+      title={title}
+      description={
+        user?.email
+          ? t(`Enter the 6-digit code sent to ${user.email}. It takes less than a minute.`, `กรอกรหัส 6 หลักที่ส่งไปที่ ${user.email} ใช้เวลาไม่ถึงนาที`)
+          : undefined
+      }
+    >
       <GateReasons action={action} />
       <div className="mt-5 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
         <Button variant="ghost" onClick={close}>
-          ไว้ทีหลัง
+          {t('Later', 'ไว้ทีหลัง')}
         </Button>
         <Button
           variant="brand"
@@ -69,7 +81,7 @@ export const EmailVerifyModal: React.FC = () => {
             navigate(verifyHref(action, location.pathname + location.search))
           }}
         >
-          ยืนยันอีเมลตอนนี้
+          {t('Verify email now', 'ยืนยันอีเมลตอนนี้')}
         </Button>
       </div>
     </Modal>
@@ -80,6 +92,7 @@ export const EmailVerifyModal: React.FC = () => {
 export const EmailVerifyNotice: React.FC<{ action: GateAction }> = ({ action }) => {
   const navigate = useNavigate()
   const location = useLocation()
+  const { t, lang } = useT()
   return (
     <div className="dash-card p-5 sm:p-6">
       <div className="flex items-start gap-3">
@@ -87,15 +100,15 @@ export const EmailVerifyNotice: React.FC<{ action: GateAction }> = ({ action }) 
           <MailCheck size={18} />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[15px] font-bold text-[var(--text-primary)]">{GATE_COPY[action].title}</h3>
-          <p className="mt-1 mb-4 text-[12.5px] text-[var(--text-muted)]">กรอกรหัส 6 หลักที่ส่งไปที่อีเมลของคุณ ใช้เวลาไม่ถึงนาที</p>
+          <h3 className="m-0 text-[15px] font-bold text-[var(--text-primary)]">{gateCopy(action, lang).title}</h3>
+          <p className="mt-1 mb-4 text-[12.5px] text-[var(--text-muted)]">{t('Enter the 6-digit code sent to your email. It takes less than a minute.', 'กรอกรหัส 6 หลักที่ส่งไปที่อีเมลของคุณ ใช้เวลาไม่ถึงนาที')}</p>
           <GateReasons action={action} />
           <Button
             className="mt-5"
             variant="brand"
             onClick={() => navigate(verifyHref(action, location.pathname + location.search))}
           >
-            <span>ยืนยันอีเมล</span>
+            <span>{t('Verify email', 'ยืนยันอีเมล')}</span>
             <ArrowRight size={14} />
           </Button>
         </div>

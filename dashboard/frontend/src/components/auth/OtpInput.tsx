@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { normalizeOtp } from '../../lib/emailGate'
+import { tr } from '../../i18n'
 
 // Six digit boxes for an emailed code. Typing moves to the next box,
 // Backspace to the previous, and pasting "123 456" fills all six. The value
@@ -88,7 +89,7 @@ export const OtpInput: React.FC<OtpInputProps> = ({ value, onChange, onComplete,
             type="text"
             inputMode="numeric"
             autoComplete={i === 0 ? 'one-time-code' : 'off'}
-            aria-label={`รหัสหลักที่ ${i + 1}`}
+            aria-label={tr(`Digit ${i + 1}`, `รหัสหลักที่ ${i + 1}`)}
             maxLength={i === 0 ? LENGTH : 1}
             disabled={disabled}
             value={d}

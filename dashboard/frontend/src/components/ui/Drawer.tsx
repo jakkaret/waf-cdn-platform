@@ -1,6 +1,7 @@
 import React, { useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useDialog } from './useDialog'
+import { useT } from '../../i18n'
 
 // Side panel for looking at (or editing) one record while the list it came
 // from stays visible behind it. Same behaviour as Modal via useDialog; the
@@ -30,6 +31,7 @@ interface DrawerProps {
 
 export const Drawer: React.FC<DrawerProps> = ({ open, onClose, title, children, size = 'md' }) => {
   const panelRef = useRef<HTMLDivElement>(null)
+  const { t } = useT()
   const titleId = useId()
   useDialog(open, onClose, panelRef)
 
@@ -59,7 +61,7 @@ export const Drawer: React.FC<DrawerProps> = ({ open, onClose, title, children, 
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close panel"
+            aria-label={t('Close panel', 'ปิดแผง')}
             className="shrink-0 p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60"
           >
             <svg

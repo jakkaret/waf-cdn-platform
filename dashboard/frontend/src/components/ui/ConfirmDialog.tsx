@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal } from './Modal';
 import { Button } from './Button';
+import { useT } from '../../i18n';
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -15,25 +16,26 @@ interface ConfirmDialogProps {
 
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   open,
-  title = 'Confirm Action',
+  title,
   message,
   onConfirm,
   onCancel,
-  confirmText = 'Confirm',
-  cancelText = 'Cancel',
+  confirmText,
+  cancelText,
   isDanger = false,
 }) => {
+  const { t } = useT();
   return (
-    <Modal open={open} onClose={onCancel} title={title}>
+    <Modal open={open} onClose={onCancel} title={title ?? t('Confirm action', 'ยืนยันการดำเนินการ')}>
       <div className="text-text-primary mb-6">
         <p>{message}</p>
       </div>
       <div className="flex justify-end gap-3">
         <Button variant="secondary" onClick={onCancel}>
-          {cancelText}
+          {cancelText ?? t('Cancel', 'ยกเลิก')}
         </Button>
         <Button variant={isDanger ? 'danger' : 'primary'} onClick={onConfirm}>
-          {confirmText}
+          {confirmText ?? t('Confirm', 'ยืนยัน')}
         </Button>
       </div>
     </Modal>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useT } from '../../i18n';
 
 interface PaginationProps {
   page: number;
@@ -7,12 +8,13 @@ interface PaginationProps {
 }
 
 export const Pagination: React.FC<PaginationProps> = ({ page, totalPages, onChange }) => {
+  const { t } = useT();
   if (totalPages <= 1) return null;
 
   return (
     <div className="flex items-center justify-between px-6 py-4 border-t border-bg-border bg-bg-surface">
       <div className="text-sm text-text-muted">
-        Showing page <span className="font-medium text-text-primary">{page}</span> of <span className="font-medium text-text-primary">{totalPages}</span>
+        {t('Showing page', 'หน้า')} <span className="font-medium text-text-primary">{page}</span> {t('of', 'จาก')} <span className="font-medium text-text-primary">{totalPages}</span>
       </div>
       <div className="flex gap-2">
         <button
@@ -20,14 +22,14 @@ export const Pagination: React.FC<PaginationProps> = ({ page, totalPages, onChan
           disabled={page === 1}
           className="px-3 py-1 text-sm bg-bg-surface2 text-text-primary rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-bg-border transition-colors"
         >
-          Previous
+          {t('Previous', 'ก่อนหน้า')}
         </button>
         <button
           onClick={() => onChange(page + 1)}
           disabled={page === totalPages}
           className="px-3 py-1 text-sm bg-bg-surface2 text-text-primary rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-bg-border transition-colors"
         >
-          Next
+          {t('Next', 'ถัดไป')}
         </button>
       </div>
     </div>

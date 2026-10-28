@@ -9,12 +9,14 @@ import { OtpInput } from '../components/auth/OtpInput'
 import { Button } from '../components/ui/Button'
 import {
   GATE_COPY,
-  LOCKED_UNTIL_VERIFIED,
-  OPEN_BEFORE_VERIFIED,
-  WHY_VERIFY,
   formatCountdown,
+  gateCopy,
   isGateAction,
+  lockedUntilVerified,
+  openBeforeVerified,
+  whyVerify,
 } from '../lib/emailGate'
+import { useT } from '../i18n'
 
 // Confirm the 6-digit code mailed after sign-up (api/auth.py /verify-email).
 // Reached right after Register, from the AppLayout banner, or from the
@@ -27,6 +29,7 @@ export const VerifyEmail: React.FC = () => {
   const action = isGateAction(params.get('action')) ? (params.get('action') as keyof typeof GATE_COPY) : null
   const next = safeNext(params.get('next'))
   const navigate = useNavigate()
+  const { t, lang } = useT()
   const { user, updateUser } = useAuthStore()
   const [code, setCode] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -39,8 +42,8 @@ export const VerifyEmail: React.FC = () => {
   // Count the resend cooldown down once a second.
   useEffect(() => {
     if (wait <= 0) return
-    const t = setTimeout(() => setWait((w) => w - 1), 1000)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => setWait((w) => w - 1), 1000)
+    return () => clearTimeout(timer)
   }, [wait])
 
   const send = async (initial: boolean) => {
@@ -52,11 +55,11 @@ export const VerifyEmail: React.FC = () => {
         return
       }
       setWait(res.retry_after ?? 60)
-      if (!initial && res.sent) toast.success('ส่งรหัสใหม่แล้ว')
+      if (!initial && res.sent) toast.success(t('A new code has been sent', 'ส่งรหัสใหม่แล้ว'))
     } catch (err: any) {
       const status = err.response?.status
       if (status === 429) setWait(60)
-      else toast.error('ส่งรหัสไม่สำเร็จ ลองใหม่อีกครั้ง')
+      else toast.error(t('Could not send the code. Please try again.', 'ส่งรหัสไม่สำเร็จ ลองใหม่อีกครั้ง'))
     } finally {
       setSending(false)
     }
@@ -79,11 +82,11 @@ export const VerifyEmail: React.FC = () => {
     try {
       const res = await authApi.confirmVerifyCode(value)
       updateUser(res.user)
-      toast.success('ยืนยันอีเมลแล้ว ใช้งานได้ครบทุกส่วน')
+      toast.success(t('Email verified. Every feature is now open.', 'ยืนยันอีเมลแล้ว ใช้งานได้ครบทุกส่วน'))
       navigate(next, { replace: true })
     } catch (err: any) {
       const detail = err.response?.data?.detail
-      setError(typeof detail === 'string' ? detail : 'รหัสไม่ถูกต้อง')
+      setError(typeof detail === 'string' ? detail : t('Incorrect code', 'รหัสไม่ถูกต้อง'))
       setInvalid(true)
       setTimeout(() => setInvalid(false), 400)
       setCode('')
@@ -100,9 +103,9 @@ export const VerifyEmail: React.FC = () => {
             <div className="dash-card border-[var(--bg-border)] bg-[var(--bg-surface)] p-5 shadow-xl sm:p-7">
               <div className="mb-6 flex items-start justify-between gap-4">
                 <div>
-                  <h1 className="m-0 text-[20px] font-bold tracking-tight text-[var(--text-primary)]">ยืนยันอีเมลของคุณ</h1>
+                  <h1 className="m-0 text-[20px] font-bold tracking-tight text-[var(--text-primary)]">{t('Verify your email', 'ยืนยันอีเมลของคุณ')}</h1>
                   <p className="mt-1.5 mb-0 text-[12.5px] leading-5 text-[var(--text-muted)]">
-                    กรอกรหัส 6 หลักที่ส่งไปที่
+                    {t('Enter the 6-digit code sent to', 'กรอกรหัส 6 หลักที่ส่งไปที่')}
                     <br />
                     <span className="font-mono font-semibold text-[var(--text-primary)] break-all">{user?.email}</span>
                   </p>
@@ -129,12 +132,12 @@ export const VerifyEmail: React.FC = () => {
                   disabled={code.length !== 6 || submitting}
                   isLoading={submitting}
                 >
-                  {submitting ? 'กำลังตรวจรหัส...' : 'ยืนยันอีเมล'}
+                  {submitting ? t('Checking the code...', 'กำลังตรวจรหัส...') : t('Verify email', 'ยืนยันอีเมล')}
                 </Button>
               </form>
 
               <div className="mt-4 flex items-center justify-between gap-3 text-[12px]">
-                <span className="text-[var(--text-muted)]">รหัสใช้ได้ 10 นาที · ใช้ได้ครั้งเดียว</span>
+                <span className="text-[var(--text-muted)]">{t('Valid for 10 minutes · single use', 'รหัสใช้ได้ 10 นาที · ใช้ได้ครั้งเดียว')}</span>
                 <button
                   type="button"
                   disabled={wait > 0 || sending}
@@ -142,10 +145,14 @@ export const VerifyEmail: React.FC = () => {
                   className="inline-flex items-center gap-1.5 font-semibold text-orange-600 dark:text-orange-500 disabled:text-[var(--text-muted)] disabled:cursor-not-allowed hover:underline underline-offset-4 cursor-pointer"
                 >
                   <RotateCw size={12} className={sending ? 'animate-spin' : ''} />
-                  {wait > 0 ? `ส่งใหม่ได้ใน ${formatCountdown(wait)}` : 'ส่งรหัสใหม่'}
+                  {wait > 0
+                    ? t(`Resend in ${formatCountdown(wait)}`, `ส่งใหม่ได้ใน ${formatCountdown(wait)}`)
+                    : t('Resend code', 'ส่งรหัสใหม่')}
                 </button>
               </div>
-              <p className="mt-2 mb-0 text-[11.5px] text-[var(--text-muted)]">ไม่เห็นอีเมล? ดูในโฟลเดอร์ Junk/Spam หรือ Promotions</p>
+              <p className="mt-2 mb-0 text-[11.5px] text-[var(--text-muted)]">
+                {t('No email? Check the Junk/Spam or Promotions folder.', 'ไม่เห็นอีเมล? ดูในโฟลเดอร์ Junk/Spam หรือ Promotions')}
+              </p>
 
               <div className="my-5 h-px bg-[var(--bg-border)]" />
               <button
@@ -153,7 +160,7 @@ export const VerifyEmail: React.FC = () => {
                 onClick={() => navigate(next === '/verify-email' ? '/' : next)}
                 className="w-full text-center text-[12px] text-[var(--text-muted)] hover:text-[var(--text-primary)] underline-offset-4 hover:underline cursor-pointer"
               >
-                ไว้ทีหลัง (บางส่วนจะยังใช้ไม่ได้)
+                {t('Later (some features stay locked)', 'ไว้ทีหลัง (บางส่วนจะยังใช้ไม่ได้)')}
               </button>
             </div>
           </div>
@@ -161,49 +168,49 @@ export const VerifyEmail: React.FC = () => {
 
         <aside className="lg:col-span-6 space-y-4">
           {action && (
-            <div className={`dash-card p-5 ${GATE_COPY[action].level === 'caution' ? 'border-amber-500/30' : ''}`}>
+            <div className={`dash-card p-5 ${gateCopy(action, lang).level === 'caution' ? 'border-amber-500/30' : ''}`}>
               <h2
                 className={`m-0 mb-2 flex items-center gap-2 text-[13.5px] font-bold ${
-                  GATE_COPY[action].level === 'caution' ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--text-primary)]'
+                  gateCopy(action, lang).level === 'caution' ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--text-primary)]'
                 }`}
               >
-                {GATE_COPY[action].level === 'caution' ? <ShieldAlert size={15} /> : <Lock size={15} className="text-[var(--text-muted)]" />}
-                {GATE_COPY[action].title}
+                {gateCopy(action, lang).level === 'caution' ? <ShieldAlert size={15} /> : <Lock size={15} className="text-[var(--text-muted)]" />}
+                {gateCopy(action, lang).title}
               </h2>
               <ul className="m-0 pl-4 list-disc marker:text-[var(--text-muted)] space-y-1.5 text-[12.5px] leading-5 text-[var(--text-secondary)]">
-                {GATE_COPY[action].reasons.map((t) => (
-                  <li key={t}>{t}</li>
+                {gateCopy(action, lang).reasons.map((line) => (
+                  <li key={line}>{line}</li>
                 ))}
               </ul>
             </div>
           )}
           <div className="dash-card p-5">
             <h2 className="m-0 mb-3 flex items-center gap-2 text-[13.5px] font-bold text-[var(--text-primary)]">
-              <ShieldCheck size={15} className="text-orange-500" /> ทำไมต้องยืนยันอีเมล
+              <ShieldCheck size={15} className="text-orange-500" /> {t('Why verify your email', 'ทำไมต้องยืนยันอีเมล')}
             </h2>
             <ul className="m-0 pl-4 list-disc marker:text-[var(--text-muted)] space-y-1.5 text-[12.5px] leading-5 text-[var(--text-secondary)]">
-              {WHY_VERIFY.map((t) => (
-                <li key={t}>{t}</li>
+              {whyVerify(lang).map((line) => (
+                <li key={line}>{line}</li>
               ))}
             </ul>
           </div>
           <div className="dash-card p-5 grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div>
-              <p className="m-0 mb-2 text-[11.5px] font-semibold text-[var(--text-muted)]">ใช้ได้หลังยืนยัน</p>
+              <p className="m-0 mb-2 text-[11.5px] font-semibold text-[var(--text-muted)]">{t('Available after verifying', 'ใช้ได้หลังยืนยัน')}</p>
               <ul className="m-0 p-0 list-none space-y-1.5 text-[12.5px]">
-                {LOCKED_UNTIL_VERIFIED.map((t) => (
-                  <li key={t} className="flex items-center gap-2 text-[var(--text-secondary)]">
-                    <Lock size={12} className="text-amber-500 shrink-0" /> {t}
+                {lockedUntilVerified(lang).map((line) => (
+                  <li key={line} className="flex items-center gap-2 text-[var(--text-secondary)]">
+                    <Lock size={12} className="text-amber-500 shrink-0" /> {line}
                   </li>
                 ))}
               </ul>
             </div>
             <div>
-              <p className="m-0 mb-2 text-[11.5px] font-semibold text-[var(--text-muted)]">ใช้ได้เลยตอนนี้</p>
+              <p className="m-0 mb-2 text-[11.5px] font-semibold text-[var(--text-muted)]">{t('Available now', 'ใช้ได้เลยตอนนี้')}</p>
               <ul className="m-0 p-0 list-none space-y-1.5 text-[12.5px]">
-                {OPEN_BEFORE_VERIFIED.map((t) => (
-                  <li key={t} className="flex items-center gap-2 text-[var(--text-secondary)]">
-                    <Check size={12} className="text-emerald-500 shrink-0" /> {t}
+                {openBeforeVerified(lang).map((line) => (
+                  <li key={line} className="flex items-center gap-2 text-[var(--text-secondary)]">
+                    <Check size={12} className="text-emerald-500 shrink-0" /> {line}
                   </li>
                 ))}
               </ul>

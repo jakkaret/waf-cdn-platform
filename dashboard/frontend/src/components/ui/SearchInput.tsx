@@ -1,4 +1,5 @@
 import React from 'react';
+import { useT } from '../../i18n';
 
 interface SearchInputProps {
   value: string;
@@ -6,7 +7,8 @@ interface SearchInputProps {
   placeholder?: string;
 }
 
-export const SearchInput: React.FC<SearchInputProps> = ({ value, onChange, placeholder = 'Search...' }) => {
+export const SearchInput: React.FC<SearchInputProps> = ({ value, onChange, placeholder }) => {
+  const { t } = useT();
   return (
     <div className="relative w-full max-w-md">
       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-text-muted">
@@ -20,7 +22,7 @@ export const SearchInput: React.FC<SearchInputProps> = ({ value, onChange, place
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="block w-full pl-10 pr-3 py-2 border border-bg-border rounded-lg leading-5 bg-bg-surface2 text-text-primary placeholder-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent sm:text-sm transition-colors"
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('Search...', 'ค้นหา...')}
       />
     </div>
   );

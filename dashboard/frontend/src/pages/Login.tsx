@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
 import { ThemeToggle } from '../components/ui/ThemeToggle'
+import { LanguageToggle } from '../components/ui/LanguageToggle'
 import { Button } from '../components/ui/Button'
 import { DecisionPipeline } from '../components/auth/DecisionPipeline'
 import toast from 'react-hot-toast'
@@ -14,6 +15,7 @@ import {
   Lock,
   Mail,
 } from 'lucide-react'
+import { tr, useT } from '../i18n'
 
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('')
@@ -22,18 +24,22 @@ export const Login: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const setAuth = useAuthStore((state) => state.setAuth)
+  const { t } = useT()
 
   // Google sign-in sends back ?error=<code> when it refuses a login.
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get('error')
     const messages: Record<string, string> = {
-      google_link_required: 'อีเมลนี้มีบัญชีแบบรหัสผ่านอยู่แล้ว เข้าด้วยรหัสผ่านแล้วเชื่อม Google ที่ Settings หรือถ้าไม่ได้สมัครเอง/จำรหัสไม่ได้ ใช้ "ลืมรหัสผ่าน?" เพื่อยึดบัญชีคืน',
-      google_email_unverified: 'Google has not verified this email address.',
-      google_linked_elsewhere: 'This Google account is linked to a different user.',
-      google_link_conflict: 'Your account already has a Google account linked.',
-      google_link_session: 'Sign in again, then link Google from Settings.',
-      google_state: 'The Google sign-in expired or did not start here. Please try again.',
-      google_failed: 'Google sign-in failed. Please try again.',
+      google_link_required: tr(
+        'This email already has a password account. Sign in with the password, then link Google from the profile menu. If you did not sign up yourself or forgot the password, use "Forgot password?" to take the account back.',
+        'อีเมลนี้มีบัญชีแบบรหัสผ่านอยู่แล้ว เข้าด้วยรหัสผ่านแล้วเชื่อม Google จากเมนูโปรไฟล์ หรือถ้าไม่ได้สมัครเอง/จำรหัสไม่ได้ ใช้ "ลืมรหัสผ่าน?" เพื่อยึดบัญชีคืน',
+      ),
+      google_email_unverified: tr('Google has not verified this email address.', 'Google ยังไม่ได้ยืนยันอีเมลนี้'),
+      google_linked_elsewhere: tr('This Google account is linked to a different user.', 'บัญชี Google นี้เชื่อมกับผู้ใช้คนอื่นอยู่แล้ว'),
+      google_link_conflict: tr('Your account already has a Google account linked.', 'บัญชีของคุณเชื่อมกับบัญชี Google อื่นอยู่แล้ว'),
+      google_link_session: tr('Sign in again, then link Google from the profile menu.', 'ลงชื่อเข้าใช้อีกครั้ง แล้วเชื่อม Google จากเมนูโปรไฟล์'),
+      google_state: tr('The Google sign-in expired or did not start here. Please try again.', 'การลงชื่อเข้าใช้ด้วย Google หมดเวลาหรือไม่ได้เริ่มจากหน้านี้ กรุณาลองใหม่'),
+      google_failed: tr('Google sign-in failed. Please try again.', 'ลงชื่อเข้าใช้ด้วย Google ไม่สำเร็จ กรุณาลองใหม่'),
     }
     if (code && messages[code]) toast.error(messages[code])
   }, [])
@@ -41,7 +47,7 @@ export const Login: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email.trim() || !password.trim()) {
-      toast.error('Please fill in all fields')
+      toast.error(t('Please fill in all fields', 'กรุณากรอกข้อมูลให้ครบ'))
       return
     }
 
@@ -50,7 +56,7 @@ export const Login: React.FC = () => {
       await authApi.login(email.trim(), password) // sets the HttpOnly session cookie
       const user = await authApi.getMe()
       setAuth(user)
-      toast.success('Signed in successfully')
+      toast.success(t('Signed in successfully', 'ลงชื่อเข้าใช้สำเร็จ'))
       navigate('/')
     } catch (err: any) {
       const detail = err.response?.data?.detail
@@ -59,7 +65,7 @@ export const Login: React.FC = () => {
           ? detail
           : Array.isArray(detail)
           ? detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ')
-          : 'Invalid email or password'
+          : t('Invalid email or password', 'อีเมลหรือรหัสผ่านไม่ถูกต้อง')
       toast.error(message)
       useAuthStore.getState().logout()
     } finally {
@@ -86,7 +92,10 @@ export const Login: React.FC = () => {
               </span>
             </div>
           </Link>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <LanguageToggle />
+          </div>
         </div>
       </header>
 
@@ -100,11 +109,13 @@ export const Login: React.FC = () => {
           <section className="order-2 lg:order-1 flex lg:col-span-7 xl:col-span-7 flex-col gap-8 pr-4">
             <div className="hidden lg:block">
               <h1 className="max-w-xl text-[32px] font-bold leading-tight tracking-tight text-[var(--text-primary)] font-mono">
-                Operator access for WAF, CDN edge, and ML rule review.
+                {t('Operator access for WAF, CDN edge, and ML rule review.', 'ศูนย์ควบคุม WAF, CDN edge และการตรวจกฎจาก ML')}
               </h1>
               <p className="mt-3 max-w-lg text-[13.5px] leading-6 text-[var(--text-secondary)]">
-                Sign in to review traffic evidence, edge health, alert routing, and policy changes
-                from the same protected workspace.
+                {t(
+                  'Sign in to review traffic evidence, edge health, alert routing, and policy changes from the same protected workspace.',
+                  'ลงชื่อเข้าใช้เพื่อตรวจหลักฐานจากทราฟฟิก สุขภาพของ edge การส่งการแจ้งเตือน และการเปลี่ยนนโยบาย ได้จากที่เดียว',
+                )}
               </p>
             </div>
 
@@ -118,7 +129,7 @@ export const Login: React.FC = () => {
               {/* Mobile heading */}
               <div className="mb-5 lg:hidden">
                 <h1 className="text-[24px] font-bold leading-tight tracking-tight text-[var(--text-primary)] font-mono">
-                  Operator access console
+                  {t('Operator access console', 'ศูนย์ควบคุมสำหรับผู้ดูแล')}
                 </h1>
               </div>
 
@@ -128,13 +139,13 @@ export const Login: React.FC = () => {
                   to="/login"
                   className="py-1.5 text-center text-[12px] font-mono font-semibold rounded-md bg-[var(--bg-surface-elevated)] text-orange-600 dark:text-orange-400 shadow-sm border border-[var(--bg-border)]"
                 >
-                  Sign In
+                  {t('Sign In', 'ลงชื่อเข้าใช้')}
                 </Link>
                 <Link
                   to="/register"
                   className="py-1.5 text-center text-[12px] font-mono font-medium rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                 >
-                  Register
+                  {t('Register', 'สมัครสมาชิก')}
                 </Link>
               </div>
 
@@ -142,10 +153,10 @@ export const Login: React.FC = () => {
                 <div className="mb-5 flex items-start justify-between gap-4">
                   <div>
                     <h2 className="m-0 text-[20px] font-bold tracking-tight text-[var(--text-primary)] font-mono">
-                      Sign in
+                      {t('Sign in', 'ลงชื่อเข้าใช้')}
                     </h2>
                     <p className="mt-1 mb-0 text-[12.5px] leading-5 text-[var(--text-muted)]">
-                      Continue to the IT KKU WAF operations console.
+                      {t('Continue to the IT KKU WAF operations console.', 'เข้าสู่ศูนย์ควบคุม IT KKU WAF')}
                     </p>
                   </div>
                   <div className="rounded-lg border border-orange-500/20 bg-orange-500/10 p-2 text-orange-600 dark:text-orange-400">
@@ -156,7 +167,7 @@ export const Login: React.FC = () => {
                 <form onSubmit={handleSubmit} className="space-y-4 text-[13px]">
                   <div>
                     <label htmlFor="login-identifier" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
-                      Email
+                      {t('Email', 'อีเมล')}
                     </label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
@@ -176,13 +187,13 @@ export const Login: React.FC = () => {
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label htmlFor="login-password" className="block text-[11.5px] font-semibold text-[var(--text-secondary)]">
-                        Password
+                        {t('Password', 'รหัสผ่าน')}
                       </label>
                       <Link
                         to="/forgot-password"
                         className="text-[11.5px] text-orange-600 dark:text-orange-500 underline-offset-4 hover:underline"
                       >
-                        ลืมรหัสผ่าน?
+                        {t('Forgot password?', 'ลืมรหัสผ่าน?')}
                       </Link>
                     </div>
                     <div className="relative">
@@ -192,7 +203,7 @@ export const Login: React.FC = () => {
                         required
                         id="login-password"
                         autoComplete="current-password"
-                        placeholder="Password"
+                        placeholder={t('Password', 'รหัสผ่าน')}
                         className="w-full dash-input pl-9 pr-10 py-2 text-[13px]"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -200,7 +211,7 @@ export const Login: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        aria-label={showPassword ? t('Hide password', 'ซ่อนรหัสผ่าน') : t('Show password', 'แสดงรหัสผ่าน')}
                         className="absolute right-0.5 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] focus:outline-none focus:ring-2 focus:ring-orange-500/40 transition-colors cursor-pointer"
                       >
                         {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -210,10 +221,10 @@ export const Login: React.FC = () => {
 
                   <Button type="submit" disabled={loading} isLoading={loading} variant="brand" className="w-full py-2.5">
                     {loading ? (
-                      'Verifying access...'
+                      t('Verifying access...', 'กำลังตรวจสอบสิทธิ์...')
                     ) : (
                       <>
-                        <span>Sign in to console</span>
+                        <span>{t('Sign in to console', 'เข้าสู่ศูนย์ควบคุม')}</span>
                         <ArrowRight size={14} />
                       </>
                     )}
@@ -223,7 +234,7 @@ export const Login: React.FC = () => {
                 <div className="my-5 flex items-center gap-3">
                   <div className="flex-1 h-px bg-[var(--bg-border)]" />
                   <span className="text-[11px] text-[var(--text-muted)] font-mono">
-                    Or continue with
+                    {t('Or continue with', 'หรือดำเนินการต่อด้วย')}
                   </span>
                   <div className="flex-1 h-px bg-[var(--bg-border)]" />
                 </div>
@@ -251,18 +262,18 @@ export const Login: React.FC = () => {
                       d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                     />
                   </svg>
-                  <span>Continue with Google</span>
+                  <span>{t('Continue with Google', 'ดำเนินการต่อด้วย Google')}</span>
                 </button>
 
                 <p className="mt-5 text-center text-[12px] text-[var(--text-muted)]">
-                  Need an operator account?{' '}
+                  {t('Need an operator account?', 'ยังไม่มีบัญชี?')}{' '}
                   <Link to="/register" className="text-orange-600 dark:text-orange-500 font-semibold underline-offset-4 hover:underline">
-                    Create one
+                    {t('Create one', 'สมัครเลย')}
                   </Link>
                 </p>
                 <p className="mt-1.5 text-center text-[11px] text-[var(--text-muted)]">
                   <Link to="/status" className="underline-offset-4 hover:underline">
-                    System status
+                    {t('System status', 'สถานะระบบ')}
                   </Link>
                 </p>
               </div>

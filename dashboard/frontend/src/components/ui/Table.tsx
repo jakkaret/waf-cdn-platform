@@ -1,6 +1,7 @@
 import React from 'react';
 import { LoadingSpinner } from './LoadingSpinner';
 import { EmptyState } from './EmptyState';
+import { useT } from '../../i18n';
 
 interface Column<T> {
   key: string;
@@ -16,6 +17,7 @@ interface TableProps<T> {
 }
 
 export function Table<T extends Record<string, any>>({ columns, data, onRowClick, loading }: TableProps<T>) {
+  const { t } = useT();
   if (loading) {
     return (
       <div className="py-12 flex justify-center">
@@ -27,7 +29,7 @@ export function Table<T extends Record<string, any>>({ columns, data, onRowClick
   if (data.length === 0) {
     return (
       <div className="py-8 border-t border-bg-border">
-        <EmptyState title="No data available" subtitle="There are no records to display." />
+        <EmptyState title={t('No data available', 'ไม่มีข้อมูล')} subtitle={t('There are no records to display.', 'ยังไม่มีรายการให้แสดง')} />
       </div>
     );
   }

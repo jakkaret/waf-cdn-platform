@@ -9,6 +9,7 @@ import { OtpInput } from '../components/auth/OtpInput'
 import { Button } from '../components/ui/Button'
 import { passwordChecks, passwordScore } from '../lib/passwordRules'
 import { formatCountdown } from '../lib/emailGate'
+import { useT } from '../i18n'
 
 // Forgot password: a 6-digit code goes to the mailbox (the answer is the same
 // whether or not the address has an account), then the code plus a new
@@ -18,6 +19,7 @@ const RESEND_SECONDS = 60
 
 export const ForgotPassword: React.FC = () => {
   const navigate = useNavigate()
+  const { t } = useT()
   const [step, setStep] = useState<'email' | 'reset'>('email')
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
@@ -31,8 +33,8 @@ export const ForgotPassword: React.FC = () => {
 
   useEffect(() => {
     if (wait <= 0) return
-    const t = setTimeout(() => setWait((w) => w - 1), 1000)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => setWait((w) => w - 1), 1000)
+    return () => clearTimeout(timer)
   }, [wait])
 
   const score = passwordScore(password)
@@ -48,7 +50,11 @@ export const ForgotPassword: React.FC = () => {
       setStep('reset')
       setWait(RESEND_SECONDS)
     } catch (err: any) {
-      toast.error(err.response?.status === 429 ? 'ขอรหัสถี่เกินไป รอสักครู่แล้วลองใหม่' : 'ส่งคำขอไม่สำเร็จ')
+      toast.error(
+        err.response?.status === 429
+          ? t('Too many code requests. Wait a moment and try again.', 'ขอรหัสถี่เกินไป รอสักครู่แล้วลองใหม่')
+          : t('Could not send the request', 'ส่งคำขอไม่สำเร็จ'),
+      )
     } finally {
       setLoading(false)
     }
@@ -58,15 +64,15 @@ export const ForgotPassword: React.FC = () => {
     e.preventDefault()
     setError('')
     if (code.length !== 6) {
-      setError('กรอกรหัส 6 หลักจากอีเมล')
+      setError(t('Enter the 6-digit code from the email', 'กรอกรหัส 6 หลักจากอีเมล'))
       return
     }
     if (score < passwordChecks.length) {
-      setError('รหัสผ่านใหม่ยังไม่ผ่านเงื่อนไขด้านล่าง')
+      setError(t('The new password does not meet the rules below yet', 'รหัสผ่านใหม่ยังไม่ผ่านเงื่อนไขด้านล่าง'))
       return
     }
     if (!matches) {
-      setError('ยืนยันรหัสผ่านไม่ตรงกัน')
+      setError(t('Password confirmation does not match', 'ยืนยันรหัสผ่านไม่ตรงกัน'))
       return
     }
     setLoading(true)
@@ -77,7 +83,7 @@ export const ForgotPassword: React.FC = () => {
       navigate('/login', { replace: true })
     } catch (err: any) {
       const detail = err.response?.data?.detail
-      setError(typeof detail === 'string' ? detail : 'ตั้งรหัสผ่านใหม่ไม่สำเร็จ')
+      setError(typeof detail === 'string' ? detail : t('Could not reset the password', 'ตั้งรหัสผ่านใหม่ไม่สำเร็จ'))
       setInvalid(true)
       setTimeout(() => setInvalid(false), 400)
     } finally {
@@ -93,14 +99,14 @@ export const ForgotPassword: React.FC = () => {
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <h1 className="m-0 text-[20px] font-bold tracking-tight text-[var(--text-primary)]">
-                  {step === 'email' ? 'ลืมรหัสผ่าน' : 'ตั้งรหัสผ่านใหม่'}
+                  {step === 'email' ? t('Forgot password', 'ลืมรหัสผ่าน') : t('Set a new password', 'ตั้งรหัสผ่านใหม่')}
                 </h1>
                 <p className="mt-1.5 mb-0 text-[12.5px] leading-5 text-[var(--text-muted)]">
                   {step === 'email' ? (
-                    'กรอกอีเมลของบัญชี เราจะส่งรหัส 6 หลักไปให้'
+                    t('Enter the email of your account and we will send you a 6-digit code.', 'กรอกอีเมลของบัญชี เราจะส่งรหัส 6 หลักไปให้')
                   ) : (
                     <>
-                      กรอกรหัสที่ส่งไปที่{' '}
+                      {t('Enter the code sent to', 'กรอกรหัสที่ส่งไปที่')}{' '}
                       <span className="font-mono font-semibold text-[var(--text-primary)] break-all">{email}</span>
                     </>
                   )}
@@ -115,7 +121,7 @@ export const ForgotPassword: React.FC = () => {
               <form onSubmit={requestCode} className="space-y-4 text-[13px]">
                 <div>
                   <label htmlFor="forgot-email" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
-                    Email
+                    {t('Email', 'อีเมล')}
                   </label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
@@ -132,7 +138,7 @@ export const ForgotPassword: React.FC = () => {
                   </div>
                 </div>
                 <Button type="submit" variant="brand" className="w-full py-2.5" disabled={loading} isLoading={loading}>
-                  <span>ส่งรหัส</span>
+                  <span>{t('Send code', 'ส่งรหัส')}</span>
                   <ArrowRight size={14} />
                 </Button>
               </form>
@@ -141,7 +147,7 @@ export const ForgotPassword: React.FC = () => {
                 <div>
                   <OtpInput value={code} onChange={setCode} disabled={loading} invalid={invalid} autoFocus />
                   <div className="mt-2.5 flex items-center justify-between text-[12px]">
-                    <span className="text-[var(--text-muted)]">รหัสใช้ได้ 10 นาที</span>
+                    <span className="text-[var(--text-muted)]">{t('The code is valid for 10 minutes', 'รหัสใช้ได้ 10 นาที')}</span>
                     <button
                       type="button"
                       disabled={wait > 0 || loading}
@@ -149,14 +155,16 @@ export const ForgotPassword: React.FC = () => {
                       className="inline-flex items-center gap-1.5 font-semibold text-orange-600 dark:text-orange-500 disabled:text-[var(--text-muted)] disabled:cursor-not-allowed hover:underline underline-offset-4 cursor-pointer"
                     >
                       <RotateCw size={12} />
-                      {wait > 0 ? `ส่งใหม่ได้ใน ${formatCountdown(wait)}` : 'ส่งรหัสใหม่'}
+                      {wait > 0
+                        ? t(`Resend in ${formatCountdown(wait)}`, `ส่งใหม่ได้ใน ${formatCountdown(wait)}`)
+                        : t('Resend code', 'ส่งรหัสใหม่')}
                     </button>
                   </div>
                 </div>
 
                 <div>
                   <label htmlFor="reset-password" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
-                    รหัสผ่านใหม่
+                    {t('New password', 'รหัสผ่านใหม่')}
                   </label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
@@ -171,7 +179,7 @@ export const ForgotPassword: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      aria-label={showPassword ? t('Hide password', 'ซ่อนรหัสผ่าน') : t('Show password', 'แสดงรหัสผ่าน')}
                       className="absolute right-0.5 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
                     >
                       {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -182,7 +190,7 @@ export const ForgotPassword: React.FC = () => {
                       const ok = c.test(password)
                       return (
                         <li key={c.label} className={`flex items-center gap-1.5 ${ok ? 'text-emerald-500' : 'text-[var(--text-muted)]'}`}>
-                          <Check size={11} className={ok ? '' : 'opacity-30'} /> {c.label}
+                          <Check size={11} className={ok ? '' : 'opacity-30'} /> {t(c.label, c.labelTh)}
                         </li>
                       )
                     })}
@@ -191,7 +199,7 @@ export const ForgotPassword: React.FC = () => {
 
                 <div>
                   <label htmlFor="reset-confirm" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
-                    ยืนยันรหัสผ่านใหม่
+                    {t('Confirm new password', 'ยืนยันรหัสผ่านใหม่')}
                   </label>
                   <input
                     id="reset-confirm"
@@ -205,14 +213,19 @@ export const ForgotPassword: React.FC = () => {
 
                 <div className="flex items-start gap-2 rounded-lg border border-sky-500/25 bg-sky-500/5 p-2.5 text-[11.5px] leading-5 text-[var(--text-secondary)]">
                   <MonitorSmartphone size={14} className="text-sky-500 shrink-0 mt-0.5" />
-                  <span>ตั้งรหัสผ่านใหม่แล้ว ทุกอุปกรณ์ที่เข้าระบบอยู่จะถูกออกจากระบบ รวมถึงเครื่องนี้</span>
+                  <span>
+                    {t(
+                      'Setting a new password signs out every device that is signed in, including this one.',
+                      'ตั้งรหัสผ่านใหม่แล้ว ทุกอุปกรณ์ที่เข้าระบบอยู่จะถูกออกจากระบบ รวมถึงเครื่องนี้',
+                    )}
+                  </span>
                 </div>
 
                 <p className="m-0 min-h-[18px] text-[12px] text-red-500" role="alert">
                   {error}
                 </p>
                 <Button type="submit" variant="brand" className="w-full py-2.5" disabled={loading} isLoading={loading}>
-                  ตั้งรหัสผ่านใหม่
+                  {t('Set new password', 'ตั้งรหัสผ่านใหม่')}
                 </Button>
                 <button
                   type="button"
@@ -223,7 +236,7 @@ export const ForgotPassword: React.FC = () => {
                   }}
                   className="w-full text-center text-[12px] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
                 >
-                  ใช้อีเมลอื่น
+                  {t('Use another email', 'ใช้อีเมลอื่น')}
                 </button>
               </form>
             )}
@@ -233,7 +246,7 @@ export const ForgotPassword: React.FC = () => {
               to="/login"
               className="flex items-center justify-center gap-1.5 text-[12px] text-[var(--text-muted)] hover:text-[var(--text-primary)] underline-offset-4 hover:underline"
             >
-              <ArrowLeft size={12} /> กลับไปหน้าเข้าสู่ระบบ
+              <ArrowLeft size={12} /> {t('Back to sign in', 'กลับไปหน้าเข้าสู่ระบบ')}
             </Link>
           </div>
         </div>

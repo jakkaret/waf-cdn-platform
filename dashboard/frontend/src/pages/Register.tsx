@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
 import { ThemeToggle } from '../components/ui/ThemeToggle'
+import { LanguageToggle } from '../components/ui/LanguageToggle'
 import { Button } from '../components/ui/Button'
 import toast from 'react-hot-toast'
 import { passwordChecks } from '../lib/passwordRules'
@@ -18,6 +19,7 @@ import {
   User,
   UsersRound,
 } from 'lucide-react'
+import { useT } from '../i18n'
 
 
 export const Register: React.FC = () => {
@@ -26,26 +28,28 @@ export const Register: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const setAuth = useAuthStore((state) => state.setAuth)
+  const { t } = useT()
 
   const score = passwordChecks.filter((check) => check.test(formData.password)).length
   const strengthColor = score === 0 ? 'var(--text-muted)' : score <= 2 ? '#ef4444' : score === 3 ? '#f59e0b' : '#10b981'
-  const strengthLabel = score === 0 ? 'No password yet' : score <= 2 ? 'Weak' : score === 3 ? 'Good' : 'Strong'
+  const strengthLabel =
+    score === 0 ? t('No password yet', 'ยังไม่ได้ตั้งรหัสผ่าน') : score <= 2 ? t('Weak', 'อ่อน') : score === 3 ? t('Good', 'พอใช้') : t('Strong', 'แข็งแรง')
   const passwordsMatch = formData.confirmPassword.length > 0 && formData.password === formData.confirmPassword
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formData.username.trim() || !formData.email.trim() || !formData.password || !formData.confirmPassword) {
-      toast.error('Please fill in all fields')
+      toast.error(t('Please fill in all fields', 'กรุณากรอกข้อมูลให้ครบ'))
       return
     }
 
     if (score < 4) {
-      toast.error('Use a stronger password before creating this account')
+      toast.error(t('Use a stronger password before creating this account', 'ตั้งรหัสผ่านให้แข็งแรงกว่านี้ก่อนสร้างบัญชี'))
       return
     }
 
     if (formData.password !== formData.confirmPassword) {
-      toast.error('Password confirmation does not match')
+      toast.error(t('Password confirmation does not match', 'ยืนยันรหัสผ่านไม่ตรงกัน'))
       return
     }
 
@@ -59,7 +63,7 @@ export const Register: React.FC = () => {
       await authApi.login(formData.email.trim(), formData.password) // sets the HttpOnly session cookie
       const user = await authApi.getMe()
       setAuth(user)
-      toast.success('สร้างบัญชีแล้ว ยืนยันอีเมลด้วยรหัสที่ส่งไปให้')
+      toast.success(t('Account created. Verify your email with the code we sent.', 'สร้างบัญชีแล้ว ยืนยันอีเมลด้วยรหัสที่ส่งไปให้'))
       navigate('/verify-email')
     } catch (err: any) {
       // Matches Login.tsx's identical login->getMe flow: if getMe() throws
@@ -74,7 +78,7 @@ export const Register: React.FC = () => {
           ? detail
           : Array.isArray(detail)
           ? detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ')
-          : 'Registration failed'
+          : t('Registration failed', 'สมัครสมาชิกไม่สำเร็จ')
       toast.error(message)
     } finally {
       setLoading(false)
@@ -100,7 +104,10 @@ export const Register: React.FC = () => {
               </span>
             </div>
           </Link>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <LanguageToggle />
+          </div>
         </div>
       </header>
 
@@ -114,19 +121,21 @@ export const Register: React.FC = () => {
           <section className="order-2 lg:order-1 flex lg:col-span-7 xl:col-span-7 flex-col gap-8 pr-4">
             <div className="hidden lg:block">
               <h1 className="max-w-xl text-[32px] font-bold leading-tight tracking-tight text-[var(--text-primary)] font-mono">
-                Create access for the WAF operations workspace.
+                {t('Create access for the WAF operations workspace.', 'สร้างบัญชีเพื่อเข้าใช้ศูนย์ควบคุม WAF')}
               </h1>
               <p className="mt-3 max-w-lg text-[13.5px] leading-6 text-[var(--text-secondary)]">
-                The first local account becomes admin. Later local accounts begin as viewer until
-                an admin changes the role.
+                {t(
+                  'The first local account becomes admin. Later local accounts begin as viewer until an admin changes the role.',
+                  'บัญชีแรกของระบบจะเป็น admin บัญชีถัดไปเริ่มเป็น viewer จนกว่า admin จะเปลี่ยนสิทธิ์ให้',
+                )}
               </p>
             </div>
 
             <div className="grid max-w-lg grid-cols-3 gap-3.5">
               {[
-                { icon: ShieldCheck, label: 'Bootstrap', value: 'First admin' },
-                { icon: UsersRound, label: 'Default role', value: 'User' },
-                { icon: KeyRound, label: 'Password', value: 'Argon2 hash' },
+                { icon: ShieldCheck, label: t('Bootstrap', 'บัญชีแรก'), value: t('First admin', 'เป็น admin') },
+                { icon: UsersRound, label: t('Default role', 'สิทธิ์เริ่มต้น'), value: t('User', 'ผู้ใช้') },
+                { icon: KeyRound, label: t('Password', 'รหัสผ่าน'), value: 'Argon2 hash' },
               ].map((item) => {
                 const Icon = item.icon
                 return (
@@ -145,13 +154,13 @@ export const Register: React.FC = () => {
 
             <div className="dash-card p-5 max-w-lg">
               <h3 className="text-[13px] font-bold text-[var(--text-primary)] font-mono m-0 mb-3">
-                What an operator account can do
+                {t('What an operator account can do', 'บัญชีผู้ดูแลทำอะไรได้บ้าง')}
               </h3>
               <ul className="m-0 p-0 list-none space-y-2.5 text-[12.5px] text-[var(--text-secondary)]">
                 {[
-                  'Review blocked and allowed traffic across every protected origin',
-                  'Attach domains, issue tunnel tokens, and manage WAF policy',
-                  'Approve or reject ML-suggested rules before they take effect',
+                  t('Review blocked and allowed traffic across every protected origin', 'ตรวจทราฟฟิกที่ถูกบล็อกและที่ผ่านได้ของทุก origin ที่ป้องกันอยู่'),
+                  t('Attach domains, issue tunnel tokens, and manage WAF policy', 'ผูกโดเมน ออก tunnel token และจัดการนโยบาย WAF'),
+                  t('Approve or reject ML-suggested rules before they take effect', 'อนุมัติหรือปฏิเสธกฎที่ ML เสนอก่อนนำไปใช้จริง'),
                 ].map((line) => (
                   <li key={line} className="flex items-start gap-2.5">
                     <CheckCircle2 size={14} className="text-emerald-500 shrink-0 mt-0.5" />
@@ -169,7 +178,7 @@ export const Register: React.FC = () => {
               {/* Mobile heading */}
               <div className="mb-5 lg:hidden">
                 <h1 className="text-[24px] font-bold leading-tight tracking-tight text-[var(--text-primary)] font-mono">
-                  Create workspace access
+                  {t('Create workspace access', 'สร้างบัญชีเข้าใช้งาน')}
                 </h1>
               </div>
 
@@ -179,13 +188,13 @@ export const Register: React.FC = () => {
                   to="/login"
                   className="py-1.5 text-center text-[12px] font-mono font-medium rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                 >
-                  Sign In
+                  {t('Sign In', 'ลงชื่อเข้าใช้')}
                 </Link>
                 <Link
                   to="/register"
                   className="py-1.5 text-center text-[12px] font-mono font-semibold rounded-md bg-[var(--bg-surface-elevated)] text-orange-600 dark:text-orange-400 shadow-sm border border-[var(--bg-border)]"
                 >
-                  Register
+                  {t('Register', 'สมัครสมาชิก')}
                 </Link>
               </div>
 
@@ -193,10 +202,10 @@ export const Register: React.FC = () => {
                 <div className="mb-5 flex items-start justify-between gap-4">
                   <div>
                     <h2 className="m-0 text-[20px] font-bold tracking-tight text-[var(--text-primary)] font-mono">
-                      Create account
+                      {t('Create account', 'สร้างบัญชี')}
                     </h2>
                     <p className="mt-1 mb-0 text-[12.5px] leading-5 text-[var(--text-muted)]">
-                      Set up local access for IT KKU WAF.
+                      {t('Set up local access for IT KKU WAF.', 'สร้างบัญชีสำหรับเข้าใช้ IT KKU WAF')}
                     </p>
                   </div>
                   <div className="rounded-lg border border-orange-500/20 bg-orange-500/10 p-2 text-orange-600 dark:text-orange-400">
@@ -205,13 +214,14 @@ export const Register: React.FC = () => {
                 </div>
 
                 <div className="mb-4 rounded-lg border border-[var(--bg-border-subtle)] bg-[var(--bg-primary)] px-3 py-2.5 text-[12px] leading-5 text-[var(--text-secondary)]">
-                  <span className="font-semibold text-[var(--text-primary)]">Role policy:</span> first account is admin; later accounts start as viewer.
+                  <span className="font-semibold text-[var(--text-primary)]">{t('Role policy:', 'นโยบายสิทธิ์:')}</span>{' '}
+                  {t('first account is admin; later accounts start as viewer.', 'บัญชีแรกเป็น admin บัญชีถัดไปเริ่มเป็น viewer')}
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4 text-[13px]">
                   <div>
                     <label htmlFor="register-username" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
-                      Username
+                      {t('Username', 'ชื่อผู้ใช้')}
                     </label>
                     <div className="relative">
                       <User className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
@@ -230,7 +240,7 @@ export const Register: React.FC = () => {
 
                   <div>
                     <label htmlFor="register-email" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
-                      Email
+                      {t('Email', 'อีเมล')}
                     </label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
@@ -249,7 +259,7 @@ export const Register: React.FC = () => {
 
                   <div>
                     <label htmlFor="register-password" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
-                      Password
+                      {t('Password', 'รหัสผ่าน')}
                     </label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
@@ -258,7 +268,7 @@ export const Register: React.FC = () => {
                         type={showPassword ? 'text' : 'password'}
                         required
                         autoComplete="new-password"
-                        placeholder="Password"
+                        placeholder={t('Password', 'รหัสผ่าน')}
                         className="w-full dash-input pl-9 pr-10 py-2 text-[13px]"
                         value={formData.password}
                         onChange={(e) => setFormData({ ...formData, password: e.target.value })}
@@ -266,7 +276,7 @@ export const Register: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        aria-label={showPassword ? t('Hide password', 'ซ่อนรหัสผ่าน') : t('Show password', 'แสดงรหัสผ่าน')}
                         className="absolute right-2.5 top-2 p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] focus:outline-none focus:ring-2 focus:ring-orange-500/40 transition-colors cursor-pointer"
                       >
                         {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -285,7 +295,7 @@ export const Register: React.FC = () => {
                       </div>
                       <div className="flex items-center justify-between text-[11px] font-mono">
                         <span style={{ color: strengthColor }}>{strengthLabel}</span>
-                        <span className="text-[var(--text-muted)]">{formData.password.length} chars</span>
+                        <span className="text-[var(--text-muted)]">{formData.password.length} {t('chars', 'ตัวอักษร')}</span>
                       </div>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-[var(--text-muted)]">
                         {passwordChecks.map((check) => {
@@ -293,7 +303,7 @@ export const Register: React.FC = () => {
                           return (
                             <span key={check.label} className="flex items-center gap-1.5">
                               <CheckCircle2 size={12} className={passed ? 'text-emerald-500' : 'text-[var(--text-dim)]'} />
-                              {check.label}
+                              {t(check.label, check.labelTh)}
                             </span>
                           )
                         })}
@@ -303,7 +313,7 @@ export const Register: React.FC = () => {
 
                   <div>
                     <label htmlFor="register-confirm-password" className="block text-[11.5px] font-semibold text-[var(--text-secondary)] mb-1.5">
-                      Confirm password
+                      {t('Confirm password', 'ยืนยันรหัสผ่าน')}
                     </label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-2.5 text-[var(--text-muted)] pointer-events-none" size={15} />
@@ -312,7 +322,7 @@ export const Register: React.FC = () => {
                         type={showPassword ? 'text' : 'password'}
                         required
                         autoComplete="new-password"
-                        placeholder="Confirm password"
+                        placeholder={t('Confirm password', 'ยืนยันรหัสผ่าน')}
                         className="w-full dash-input pl-9 pr-3 py-2 text-[13px]"
                         value={formData.confirmPassword}
                         onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
@@ -320,17 +330,17 @@ export const Register: React.FC = () => {
                     </div>
                     {formData.confirmPassword && (
                       <p className={`mt-1.5 mb-0 text-[11px] ${passwordsMatch ? 'text-emerald-500' : 'text-red-500'}`}>
-                        {passwordsMatch ? 'Passwords match' : 'Passwords do not match'}
+                        {passwordsMatch ? t('Passwords match', 'รหัสผ่านตรงกัน') : t('Passwords do not match', 'รหัสผ่านไม่ตรงกัน')}
                       </p>
                     )}
                   </div>
 
                   <Button type="submit" disabled={loading} isLoading={loading} variant="brand" className="w-full py-2.5">
                     {loading ? (
-                      'Creating workspace access...'
+                      t('Creating workspace access...', 'กำลังสร้างบัญชี...')
                     ) : (
                       <>
-                        <span>Create account / Register</span>
+                        <span>{t('Create account', 'สร้างบัญชี')}</span>
                         <ArrowRight size={14} />
                       </>
                     )}
@@ -340,7 +350,7 @@ export const Register: React.FC = () => {
                 <div className="my-5 flex items-center gap-3">
                   <div className="flex-1 h-px bg-[var(--bg-border)]" />
                   <span className="text-[11px] text-[var(--text-muted)] font-mono">
-                    Or continue with
+                    {t('Or continue with', 'หรือดำเนินการต่อด้วย')}
                   </span>
                   <div className="flex-1 h-px bg-[var(--bg-border)]" />
                 </div>
@@ -368,13 +378,13 @@ export const Register: React.FC = () => {
                       d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                     />
                   </svg>
-                  <span>Continue with Google</span>
+                  <span>{t('Continue with Google', 'ดำเนินการต่อด้วย Google')}</span>
                 </button>
 
                 <p className="mt-5 text-center text-[12px] text-[var(--text-muted)]">
-                  Already have access?{' '}
+                  {t('Already have access?', 'มีบัญชีอยู่แล้ว?')}{' '}
                   <Link to="/login" className="text-orange-600 dark:text-orange-500 font-semibold underline-offset-4 hover:underline">
-                    Sign in
+                    {t('Sign in', 'ลงชื่อเข้าใช้')}
                   </Link>
                 </p>
               </div>

@@ -2,6 +2,7 @@ import React, { useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useDialog } from './useDialog'
+import { useT } from '../../i18n'
 
 interface ModalProps {
   open: boolean
@@ -14,6 +15,7 @@ interface ModalProps {
 
 export const Modal: React.FC<ModalProps> = ({ open, onClose, title, description, children }) => {
   const panelRef = useRef<HTMLDivElement>(null)
+  const { t } = useT()
   const titleId = useId()
   const descriptionId = useId()
   // Escape, focus trap/return and scroll lock live in useDialog, shared with
@@ -55,7 +57,7 @@ export const Modal: React.FC<ModalProps> = ({ open, onClose, title, description,
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close dialog"
+            aria-label={t('Close dialog', 'ปิดหน้าต่าง')}
             className="-mr-1 shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors p-1.5 rounded-md cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
             <X size={16} aria-hidden="true" />

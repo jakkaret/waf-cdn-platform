@@ -75,6 +75,58 @@ export const WHY_VERIFY = [
 export const LOCKED_UNTIL_VERIFIED = ['เพิ่มเว็บและโดเมน', 'เชิญหรือรับคำเชิญทีม', 'สร้าง token ของ Agent', 'ใช้ AI Copilot', 'เชื่อมบัญชี Google']
 export const OPEN_BEFORE_VERIFIED = ['ดู Dashboard และหน้าต่าง ๆ', 'จัดการอุปกรณ์ที่เข้าระบบ', 'เปิด ticket ขอความช่วยเหลือ']
 
+// English copy of the same texts, in the same order.
+const GATE_COPY_EN: Record<GateAction, Omit<GateCopy, 'level'>> = {
+  create_origin: {
+    title: 'Verify your email before adding a site',
+    reasons: [
+      'The site’s traffic will pass through the WAF, and visitor logs (IP, URL) are kept in this account.',
+      'This email becomes the way to recover the account and reach the site owner, so it has to work.',
+    ],
+  },
+  add_domain: {
+    title: 'Verify your email before adding a domain',
+    reasons: ['An HTTPS certificate is issued for this domain, and visitor logs are kept in this account.'],
+  },
+  invite: {
+    title: 'Verify your email before inviting your team',
+    reasons: [
+      'Invited members see visitor logs; editors can change WAF rules, rate limits and routes.',
+      'The invitation is sent in the name of this email, so the recipient should know it is really from you.',
+    ],
+  },
+  agent_token: {
+    title: 'Verify your email before creating an Agent token',
+    reasons: ['This token connects your server to the edge for 90 days. Keep it like a password.'],
+  },
+  accept_invite: {
+    title: 'Verify your email to accept the invitation',
+    reasons: ['The invitation was sent to this email. Verifying it tells the site owner that the person joining is you.'],
+  },
+  link_google: {
+    title: 'Verify your email to link Google',
+    reasons: ['Once linked, you can sign in with Google instead of a password, so we first confirm this account is yours.'],
+  },
+  ai: {
+    title: 'Verify your email to use AI',
+    reasons: ['AI reads your sites’ attack logs and has a per-account quota, so it is open to verified accounts.'],
+  },
+}
+
+const WHY_VERIFY_EN = [
+  'Recover the account if you forget the password',
+  'Confirm this email is yours, so nobody else can sign up with it',
+  'Team invitations are sent to this email',
+]
+const LOCKED_UNTIL_VERIFIED_EN = ['Add sites and domains', 'Invite or accept a team invitation', 'Create an Agent token', 'Use AI Copilot', 'Link a Google account']
+const OPEN_BEFORE_VERIFIED_EN = ['View the dashboard and other pages', 'Manage signed-in devices', 'Open a support ticket']
+
+export const gateCopy = (action: GateAction, lang: 'en' | 'th'): GateCopy =>
+  lang === 'th' ? GATE_COPY[action] : { ...GATE_COPY_EN[action], level: GATE_COPY[action].level }
+export const whyVerify = (lang: 'en' | 'th') => (lang === 'th' ? WHY_VERIFY : WHY_VERIFY_EN)
+export const lockedUntilVerified = (lang: 'en' | 'th') => (lang === 'th' ? LOCKED_UNTIL_VERIFIED : LOCKED_UNTIL_VERIFIED_EN)
+export const openBeforeVerified = (lang: 'en' | 'th') => (lang === 'th' ? OPEN_BEFORE_VERIFIED : OPEN_BEFORE_VERIFIED_EN)
+
 export const isGateAction = (value: unknown): value is GateAction =>
   typeof value === 'string' && value in GATE_COPY
 

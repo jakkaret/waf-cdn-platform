@@ -1,4 +1,5 @@
 import React from 'react';
+import { useT } from '../../i18n';
 
 interface CodeBlockProps {
   code: string;
@@ -7,13 +8,14 @@ interface CodeBlockProps {
 }
 
 export const CodeBlock: React.FC<CodeBlockProps> = ({ code, className = '' }) => {
+  const { t } = useT();
   return (
     <div className={`relative rounded-lg overflow-hidden border border-bg-border bg-[#0d1117] ${className}`}>
       <div className="absolute top-0 right-0 p-2">
         <button 
           onClick={() => navigator.clipboard.writeText(code)}
           className="p-1.5 rounded-md bg-bg-surface2 text-text-muted hover:text-text-primary transition-colors hover:bg-bg-border"
-          title="Copy code"
+          title={t('Copy code', 'คัดลอกโค้ด')}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
