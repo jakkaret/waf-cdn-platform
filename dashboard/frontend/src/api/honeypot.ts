@@ -77,7 +77,9 @@ export interface DecoyProbe {
   serves_path?: boolean
 }
 
-const base = (originId: string) => `/api/origins/${encodeURIComponent(originId)}/honeypot`
+// Relative to the axios baseURL (/api), like every other api/ module.
+export const honeypotBase = (originId: string) => `/origins/${encodeURIComponent(originId)}/honeypot`
+const base = honeypotBase
 
 export const getHoneypotSummary = (originId: string, days: number) =>
   api.get<HoneypotSummary>(`${base(originId)}/summary`, { params: { days } }).then((r) => r.data)

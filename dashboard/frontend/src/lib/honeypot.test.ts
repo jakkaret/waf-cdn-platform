@@ -57,3 +57,10 @@ describe('IOC export', () => {
     expect(iocCsv([session({ tool: '=cmd|calc', uploads: [], tokens_replayed: [] })])).toContain(`"'=cmd|calc"`)
   })
 })
+
+describe('honeypot API paths', () => {
+  it('are relative to the axios /api base, not prefixed again', async () => {
+    const { honeypotBase } = await import('../api/honeypot')
+    expect(honeypotBase('o 1')).toBe('/origins/o%201/honeypot')
+  })
+})
