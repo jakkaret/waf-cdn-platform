@@ -6,6 +6,7 @@ import { aiSummaryApi, NotificationItem } from '../api/aiSummary'
 import toast from 'react-hot-toast'
 import { formatBkkTime } from '../lib/time'
 import { alertSeverity } from '../lib/alertActions'
+import { severityLabel, useT } from '../i18n'
 
 // The bell: the latest alerts and the unread count. The unread count is the
 // backend's (`unread_count` of /ai/notifications/feed), the same number the
@@ -18,6 +19,7 @@ export const NotificationCenter: React.FC = () => {
   const panelRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const { t, lang } = useT()
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['notifications-feed'],
@@ -58,8 +60,8 @@ export const NotificationCenter: React.FC = () => {
 
   const handleMarkAllRead = () => {
     markReadMutation.mutate(undefined, {
-      onSuccess: () => toast.success('Marked all as read'),
-      onError: () => toast.error('Could not mark the alerts as read'),
+      onSuccess: () => toast.success(t('Marked all as read', 'ทำเครื่องหมายว่าอ่านทั้งหมดแล้ว')),
+      onError: () => toast.error(t('Could not mark the alerts as read', 'ทำเครื่องหมายว่าอ่านแล้วไม่สำเร็จ')),
     })
   }
 
@@ -77,9 +79,9 @@ export const NotificationCenter: React.FC = () => {
         onClick={() => setIsOpen(!isOpen)}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
-        aria-label={unreadCount > 0 ? `Alerts, ${unreadCount} unread` : 'Alerts'}
+        aria-label={unreadCount > 0 ? t(`Alerts, ${unreadCount} unread`, `การแจ้งเตือน ยังไม่อ่าน ${unreadCount}`) : t('Alerts', 'การแจ้งเตือน')}
         className="relative h-9 w-9 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--bg-border)] transition-colors cursor-pointer flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-        title="Alerts"
+        title={t('Alerts', 'การแจ้งเตือน')}
       >
         <Bell size={17} aria-hidden="true" />
         {unreadCount > 0 && (
@@ -93,15 +95,18 @@ export const NotificationCenter: React.FC = () => {
         <div
           ref={panelRef}
           role="dialog"
-          aria-label="Latest alerts"
+          aria-label={t('Latest alerts', 'การแจ้งเตือนล่าสุด')}
           tabIndex={-1}
           className="absolute right-0 mt-2 w-[calc(100vw-2rem)] max-w-[420px] max-h-[560px] bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] rounded-xl shadow-xl z-50 flex flex-col overflow-hidden focus:outline-none"
         >
           <div className="px-4 py-3 border-b border-[var(--bg-border-subtle)] flex items-center justify-between gap-3 bg-[var(--bg-surface)]">
             <div className="min-w-0">
-              <h3 className="text-[14px] font-semibold text-[var(--text-primary)] m-0">Latest alerts</h3>
+              <h3 className="text-[14px] font-semibold text-[var(--text-primary)] m-0">{t('Latest alerts', 'การแจ้งเตือนล่าสุด')}</h3>
               <span className="text-[12px] text-[var(--text-muted)]">
-                {unreadCount} unread, showing the latest {notifications.length}
+                {t(
+                  `${unreadCount} unread, showing the latest ${notifications.length}`,
+                  `ยังไม่อ่าน ${unreadCount} แสดง ${notifications.length} รายการล่าสุด`,
+                )}
               </span>
             </div>
             {unreadCount > 0 && (
@@ -112,21 +117,23 @@ export const NotificationCenter: React.FC = () => {
                 className="shrink-0 text-[12px] text-[var(--accent)] hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-50"
               >
                 <CheckCheck size={13} aria-hidden="true" />
-                Mark all read
+                {t('Mark all read', 'อ่านทั้งหมดแล้ว')}
               </button>
             )}
           </div>
 
           <ul className="m-0 p-0 list-none flex-1 overflow-y-auto divide-y divide-[var(--bg-border-subtle)] max-h-[440px]">
             {isLoading ? (
-              <li className="p-8 text-center text-[var(--text-muted)] text-[13px]">Loading alerts…</li>
+              <li className="p-8 text-center text-[var(--text-muted)] text-[13px]">{t('Loading alerts…', 'กำลังโหลดการแจ้งเตือน…')}</li>
             ) : isError ? (
-              <li className="p-8 text-center text-[13px] text-red-600 dark:text-red-400">Could not load alerts. They will retry in a few seconds.</li>
+              <li className="p-8 text-center text-[13px] text-red-600 dark:text-red-400">
+                {t('Could not load alerts. They will retry in a few seconds.', 'โหลดการแจ้งเตือนไม่สำเร็จ ระบบจะลองใหม่ในอีกไม่กี่วินาที')}
+              </li>
             ) : notifications.length === 0 ? (
               <li className="p-8 text-center text-[var(--text-muted)]">
                 <Shield size={28} className="mx-auto mb-2 opacity-40" aria-hidden="true" />
-                <p className="text-[13px] font-medium text-[var(--text-secondary)] m-0">No alerts</p>
-                <p className="text-[12px] mt-1 m-0">Nothing was flagged on your sites recently.</p>
+                <p className="text-[13px] font-medium text-[var(--text-secondary)] m-0">{t('No alerts', 'ไม่มีการแจ้งเตือน')}</p>
+                <p className="text-[12px] mt-1 m-0">{t('Nothing was flagged on your sites recently.', 'ช่วงนี้ไม่มีอะไรผิดปกติบนเว็บของคุณ')}</p>
               </li>
             ) : (
               notifications.map((item) => {
@@ -141,11 +148,11 @@ export const NotificationCenter: React.FC = () => {
                     >
                       <span className="flex items-start justify-between gap-2 mb-1">
                         <span className="flex items-center gap-1.5 min-w-0">
-                          {isUnread && <span className="h-2 w-2 rounded-full bg-[var(--accent)] shrink-0" aria-label="Unread" />}
+                          {isUnread && <span className="h-2 w-2 rounded-full bg-[var(--accent)] shrink-0" aria-label={t('Unread', 'ยังไม่อ่าน')} />}
                           <span className="font-mono text-[12px] text-[var(--text-primary)] font-semibold truncate">{item.ip}</span>
                           {sev && (
                             <span className={`text-[11px] font-medium ${sev === 'CRITICAL' || sev === 'HIGH' ? 'text-red-700 dark:text-red-400' : 'text-[var(--text-muted)]'}`}>
-                              {sev.charAt(0) + sev.slice(1).toLowerCase()}
+                              {severityLabel(sev, lang)}
                             </span>
                           )}
                           {item.status && <span className="text-[11px] text-[var(--text-muted)]">HTTP {item.status}</span>}
@@ -157,14 +164,14 @@ export const NotificationCenter: React.FC = () => {
                       </span>
                       <span className="block text-[12px] text-[var(--text-secondary)] truncate font-mono">{item.url}</span>
                       <span className="block text-[12px] text-[var(--text-muted)] truncate">
-                        {item.attack_type || item.message || 'WAF rule matched'}
-                        {item.rule_id ? ` (rule ${item.rule_id})` : ''}
+                        {item.attack_type || item.message || t('WAF rule matched', 'ตรงกับกฎ WAF')}
+                        {item.rule_id ? t(` (rule ${item.rule_id})`, ` (กฎ ${item.rule_id})`) : ''}
                       </span>
                       {item.ai_summary && (
                         <span className="mt-1.5 block rounded-md border border-[var(--bg-border)] bg-[var(--bg-surface)] p-2 text-[12px] text-[var(--text-secondary)]">
                           <span className="flex items-center gap-1 text-[11px] font-medium text-indigo-700 dark:text-indigo-300 mb-0.5">
                             <Sparkles size={11} aria-hidden="true" />
-                            AI summary, may be inaccurate
+                            {t('AI summary, may be inaccurate', 'สรุปโดย AI อาจคลาดเคลื่อนได้')}
                           </span>
                           {item.ai_summary}
                         </span>
@@ -184,7 +191,7 @@ export const NotificationCenter: React.FC = () => {
               }}
               className="text-[12.5px] font-medium text-[var(--accent)] hover:underline cursor-pointer"
             >
-              Open the Alert center
+              {t('Open the Alert center', 'เปิดศูนย์การแจ้งเตือน')}
             </button>
           </div>
         </div>

@@ -52,8 +52,9 @@ export function buildTimeline(logs: LogLike[]): { buckets: TimelineBucket[]; buc
   return { buckets, bucketMs, from, to }
 }
 
-export function bucketLabel(bucketMs: number): string {
-  if (bucketMs >= 24 * 60 * MINUTE) return 'per day'
-  if (bucketMs >= 60 * MINUTE) return `per ${bucketMs / (60 * MINUTE)} h`
-  return `per ${bucketMs / MINUTE} min`
+export function bucketLabel(bucketMs: number, lang: 'en' | 'th' = 'en'): string {
+  const th = lang === 'th'
+  if (bucketMs >= 24 * 60 * MINUTE) return th ? 'รายวัน' : 'per day'
+  if (bucketMs >= 60 * MINUTE) return th ? `ทุก ${bucketMs / (60 * MINUTE)} ชม.` : `per ${bucketMs / (60 * MINUTE)} h`
+  return th ? `ทุก ${bucketMs / MINUTE} นาที` : `per ${bucketMs / MINUTE} min`
 }

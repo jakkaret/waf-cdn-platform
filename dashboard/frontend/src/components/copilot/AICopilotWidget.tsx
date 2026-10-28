@@ -18,6 +18,7 @@ import {
 import { toast } from 'react-hot-toast'
 import { ReportText } from '../ai/ReportText'
 import { formatBkkTime } from '../../lib/time'
+import { useT } from '../../i18n'
 
 interface Message {
   id: string
@@ -26,15 +27,27 @@ interface Message {
   timestamp: string
 }
 
-const QUICK_PROMPTS = [
-  'สรุปการโจมตี 24 ชั่วโมงล่าสุด',
-  'IP ไหนควรบล็อก',
-  'การโจมตีประเภทไหนเยอะสุด และควรทำอะไร',
-  'URL ไหนถูกเล็งมากสุด',
-]
+const QUICK_PROMPTS = {
+  th: [
+    'สรุปการโจมตี 24 ชั่วโมงล่าสุด',
+    'IP ไหนควรบล็อก',
+    'การโจมตีประเภทไหนเยอะสุด และควรทำอะไร',
+    'URL ไหนถูกเล็งมากสุด',
+  ],
+  en: [
+    'Summarise the attacks of the last 24 hours',
+    'Which IPs should I block?',
+    'Which attack type is most common, and what should I do?',
+    'Which URLs are targeted most?',
+  ],
+}
 
 // Answers come from this account's last 24 hours of logs only (api/copilot.py).
-const INTRO = 'ถามเรื่องทราฟฟิกและการโจมตีของเว็บในบัญชีนี้ ข้อมูล 24 ชั่วโมงล่าสุด'
+// The intro is not stored as a message text, so it follows the language.
+const INTRO = {
+  th: 'ถามเรื่องทราฟฟิกและการโจมตีของเว็บในบัญชีนี้ ข้อมูล 24 ชั่วโมงล่าสุด',
+  en: 'Ask about the traffic and attacks of the sites in this account, from the last 24 hours.',
+}
 
 const now = () => formatBkkTime(new Date())
 
@@ -44,12 +57,13 @@ export const AICopilotWidget: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const { t, lang } = useT()
 
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'welcome-1',
       role: 'model',
-      content: INTRO,
+      content: '',
       timestamp: now(),
     },
   ])
@@ -91,7 +105,7 @@ export const AICopilotWidget: React.FC = () => {
         history: historyPayload,
       })
 
-      const botReply = response.data?.reply || 'ไม่มีคำตอบจากระบบ ลองใหม่อีกครั้ง'
+      const botReply = response.data?.reply || t('No answer from the system. Please try again.', 'ไม่มีคำตอบจากระบบ ลองใหม่อีกครั้ง')
 
       const botMessage: Message = {
         id: `bot-${Date.now()}`,
@@ -102,11 +116,11 @@ export const AICopilotWidget: React.FC = () => {
 
       setMessages((prev) => [...prev, botMessage])
     } catch (error: any) {
-      toast.error('ส่งคำถามไม่สำเร็จ')
+      toast.error(t('Could not send the question', 'ส่งคำถามไม่สำเร็จ'))
       const errorMessage: Message = {
         id: `err-${Date.now()}`,
         role: 'model',
-        content: 'เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้ง',
+        content: t('Could not connect. Please try again.', 'เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้ง'),
         timestamp: formatBkkTime(new Date()),
       }
       setMessages((prev) => [...prev, errorMessage])
@@ -118,7 +132,7 @@ export const AICopilotWidget: React.FC = () => {
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text)
     setCopiedId(id)
-    toast.success('คัดลอกแล้ว')
+    toast.success(t('Copied', 'คัดลอกแล้ว'))
     setTimeout(() => setCopiedId(null), 2000)
   }
 
@@ -127,11 +141,11 @@ export const AICopilotWidget: React.FC = () => {
       {
         id: 'welcome-reset',
         role: 'model',
-        content: INTRO,
+        content: '',
         timestamp: now(),
       },
     ])
-    toast.success('ล้างประวัติการสนทนาแล้ว')
+    toast.success(t('Chat history cleared', 'ล้างประวัติการสนทนาแล้ว'))
   }
 
   return (
@@ -144,7 +158,7 @@ export const AICopilotWidget: React.FC = () => {
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          aria-label="Open AI copilot"
+          aria-label={t('Open AI copilot', 'เปิด AI copilot')}
           title="AI copilot"
           className="fixed bottom-4 right-4 z-40 flex items-center justify-center gap-2 h-11 w-11 lg:w-auto lg:px-3.5 rounded-full bg-indigo-700 hover:bg-indigo-800 text-white shadow-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500"
         >
@@ -174,7 +188,10 @@ export const AICopilotWidget: React.FC = () => {
                   </h3>
                 </div>
                 <p className="text-[11.5px] text-[var(--text-muted)] m-0 mt-0.5">
-                  Answers from the last 24 h of your sites. Check important answers in the logs.
+                  {t(
+                    'Answers from the last 24 h of your sites. Check important answers in the logs.',
+                    'ตอบจากข้อมูล 24 ชม. ล่าสุดของเว็บคุณ คำตอบสำคัญควรตรวจกับ log อีกครั้ง',
+                  )}
                 </p>
               </div>
             </div>
@@ -183,14 +200,14 @@ export const AICopilotWidget: React.FC = () => {
               <button
                 onClick={handleClear}
                 className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-red-400 hover:bg-white/5 transition-colors cursor-pointer"
-                title="Clear Chat"
+                title={t('Clear chat', 'ล้างการสนทนา')}
               >
                 <Trash2 size={14} />
               </button>
               <button
                 onClick={() => setIsOpen(false)}
                 className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-white/5 transition-colors cursor-pointer"
-                title="Close"
+                title={t('Close', 'ปิด')}
               >
                 <Minimize2 size={14} />
               </button>
@@ -220,16 +237,20 @@ export const AICopilotWidget: React.FC = () => {
                     }`}
                   >
                     <div className="space-y-1">
-                      {isBot ? <ReportText text={msg.content} className="text-[12px]" /> : msg.content}
+                      {isBot ? (
+                        <ReportText text={msg.id.startsWith('welcome') ? INTRO[lang] : msg.content} className="text-[12px]" />
+                      ) : (
+                        msg.content
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between gap-2 mt-2 pt-1 border-t border-white/5 text-[10px] text-[var(--text-muted)] font-mono">
                       <span>{msg.timestamp}</span>
                       {isBot && (
                         <button
-                          onClick={() => handleCopy(msg.content, msg.id)}
+                          onClick={() => handleCopy(msg.id.startsWith('welcome') ? INTRO[lang] : msg.content, msg.id)}
                           className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-indigo-400 cursor-pointer"
-                          title="Copy response"
+                          title={t('Copy response', 'คัดลอกคำตอบ')}
                         >
                           {copiedId === msg.id ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
                         </button>
@@ -250,7 +271,7 @@ export const AICopilotWidget: React.FC = () => {
             {isLoading && (
               <div className="flex items-center gap-2.5 text-[12px] text-indigo-400 font-mono bg-indigo-500/10 p-2.5 rounded-xl border border-indigo-500/20 w-fit">
                 <Sparkles size={14} className="animate-spin text-indigo-400" />
-                <span>Copilot กำลังวิเคราะห์ข้อมูลสดจาก ClickHouse...</span>
+                <span>{t('Copilot is analysing live data from ClickHouse...', 'Copilot กำลังวิเคราะห์ข้อมูลสดจาก ClickHouse...')}</span>
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -258,7 +279,7 @@ export const AICopilotWidget: React.FC = () => {
 
           {/* Quick Starter Chips */}
           <div className="px-3 py-2 border-t border-[var(--bg-border-subtle)] bg-[var(--bg-surface-elevated)] flex gap-1.5 overflow-x-auto no-scrollbar">
-            {QUICK_PROMPTS.map((prompt, idx) => (
+            {QUICK_PROMPTS[lang].map((prompt, idx) => (
               <button
                 key={idx}
                 onClick={() => handleSend(prompt)}
@@ -277,13 +298,14 @@ export const AICopilotWidget: React.FC = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder="ถามข้อมูลความปลอดภัย เช่น 'IP ไหนโจมตีบ่อยสุด'..."
+              placeholder={t("Ask about security, e.g. 'Which IP attacks most often?'...", "ถามข้อมูลความปลอดภัย เช่น 'IP ไหนโจมตีบ่อยสุด'...")}
               disabled={isLoading}
               className="flex-1 px-3.5 py-2 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--bg-border)] text-[12.5px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-indigo-500 font-sans"
             />
             <button
               onClick={() => handleSend()}
               disabled={!input.trim() || isLoading}
+              aria-label={t('Send', 'ส่ง')}
               className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition-all disabled:opacity-40 shadow-md cursor-pointer shrink-0"
             >
               <Send size={15} />

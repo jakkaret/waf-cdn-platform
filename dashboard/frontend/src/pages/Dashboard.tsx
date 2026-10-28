@@ -51,21 +51,24 @@ import {
 import toast from 'react-hot-toast'
 import { CRS_VERSION } from '../lib/crsVersion'
 import { BKK_LABEL, formatBkkDateTime, formatBkkTime } from '../lib/time'
+import { useT } from '../i18n'
 
-// Full English country name for an ISO alpha-2 code, from the browser's own
-// data (always complete and current) rather than a list we maintain. The API's
-// `name` only covers a handful of countries now that the code comes from real
-// GeoIP; falls back to the code itself if the runtime lacks Intl.DisplayNames.
-const regionNames: Intl.DisplayNames | null = (() => {
+// Full country name (English or Thai) for an ISO alpha-2 code, from the
+// browser's own data (always complete and current) rather than a list we
+// maintain. The API's `name` only covers a handful of countries now that the
+// code comes from real GeoIP; falls back to the code itself if the runtime
+// lacks Intl.DisplayNames.
+const makeRegionNames = (lang: string): Intl.DisplayNames | null => {
   try {
-    return new Intl.DisplayNames(['en'], { type: 'region' })
+    return new Intl.DisplayNames([lang], { type: 'region' })
   } catch {
     return null
   }
-})()
-const countryDisplayName = (code: string, fallback?: string): string => {
+}
+const regionNames = { en: makeRegionNames('en'), th: makeRegionNames('th') }
+const countryDisplayName = (code: string, fallback: string | undefined, lang: 'en' | 'th'): string => {
   try {
-    return regionNames?.of(code.toUpperCase()) || fallback || code
+    return regionNames[lang]?.of(code.toUpperCase()) || fallback || code
   } catch {
     return fallback || code
   }
@@ -76,6 +79,7 @@ export const Dashboard: React.FC = () => {
   const [chartView, setChartView] = useState<'area' | 'bar'>('area')
   const [copiedIp, setCopiedIp] = useState<string | null>(null)
   const { theme } = useThemeStore()
+  const { t, lang } = useT()
   const { selectedOrigin, selectedOriginLabel, setSelectedOrigin } = useOriginFilterStore()
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin'
@@ -133,17 +137,17 @@ export const Dashboard: React.FC = () => {
     if (activeTab === 'security') {
       refetchLogs()
       refetchAnalytics()
-      toast.success(`Refreshed telemetry for: ${selectedOriginLabel}`)
+      toast.success(t(`Refreshed telemetry for: ${selectedOriginLabel}`, `รีเฟรชข้อมูลของ: ${selectedOriginLabel} แล้ว`))
     } else {
       refetchSystem()
-      toast.success('Infrastructure status refreshed')
+      toast.success(t('Infrastructure status refreshed', 'รีเฟรชสถานะโครงสร้างระบบแล้ว'))
     }
   }
 
   const handleCopyIp = (ip: string) => {
     navigator.clipboard.writeText(ip)
     setCopiedIp(ip)
-    toast.success(`Copied IP ${ip} to clipboard`)
+    toast.success(t(`Copied IP ${ip} to clipboard`, `คัดลอก IP ${ip} แล้ว`))
     setTimeout(() => setCopiedIp(null), 2000)
   }
 
@@ -181,14 +185,14 @@ export const Dashboard: React.FC = () => {
       {/* Top Header Bar */}
       <TopBar
         scope
-        title="Dashboard"
-        subtitle="Traffic and threats across your sites"
+        title={t('Dashboard', 'แดชบอร์ด')}
+        subtitle={t('Traffic and threats across your sites', 'ทราฟฟิกและภัยคุกคามของทุกเว็บไซต์ของคุณ')}
         action={
           <div className="flex items-center gap-2">
             {/* View Switcher: the infrastructure view (node addresses,
                 ports, internal services) is for the platform operator. */}
             {isAdmin && (
-            <div className="flex rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] p-0.5" role="tablist" aria-label="Dashboard perspective tabs">
+            <div className="flex rounded-lg border border-[var(--bg-border)] bg-[var(--bg-surface)] p-0.5" role="tablist" aria-label={t('Dashboard perspective tabs', 'มุมมองของแดชบอร์ด')}>
               <button
                 role="tab"
                 aria-selected={activeTab === 'security'}
@@ -200,7 +204,7 @@ export const Dashboard: React.FC = () => {
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
-                Security Analytics
+                {t('Security Analytics', 'วิเคราะห์ความปลอดภัย')}
               </button>
               <button
                 role="tab"
@@ -213,7 +217,7 @@ export const Dashboard: React.FC = () => {
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
-                Infrastructure & Nodes
+                {t('Infrastructure & Nodes', 'โครงสร้างระบบและ node')}
               </button>
             </div>
             )}
@@ -222,12 +226,12 @@ export const Dashboard: React.FC = () => {
             <button
               onClick={handleRefresh}
               disabled={isSyncing}
-              aria-label="Refresh telemetry data"
+              aria-label={t('Refresh telemetry data', 'รีเฟรชข้อมูล')}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--bg-surface)] border border-[var(--bg-border)] hover:border-[var(--bg-border-hover)] text-[12px] font-mono font-medium text-[var(--text-primary)] rounded-md hover:bg-[var(--bg-hover)] shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-orange-500"
-              title="Refresh telemetry"
+              title={t('Refresh telemetry', 'รีเฟรชข้อมูล')}
             >
               <RefreshCw size={13} className={isSyncing ? 'animate-spin text-orange-500' : 'text-[var(--text-muted)]'} />
-              <span className="hidden sm:inline">Sync</span>
+              <span className="hidden sm:inline">{t('Sync', 'รีเฟรช')}</span>
             </button>
           </div>
         }
@@ -239,16 +243,16 @@ export const Dashboard: React.FC = () => {
           <div className="flex items-center gap-2 truncate">
             <Shield size={16} className="text-indigo-400 shrink-0" />
             <span className="truncate">
-              Currently Scoped to Origin:{' '}
+              {t('Currently scoped to origin:', 'กำลังดูเฉพาะ origin:')}{' '}
               <strong className="text-[var(--text-primary)] font-semibold">{selectedOriginLabel}</strong>
             </span>
           </div>
           <button
-            onClick={() => setSelectedOrigin('ALL', 'All Managed Origins (ทั้งหมด)')}
+            onClick={() => setSelectedOrigin('ALL', t('All origins', 'ทุก origin'))}
             className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-white text-[11px] font-bold transition-colors cursor-pointer shrink-0"
           >
             <X size={12} />
-            <span>Show All Origins</span>
+            <span>{t('Show all origins', 'แสดงทุก origin')}</span>
           </button>
         </div>
       )}
@@ -268,7 +272,7 @@ export const Dashboard: React.FC = () => {
           return (
             <div className="mb-5 p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)] flex items-center gap-2.5 text-[12.5px] font-mono text-[var(--text-muted)]">
               <RefreshCw size={14} className="animate-spin shrink-0" />
-              <span>Checking system status...</span>
+              <span>{t('Checking system status...', 'กำลังตรวจสถานะระบบ...')}</span>
             </div>
           )
         }
@@ -278,8 +282,10 @@ export const Dashboard: React.FC = () => {
           return (
             <div className="mb-5 p-3.5 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/[0.12] border border-emerald-200/60 dark:border-emerald-500/20 flex items-center gap-2.5 text-[12.5px] font-mono">
               <ShieldCheck size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span className="text-emerald-700 dark:text-emerald-400 font-semibold">Nothing needs attention right now</span>
-              <span className="text-[var(--text-muted)]">-- no unread alerts, no pending rule reviews, all nodes online.</span>
+              <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{t('Nothing needs attention right now', 'ตอนนี้ไม่มีอะไรต้องจัดการ')}</span>
+              <span className="text-[var(--text-muted)]">
+                {t('-- no unread alerts, no pending rule reviews, all nodes online.', '— ไม่มีการแจ้งเตือนที่ยังไม่อ่าน ไม่มีกฎรอตรวจ และทุก node ออนไลน์')}
+              </span>
             </div>
           )
         }
@@ -289,7 +295,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex items-center gap-2 mb-2.5">
               <AlertTriangle size={15} className="text-amber-600 dark:text-amber-400" />
               <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 font-mono">
-                Needs Attention
+                {t('Needs attention', 'ต้องจัดการ')}
               </span>
             </div>
             <div className="flex flex-wrap gap-2.5">
@@ -300,7 +306,7 @@ export const Dashboard: React.FC = () => {
                 >
                   <Bell size={13} className="text-amber-600 dark:text-amber-400" />
                   <span className="font-semibold text-[var(--text-primary)]">{unreadCount}</span>
-                  <span className="text-[var(--text-muted)]">unread alert{unreadCount === 1 ? '' : 's'}</span>
+                  <span className="text-[var(--text-muted)]">{t(`unread alert${unreadCount === 1 ? '' : 's'}`, 'การแจ้งเตือนที่ยังไม่อ่าน')}</span>
                 </Link>
               )}
               {pendingRuleCount > 0 && (
@@ -311,7 +317,10 @@ export const Dashboard: React.FC = () => {
                   <FlaskConical size={13} className="text-amber-600 dark:text-amber-400" />
                   <span className="font-semibold text-[var(--text-primary)]">{pendingRuleCount}</span>
                   <span className="text-[var(--text-muted)]">
-                    ML rule{pendingRuleCount === 1 ? '' : 's'} awaiting {isAdmin ? 'review' : 'your review'}
+                    {t(
+                      `ML rule${pendingRuleCount === 1 ? '' : 's'} awaiting ${isAdmin ? 'review' : 'your review'}`,
+                      isAdmin ? 'กฎ ML รอตรวจ' : 'กฎ ML รอคุณตรวจ',
+                    )}
                   </span>
                 </Link>
               )}
@@ -324,12 +333,17 @@ export const Dashboard: React.FC = () => {
                   >
                     <WifiOff size={13} className="text-amber-600 dark:text-amber-400" />
                     <span className="font-semibold text-[var(--text-primary)]">{offlineNodes.length}</span>
-                    <span className="text-[var(--text-muted)]">node{offlineNodes.length === 1 ? '' : 's'} offline</span>
+                    <span className="text-[var(--text-muted)]">{t(`node${offlineNodes.length === 1 ? '' : 's'} offline`, 'node ออฟไลน์')}</span>
                   </button>
                 ) : (
                   <span className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-amber-300/50 dark:border-amber-500/20 text-[12px]">
                     <WifiOff size={13} className="text-amber-600 dark:text-amber-400" />
-                    <span className="text-[var(--text-secondary)]">Part of the platform is degraded right now, so some requests may be slow or fail.</span>
+                    <span className="text-[var(--text-secondary)]">
+                      {t(
+                        'Part of the platform is degraded right now, so some requests may be slow or fail.',
+                        'ขณะนี้ระบบบางส่วนทำงานไม่เต็มที่ บาง request อาจช้าหรือล้มเหลว',
+                      )}
+                    </span>
                   </span>
                 )
               )}
@@ -339,17 +353,22 @@ export const Dashboard: React.FC = () => {
       })()}
 
       {activeTab === 'security' ? (
-        <div id="security-panel" role="tabpanel" aria-label="Security Analytics Dashboard" className="animate-fade-in">
+        <div id="security-panel" role="tabpanel" aria-label={t('Security Analytics Dashboard', 'แดชบอร์ดวิเคราะห์ความปลอดภัย')} className="animate-fade-in">
 
           {/* ═══ Section 1: KPI Summary Strip ═══ */}
           {/* /analytics/summary queries access_logs with no time filter, so
               the cards cover every request still stored, not a recent window. */}
           <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2.5">
             <h2 className="m-0 text-[14px] font-semibold text-[var(--text-primary)]">
-              {selectedOrigin === 'ALL' ? (isAdmin ? 'All platform traffic' : 'All your origins') : selectedOriginLabel}
+              {selectedOrigin === 'ALL'
+                ? isAdmin
+                  ? t('All platform traffic', 'ทราฟฟิกทั้งแพลตฟอร์ม')
+                  : t('All your origins', 'ทุก origin ของคุณ')
+                : selectedOriginLabel}
             </h2>
             <span className="text-[12px] text-[var(--text-muted)]">
-              All stored traffic, no time limit{analytics?.source === 'offline' ? ' (log store offline, figures unavailable)' : ''}
+              {t('All stored traffic, no time limit', 'ทราฟฟิกทั้งหมดที่เก็บไว้ ไม่จำกัดช่วงเวลา')}
+              {analytics?.source === 'offline' ? t(' (log store offline, figures unavailable)', ' (ระบบเก็บ log ออฟไลน์ ยังไม่มีตัวเลข)') : ''}
             </span>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -358,7 +377,7 @@ export const Dashboard: React.FC = () => {
             <div className="dash-card p-4 sm:p-5 flex flex-col justify-between">
               <div className="flex items-center justify-between gap-2 mb-3">
                 <span className="text-[12.5px] font-medium text-[var(--text-secondary)]">
-                  Requests
+                  {t('Requests', 'Request')}
                 </span>
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-sky-500/10">
                   <Activity size={15} className="text-sky-600 dark:text-sky-400" />
@@ -368,7 +387,7 @@ export const Dashboard: React.FC = () => {
                 {kpi(totalRequests)}
               </span>
               <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11.5px]">
-                <span className="text-[var(--text-muted)]">Requests inspected</span>
+                <span className="text-[var(--text-muted)]">{t('Requests inspected', 'จำนวน request ที่ตรวจแล้ว')}</span>
               </div>
             </div>
 
@@ -376,7 +395,7 @@ export const Dashboard: React.FC = () => {
             <div className="dash-card p-4 sm:p-5 flex flex-col justify-between bg-red-50/50 dark:bg-red-950/[0.08] border-red-200/60 dark:border-red-500/15">
               <div className="flex items-center justify-between gap-2 mb-3">
                 <span className="text-[12.5px] font-medium text-red-800 dark:text-red-300">
-                  Blocked or flagged
+                  {t('Blocked or flagged', 'ถูกบล็อกหรือถูกตั้งธง')}
                 </span>
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-red-500/10">
                   <ShieldAlert size={15} className="text-red-600 dark:text-red-400" />
@@ -393,7 +412,7 @@ export const Dashboard: React.FC = () => {
                 )}
               </div>
               <div className="mt-3 pt-2.5 border-t border-red-200/40 dark:border-red-500/10 flex items-center text-[11.5px]">
-                <span className="text-red-800/80 dark:text-red-300/70">Requests blocked (403), rate limited (429) or flagged</span>
+                <span className="text-red-800/80 dark:text-red-300/70">{t('Requests blocked (403), rate limited (429) or flagged', 'Request ที่ถูกบล็อก (403), ถูก rate limit (429) หรือถูกตั้งธง')}</span>
               </div>
             </div>
 
@@ -401,7 +420,7 @@ export const Dashboard: React.FC = () => {
             <div className="dash-card p-4 sm:p-5 flex flex-col justify-between">
               <div className="flex items-center justify-between gap-2 mb-3">
                 <span className="text-[12.5px] font-medium text-[var(--text-secondary)]">
-                  Unique visitor IPs
+                  {t('Unique visitor IPs', 'IP ผู้เข้าชมที่ไม่ซ้ำ')}
                 </span>
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-amber-500/10">
                   <Globe size={15} className="text-amber-600 dark:text-amber-400" />
@@ -411,7 +430,7 @@ export const Dashboard: React.FC = () => {
                 {kpi(uniqueIPs)}
               </span>
               <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11.5px]">
-                <span className="text-[var(--text-muted)]">Visitor IP addresses seen</span>
+                <span className="text-[var(--text-muted)]">{t('Visitor IP addresses seen', 'จำนวน IP ผู้เข้าชมที่พบ')}</span>
               </div>
             </div>
 
@@ -423,7 +442,7 @@ export const Dashboard: React.FC = () => {
             <div className="dash-card p-4 sm:p-5 flex flex-col justify-between">
               <div className="flex items-center justify-between gap-2 mb-3">
                 <span className="text-[12.5px] font-medium text-[var(--text-secondary)]">
-                  Average response time
+                  {t('Average response time', 'เวลาตอบกลับเฉลี่ย')}
                 </span>
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10">
                   <ShieldCheck size={15} className="text-emerald-600 dark:text-emerald-400" />
@@ -436,7 +455,9 @@ export const Dashboard: React.FC = () => {
               </div>
               <div className="mt-3 pt-2.5 border-t border-[var(--bg-border-subtle)] flex items-center text-[11.5px]">
                 <span className="text-[var(--text-muted)]">
-                  {analytics && analytics.average_latency_ms == null ? 'No response times recorded' : 'Mean time to answer a request'}
+                  {analytics && analytics.average_latency_ms == null
+                    ? t('No response times recorded', 'ยังไม่มีข้อมูลเวลาตอบกลับ')
+                    : t('Mean time to answer a request', 'เวลาเฉลี่ยในการตอบหนึ่ง request')}
                 </span>
               </div>
             </div>
@@ -449,7 +470,7 @@ export const Dashboard: React.FC = () => {
             <div className="mt-4 p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)] flex items-start gap-3 text-[13px]">
               <Sparkles size={16} className="text-[var(--text-muted)] shrink-0 mt-0.5" aria-hidden="true" />
               <div className="space-y-0.5">
-                <span className="font-semibold text-[var(--text-primary)]">In short</span>
+                <span className="font-semibold text-[var(--text-primary)]">{t('In short', 'สรุปสั้น ๆ')}</span>
                 <p className="text-[var(--text-secondary)] m-0 leading-relaxed max-w-[90ch]">{analytics.ai_summary}</p>
               </div>
             </div>
@@ -464,51 +485,54 @@ export const Dashboard: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <Activity size={15} className="text-orange-600 dark:text-orange-400" />
                   <div>
-                    <h3>Traffic timeline</h3>
+                    <h3>{t('Traffic timeline', 'ไทม์ไลน์ทราฟฟิก')}</h3>
                     <p className="m-0 text-[12px] text-[var(--text-muted)]">
-                      Latest {logs.length.toLocaleString()} requests, counted {bucketLabel(timeline.bucketMs)}, {BKK_LABEL} time
+                      {t(
+                        `Latest ${logs.length.toLocaleString()} requests, counted ${bucketLabel(timeline.bucketMs)}, ${BKK_LABEL} time`,
+                        `${logs.length.toLocaleString()} request ล่าสุด นับ${bucketLabel(timeline.bucketMs, 'th')} เวลากรุงเทพฯ`,
+                      )}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="flex rounded border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5 text-[11px] font-mono" role="group" aria-label="Chart render type">
+                  <div className="flex rounded border border-[var(--bg-border)] bg-[var(--bg-primary)] p-0.5 text-[11px] font-mono" role="group" aria-label={t('Chart render type', 'รูปแบบกราฟ')}>
                     <button
                       type="button"
                       aria-pressed={chartView === 'area'}
-                      aria-label="Area chart view"
+                      aria-label={t('Area chart view', 'กราฟพื้นที่')}
                       onClick={() => setChartView('area')}
                       className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
                         chartView === 'area' ? 'bg-orange-500 text-white font-semibold' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                       }`}
                     >
-                      Area
+                      {t('Area', 'พื้นที่')}
                     </button>
                     <button
                       type="button"
                       aria-pressed={chartView === 'bar'}
-                      aria-label="Bar chart view"
+                      aria-label={t('Bar chart view', 'กราฟแท่ง')}
                       onClick={() => setChartView('bar')}
                       className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
                         chartView === 'bar' ? 'bg-orange-500 text-white font-semibold' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                       }`}
                     >
-                      Bar
+                      {t('Bar', 'แท่ง')}
                     </button>
                   </div>
-                  <span className="text-[11.5px] text-[var(--text-muted)] hidden sm:inline">Updates every 8 s</span>
+                  <span className="text-[11.5px] text-[var(--text-muted)] hidden sm:inline">{t('Updates every 8 s', 'อัปเดตทุก 8 วินาที')}</span>
                 </div>
               </div>
 
               <div
                 className="p-4 sm:p-5 flex-1 flex flex-col"
                 role="region"
-                aria-label="Traffic and Threat Telemetry Timeline Chart"
+                aria-label={t('Traffic and threat timeline chart', 'กราฟไทม์ไลน์ทราฟฟิกและภัยคุกคาม')}
               >
                 <div className="h-[280px] w-full flex-1">
                   {isLogsLoading ? (
-                    <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">Loading requests…</div>
+                    <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">{t('Loading requests…', 'กำลังโหลด request…')}</div>
                   ) : chartData.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">No requests recorded for this scope yet.</div>
+                    <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">{t('No requests recorded for this scope yet.', 'ยังไม่มี request ในขอบเขตนี้')}</div>
                   ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     {/* Numeric time axis: ticks and spacing follow real time.
@@ -522,22 +546,22 @@ export const Dashboard: React.FC = () => {
                           type="number"
                           scale="time"
                           domain={['dataMin', 'dataMax']}
-                          tickFormatter={(t: number) => formatBkkTime(t)}
+                          tickFormatter={(v: number) => formatBkkTime(v)}
                           stroke={axisColor}
                           fontSize={11}
                           tickLine={false}
                           tickMargin={8}
                           minTickGap={40}
                         />
-                        <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} width={36} label={{ value: 'Requests', angle: -90, position: 'insideLeft', fill: axisColor, fontSize: 11 }} />
+                        <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} width={36} label={{ value: t('Requests', 'Request'), angle: -90, position: 'insideLeft', fill: axisColor, fontSize: 11 }} />
                         <Tooltip
-                          labelFormatter={(t: number) => `${formatBkkDateTime(t, { seconds: false })} (${bucketLabel(timeline.bucketMs)})`}
+                          labelFormatter={(v: number) => `${formatBkkDateTime(v, { seconds: false })} (${bucketLabel(timeline.bucketMs, lang)})`}
                           contentStyle={chartTooltipStyle}
                         />
                         <Legend wrapperStyle={{ fontSize: 12 }} />
-                        <Area type="stepAfter" dataKey="allowed" stroke={isDark ? '#38bdf8' : '#0369a1'} strokeWidth={1.5} fill={isDark ? '#38bdf8' : '#0369a1'} fillOpacity={0.12} name="Allowed" isAnimationActive={false} />
-                        <Area type="stepAfter" dataKey="limited" stroke="#d97706" strokeWidth={1.5} fill="#d97706" fillOpacity={0.12} name="Rate limited (429)" isAnimationActive={false} />
-                        <Area type="stepAfter" dataKey="blocked" stroke="#dc2626" strokeWidth={1.5} fill="#dc2626" fillOpacity={0.15} name="Blocked (403)" isAnimationActive={false} />
+                        <Area type="stepAfter" dataKey="allowed" stroke={isDark ? '#38bdf8' : '#0369a1'} strokeWidth={1.5} fill={isDark ? '#38bdf8' : '#0369a1'} fillOpacity={0.12} name={t('Allowed', 'ผ่าน')} isAnimationActive={false} />
+                        <Area type="stepAfter" dataKey="limited" stroke="#d97706" strokeWidth={1.5} fill="#d97706" fillOpacity={0.12} name={t('Rate limited (429)', 'ถูก rate limit (429)')} isAnimationActive={false} />
+                        <Area type="stepAfter" dataKey="blocked" stroke="#dc2626" strokeWidth={1.5} fill="#dc2626" fillOpacity={0.15} name={t('Blocked (403)', 'ถูกบล็อก (403)')} isAnimationActive={false} />
                       </AreaChart>
                     ) : (
                       <BarChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
@@ -547,22 +571,22 @@ export const Dashboard: React.FC = () => {
                           type="number"
                           scale="time"
                           domain={['dataMin - ' + timeline.bucketMs / 2, 'dataMax + ' + timeline.bucketMs / 2]}
-                          tickFormatter={(t: number) => formatBkkTime(t)}
+                          tickFormatter={(v: number) => formatBkkTime(v)}
                           stroke={axisColor}
                           fontSize={11}
                           tickLine={false}
                           tickMargin={8}
                           minTickGap={40}
                         />
-                        <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} width={36} label={{ value: 'Requests', angle: -90, position: 'insideLeft', fill: axisColor, fontSize: 11 }} />
+                        <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} width={36} label={{ value: t('Requests', 'Request'), angle: -90, position: 'insideLeft', fill: axisColor, fontSize: 11 }} />
                         <Tooltip
-                          labelFormatter={(t: number) => `${formatBkkDateTime(t, { seconds: false })} (${bucketLabel(timeline.bucketMs)})`}
+                          labelFormatter={(v: number) => `${formatBkkDateTime(v, { seconds: false })} (${bucketLabel(timeline.bucketMs, lang)})`}
                           contentStyle={chartTooltipStyle}
                         />
                         <Legend wrapperStyle={{ fontSize: 12 }} />
-                        <Bar dataKey="allowed" stackId="a" fill={isDark ? '#1e3a5f' : '#bfdbfe'} maxBarSize={28} name="Allowed" isAnimationActive={false} />
-                        <Bar dataKey="limited" stackId="a" fill="#d97706" maxBarSize={28} name="Rate limited (429)" isAnimationActive={false} />
-                        <Bar dataKey="blocked" stackId="a" fill="#dc2626" radius={[3, 3, 0, 0]} maxBarSize={28} name="Blocked (403)" isAnimationActive={false} />
+                        <Bar dataKey="allowed" stackId="a" fill={isDark ? '#1e3a5f' : '#bfdbfe'} maxBarSize={28} name={t('Allowed', 'ผ่าน')} isAnimationActive={false} />
+                        <Bar dataKey="limited" stackId="a" fill="#d97706" maxBarSize={28} name={t('Rate limited (429)', 'ถูก rate limit (429)')} isAnimationActive={false} />
+                        <Bar dataKey="blocked" stackId="a" fill="#dc2626" radius={[3, 3, 0, 0]} maxBarSize={28} name={t('Blocked (403)', 'ถูกบล็อก (403)')} isAnimationActive={false} />
                       </BarChart>
                     )}
                   </ResponsiveContainer>
@@ -577,9 +601,12 @@ export const Dashboard: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <ShieldAlert size={15} className="text-red-500" />
                   <div>
-                    <h3>Requests by attack type</h3>
+                    <h3>{t('Requests by attack type', 'Request แยกตามประเภทการโจมตี')}</h3>
                     <p className="m-0 text-[12px] text-[var(--text-muted)]">
-                      {attackTypeTotal.toLocaleString()} classified requests, top 10 types
+                      {t(
+                        `${attackTypeTotal.toLocaleString()} classified requests, top 10 types`,
+                        `${attackTypeTotal.toLocaleString()} request ที่ระบุประเภทได้ 10 ประเภทแรก`,
+                      )}
                     </p>
                   </div>
                 </div>
@@ -609,7 +636,7 @@ export const Dashboard: React.FC = () => {
                   })
                 ) : (
                   <div className="py-12 text-center text-[var(--text-muted)] text-[12px]">
-                    No active threat violations detected for this origin.
+                    {t('No active threat violations detected for this origin.', 'ไม่พบการโจมตีใน origin นี้')}
                   </div>
                 )}
               </div>
@@ -625,8 +652,10 @@ export const Dashboard: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <Terminal size={14} className="text-orange-600 dark:text-orange-400" />
                   <div>
-                    <h3>Most blocked sources</h3>
-                    <p className="m-0 text-[12px] text-[var(--text-muted)]">Top 5 IPs by blocked or flagged requests, all stored traffic</p>
+                    <h3>{t('Most blocked sources', 'แหล่งที่ถูกบล็อกมากที่สุด')}</h3>
+                    <p className="m-0 text-[12px] text-[var(--text-muted)]">
+                      {t('Top 5 IPs by blocked or flagged requests, all stored traffic', '5 IP แรกที่ถูกบล็อกหรือถูกตั้งธงมากที่สุด จากทราฟฟิกทั้งหมดที่เก็บไว้')}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -635,17 +664,17 @@ export const Dashboard: React.FC = () => {
                 <table className="dash-table">
                   <thead>
                     <tr>
-                      <th>Client IP</th>
-                      <th className="text-right">Blocked</th>
-                      <th className="text-right">All requests</th>
-                      <th className="hidden sm:table-cell text-right">Blocked share</th>
-                      <th><span className="sr-only">Actions</span></th>
+                      <th>{t('Client IP', 'IP ผู้ใช้')}</th>
+                      <th className="text-right">{t('Blocked', 'ถูกบล็อก')}</th>
+                      <th className="text-right">{t('All requests', 'Request ทั้งหมด')}</th>
+                      <th className="hidden sm:table-cell text-right">{t('Blocked share', 'สัดส่วนที่ถูกบล็อก')}</th>
+                      <th><span className="sr-only">{t('Actions', 'การดำเนินการ')}</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {isAnalyticsLoading ? (
                       <tr>
-                        <td colSpan={5} className="py-8 text-center text-[var(--text-muted)] text-[13px]">Loading…</td>
+                        <td colSpan={5} className="py-8 text-center text-[var(--text-muted)] text-[13px]">{t('Loading…', 'กำลังโหลด…')}</td>
                       </tr>
                     ) : analytics?.suspicious_ips && analytics.suspicious_ips.length > 0 ? (
                       analytics.suspicious_ips.map((item, idx) => {
@@ -668,7 +697,7 @@ export const Dashboard: React.FC = () => {
                                   type="button"
                                   onClick={() => handleCopyIp(item.ip)}
                                   className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 rounded cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-                                  aria-label={`Copy IP ${item.ip}`}
+                                  aria-label={t(`Copy IP ${item.ip}`, `คัดลอก IP ${item.ip}`)}
                                 >
                                   {copiedIp === item.ip ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
                                 </button>
@@ -688,9 +717,9 @@ export const Dashboard: React.FC = () => {
                                 <Link
                                   to={logsSearchPath(item.ip)}
                                   className="inline-flex items-center h-7 px-2 rounded-md border border-[var(--bg-border)] text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-                                  aria-label={`View requests from ${item.ip} in traffic logs`}
+                                  aria-label={t(`View requests from ${item.ip} in traffic logs`, `ดู request จาก ${item.ip} ใน log ทราฟฟิก`)}
                                 >
-                                  Logs
+                                  {t('Logs', 'Log')}
                                 </Link>
                                 <BlockIpButton
                                   ip={item.ip}
@@ -705,7 +734,7 @@ export const Dashboard: React.FC = () => {
                     ) : (
                       <tr>
                         <td colSpan={5} className="py-8 text-center text-[var(--text-muted)] text-[13px]">
-                          No blocked requests recorded for this scope.
+                          {t('No blocked requests recorded for this scope.', 'ยังไม่มี request ที่ถูกบล็อกในขอบเขตนี้')}
                         </td>
                       </tr>
                     )}
@@ -719,19 +748,19 @@ export const Dashboard: React.FC = () => {
               <div className="dash-card-header">
                 <div className="flex items-center gap-2">
                   <Globe size={14} className="text-sky-600 dark:text-sky-400" />
-                  <h3>Geographic Distribution</h3>
+                  <h3>{t('Geographic distribution', 'การกระจายตามประเทศ')}</h3>
                 </div>
-                <span className="text-[10px] text-[var(--text-dim)] font-mono">Global Inbound</span>
+                <span className="text-[10px] text-[var(--text-dim)] font-mono">{t('Global inbound', 'ขาเข้าทั่วโลก')}</span>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="dash-table">
                   <thead>
                     <tr>
-                      <th>Origin Region</th>
-                      <th>Requests</th>
-                      <th>Mitigated</th>
-                      <th className="text-right">Traffic Share</th>
+                      <th>{t('Country', 'ประเทศ')}</th>
+                      <th>{t('Requests', 'Request')}</th>
+                      <th>{t('Mitigated', 'ถูกสกัด')}</th>
+                      <th className="text-right">{t('Traffic share', 'สัดส่วนทราฟฟิก')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -748,7 +777,7 @@ export const Dashboard: React.FC = () => {
                               <div className="flex items-center gap-2">
                                 <span className="text-base leading-none">{c.flag || '🌐'}</span>
                                 <span className="font-medium text-[12px] text-[var(--text-primary)]">
-                                  {countryDisplayName(c.country, c.name)}
+                                  {countryDisplayName(c.country, c.name, lang)}
                                 </span>
                                 <span className="text-[10px] font-mono text-[var(--text-dim)]">
                                   [{c.country}]
@@ -780,7 +809,7 @@ export const Dashboard: React.FC = () => {
                     ) : (
                       <tr>
                         <td colSpan={4} className="py-8 text-center text-[var(--text-muted)] text-[12px] font-mono">
-                          No geographic telemetry available for this origin.
+                          {t('No geographic telemetry available for this origin.', 'ยังไม่มีข้อมูลตำแหน่งของ origin นี้')}
                         </td>
                       </tr>
                     )}
@@ -788,8 +817,10 @@ export const Dashboard: React.FC = () => {
                 </table>
               </div>
               <p className="px-4 py-2 text-[10px] text-[var(--text-dim)] font-mono border-t border-[var(--bg-border-subtle)]">
-                Country is estimated from the client IP (approximate; VPNs and proxies show their exit location). IP
-                geolocation by{' '}
+                {t(
+                  'Country is estimated from the client IP (approximate; VPNs and proxies show their exit location). IP geolocation by',
+                  'ประเทศประมาณจาก IP ของผู้ใช้ (ค่าโดยประมาณ VPN และ proxy จะแสดงตำแหน่งปลายทางของมัน) ข้อมูลตำแหน่ง IP โดย',
+                )}{' '}
                 <a
                   href="https://db-ip.com"
                   target="_blank"
@@ -805,16 +836,16 @@ export const Dashboard: React.FC = () => {
         </div>
       ) : (
         /* ── Infrastructure Tab ── */
-        <div id="infrastructure-panel" role="tabpanel" aria-label="Infrastructure and Nodes Dashboard" className="animate-fade-in">
+        <div id="infrastructure-panel" role="tabpanel" aria-label={t('Infrastructure and nodes dashboard', 'แดชบอร์ดโครงสร้างระบบและ node')} className="animate-fade-in">
           {/* Cluster Status Header */}
           <div className="flex flex-wrap justify-between items-center bg-[var(--bg-surface)] border border-[var(--bg-border)] p-4 rounded-lg gap-3">
             <div>
               <h2 className="text-[14px] font-bold text-[var(--text-primary)] m-0 font-mono flex items-center gap-2">
                 <Server size={16} className="text-orange-600 dark:text-orange-400" />
-                Edge POP Nodes & Service Mesh
+                {t('Edge POP nodes & service mesh', 'Edge POP node และบริการภายใน')}
               </h2>
               <p className="text-[11.5px] text-[var(--text-muted)] m-0 mt-1">
-                ModSecurity Reverse Proxy, Caddy SSL Termination, and ClickHouse OLAP
+                {t('ModSecurity reverse proxy, Caddy SSL termination, and ClickHouse OLAP', 'ModSecurity reverse proxy, Caddy SSL termination และ ClickHouse OLAP')}
               </p>
             </div>
             {/* Was hardcoded regardless of thNode/mainNode's real status --
@@ -827,8 +858,10 @@ export const Dashboard: React.FC = () => {
               pulse={systemStatus !== undefined && thNode.online && mainNode.online}
             >
               {systemStatus === undefined
-                ? 'CHECKING STATUS...'
-                : thNode.online && mainNode.online ? 'ALL SYSTEMS OPERATIONAL' : 'DEGRADED — CHECK NODE STATUS'}
+                ? t('CHECKING STATUS...', 'กำลังตรวจสถานะ...')
+                : thNode.online && mainNode.online
+                  ? t('ALL SYSTEMS OPERATIONAL', 'ทุกระบบทำงานปกติ')
+                  : t('DEGRADED — CHECK NODE STATUS', 'ทำงานไม่เต็มที่ — ตรวจสถานะ node')}
             </Badge>
           </div>
 
@@ -840,7 +873,7 @@ export const Dashboard: React.FC = () => {
                   <span className="text-2xl">🇹🇭</span>
                   <div>
                     <p className="font-bold text-[13px] text-[var(--text-primary)] m-0 font-mono">
-                      Thailand Edge POP (Bangkok)
+                      {t('Thailand Edge POP (Bangkok)', 'Edge POP ประเทศไทย (กรุงเทพฯ)')}
                     </p>
                     <p className="text-[10.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
                       45.154.26.91 • Port 443 (HTTPS) / 80
@@ -854,11 +887,11 @@ export const Dashboard: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-2 pt-3 border-t border-[var(--bg-border-subtle)] text-[11px] font-mono">
                 <div>
-                  <span className="text-[var(--text-muted)] block text-[11px]">Health check round trip</span>
+                  <span className="text-[var(--text-muted)] block text-[11px]">{t('Health check round trip', 'เวลาไป-กลับของ health check')}</span>
                   <span className="font-semibold text-[var(--text-primary)]">{thNode.latencyLabel}</span>
                 </div>
                 <div>
-                  <span className="text-[var(--text-muted)] block text-[11px]">Rule set</span>
+                  <span className="text-[var(--text-muted)] block text-[11px]">{t('Rule set', 'ชุดกฎ')}</span>
                   <span className="font-semibold text-[var(--text-primary)]">OWASP CRS {CRS_VERSION}</span>
                 </div>
               </div>
@@ -870,7 +903,7 @@ export const Dashboard: React.FC = () => {
                   <span className="text-2xl">🛡️</span>
                   <div>
                     <p className="font-bold text-[13px] text-[var(--text-primary)] m-0 font-mono">
-                      Central WAF Core (Hub)
+                      {t('Central WAF Core (Hub)', 'WAF Core ส่วนกลาง (Hub)')}
                     </p>
                     <p className="text-[10.5px] font-mono text-[var(--text-muted)] m-0 mt-0.5">
                       178.104.53.123 • Port 8000 / 7000 (FRP)
@@ -886,15 +919,15 @@ export const Dashboard: React.FC = () => {
                 {/* From the same /system/status probes as Stack diagnostics
                     (these two used to be fixed "Connected" / "Active"). */}
                 {([
-                  { key: 'clickhouse', label: 'Log store (ClickHouse)' },
-                  { key: 'frps', label: 'Tunnel server (FRP)' },
+                  { key: 'clickhouse', label: t('Log store (ClickHouse)', 'ที่เก็บ log (ClickHouse)') },
+                  { key: 'frps', label: t('Tunnel server (FRP)', 'Tunnel server (FRP)') },
                 ] as const).map(({ key, label }) => {
                   const s = systemStatus?.services?.[key]?.status
                   return (
                     <div key={key}>
                       <span className="text-[var(--text-muted)] block text-[11px]">{label}</span>
                       <span className={`font-semibold ${s === 'online' ? 'text-emerald-700 dark:text-emerald-400' : s === 'offline' ? 'text-red-700 dark:text-red-400' : 'text-[var(--text-muted)]'}`}>
-                        {s === 'online' ? 'Online' : s === 'offline' ? 'Offline' : 'Unknown'}
+                        {s === 'online' ? t('Online', 'ออนไลน์') : s === 'offline' ? t('Offline', 'ออฟไลน์') : t('Unknown', 'ไม่ทราบ')}
                       </span>
                     </div>
                   )

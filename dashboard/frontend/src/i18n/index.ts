@@ -53,6 +53,23 @@ export const currentLang = (): Lang => useLangStore.getState().lang
 // log timestamps are compared with server logs, a Buddhist year would not match.
 export const localeOf = (lang: Lang) => (lang === 'th' ? 'th-TH-u-ca-gregory' : 'en-GB')
 
+// Severity words shown next to alerts and rules.
+const SEVERITY_TH: Record<string, string> = {
+  CRITICAL: 'วิกฤต',
+  HIGH: 'สูง',
+  MEDIUM: 'ปานกลาง',
+  LOW: 'ต่ำ',
+  INFO: 'ข้อมูล',
+  UNKNOWN: 'ไม่ทราบ',
+}
+
+// "CRITICAL" -> "Critical" / "วิกฤต". Unknown words come back as given.
+export const severityLabel = (sev: string, lang: Lang): string => {
+  const up = (sev || '').toUpperCase()
+  if (lang === 'th') return SEVERITY_TH[up] ?? sev
+  return up ? up.charAt(0) + up.slice(1).toLowerCase() : sev
+}
+
 export function useT() {
   const lang = useLangStore((s) => s.lang)
   return { t: pick(lang), lang, locale: localeOf(lang) }

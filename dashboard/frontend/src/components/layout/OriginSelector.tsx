@@ -7,12 +7,14 @@ import { useOriginFilterStore } from '../../store/originFilterStore'
 import { useAuthStore } from '../../store/authStore'
 import { Globe, Shield, ChevronDown, Check, Server, Plus } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useT } from '../../i18n'
 
 export const OriginSelector: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { selectedOrigin, selectedOriginLabel, setSelectedOrigin } = useOriginFilterStore()
   const { user } = useAuthStore()
+  const { t } = useT()
 
   // Fetch active origins belonging strictly to current logged-in user
   const { data } = useQuery({
@@ -54,9 +56,9 @@ export const OriginSelector: React.FC = () => {
   }, [])
 
   const handleSelect = (originKey: string, label: string) => {
-    setSelectedOrigin(originKey || 'ALL', label || 'All Managed Origins')
+    setSelectedOrigin(originKey || 'ALL', label || t('All origins', 'ทุก origin'))
     setIsOpen(false)
-    toast.success(`Switched view to: ${label}`, {
+    toast.success(t(`Switched view to: ${label}`, `เปลี่ยนมุมมองเป็น: ${label}`), {
       icon: originKey === 'ALL' ? '🌐' : '🛡️',
       duration: 2000,
     })
@@ -67,12 +69,12 @@ export const OriginSelector: React.FC = () => {
   // backend's tenant_service), so don't call it "my origins" or "none added".
   const triggerLabel =
     selectedOrigin === 'ALL' && isUserAdmin
-      ? 'All Platform Traffic (admin)'
+      ? t('All platform traffic (admin)', 'ทราฟฟิกทั้งแพลตฟอร์ม (admin)')
       : hasOrigins
         ? selectedOrigin === 'ALL'
-          ? `All My Origins (${allAvailableOrigins.length})`
-          : selectedOriginLabel || 'Selected Origin'
-        : 'No Origins Added'
+          ? t(`All my origins (${allAvailableOrigins.length})`, `ทุก origin ของฉัน (${allAvailableOrigins.length})`)
+          : selectedOriginLabel || t('Selected origin', 'origin ที่เลือก')
+        : t('No origins added', 'ยังไม่มี origin')
 
   return (
     <div className="relative font-mono" ref={dropdownRef}>
@@ -85,7 +87,7 @@ export const OriginSelector: React.FC = () => {
             ? 'bg-indigo-600/15 border-indigo-500/40 text-indigo-800 dark:text-indigo-300 hover:bg-indigo-600/25 hover:border-indigo-500/60'
             : 'bg-[var(--bg-surface)] border-[var(--bg-border)] text-[var(--text-primary)] hover:border-[var(--bg-border-hover)] hover:bg-[var(--bg-hover)]'
         }`}
-        title="Filter dashboard telemetry & logs by Web Origin"
+        title={t('Filter dashboard data and logs by origin', 'กรองข้อมูลแดชบอร์ดและ log ตาม origin')}
       >
         <div className="flex items-center gap-1.5 truncate max-w-[170px] sm:max-w-[220px]">
           {selectedOrigin === 'ALL' ? (
@@ -108,7 +110,7 @@ export const OriginSelector: React.FC = () => {
           <div className="px-3.5 py-2.5 bg-[var(--bg-primary)]/50 flex justify-between items-center">
             <span className="text-[10.5px] font-bold text-[var(--text-muted)] flex items-center gap-1.5">
               <Server size={12} className="text-orange-500" />
-              My Web Origins
+              {t('My origins', 'Origin ของฉัน')}
             </span>
             <Link
               to="/origins"
@@ -116,7 +118,7 @@ export const OriginSelector: React.FC = () => {
               className="text-[10px] text-orange-500 hover:underline flex items-center gap-0.5"
             >
               <Plus size={10} />
-              Manage
+              {t('Manage', 'จัดการ')}
             </Link>
           </div>
 
@@ -127,7 +129,9 @@ export const OriginSelector: React.FC = () => {
               onClick={() =>
                 handleSelect(
                   'ALL',
-                  hasOrigins ? `All My Origins (${allAvailableOrigins.length})` : 'All Web Origins'
+                  hasOrigins
+                    ? t(`All my origins (${allAvailableOrigins.length})`, `ทุก origin ของฉัน (${allAvailableOrigins.length})`)
+                    : t('All origins', 'ทุก origin')
                 )
               }
               className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-[12px] font-medium transition-all text-left cursor-pointer ${
@@ -142,12 +146,12 @@ export const OriginSelector: React.FC = () => {
                 </div>
                 <div>
                   <p className="m-0 font-bold leading-none text-[12px]">
-                    {hasOrigins ? 'All My Origins (ทั้งหมด)' : 'All Web Origins'}
+                    {hasOrigins ? t('All my origins', 'ทุก origin ของฉัน') : t('All origins', 'ทุก origin')}
                   </p>
                   <p className="m-0 text-[10px] text-[var(--text-muted)] mt-1">
                     {hasOrigins
-                      ? `Aggregated telemetry for ${allAvailableOrigins.length} origins`
-                      : 'No origin servers added yet'}
+                      ? t(`Combined data of ${allAvailableOrigins.length} origins`, `ข้อมูลรวมของ ${allAvailableOrigins.length} origin`)
+                      : t('No origin servers added yet', 'ยังไม่ได้เพิ่ม origin server')}
                   </p>
                 </div>
               </div>
@@ -189,14 +193,14 @@ export const OriginSelector: React.FC = () => {
               })
             ) : (
               <div className="p-3 text-center text-[11px] text-[var(--text-muted)]">
-                <p className="m-0 mb-2">You have not created any origin servers yet.</p>
+                <p className="m-0 mb-2">{t('You have not created any origin servers yet.', 'คุณยังไม่ได้สร้าง origin server')}</p>
                 <Link
                   to="/origins"
                   onClick={() => setIsOpen(false)}
                   className="inline-flex items-center gap-1 px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-[11px] font-bold transition-colors"
                 >
                   <Plus size={12} />
-                  Add Origin Server
+                  {t('Add origin server', 'เพิ่ม origin server')}
                 </Link>
               </div>
             )}

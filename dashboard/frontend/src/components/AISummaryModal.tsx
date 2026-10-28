@@ -4,6 +4,7 @@ import { Sparkles, X, Send, Calendar, ShieldCheck, AlertTriangle, Copy, Check, B
 import { aiSummaryApi, SummarizeRangeResponse } from '../api/aiSummary'
 import toast from 'react-hot-toast'
 import { ReportText } from './ai/ReportText'
+import { useT } from '../i18n'
 
 interface AISummaryModalProps {
   isOpen: boolean
@@ -16,15 +17,16 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
   const [endTime, setEndTime] = useState('')
   const [result, setResult] = useState<SummarizeRangeResponse | null>(null)
   const [copied, setCopied] = useState(false)
+  const { t } = useT()
 
   const summaryMutation = useMutation({
     mutationFn: () => aiSummaryApi.summarizeRange(queryText, startTime, endTime),
     onSuccess: (data) => {
       setResult(data)
-      toast.success('Generated AI Executive Summary!')
+      toast.success(t('AI summary is ready', 'สรุปด้วย AI เสร็จแล้ว'))
     },
     onError: (err: any) => {
-      toast.error(err?.response?.data?.detail || 'Failed to generate summary')
+      toast.error(err?.response?.data?.detail || t('Failed to generate summary', 'สรุปไม่สำเร็จ'))
     },
   })
 
@@ -41,7 +43,7 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
     if (!result?.ai_executive_summary) return
     navigator.clipboard.writeText(result.ai_executive_summary)
     setCopied(true)
-    toast.success('Copied report to clipboard')
+    toast.success(t('Copied report to clipboard', 'คัดลอกรายงานแล้ว'))
     setTimeout(() => setCopied(false), 2000)
   }
 
@@ -60,16 +62,17 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
             </div>
             <div>
               <h2 className="text-[16px] font-bold text-[var(--text-primary)] font-mono tracking-tight m-0">
-                สรุปเหตุการณ์ความปลอดภัย
+                {t('Security event summary', 'สรุปเหตุการณ์ความปลอดภัย')}
               </h2>
               <p className="text-[12px] text-[var(--text-muted)] m-0 mt-0.5">
-                การโจมตีของเว็บในบัญชีนี้ตามช่วงเวลาที่เลือก
+                {t('Attacks on the sites in this account for the chosen time range', 'การโจมตีของเว็บในบัญชีนี้ตามช่วงเวลาที่เลือก')}
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
+            aria-label={t('Close', 'ปิด')}
             className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
           >
             <X size={18} />
@@ -81,7 +84,7 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
           {/* Natural language query input */}
           <div className="space-y-2">
             <label className="text-[12px] font-bold font-mono text-[var(--text-secondary)] block">
-              ช่วงเวลา
+              {t('Time range', 'ช่วงเวลา')}
             </label>
             <div className="relative flex items-center">
               <input
@@ -89,7 +92,7 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
                 value={queryText}
                 onChange={(e) => setQueryText(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && summaryMutation.mutate()}
-                placeholder="เช่น '3 วันล่าสุด', 'เมื่อวานถึงเที่ยงวันนี้'"
+                placeholder={t("e.g. 'last 3 days', 'yesterday to noon today'", "เช่น '3 วันล่าสุด', 'เมื่อวานถึงเที่ยงวันนี้'")}
                 className="w-full pl-4 pr-28 py-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)] text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-indigo-500 transition-colors shadow-inner"
               />
               <button
@@ -103,7 +106,7 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
                 ) : (
                   <>
                     <Send size={13} />
-                    <span>สรุป</span>
+                    <span>{t('Summarise', 'สรุป')}</span>
                   </>
                 )}
               </button>
@@ -112,15 +115,22 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
 
           {/* Quick Presets */}
           <div className="flex items-center gap-2 flex-wrap text-[11.5px]">
-            <span className="text-[var(--text-muted)] font-mono">หรือเลือกช่วงด่วน:</span>
-            {['24 ชั่วโมงล่าสุด', '3 วันล่าสุด', '7 วันล่าสุด', '30 วันล่าสุด'].map((preset) => (
+            <span className="text-[var(--text-muted)] font-mono">{t('Or pick a quick range:', 'หรือเลือกช่วงด่วน:')}</span>
+            {/* The query sent stays the Thai phrase the range parser is
+                tested with; only the button label follows the language. */}
+            {[
+              { query: '24 ชั่วโมงล่าสุด', label: t('Last 24 hours', '24 ชั่วโมงล่าสุด') },
+              { query: '3 วันล่าสุด', label: t('Last 3 days', '3 วันล่าสุด') },
+              { query: '7 วันล่าสุด', label: t('Last 7 days', '7 วันล่าสุด') },
+              { query: '30 วันล่าสุด', label: t('Last 30 days', '30 วันล่าสุด') },
+            ].map((preset) => (
               <button
-                key={preset}
+                key={preset.query}
                 type="button"
-                onClick={() => handlePreset(preset)}
+                onClick={() => handlePreset(preset.query)}
                 className="px-2.5 py-1 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-indigo-400 border border-[var(--bg-border)] font-mono transition-colors cursor-pointer"
               >
-                {preset}
+                {preset.label}
               </button>
             ))}
           </div>
@@ -132,7 +142,7 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
               <div className="flex items-center justify-between p-3.5 px-4 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
                 <div className="flex items-center gap-2 font-mono text-[12.5px] text-indigo-800 dark:text-indigo-300">
                   <Clock size={15} />
-                  <span>ช่วงเวลาที่วิเคราะห์: <strong>{result.time_range.description}</strong></span>
+                  <span>{t('Analysed range:', 'ช่วงเวลาที่วิเคราะห์:')} <strong>{result.time_range.description}</strong></span>
                 </div>
                 <button
                   type="button"
@@ -140,26 +150,26 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
                   className="px-2.5 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-800 dark:text-indigo-200 font-mono text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
                 >
                   {copied ? <Check size={12} /> : <Copy size={12} />}
-                  {copied ? 'Copied' : 'Copy Report'}
+                  {copied ? t('Copied', 'คัดลอกแล้ว') : t('Copy report', 'คัดลอกรายงาน')}
                 </button>
               </div>
 
               {/* Stat Metric Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)]">
-                  <span className="text-[11px] text-[var(--text-muted)] font-mono block">Total Requests</span>
+                  <span className="text-[11px] text-[var(--text-muted)] font-mono block">{t('Total requests', 'Request ทั้งหมด')}</span>
                   <span className="text-[20px] font-bold text-[var(--text-primary)] font-mono">
                     {result.stats.total_requests.toLocaleString()}
                   </span>
                 </div>
                 <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)]">
-                  <span className="text-[11px] text-red-400 font-mono block">Blocked Attacks</span>
+                  <span className="text-[11px] text-red-400 font-mono block">{t('Blocked attacks', 'การโจมตีที่ถูกบล็อก')}</span>
                   <span className="text-[20px] font-bold text-red-400 font-mono">
                     {result.stats.blocked_attacks.toLocaleString()}
                   </span>
                 </div>
                 <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)]">
-                  <span className="text-[11px] text-emerald-400 font-mono block">Block Rate</span>
+                  <span className="text-[11px] text-emerald-400 font-mono block">{t('Block rate', 'อัตราการบล็อก')}</span>
                   <span className="text-[20px] font-bold text-emerald-400 font-mono">
                     {blockRate}%
                   </span>
@@ -170,10 +180,12 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({ isOpen, onClose 
               <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-[var(--bg-border)] space-y-3">
                 <div className="flex items-center gap-2 text-indigo-400 font-bold text-[13px] font-mono border-b border-[var(--bg-border-subtle)] pb-2">
                   <Sparkles size={16} />
-                  <span>ข้อสังเกตและสิ่งที่ควรทำ</span>
+                  <span>{t('Findings and next steps', 'ข้อสังเกตและสิ่งที่ควรทำ')}</span>
                 </div>
                 <ReportText text={result.ai_executive_summary} className="text-[13px]" />
-                <p className="m-0 text-[11px] text-[var(--text-muted)]">สรุปโดย AI จาก log ของช่วงนี้ ตัวเลขด้านบนมาจาก log โดยตรง</p>
+                <p className="m-0 text-[11px] text-[var(--text-muted)]">
+                  {t('Written by AI from the logs of this range. The figures above come straight from the logs.', 'สรุปโดย AI จาก log ของช่วงนี้ ตัวเลขด้านบนมาจาก log โดยตรง')}
+                </p>
               </div>
             </div>
           )}
