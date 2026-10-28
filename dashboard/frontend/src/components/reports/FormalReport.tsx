@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import type { Postmortem } from '../../types'
 import { ReportText } from '../ai/ReportText'
 import { ReportChart, ChartLegend } from './ReportChart'
-import { blockedShare, rangeFacts, reportFileBase, reportNumber, reportSeries } from '../../lib/reportExport'
+import { blockedShare, honeypotRows, rangeFacts, reportFileBase, reportNumber, reportSeries } from '../../lib/reportExport'
 import { longDateTh, splitBkk } from '../../lib/reportRange'
 import { bkkDateKey, formatBkkTime, formatBkkDateTime } from '../../lib/time'
 
@@ -30,6 +30,7 @@ export const FormalReport: React.FC<{ pm: Postmortem; printedAt: Date }> = ({ pm
   const series = reportSeries(pm)
   const types = pm.stats?.top_attack_types || []
   const events = pm.audit_events || []
+  const hpRows = honeypotRows(pm)
   const typesTotal = types.reduce((a, t) => a + (t.count || 0), 0)
 
   return (
@@ -116,7 +117,26 @@ export const FormalReport: React.FC<{ pm: Postmortem; printedAt: Date }> = ({ pm
         <p className="pr-muted">ไม่มีคำขอในช่วงเวลานี้</p>
       )}
 
-      <h2 className="pr-h2">5. การเปลี่ยนแปลงในระบบระหว่างช่วงเวลา</h2>
+      <h2 className="pr-h2">5. กับดัก (Honeypot)</h2>
+      {!hpRows ? (
+        <p className="pr-muted">รายงานนี้จัดทำก่อนระบบเริ่มเก็บข้อมูล honeypot</p>
+      ) : !hpRows[0].value ? (
+        <p className="pr-muted">ไม่มีผู้เข้ากับดักในช่วงเวลานี้</p>
+      ) : (
+        <>
+          <table className="pr-table">
+            <thead><tr><th>รายการ</th><th className="pr-r">จำนวน</th></tr></thead>
+            <tbody>
+              {hpRows.map((r) => (
+                <tr key={r.label}><td>{r.label}</td><td className="pr-r">{n(r.value)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="pr-muted">ทุกคำขอที่เข้ากับดักได้รับเนื้อหาปลอม ไม่ถึงเว็บจริง จำนวนแต่ละขั้นนับ session ที่ไปถึงขั้นนั้นหรือไกลกว่า</p>
+        </>
+      )}
+
+      <h2 className="pr-h2">6. การเปลี่ยนแปลงในระบบระหว่างช่วงเวลา</h2>
       {events.length ? (
         <table className="pr-table">
           <thead><tr><th style={{ width: 150 }}>เวลา</th><th style={{ width: 120 }}>ผู้ดำเนินการ</th><th>รายการ</th></tr></thead>
@@ -134,7 +154,7 @@ export const FormalReport: React.FC<{ pm: Postmortem; printedAt: Date }> = ({ pm
         <p className="pr-muted">ไม่มีการเปลี่ยนแปลงการตั้งค่าในช่วงเวลานี้</p>
       )}
 
-      <h2 className="pr-h2">6. การรับรองรายงาน</h2>
+      <h2 className="pr-h2">7. การรับรองรายงาน</h2>
       <div className="pr-signs">
         {['ผู้จัดทำรายงาน', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ'].map((role) => (
           <div key={role} className="pr-sign">

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Postmortem } from '../types'
-import { blockedShare, buildReportMarkdown, rangeFacts, reportFileBase, reportNumber, reportSeries } from './reportExport'
+import { blockedShare, buildReportMarkdown, rangeFacts, reportFileBase, reportNumber, reportSeries, honeypotRows } from './reportExport'
 
 const base: Postmortem = {
   id: '1a2b3c4d-5e6f-7a8b-9c0d-112233445566',
@@ -74,5 +74,15 @@ describe('buildReportMarkdown', () => {
   it('escapes pipes inside table cells', () => {
     const m = buildReportMarkdown({ ...base, stats: { ...base.stats, top_attack_types: [{ type: 'a|b', count: 1 }] } })
     expect(m).toContain('| 1 | a\\|b | 1 |')
+  })
+})
+
+describe('honeypot section', () => {
+  const base = { stats: { total_requests: 0, total_alerts: 0, top_attack_types: [] } }
+  it('is missing on old reports and lists depth on new ones', () => {
+    expect(honeypotRows(base)).toBeNull()
+    const rows = honeypotRows({ stats: { ...base.stats, honeypot: { sessions: 3, ips: 2, loot: 2, exploit: 1, credential_use: 1, persistence: 0 } } })!
+    expect(rows.map((r) => r.value)).toEqual([3, 2, 2, 1, 1, 0])
+    expect(rows[4].label).toContain('T1078')
   })
 })

@@ -84,6 +84,34 @@ const n = (v: number | undefined | null) => (v ?? 0).toLocaleString('en-US')
 // A Markdown table cell must not break the row.
 const cell = (t: string) => String(t ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
 
+// Rows of the report's honeypot section: how many decoy sessions, and how
+// many got at least this far. null on reports made before it was collected.
+export function honeypotRows(p: Pick<Postmortem, 'stats'>): { label: string; value: number }[] | null {
+  const h = p.stats?.honeypot
+  if (!h) return null
+  return [
+    { label: 'Session ที่เข้ากับดัก', value: h.sessions },
+    { label: 'IP ที่ไม่ซ้ำ', value: h.ips },
+    { label: 'ได้ข้อมูลลับปลอม (T1552)', value: h.loot },
+    { label: 'พยายามเจาะ (T1190)', value: h.exploit },
+    { label: 'ใช้ credential ปลอม (T1078)', value: h.credential_use },
+    { label: 'พยายามฝังไฟล์ (T1505.003)', value: h.persistence },
+  ]
+}
+
+function honeypotLines(p: Postmortem): string[] {
+  const rows = honeypotRows(p)
+  if (!rows) return ['รายงานนี้จัดทำก่อนระบบเริ่มเก็บข้อมูล honeypot']
+  if (!rows[0].value) return ['ไม่มีผู้เข้ากับดักในช่วงเวลานี้']
+  return [
+    `| รายการ | จำนวน |`,
+    `| --- | ---: |`,
+    ...rows.map((r) => `| ${r.label} | ${n(r.value)} |`),
+    '',
+    'ทุกคำขอที่เข้ากับดักได้รับเนื้อหาปลอม ไม่ถึงเว็บจริง',
+  ]
+}
+
 export function buildReportMarkdown(p: Postmortem, printedAt: Date = new Date()): string {
   const facts = rangeFacts(p)
   const lines: string[] = []
@@ -123,7 +151,11 @@ export function buildReportMarkdown(p: Postmortem, printedAt: Date = new Date())
   lines.push(p.ai_narrative ? p.ai_narrative.trim() : 'ไม่มีบทสรุปจาก AI สำหรับรายงานนี้')
   if (p.ai_narrative_degraded) lines.push('', '_หมายเหตุ: บทสรุปจาก AI อาจไม่ครบถ้วน_')
   lines.push('')
-  lines.push(`## 4. การเปลี่ยนแปลงในระบบช่วงเวลาเดียวกัน (audit log)`)
+  lines.push(`## 4. กับดัก (Honeypot)`)
+  lines.push('')
+  lines.push(...honeypotLines(p))
+  lines.push('')
+  lines.push(`## 5. การเปลี่ยนแปลงในระบบช่วงเวลาเดียวกัน (audit log)`)
   lines.push('')
   const events = p.audit_events || []
   if (events.length) {

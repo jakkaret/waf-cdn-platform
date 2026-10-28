@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { ORIGIN_TABS, ORIGIN_VIEWS, resolveOriginTab, viewOfSection } from './navigation'
 
 describe('origin views', () => {
-  it('places every section id in exactly one of the five tabs', () => {
-    expect(ORIGIN_VIEWS).toHaveLength(5)
+  it('places every section id in exactly one of the six tabs', () => {
+    expect(ORIGIN_VIEWS).toHaveLength(6)
     const all = ORIGIN_VIEWS.flatMap((v) => v.sections).sort()
     expect(all).toEqual(ORIGIN_TABS.map((t) => t.id).sort())
   })
@@ -13,6 +13,7 @@ describe('origin views', () => {
     expect(resolveOriginTab('postmortem')).toEqual({ view: 'reports', section: 'postmortem' })
     expect(resolveOriginTab('ssl')).toEqual({ view: 'domains', section: 'domains' })
     expect(resolveOriginTab('domains')).toEqual({ view: 'domains', section: 'domains' })
+    expect(resolveOriginTab('honeypot')).toEqual({ view: 'honeypot', section: 'honeypot' })
   })
   it('opens Protection with nothing expanded, and falls back to Overview', () => {
     expect(resolveOriginTab('protection')).toEqual({ view: 'protection', section: null })

@@ -20,6 +20,8 @@ import {
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { LoadingSpinner } from './ui/LoadingSpinner'
+import { ConfirmDialog } from './ui/ConfirmDialog'
+import { probeDecoy, type DecoyProbe } from '../api/honeypot'
 import { severityLabel, useT } from '../i18n'
 
 interface Props {
@@ -70,6 +72,27 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
     queryKey: decoysKey,
     queryFn: async () => (await getDecoys(originId)).data.decoys,
   })
+
+  // Before a decoy goes on, ask the origin whether it already serves that
+  // path (api/honeypot.py probe). Advisory: a failed or skipped probe never
+  // blocks the switch, a page that answers asks for confirmation first.
+  const [probing, setProbing] = useState<string | null>(null)
+  const [probes, setProbes] = useState<Record<string, DecoyProbe>>({})
+  const [collision, setCollision] = useState<{ key: string; label: string; status?: number } | null>(null)
+  const enableDecoy = async (key: string, label: string) => {
+    setProbing(key)
+    let probe: DecoyProbe | null = null
+    try {
+      probe = await probeDecoy(originId, key)
+      setProbes((p) => ({ ...p, [key]: probe! }))
+    } catch {
+      probe = null
+    } finally {
+      setProbing(null)
+    }
+    if (probe?.checked && probe.serves_path) setCollision({ key, label, status: probe.status })
+    else decoyMutation.mutate({ key, enabled: true })
+  }
 
   const decoyMutation = useMutation({
     mutationFn: ({ key, enabled }: { key: string; enabled: boolean }) => setDecoy(originId, key, enabled),
@@ -331,8 +354,10 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                       className="mt-0.5"
                       aria-label={d.label}
                       checked={d.enabled}
-                      disabled={!canEdit || decoyMutation.isPending}
-                      onChange={(e) => decoyMutation.mutate({ key: d.key, enabled: e.target.checked })}
+                      disabled={!canEdit || decoyMutation.isPending || probing !== null}
+                      onChange={(e) =>
+                        e.target.checked ? enableDecoy(d.key, d.label) : decoyMutation.mutate({ key: d.key, enabled: false })
+                      }
                     />
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -344,6 +369,20 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
                         {!d.enabled && d.collision && <Badge color="danger">{t('Your stack uses this', 'ระบบของคุณใช้ path นี้')}</Badge>}
                       </div>
                       <p className="text-[11px] text-[var(--text-muted)] m-0 mt-0.5">{d.reason}</p>
+                      {probing === d.key && (
+                        <p className="text-[11px] text-[var(--text-muted)] m-0 mt-0.5">{t('Checking whether your site serves this path…', 'กำลังตรวจว่าเว็บของคุณมี path นี้จริงไหม…')}</p>
+                      )}
+                      {probes[d.key] && probing !== d.key && (
+                        <p className={`text-[11px] m-0 mt-0.5 ${probes[d.key].serves_path ? 'text-red-600 dark:text-red-400' : 'text-[var(--text-muted)]'}`}>
+                          {!probes[d.key].checked
+                            ? probes[d.key].reason === 'tunnel'
+                              ? t('Not checked: a tunnel origin is reached only through its agent. Make sure your site does not use this path.', 'ไม่ได้ตรวจ: origin แบบ tunnel เข้าถึงได้ผ่าน agent เท่านั้น ตรวจเองว่าเว็บไม่ได้ใช้ path นี้')
+                              : t('Not checked: the origin could not be asked directly.', 'ไม่ได้ตรวจ: ถามเซิร์ฟเวอร์ต้นทางโดยตรงไม่ได้')
+                            : probes[d.key].serves_path
+                              ? t(`Your site answers this path (HTTP ${probes[d.key].status}).`, `เว็บของคุณตอบ path นี้ (HTTP ${probes[d.key].status})`)
+                              : t('Checked: your site does not serve this path.', 'ตรวจแล้ว: เว็บของคุณไม่มี path นี้')}
+                        </p>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -352,6 +391,26 @@ export const OriginWafRules: React.FC<Props> = ({ originId, canEdit }) => {
           )
         })}
       </section>
+
+      <ConfirmDialog
+        open={collision !== null}
+        isDanger
+        title={t('Your site uses this path', 'เว็บของคุณใช้ path นี้')}
+        message={
+          collision
+            ? t(
+                `Your site answered ${collision.label} with HTTP ${collision.status}, so it looks like a real page. With the decoy on, real visitors there get the fake page instead. Turn it on anyway?`,
+                `เว็บของคุณตอบ ${collision.label} ด้วย HTTP ${collision.status} จึงน่าจะเป็นหน้าจริง ถ้าเปิด decoy ผู้ใช้จริงที่เข้าหน้านี้จะเจอหน้าปลอมแทน ยืนยันจะเปิดไหม`,
+              )
+            : ''
+        }
+        confirmText={t('Turn on anyway', 'เปิดต่อไป')}
+        onCancel={() => setCollision(null)}
+        onConfirm={() => {
+          if (collision) decoyMutation.mutate({ key: collision.key, enabled: true })
+          setCollision(null)
+        }}
+      />
 
       {/* ── This origin's own rules ─────────────────────────────────── */}
       <section className="space-y-3">

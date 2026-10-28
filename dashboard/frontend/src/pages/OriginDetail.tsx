@@ -27,6 +27,7 @@ import { OriginMlProtection } from '../components/OriginMlProtection'
 import { OriginRateLimits } from '../components/OriginRateLimits'
 import { ShieldActivity } from '../components/ShieldActivity'
 import { OriginReports } from '../components/reports/OriginReports'
+import { OriginHoneypot } from '../components/origins/OriginHoneypot'
 import { getSiteRateRules } from '../api/siteAccess'
 import { originUpstreamLabel } from '../lib/originUpstream'
 import { ORIGIN_VIEWS, resolveOriginTab, type OriginTabId, type OriginViewId } from '../components/layout/navigation'
@@ -100,7 +101,7 @@ export const OriginDetail: React.FC = () => {
   // lands a just-connected site on its setup status; the old ?tab=ssl link
   // target is now part of the Domains tab.
   const { view: activeView, section } = resolveOriginTab(searchParams.get('tab'))
-  // A section id (one of the nine old tabs), or Protection with nothing open.
+  // A section id (one of the old tabs, or honeypot), or Protection with nothing open.
   const activeTab: OriginTabId | 'protection' = section ?? 'protection'
   const setActiveTab = (tab: OriginTabId | 'protection') => {
     const p = new URLSearchParams(searchParams)
@@ -1550,6 +1551,7 @@ export const OriginDetail: React.FC = () => {
         )}
 
         {activeTab === 'postmortem' && id && <OriginReports originId={id} canWrite={isAdmin} />}
+        {activeTab === 'honeypot' && id && <OriginHoneypot originId={id} canEdit={isAdmin} />}
       </div>
 
       <ConfirmDialog

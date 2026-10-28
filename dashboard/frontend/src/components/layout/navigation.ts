@@ -134,6 +134,7 @@ export type OriginTabId =
   | 'shield'
   | 'team'
   | 'postmortem'
+  | 'honeypot'
 
 export interface OriginTabDef {
   id: OriginTabId
@@ -152,6 +153,7 @@ export const ORIGIN_TABS: OriginTabDef[] = [
   { id: 'shield', label: 'Bot & login shield', labelTh: 'ป้องกันบอทและการล็อกอิน', keywords: ['bot', 'captcha', 'otp', 'login'] },
   { id: 'team', label: 'Team & audit log', labelTh: 'ทีมและประวัติการแก้ไข', keywords: ['members', 'invite', 'editor', 'viewer', 'audit'] },
   { id: 'postmortem', label: 'Reports', labelTh: 'รายงาน', keywords: ['incident report', 'postmortem', 'report', 'pdf', 'export'] },
+  { id: 'honeypot', label: 'Honeypot', labelTh: 'Honeypot', keywords: ['honeypot', 'decoy', 'deception', 'honeytoken', 'attacker session', 'mitre'] },
 ]
 
 // Label in the chosen language; falls back to English when no Thai label.
@@ -161,11 +163,12 @@ export const labelIn = (item: { label?: string; labelTh?: string }, lang: 'en' |
 // The origin page shows five tabs. Each of the nine section ids above still
 // works in a link (?tab=ip-access opens Protection with IP rules open), so
 // quick search, All rules, Alerts and "Block IP" links keep landing right.
-export type OriginViewId = 'overview' | 'protection' | 'domains' | 'team' | 'reports'
+export type OriginViewId = 'overview' | 'protection' | 'honeypot' | 'domains' | 'team' | 'reports'
 
 export const ORIGIN_VIEWS: { id: OriginViewId; label: string; labelTh: string; sections: OriginTabId[] }[] = [
   { id: 'overview', label: 'Overview', labelTh: 'ภาพรวม', sections: ['overview'] },
   { id: 'protection', label: 'Protection', labelTh: 'การป้องกัน', sections: ['waf', 'ml', 'ip-access', 'rate-limits', 'shield'] },
+  { id: 'honeypot', label: 'Honeypot', labelTh: 'Honeypot', sections: ['honeypot'] },
   { id: 'domains', label: 'Domains & DNS', labelTh: 'โดเมนและ DNS', sections: ['domains'] },
   { id: 'team', label: 'Team & history', labelTh: 'ทีมและประวัติ', sections: ['team'] },
   { id: 'reports', label: 'Reports', labelTh: 'รายงาน', sections: ['postmortem'] },

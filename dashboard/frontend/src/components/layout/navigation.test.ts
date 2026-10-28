@@ -146,7 +146,7 @@ describe('origin tabs', () => {
   })
 
   it('recognises only known tab ids', () => {
-    expect(ORIGIN_TABS).toHaveLength(9)
+    expect(ORIGIN_TABS).toHaveLength(10)
     expect(isOriginTab('rate-limits')).toBe(true)
     expect(isOriginTab('ssl')).toBe(false)
     expect(isOriginTab(null)).toBe(false)

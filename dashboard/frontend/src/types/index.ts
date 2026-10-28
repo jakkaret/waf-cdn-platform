@@ -211,6 +211,9 @@ export interface PostmortemStats {
   total_requests: number
   total_alerts: number
   top_attack_types: { type: string; count: number }[]
+  // Decoy sessions in the window and how many got at least this far
+  // (services/honeypot.py day_counts). Missing on reports made before 2026-10-28.
+  honeypot?: { sessions: number; ips: number; loot: number; exploit: number; credential_use: number; persistence: number }
 }
 
 export interface PostmortemBucket {

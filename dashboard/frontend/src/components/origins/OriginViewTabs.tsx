@@ -5,7 +5,7 @@ import { PROT_KEYS, PROT_STATE_LABEL, PROT_STATE_LABEL_TH, protMeta, type ProtKe
 import { ProtIcon } from './OriginBits'
 import { useT } from '../../i18n'
 
-// The origin page's five tabs, and the Protection tab's accordion: each of
+// The origin page's tabs, and the Protection tab's accordion: each of
 // the five protections is one row (icon, name, what it does, a short
 // summary, its state) that opens the existing editor for it.
 
