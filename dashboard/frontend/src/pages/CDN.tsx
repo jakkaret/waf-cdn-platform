@@ -20,14 +20,16 @@ import {
   CartesianGrid,
 } from 'recharts'
 import { Activity, Globe, HardDrive, Trash2, Clock, Server, Layers } from 'lucide-react'
-import { EDGE_STATE_LABEL, EdgeState, nextEdgeState } from '../lib/edgeStatus'
+import { EDGE_STATE_LABEL, EDGE_STATE_LABEL_TH, EdgeState, nextEdgeState } from '../lib/edgeStatus'
 import { formatBkkTime } from '../lib/time'
+import { useT } from '../i18n'
 
 // Platform operator page: the edge nodes and their cache. Every figure is a
 // backend measurement (/cdn/nodes health checks, /cdn/stats cache counters);
 // nothing here is per visitor.
 export const CDN: React.FC = () => {
   const { theme } = useThemeStore()
+  const { t, lang } = useT()
 
   const { data: nodes = [], isLoading: isLoadingNodes, isError: nodesError, dataUpdatedAt: nodesUpdatedAt } = useQuery({
     queryKey: ['cdn-nodes'],
@@ -98,9 +100,9 @@ export const CDN: React.FC = () => {
     : null
 
   const pieData = [
-    { name: 'Cache hit', value: totalHits, color: '#059669' },
-    { name: 'Cache miss', value: totalMisses, color: '#d97706' },
-    { name: 'Bypass (dynamic)', value: totalBypass, color: '#0284c7' },
+    { name: t('Cache hit', 'Cache hit'), value: totalHits, color: '#059669' },
+    { name: t('Cache miss', 'Cache miss'), value: totalMisses, color: '#d97706' },
+    { name: t('Bypass (dynamic)', 'Bypass (เนื้อหา dynamic)'), value: totalBypass, color: '#0284c7' },
   ].filter((d) => d.value > 0)
 
   // Health-check round trip from the control plane to each edge -- the same
@@ -120,16 +122,16 @@ export const CDN: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       <TopBar
-        title="CDN edge nodes"
-        subtitle="Edge health as seen from the control plane, and edge cache counters."
+        title={t('CDN edge nodes', 'CDN edge node')}
+        subtitle={t('Edge health as seen from the control plane, and edge cache counters.', 'สุขภาพของ edge ตามที่ control plane ตรวจได้ และตัวนับ cache ของ edge')}
         badge={
           isLoadingNodes ? (
-            <Badge color="gray">Checking edges…</Badge>
+            <Badge color="gray">{t('Checking edges…', 'กำลังตรวจ edge…')}</Badge>
           ) : nodesError ? (
-            <Badge color="gray">Edge status unavailable</Badge>
+            <Badge color="gray">{t('Edge status unavailable', 'ไม่มีข้อมูลสถานะ edge')}</Badge>
           ) : (
             <Badge color={onlineEdges === edgeNodes.length ? 'success' : 'warning'} dot>
-              {onlineEdges} of {edgeNodes.length} edges answering
+              {t(`${onlineEdges} of ${edgeNodes.length} edges answering`, `edge ตอบ ${onlineEdges} จาก ${edgeNodes.length}`)}
             </Badge>
           )
         }
@@ -138,25 +140,25 @@ export const CDN: React.FC = () => {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
-          label="Cache hit rate"
+          label={t('Cache hit rate', 'อัตรา cache hit')}
           value={isLoadingStats || statsError || hitRatio === null ? '—' : `${hitRatio}%`}
           color="green"
           icon={<HardDrive size={16} />}
-          sub={statsError ? 'Cache counters unavailable' : `${totalHits.toLocaleString()} responses served from cache`}
+          sub={statsError ? t('Cache counters unavailable', 'ไม่มีข้อมูลตัวนับ cache') : t(`${totalHits.toLocaleString()} responses served from cache`, `ตอบจาก cache ${totalHits.toLocaleString()} ครั้ง`)}
         />
         <StatCard
-          label="Requests at the edges"
+          label={t('Requests at the edges', 'request ที่ edge')}
           value={isLoadingStats || statsError ? '—' : totalRequests.toLocaleString()}
           color="blue"
           icon={<Globe size={16} />}
-          sub="All edges together"
+          sub={t('All edges together', 'รวมทุก edge')}
         />
         <StatCard
-          label="Average time to first byte"
+          label={t('Average time to first byte', 'เวลาเฉลี่ยถึง byte แรก')}
           value={isLoadingStats || statsError || avgTtfb === null ? '—' : `${avgTtfb} ms`}
           color="cyan"
           icon={<Activity size={16} />}
-          sub="Mean over the edges' recorded responses"
+          sub={t("Mean over the edges' recorded responses", 'ค่าเฉลี่ยจาก response ที่ edge บันทึกไว้')}
         />
       </div>
 
@@ -166,20 +168,20 @@ export const CDN: React.FC = () => {
           <div className="dash-card-header">
             <div className="flex items-center gap-2">
               <Server size={16} className="text-[var(--text-muted)]" aria-hidden="true" />
-              <h3 id="edge-nodes-heading">Nodes</h3>
+              <h3 id="edge-nodes-heading">{t('Nodes', 'Node')}</h3>
             </div>
             {nodesUpdatedAt > 0 && (
-              <span className="text-[12px] text-[var(--text-muted)]">Checked {formatBkkTime(nodesUpdatedAt, { seconds: true })}</span>
+              <span className="text-[12px] text-[var(--text-muted)]">{t('Checked', 'ตรวจเมื่อ')} {formatBkkTime(nodesUpdatedAt, { seconds: true })}</span>
             )}
           </div>
 
           <ul className="m-0 p-4 list-none space-y-3 flex-1">
             {isLoadingNodes ? (
-              <li className="text-center py-8 text-[var(--text-muted)] text-[13px]">Checking nodes…</li>
+              <li className="text-center py-8 text-[var(--text-muted)] text-[13px]">{t('Checking nodes…', 'กำลังตรวจ node…')}</li>
             ) : nodesError ? (
-              <li className="text-center py-8 text-red-600 dark:text-red-400 text-[13px]">Could not reach the status check.</li>
+              <li className="text-center py-8 text-red-600 dark:text-red-400 text-[13px]">{t('Could not reach the status check.', 'ติดต่อระบบตรวจสถานะไม่ได้')}</li>
             ) : safeNodes.length === 0 ? (
-              <li className="text-center py-8 text-[var(--text-muted)] text-[13px]">No edge nodes configured.</li>
+              <li className="text-center py-8 text-[var(--text-muted)] text-[13px]">{t('No edge nodes configured.', 'ยังไม่ได้ตั้งค่า edge node')}</li>
             ) : (
               safeNodes.map((node) => {
                 const state = stateOf(node)
@@ -194,11 +196,17 @@ export const CDN: React.FC = () => {
                       <span className="text-2xl leading-none" aria-hidden="true">{node.flag || '🌐'}</span>
                       <div className="min-w-0">
                         <p className="font-semibold text-[13px] text-[var(--text-primary)] m-0 truncate">
-                          {node.name || node.region}{isCore ? ' (WAF core)' : ''}
+                          {node.name || node.region}{isCore ? t(' (WAF core)', ' (WAF core)') : ''}
                         </p>
                         <p className="text-[12px] text-[var(--text-muted)] m-0">
-                          {state === 'online' && node.latency_ms ? `Health check ${node.latency_ms} ms` : 'No round-trip sample'}
-                          {!isCore && tls ? `, TLS port ${tls === 'port_open' ? 'open' : 'not reachable'}` : ''}
+                          {state === 'online' && node.latency_ms
+                            ? t(`Health check ${node.latency_ms} ms`, `health check ${node.latency_ms} ms`)
+                            : t('No round-trip sample', 'ยังไม่มีค่าเวลาไป-กลับ')}
+                          {!isCore && tls
+                            ? tls === 'port_open'
+                              ? t(', TLS port open', ', พอร์ต TLS เปิดอยู่')
+                              : t(', TLS port not reachable', ', เข้าถึงพอร์ต TLS ไม่ได้')
+                            : ''}
                         </p>
                       </div>
                     </div>
@@ -206,7 +214,7 @@ export const CDN: React.FC = () => {
                       color={state === 'online' ? 'success' : state === 'missed' ? 'warning' : state === 'offline' ? 'danger' : 'gray'}
                       dot
                     >
-                      {EDGE_STATE_LABEL[state]}
+                      {lang === 'th' ? EDGE_STATE_LABEL_TH[state] : EDGE_STATE_LABEL[state]}
                     </Badge>
                   </li>
                 )
@@ -220,7 +228,7 @@ export const CDN: React.FC = () => {
           <div className="dash-card-header">
             <div className="flex items-center gap-2">
               <Layers size={16} className="text-[var(--text-muted)]" aria-hidden="true" />
-              <h3 id="cache-heading">Requests and cache hits per edge</h3>
+              <h3 id="cache-heading">{t('Requests and cache hits per edge', 'request และ cache hit แยกตาม edge')}</h3>
             </div>
           </div>
 
@@ -228,7 +236,11 @@ export const CDN: React.FC = () => {
             <div className="flex-1 h-[220px] w-full">
               {statsList.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">
-                  {isLoadingStats ? 'Loading…' : statsError ? 'Cache counters unavailable.' : 'No per-edge counters reported yet.'}
+                  {isLoadingStats
+                    ? t('Loading…', 'กำลังโหลด…')
+                    : statsError
+                      ? t('Cache counters unavailable.', 'ไม่มีข้อมูลตัวนับ cache')
+                      : t('No per-edge counters reported yet.', 'ยังไม่มีตัวนับของแต่ละ edge')}
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
@@ -237,8 +249,8 @@ export const CDN: React.FC = () => {
                     <XAxis dataKey="region" stroke={axisColor} fontSize={11} tickLine={false} />
                     <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} width={44} />
                     <Tooltip contentStyle={tooltipStyle} />
-                    <Bar dataKey="request_count" name="Requests" fill={isDark ? '#38bdf8' : '#0369a1'} radius={[4, 4, 0, 0]} isAnimationActive={false} />
-                    <Bar dataKey="cache_hit" name="Cache hits" fill="#059669" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                    <Bar dataKey="request_count" name={t('Requests', 'Request')} fill={isDark ? '#38bdf8' : '#0369a1'} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                    <Bar dataKey="cache_hit" name={t('Cache hits', 'Cache hit')} fill="#059669" radius={[4, 4, 0, 0]} isAnimationActive={false} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -272,7 +284,7 @@ export const CDN: React.FC = () => {
                   </ul>
                 </>
               ) : (
-                <p className="m-0 text-[13px] text-[var(--text-muted)] text-center">No cache outcomes recorded yet.</p>
+                <p className="m-0 text-[13px] text-[var(--text-muted)] text-center">{t('No cache outcomes recorded yet.', 'ยังไม่มีผลของ cache ที่บันทึกไว้')}</p>
               )}
             </div>
           </div>
@@ -284,26 +296,26 @@ export const CDN: React.FC = () => {
           <div className="flex items-center gap-2">
             <Clock size={16} className="text-[var(--text-muted)]" aria-hidden="true" />
             <div>
-              <h3 id="rtt-heading">Health check round trip (ms)</h3>
+              <h3 id="rtt-heading">{t('Health check round trip (ms)', 'เวลาไป-กลับของ health check (ms)')}</h3>
               <p className="m-0 text-[12px] text-[var(--text-muted)]">
-                From the control plane to each edge, latest check. Not the latency your visitors see.
+                {t('From the control plane to each edge, latest check. Not the latency your visitors see.', 'จาก control plane ไปยังแต่ละ edge จากการตรวจล่าสุด ไม่ใช่ความหน่วงที่ผู้เข้าชมเห็น')}
               </p>
             </div>
           </div>
         </div>
         <div className="p-4 sm:p-5 h-[220px]">
           {isLoadingNodes ? (
-            <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">Checking…</div>
+            <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">{t('Checking…', 'กำลังตรวจ…')}</div>
           ) : rttData.every((d) => d.rtt === null) ? (
-            <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">No edge answered the last check.</div>
+            <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-muted)]">{t('No edge answered the last check.', 'ไม่มี edge ตอบการตรวจครั้งล่าสุด')}</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={rttData} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 0 }}>
                 <CartesianGrid stroke={gridColor} strokeDasharray="3 3" horizontal={false} />
                 <XAxis type="number" stroke={axisColor} fontSize={11} tickLine={false} unit=" ms" allowDecimals={false} />
                 <YAxis type="category" dataKey="name" stroke={axisColor} fontSize={12} tickLine={false} axisLine={false} width={140} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => (v == null ? 'no answer' : `${v} ms`)} />
-                <Bar dataKey="rtt" name="Round trip" fill={isDark ? '#38bdf8' : '#0369a1'} radius={[0, 4, 4, 0]} maxBarSize={28} isAnimationActive={false} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => (v == null ? t('no answer', 'ไม่ตอบ') : `${v} ms`)} />
+                <Bar dataKey="rtt" name={t('Round trip', 'เวลาไป-กลับ')} fill={isDark ? '#38bdf8' : '#0369a1'} radius={[0, 4, 4, 0]} maxBarSize={28} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -313,12 +325,15 @@ export const CDN: React.FC = () => {
       <section className="dash-card p-4 sm:p-5" aria-labelledby="purge-heading">
         <div className="flex items-center gap-2 mb-1.5">
           <Trash2 size={16} className="text-[var(--text-muted)]" aria-hidden="true" />
-          <h3 id="purge-heading" className="text-[14px] font-semibold text-[var(--text-primary)] m-0">Purge a site's cache</h3>
+          <h3 id="purge-heading" className="text-[14px] font-semibold text-[var(--text-primary)] m-0">{t("Purge a site's cache", 'ล้าง cache ของเว็บ')}</h3>
         </div>
         <p className="text-[13px] text-[var(--text-secondary)] m-0">
-          Purging works per site. Open the site in{' '}
-          <Link to="/origins" className="text-[var(--accent)] hover:underline">Origins</Link>, then use Purge cache on its Overview tab.
-          The purge reaches every edge within a few seconds.
+          {t('Purging works per site. Open the site in', 'การล้าง cache ทำทีละเว็บ เปิดเว็บใน')}{' '}
+          <Link to="/origins" className="text-[var(--accent)] hover:underline">Origins</Link>
+          {t(
+            ', then use Purge cache on its Overview tab. The purge reaches every edge within a few seconds.',
+            ' แล้วใช้ปุ่มล้าง cache ที่แท็บภาพรวม คำสั่งจะถึงทุก edge ภายในไม่กี่วินาที',
+          )}
         </p>
       </section>
     </div>

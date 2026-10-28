@@ -20,3 +20,10 @@ export const EDGE_STATE_LABEL: Record<EdgeState, string> = {
   offline: 'Offline',
   unknown: 'Checking',
 }
+
+export const EDGE_STATE_LABEL_TH: Record<EdgeState, string> = {
+  online: 'ออนไลน์',
+  missed: 'ไม่ตอบการตรวจครั้งล่าสุด',
+  offline: 'ออฟไลน์',
+  unknown: 'กำลังตรวจ',
+}
