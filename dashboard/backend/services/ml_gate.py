@@ -32,6 +32,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
+import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -94,6 +97,47 @@ def decide(score: float, policy: Policy) -> str:
     if challenge is not None and points >= challenge:
         return "challenge"
     return "pass"
+
+
+# ---- the action, for the access log -----------------------------------------
+#
+# The access log row of a request comes from the edge (api/cdn.py's ingest), a
+# few seconds after the gate answered it, with the same request id: nginx sends
+# the edge's X-Request-ID as X-Original-Request-ID ($waf_request_id). Without
+# this the row of an ML block reads like a ModSecurity one (WAF-CRS). In memory,
+# one backend process: a restart only loses the labels of the last few seconds.
+
+ACTION_TTL_SECONDS = 900
+ACTIONS_MAX = 50_000
+_actions: "OrderedDict[str, Tuple[float, str]]" = OrderedDict()
+_actions_lock = threading.Lock()
+
+
+def remember_action(request_id: Any, action: str, now: Optional[float] = None) -> None:
+    """Keep a "block" / "challenge" answer until the edge's log row arrives."""
+    rid = str(request_id or "").strip()[:128]
+    if not rid or action not in ("block", "challenge"):
+        return
+    now = time.monotonic() if now is None else now
+    with _actions_lock:
+        _actions[rid] = (now, action)
+        _actions.move_to_end(rid)
+        while _actions and (len(_actions) > ACTIONS_MAX
+                            or next(iter(_actions.values()))[0] < now - ACTION_TTL_SECONDS):
+            _actions.popitem(last=False)
+
+
+def recalled_action(request_id: Any, now: Optional[float] = None) -> Optional[str]:
+    """"block" / "challenge" if the gate answered this request, else None."""
+    rid = str(request_id or "").strip()[:128]
+    if not rid:
+        return None
+    now = time.monotonic() if now is None else now
+    with _actions_lock:
+        hit = _actions.get(rid)
+    if hit is None or hit[0] < now - ACTION_TTL_SECONDS:
+        return None
+    return hit[1]
 
 
 # ---- settings ---------------------------------------------------------------

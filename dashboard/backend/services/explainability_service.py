@@ -8,8 +8,11 @@ and ReDoS-safe execution with time budgets.
 
 import re
 from typing import Dict, Any, Optional, Tuple, List
+from services.log_normalize import ML_RULE_ID
 from services.payload_normalizer import payload_normalizer
 from services.safe_regex import safe_search
+
+ML_CATEGORY = "ML anomaly (Gen 3)"
 
 # Token attribution pattern maps with strict linear-time bounded regexes
 SIGNATURE_PATTERNS = [
@@ -203,7 +206,14 @@ class ExplainabilityService:
                     break
 
         # 4. Formulate explanation based on matched signature or rule
-        if matched_sig:
+        if rule_id == ML_RULE_ID:
+            # The inline ML gate answered this request, not a ModSecurity rule.
+            category = ML_CATEGORY
+            root_cause = "โมเดล ML (Gen 3) ให้คะแนนคำขอนี้ถึงเกณฑ์ที่ origin ตั้งไว้ในโหมด enforce"
+            remediation = ("ดูคะแนนและรายละเอียดในหน้า ML insights ถ้าเป็นคำขอปกติ "
+                           "ให้ปรับเกณฑ์ในแท็บ ML protection ของ origin")
+            confidence = 0.6
+        elif matched_sig:
             category = matched_sig["category"]
             tok_display = matched_token if matched_token else (rule_id or "Anomalous Payload")
             root_cause = matched_sig["explanation"].replace("{token}", tok_display)
