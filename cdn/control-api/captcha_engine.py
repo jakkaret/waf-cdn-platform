@@ -460,8 +460,11 @@ async def verify_challenge(request: Request, payload: ChallengeVerifyRequest) ->
         HMAC_SECRET.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
     ).hexdigest()
     response = JSONResponse({"success": True})
+    # No expires=: Starlette reads an int there as seconds from now, so the
+    # absolute expiry put Expires decades ahead. max_age alone sets the same
+    # lifetime, and the signed expiry in the value is what the server checks.
     response.set_cookie(
-        COOKIE_NAME, f"{expiry}.{host}.{signature}", max_age=ttl, expires=expiry,
+        COOKIE_NAME, f"{expiry}.{host}.{signature}", max_age=ttl,
         path="/", secure=True, httponly=True, samesite="lax"
     )
     return response
