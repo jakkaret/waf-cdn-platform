@@ -1,8 +1,12 @@
+import base64
+import functools
 import hashlib
 import hmac
+import io
 import ipaddress
 import json
 import logging
+import math
 import os
 import secrets
 import socket
@@ -13,6 +17,7 @@ from http.cookies import SimpleCookie
 import redis
 from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, Field
 
 from shield_paths import is_protected
@@ -21,6 +26,13 @@ logger = logging.getLogger(__name__)
 COOKIE_NAME = "waf_clearance"
 DEFAULT_PATHS = ["/login*", "/admin*", "/wp-login.php", "/administrator*", "/user/login*"]
 CHALLENGE_TTL = 60
+# A visitor reads and types the image text, so its challenge lives longer
+# than the proof-of-work one the browser solves on its own.
+IMAGE_CHALLENGE_TTL = 180
+# No 0/O, 1/I/L: characters people confuse in a distorted image.
+IMAGE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+IMAGE_LENGTH = 5
+IMAGE_SIZE = (200, 70)
 DEFAULT_CLEARANCE_TTL = 3600
 CLEARANCE_TTL_RANGE = (900, 43200)
 # A cookie's expiry may run past now + the configured clearance by at most
@@ -54,6 +66,8 @@ class ChallengeVerifyRequest(BaseModel):
     challenge_id: str = Field(min_length=1, max_length=128)
     nonce: int = Field(ge=0, le=2_000_000)
     host: str = Field(min_length=1, max_length=253)
+    # The text typed from the image; only checked when the challenge has one.
+    answer: str | None = Field(default=None, max_length=16)
 
 
 def _redis():
@@ -173,6 +187,9 @@ def _default_config(host: str = "") -> dict:
         "clearance_ttl": DEFAULT_CLEARANCE_TTL,
         "bypass_ips": [],
         "pow_difficulty": 3,
+        # On top of the proof of work, the visitor types the text of a
+        # distorted image. Off unless the origin turns it on.
+        "image_captcha": False,
         # "enforce" or "log_only" (record what would happen, let the request
         # through). Configs saved before this field existed have no key and
         # keep enforcing.
@@ -332,6 +349,67 @@ async def captcha_access(request: Request) -> Response:
     return Response(status_code=204)
 
 
+def _answer_digest(challenge_id: str, answer: str) -> str:
+    normalized = "".join(answer.split()).upper()
+    return hmac.new(
+        HMAC_SECRET.encode("utf-8"),
+        f"image\x1f{challenge_id}\x1f{normalized}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+_rng = secrets.SystemRandom()
+
+
+@functools.lru_cache(maxsize=16)
+def _image_font(size: int):
+    # Pillow's bundled FreeType font: the slim image ships no system fonts.
+    return ImageFont.load_default(size=size)
+
+
+def _captcha_png(text: str) -> bytes:
+    width, height = IMAGE_SIZE
+    image = Image.new("RGB", IMAGE_SIZE, tuple(_rng.randint(225, 250) for _ in range(3)))
+    draw = ImageDraw.Draw(image)
+    for _ in range(350):
+        draw.point(
+            (_rng.randrange(width), _rng.randrange(height)),
+            fill=tuple(_rng.randint(110, 210) for _ in range(3)),
+        )
+    # Each character on its own layer: its own size, tilt and offset, so the
+    # glyphs do not sit on one baseline a segmenter can cut along.
+    cell = 60
+    step = (width - 20) / len(text)
+    for index, char in enumerate(text):
+        glyph = Image.new("RGBA", (cell, cell), (0, 0, 0, 0))
+        ImageDraw.Draw(glyph).text(
+            (cell / 2, cell / 2), char, anchor="mm",
+            font=_image_font(_rng.randint(34, 42)),
+            fill=tuple(_rng.randint(10, 110) for _ in range(3)) + (255,),
+        )
+        glyph = glyph.rotate(_rng.uniform(-22, 22), resample=Image.BICUBIC)
+        x = int(10 + index * step - (cell - step) / 2 + _rng.uniform(-3, 3))
+        y = int((height - cell) / 2 + _rng.uniform(-6, 6))
+        image.paste(glyph, (x, y), glyph)
+    # A vertical sine wave across the whole text bends every glyph a little.
+    amplitude, period, phase = _rng.uniform(2.5, 4.5), _rng.uniform(45, 75), _rng.uniform(0, 2 * math.pi)
+    waved = image.copy()
+    for x in range(width):
+        dy = int(amplitude * math.sin(2 * math.pi * x / period + phase))
+        waved.paste(image.crop((x, 0, x + 1, height)), (x, dy))
+    draw = ImageDraw.Draw(waved)
+    for _ in range(3):
+        draw.line(
+            [(0, _rng.randrange(height)), (width // 2, _rng.randrange(height)), (width, _rng.randrange(height))],
+            fill=tuple(_rng.randint(40, 140) for _ in range(3)),
+            width=2,
+            joint="curve",
+        )
+    out = io.BytesIO()
+    waved.save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
 def _new_challenge(request: Request, config: dict, client) -> dict:
     challenge_id = str(uuid.uuid4())
     record = {
@@ -342,26 +420,48 @@ def _new_challenge(request: Request, config: dict, client) -> dict:
         "ua_digest": _ua_digest(user_agent(request)),
         "issued_at": int(time.time()),
     }
+    text = None
+    if config.get("image_captcha"):
+        text = "".join(secrets.choice(IMAGE_ALPHABET) for _ in range(IMAGE_LENGTH))
+        record["answer_digest"] = _answer_digest(challenge_id, text)
     client.setex(
         f"waf:captcha:challenge:{challenge_id}",
-        CHALLENGE_TTL,
+        IMAGE_CHALLENGE_TTL if text else CHALLENGE_TTL,
         json.dumps(record, separators=(",", ":")),
     )
-    return {
+    payload = {
         "challenge_id": challenge_id,
         "prefix": record["prefix"],
         "difficulty": record["difficulty"],
     }
+    if text:
+        payload["image"] = "data:image/png;base64," + base64.b64encode(_captcha_png(text)).decode("ascii")
+    return payload
 
 
 def _challenge_html(payload: dict) -> str:
-    # Values are generated by the server and limited to UUID/hex/integer fields.
+    # The image stays out of the script: it goes into the <img> tag, and the
+    # script only learns that there is one.
+    payload = dict(payload)
+    image = payload.pop("image", None)
+    payload["image"] = bool(image)
+    # Values are generated by the server and limited to UUID/hex/integer/bool fields.
     safe_payload = (
         json.dumps(payload, separators=(",", ":"))
         .replace("\\", "\\\\")
         .replace("'", "\\'")
         .replace("</", "<\\/")
     )
+    if image:
+        # The data URI is base64 of a PNG the server drew: no quotes or markup.
+        body = f"""<h1>ยืนยันว่าคุณไม่ใช่บอท</h1><p>พิมพ์ตัวอักษรที่เห็นในภาพเพื่อเข้าสู่ระบบ</p>
+<img id="captcha-image" src="{image}" width="{IMAGE_SIZE[0]}" height="{IMAGE_SIZE[1]}" alt="ภาพตัวอักษรสำหรับยืนยันตัวตน">
+<form id="captcha-form"><input id="captcha-answer" name="answer" maxlength="16" autocomplete="off" autocapitalize="characters" spellcheck="false" required aria-label="ตัวอักษรในภาพ"><button type="submit">ยืนยัน</button></form>
+<button type="button" id="captcha-refresh" class="link">ขอภาพใหม่</button>
+<small id="status"></small><p id="error"></p>"""
+    else:
+        body = """<h1>กำลังตรวจสอบเบราว์เซอร์</h1><p>กรุณารอสักครู่ ระบบกำลังยืนยันความปลอดภัยก่อนเข้าสู่ระบบ</p>
+<div class="spinner" aria-hidden="true"></div><small id="status">กำลังคำนวณ...</small><p id="error"></p>"""
     return f"""<!doctype html>
 <html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Checking your browser</title>
@@ -370,9 +470,14 @@ body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b12
 main{{width:min(92vw,430px);padding:32px;border:1px solid #263248;border-radius:16px;background:#111a2b;box-shadow:0 18px 50px #0006;text-align:center}}
 .spinner{{width:28px;height:28px;margin:20px auto;border:3px solid #334155;border-top-color:#fb923c;border-radius:50%;animation:spin 1s linear infinite}}
 small{{color:#94a3b8}}#error{{color:#fca5a5;min-height:1.5em}}@keyframes spin{{to{{transform:rotate(360deg)}}}}
+#captcha-image{{display:block;margin:20px auto 16px;border-radius:8px;max-width:100%;height:auto}}
+#captcha-form{{display:flex;gap:8px;margin:0 0 12px}}
+#captcha-answer{{flex:1;min-width:0;padding:10px 12px;border:1px solid #334155;border-radius:8px;background:#0b1220;color:#e5e7eb;font:600 18px ui-monospace,monospace;letter-spacing:.2em;text-transform:uppercase}}
+#captcha-form button{{padding:10px 16px;border:0;border-radius:8px;background:#fb923c;color:#111827;font-weight:700;cursor:pointer}}
+#captcha-form button:disabled{{opacity:.6;cursor:wait}}
+.link{{display:block;margin:0 auto 8px;border:0;background:none;color:#93c5fd;font:inherit;font-size:14px;cursor:pointer;text-decoration:underline}}
 </style></head><body><main>
-<h1>กำลังตรวจสอบเบราว์เซอร์</h1><p>กรุณารอสักครู่ ระบบกำลังยืนยันความปลอดภัยก่อนเข้าสู่ระบบ</p>
-<div class="spinner" aria-hidden="true"></div><small id="status">กำลังคำนวณ...</small><p id="error"></p>
+{body}
 </main><script>
 const challenge=JSON.parse('{safe_payload}'),statusEl=document.getElementById('status'),errorEl=document.getElementById('error');
 function rotr(n,x){{return(x>>>n)|(x<<(32-n));}}
@@ -385,8 +490,19 @@ function sha256Fallback(input){{
  return h.map(x=>('00000000'+(x>>>0).toString(16)).slice(-8)).join('');
 }}
 async function sha256Hex(value){{if(window.crypto&&window.crypto.subtle&&window.TextEncoder){{const b=await window.crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('');}}return sha256Fallback(value);}}
-async function solve(){{const target='0'.repeat(challenge.difficulty);let nonce=0,started=Date.now();while(nonce<=2000000){{if(nonce%256===0)statusEl.textContent='กำลังคำนวณ... '+Math.round((Date.now()-started)/1000)+' วินาที';const digest=await sha256Hex(challenge.prefix+nonce);if(digest.startsWith(target)){{const r=await fetch('/cdn-cgi/challenge/verify',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{challenge_id:challenge.challenge_id,nonce:nonce,host:location.host}})}}),j=await r.json().catch(()=>({{}}));if(r.ok&&j.success){{location.reload();return;}}throw new Error(j.error||'verification failed');}}nonce++;}}throw new Error('challenge timeout');}}
-solve().catch(e=>{{document.querySelector('.spinner').style.display='none';statusEl.textContent='ไม่สามารถยืนยันเบราว์เซอร์ได้';errorEl.textContent=e.message+' กรุณาลองใหม่';}});
+async function work(){{const target='0'.repeat(challenge.difficulty);let nonce=0,started=Date.now();while(nonce<=2000000){{if(!challenge.image&&nonce%256===0)statusEl.textContent='กำลังคำนวณ... '+Math.round((Date.now()-started)/1000)+' วินาที';const digest=await sha256Hex(challenge.prefix+nonce);if(digest.startsWith(target))return nonce;nonce++;}}throw new Error('challenge timeout');}}
+async function send(nonce,answer){{const body={{challenge_id:challenge.challenge_id,nonce:nonce,host:location.host}};if(answer!==undefined)body.answer=answer;const r=await fetch('/cdn-cgi/challenge/verify',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}}),j=await r.json().catch(()=>({{}}));if(r.ok&&j.success){{location.reload();return;}}throw new Error(j.error||'verification failed');}}
+const proof=work();
+if(!challenge.image){{proof.then(nonce=>send(nonce)).catch(e=>{{document.querySelector('.spinner').style.display='none';statusEl.textContent='ไม่สามารถยืนยันเบราว์เซอร์ได้';errorEl.textContent=e.message+' กรุณาลองใหม่';}});}}
+else{{
+ // The proof of work runs while the visitor reads the image. A challenge is
+ // good for one attempt only, so any failure loads a fresh image.
+ proof.catch(()=>{{}});
+ const form=document.getElementById('captcha-form'),input=document.getElementById('captcha-answer'),button=form.querySelector('button');
+ document.getElementById('captcha-refresh').addEventListener('click',()=>location.reload());
+ input.focus();
+ form.addEventListener('submit',async e=>{{e.preventDefault();const answer=input.value.trim();if(!answer){{input.focus();return;}}button.disabled=true;input.disabled=true;errorEl.textContent='';statusEl.textContent='กำลังตรวจสอบ...';try{{await send(await proof,answer);}}catch(err){{statusEl.textContent='';errorEl.textContent=(err.message==='invalid answer'?'ตัวอักษรไม่ถูกต้อง':err.message)+' กำลังโหลดภาพใหม่...';setTimeout(()=>location.reload(),1500);}}}});
+}}
 </script></body></html>"""
 
 
@@ -452,6 +568,13 @@ async def verify_challenge(request: Request, payload: ChallengeVerifyRequest) ->
     difficulty = max(1, min(5, int(record.get("difficulty", 3))))
     if not digest.startswith("0" * difficulty):
         return JSONResponse({"success": False, "error": "invalid proof"}, status_code=400)
+    # The record is already deleted above, so a wrong answer costs the whole
+    # challenge: guessing means a new image and a new proof of work each time.
+    expected_answer = record.get("answer_digest")
+    if expected_answer and not hmac.compare_digest(
+        expected_answer, _answer_digest(payload.challenge_id, payload.answer or "")
+    ):
+        return JSONResponse({"success": False, "error": "invalid answer"}, status_code=400)
     config, _ = get_config(host, client)
     ttl = max(CLEARANCE_TTL_RANGE[0], min(CLEARANCE_TTL_RANGE[1], int(config.get("clearance_ttl", DEFAULT_CLEARANCE_TTL))))
     expiry = int(time.time()) + ttl
