@@ -80,6 +80,7 @@ class CaptchaShieldConfig(BaseModel):
     clearance_ttl: int = Field(default=3600, ge=900, le=43200)
     bypass_ips: List[str] = Field(default_factory=list)
     pow_difficulty: int = Field(default=3, ge=1, le=5)
+    image_captcha: bool = False
     mode: Literal["enforce", "log_only"] = "enforce"
     exclude_paths: List[str] = Field(default_factory=list)
 

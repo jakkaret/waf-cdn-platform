@@ -288,6 +288,7 @@ export interface CaptchaShieldConfig {
   clearance_ttl: number
   bypass_ips: string[]
   pow_difficulty: number
+  image_captcha?: boolean
   mode: 'enforce' | 'log_only'
   exclude_paths: string[]
   updated_at?: string

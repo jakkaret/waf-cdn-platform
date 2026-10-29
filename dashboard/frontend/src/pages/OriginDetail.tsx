@@ -202,6 +202,7 @@ export const OriginDetail: React.FC = () => {
     loginPathsText: string
     bypassIpsText: string
     powDifficulty: number
+    imageCaptcha: boolean
     clearanceTtl: number
     mode: ShieldMode
     excludePathsText: string
@@ -221,6 +222,7 @@ export const OriginDetail: React.FC = () => {
       loginPathsText: formatListInput(remoteShieldConfig.login_paths),
       bypassIpsText: formatListInput(remoteShieldConfig.bypass_ips),
       powDifficulty: remoteShieldConfig.pow_difficulty,
+      imageCaptcha: remoteShieldConfig.image_captcha ?? false,
       clearanceTtl: remoteShieldConfig.clearance_ttl,
       mode: remoteShieldConfig.mode ?? 'enforce',
       excludePathsText: formatListInput(remoteShieldConfig.exclude_paths ?? []),
@@ -259,6 +261,7 @@ export const OriginDetail: React.FC = () => {
       login_paths,
       bypass_ips: parseListInput(shieldForm.bypassIpsText),
       pow_difficulty: shieldForm.powDifficulty,
+      image_captcha: shieldForm.imageCaptcha,
       clearance_ttl: shieldForm.clearanceTtl,
       mode: shieldForm.mode,
       exclude_paths,
@@ -711,6 +714,27 @@ export const OriginDetail: React.FC = () => {
                         'ค่าสูงทำให้เบราว์เซอร์ของผู้เข้าชมใช้เวลาแก้นานขึ้น — ระดับ 3 ไม่ถึงวินาที ระดับ 5 ราวสองวินาที',
                       )}
                     </p>
+                    <label className="flex items-start gap-3 cursor-pointer pt-3 border-t border-[var(--bg-border)]">
+                      <input
+                        type="checkbox"
+                        checked={shieldForm.imageCaptcha}
+                        onChange={(e) =>
+                          setShieldForm((f) => (f ? { ...f, imageCaptcha: e.target.checked } : f))
+                        }
+                        className="mt-0.5 accent-orange-500 cursor-pointer"
+                      />
+                      <span>
+                        <span className="block text-[12.5px] font-bold font-mono text-[var(--text-primary)]">
+                          {t('Image CAPTCHA', 'CAPTCHA แบบรูปภาพ')}
+                        </span>
+                        <span className="block text-[11.5px] font-mono text-[var(--text-muted)] mt-0.5">
+                          {t(
+                            'Visitors also type the letters from a distorted image. Stops bots that only run the browser check.',
+                            'ผู้เข้าชมต้องพิมพ์ตัวอักษรจากภาพที่บิดเบี้ยวด้วย กันบอทที่ผ่านแค่การตรวจเบราว์เซอร์ได้',
+                          )}
+                        </span>
+                      </span>
+                    </label>
                   </div>
 
                   <div className="dash-card p-5 space-y-4">

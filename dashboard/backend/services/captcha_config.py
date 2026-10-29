@@ -12,6 +12,9 @@ DEFAULT_CONFIG = {
     "clearance_ttl": 3600,
     "bypass_ips": [],
     "pow_difficulty": 3,
+    # Visitors also type the text of a distorted image (control-api
+    # captcha_engine._captcha_png).
+    "image_captcha": False,
     # "log_only" records what the gate would do and lets the request through.
     # A fresh config starts there so an Admin can watch the effect before
     # enforcing; a config saved before this field existed keeps "enforce"
