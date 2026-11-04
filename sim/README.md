@@ -47,8 +47,9 @@ Dashboard: เปิด http://localhost:8880 (ผ่าน Caddy ของ main
 
 ## test.sh ตรวจอะไร
 
-1. GeoDNS: คนไทย (`+subnet=1.46.0.0/24`) ได้ edge-th, คนต่างประเทศได้ edge-asia,
-   สอง edge ตอบตรงกัน, ไม่ทำ recursion
+1. GeoDNS ตามกติกาใน zone: ไทย (`+subnet=1.46.0.0/24`) และสหรัฐฯ (`8.8.8.0/24`)
+   ได้ edge-th, ญี่ปุ่น (`133.0.0.0/24`) และออสเตรเลีย (`1.128.0.0/24`, ทวีป OC)
+   ได้ edge-asia, สอง edge ตอบตรงกัน, ไม่ทำ recursion
 2. เว็บผ่านทั้งสอง edge → waf-nginx บน Main → frps → agent ใน lab → DVWA
 3. SQLi และ XSS โดน 403 ที่ edge
 4. ไฟล์ static ได้ `X-Cache-Status: HIT` ครั้งที่สอง, สั่ง purge (คิวเดียวกับ
@@ -56,7 +57,7 @@ Dashboard: เปิด http://localhost:8880 (ผ่าน Caddy ของ main
 5. edge ทั้งสองรัน rule bundle ที่เซ็นแล้วจาก control-api
 6. dashboard `/api/health`, Host อื่นที่เข้า Main ตรงโดน 403, log ของ Main เห็น IP
    ผู้เข้าชม ไม่ใช่ IP ของ edge
-7. ปิด edge-asia แล้วคนต่างประเทศย้ายไป edge-th, เปิดคืนแล้วกลับมา
+7. ปิด edge-asia แล้วผู้ใช้ญี่ปุ่นย้ายไป edge-th, เปิดคืนแล้วกลับมา
 
 ## ต่างจาก production ตรงไหน
 

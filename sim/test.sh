@@ -42,9 +42,11 @@ sleep 10
 
 echo "== GeoDNS (PowerDNS on both edges)"
 check "Thai visitor -> edge-th"     "$EDGE_TH"   "$(dig_a $EDGE_TH x.cdn.waf-it-kku.online +subnet=1.46.0.0/24)"
-check "US visitor -> edge-asia"     "$EDGE_ASIA" "$(dig_a $EDGE_ASIA x.cdn.waf-it-kku.online +subnet=8.8.8.0/24)"
-check "both edges give one answer"  "$(dig_a $EDGE_TH x.cdn.waf-it-kku.online +subnet=8.8.8.0/24)" \
-                                    "$(dig_a $EDGE_ASIA x.cdn.waf-it-kku.online +subnet=8.8.8.0/24)"
+check "US visitor -> edge-th"       "$EDGE_TH"   "$(dig_a $EDGE_ASIA x.cdn.waf-it-kku.online +subnet=8.8.8.0/24)"
+check "Japan visitor -> edge-asia"  "$EDGE_ASIA" "$(dig_a $EDGE_TH x.cdn.waf-it-kku.online +subnet=133.0.0.0/24)"
+check "Australia (OC) -> edge-asia" "$EDGE_ASIA" "$(dig_a $EDGE_TH x.cdn.waf-it-kku.online +subnet=1.128.0.0/24)"
+check "both edges give one answer"  "$(dig_a $EDGE_TH x.cdn.waf-it-kku.online +subnet=133.0.0.0/24)" \
+                                    "$(dig_a $EDGE_ASIA x.cdn.waf-it-kku.online +subnet=133.0.0.0/24)"
 check "no recursion (google.com)"   "status: REFUSED" \
   "$("${C[@]}" dig +time=2 +tries=1 @$EDGE_TH google.com | grep -o 'status: REFUSED')"
 
@@ -87,10 +89,10 @@ check "Main sees the visitor, not the edge" yes \
 echo "== GeoDNS failover"
 docker compose exec -T edge-asia docker stop cdn-edge-node >/dev/null
 sleep 8
-check "edge-asia down -> US visitor gets edge-th" "$EDGE_TH" "$(dig_a $EDGE_TH x.cdn.waf-it-kku.online +subnet=8.8.8.0/24)"
+check "edge-asia down -> Japan visitor gets edge-th" "$EDGE_TH" "$(dig_a $EDGE_TH x.cdn.waf-it-kku.online +subnet=133.0.0.0/24)"
 docker compose exec -T edge-asia docker start cdn-edge-node >/dev/null
 sleep 20
-check "edge-asia back -> US visitor gets edge-asia" "$EDGE_ASIA" "$(dig_a $EDGE_TH x.cdn.waf-it-kku.online +subnet=8.8.8.0/24)"
+check "edge-asia back -> Japan visitor gets edge-asia" "$EDGE_ASIA" "$(dig_a $EDGE_TH x.cdn.waf-it-kku.online +subnet=133.0.0.0/24)"
 
 echo
 [ "$fails" -eq 0 ] && echo "all checks passed" || echo "$fails check(s) failed"
