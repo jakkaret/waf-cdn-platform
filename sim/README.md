@@ -18,6 +18,11 @@ template และสคริปต์ของ repo จึงรันข้�
 
 ต้องมี Docker (Linux หรือ Docker Desktop) RAM ว่างราว 6 GB และดิสก์ราว 15 GB
 
+**ระวังบน Linux ที่รัน Docker Engine ตรงๆ:** เครือข่ายจำลองใช้ IP จริงของ production
+(178.104.53.0/24, 45.154.26.0/24, 57.158.25.0/24) ระหว่างที่ sim เปิดอยู่ เครื่องนั้นจะต่อ
+เซิร์ฟเวอร์จริงที่ IP เหล่านี้ไม่ได้ (เช่น SSH) เพราะ traffic ถูกส่งเข้า bridge ของ sim แทน
+Docker Desktop (macOS, Windows/WSL2) ไม่โดน เพราะ bridge อยู่ใน VM ของ Docker
+
 ```sh
 bash sim/up.sh      # ครั้งแรก 15-25 นาที (ดึง image และ build ในแต่ละเครื่อง)
 bash sim/test.sh    # ตรวจ end-to-end 22 ข้อ
