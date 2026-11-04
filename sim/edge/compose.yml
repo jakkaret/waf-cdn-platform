@@ -1,0 +1,63 @@
+# Stand-in for the edge's own compose file (/root/edge_node, /opt/edge_node:
+# not in git, Known Issue #1). Same containers and settings as
+# docs/cdn/23-edge-nodes.md: Caddy in front on :80/:443, the CRS nginx
+# (cdn/edge templates + rulesync) behind it, origin = Main over WireGuard.
+# The log forwarder is left out: its script is not in the repo.
+name: edge_node
+services:
+  cdn-caddy-ssl:
+    image: caddy:alpine
+    container_name: cdn-caddy-ssl
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [cdn-edge-node]
+    restart: unless-stopped
+
+  cdn-edge-node:
+    image: owasp/modsecurity-crs@sha256:4d5e1c4605df9a89ca85db742d8e7e39cbbf5b656264091ed9ab1211d2476e6a  # CRS 4.25.1-nginx-lts, same pin as the repo
+    container_name: cdn-edge-node
+    user: root
+    environment:
+      EDGE_REGION: ${EDGE_REGION}
+      ORIGIN_HOST: 10.88.0.1
+      ORIGIN_PORT: 8080
+      PARANOIA: 1
+      ANOMALY_INBOUND: 10
+      ANOMALY_OUTBOUND: 10
+      CONTROL_API_URL: http://10.88.0.1:8070
+      BUNDLE_SIGNING_KEY: ${BUNDLE_SIGNING_KEY:?}
+      SYNC_INTERVAL_SEC: 5
+      RATE_LIMIT_RPS: 50
+      RATE_LIMIT_BURST: 100
+      RATE_LIMIT_BURST_STATIC: 200
+      FORCE_HTTPS: "false"
+      TZ: Asia/Bangkok
+    volumes:
+      - ./edge/templates/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+      - ./edge/templates/conf.d/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
+      - ./edge/templates/modsecurity.d/setup.conf.template:/etc/nginx/templates/modsecurity.d/setup.conf.template:ro
+      - ./edge/templates/modsecurity.d/modsecurity.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity.conf.template:ro
+      - ./edge/templates/modsecurity.d/modsecurity-override.conf.template:/etc/nginx/templates/modsecurity.d/modsecurity-override.conf.template:ro
+      - ./edge/entrypoint.d/99-rulesync.sh:/docker-entrypoint.d/99-rulesync.sh:ro
+      - ./edge/html/403.html:/usr/share/nginx/html/403.html:ro
+      - ./edge/html/429.html:/usr/share/nginx/html/429.html:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - edge_rules:/opt/custom-rules
+      - edge_cache:/var/cache/nginx
+      - ./logs:/var/log/nginx/cdn
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  edge_rules:
+  edge_cache:
