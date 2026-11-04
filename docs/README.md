@@ -12,7 +12,7 @@ status: VERIFIED
 | ถ้าคุณเป็น | อ่าน |
 |---|---|
 | ผู้บริหาร/ผู้ตรวจโครงการ | [บทที่ 01](book/01-overview.md), [บทที่ 02](book/02-capabilities.md), [Implementation Status](IMPLEMENTATION_STATUS.md) |
-| ผู้ดูแลระบบ | [Part II](infrastructure/04-infrastructure-overview.md), [Part VIII Operations](operations/36-prerequisites.md), [Troubleshooting](operations/50-troubleshooting.md) |
+| ผู้ดูแลระบบ | [Part II](infrastructure/04-infrastructure-overview.md), [Part VIII Operations](operations/36-prerequisites.md), [Troubleshooting](operations/50-troubleshooting.md), [ย้ายจากคลาวด์ลง Docker](operations/51-migrate-to-local-docker.md) |
 | นักพัฒนา | [Part III Backend](backend/08-backend-overview.md), [API Reference](reference/api-reference.md), [Part VI Frontend](frontend/27-react-architecture.md) |
 | ผู้ดูแลความปลอดภัย | [Part IV WAF](waf/18-nginx.md), [Deception](backend/17-deception-layer.md), [Part VII Flows](workflows/end-to-end.md) |
 
