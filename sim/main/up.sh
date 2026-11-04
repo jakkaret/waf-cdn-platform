@@ -85,12 +85,18 @@ cp "$SIM_MAIN/dashboard.Dockerfile" "$ctx/Dockerfile"
 cp /usr/local/bin/docker "$ctx/docker"
 docker build -q -t wafsim-dashboard -f "$ctx/$(with_extra_ca "$ctx" Dockerfile)" "$ctx" >/dev/null
 
-if [ "${SIM_BUILD_FRONTEND:-1}" = 1 ] && [ ! -f dashboard/frontend/dist/index.html ]; then
+# dist/ survives restarts on the /root volume (deploy_copy leaves it alone), so
+# rebuild whenever the frontend sources differ from the ones it was built from.
+src_hash=$(cd dashboard/frontend && find . -path ./node_modules -prune -o -path ./dist -prune -o \
+  -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+if [ "${SIM_BUILD_FRONTEND:-1}" = 1 ] && { [ ! -f dashboard/frontend/dist/index.html ] \
+     || [ "$(cat /root/.sim-frontend-src-hash 2>/dev/null)" != "$src_hash" ]; }; then
   log "building the frontend (npm ci + vite build)"
   extra=()
   has_extra_ca && extra=(-v /sim-ca/extra.crt:/extra-ca.crt:ro -e NODE_EXTRA_CA_CERTS=/extra-ca.crt)
   docker run --rm "${extra[@]}" -v "$REPO/dashboard/frontend:/app" -w /app node:20-alpine \
     sh -c 'npm ci --no-audit --no-fund --loglevel=error && npm run build' \
+    && echo "$src_hash" > /root/.sim-frontend-src-hash \
     || log "frontend build failed; the API still runs (the dashboard page says it is not built)"
 fi
 
