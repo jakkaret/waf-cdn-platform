@@ -29,6 +29,9 @@ fi
 
 log "starting cdn-caddy-ssl + cdn-edge-node"
 (cd "$D" && docker compose up -d)
+# The edge itself (Caddy -> nginx) must answer; only the path to Main may lag.
+wait_for 120 "the local edge (Caddy -> cdn-edge-node /healthz)" \
+  sh -c "curl -fsS -H 'Host: cdn.waf-it-kku.online' http://127.0.0.1/healthz | grep -q '\"status\": \"ok\"'"
 
 log "starting GeoDNS (PowerDNS on $EDGE_PUBLIC_IP:53)"
 deploy_copy cdn/geodns-pdns /opt/geodns-pdns
