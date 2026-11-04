@@ -127,7 +127,7 @@ fi
 run_host cloudwaf-tunnel \
   -v "$REPO/tunnel:/opt/cloudwaf-tunnel:ro" -v /etc/cloudwaf-tunnel:/etc/cloudwaf-tunnel:ro \
   -v /var/lib/cloudwaf-tunnel:/var/lib/cloudwaf-tunnel \
-  -e TUNNEL_VHOST_HOST=0.0.0.0 -w /opt/cloudwaf-tunnel wafsim-dashboard python server.py
+  -e TUNNEL_VHOST_HOST=172.18.0.1 -w /opt/cloudwaf-tunnel wafsim-dashboard python server.py
 
 # --- first admin (operator-seeded, as on the real server) -------------------
 log "seeding the admin account"

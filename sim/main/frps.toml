@@ -2,6 +2,9 @@
 # in git). @...@ values are filled from sim/.state/secrets.env.
 bindPort = 7000
 vhostHTTPPort = 8085
+# Only Main's nginx (via the waf-net gateway) may reach the vhost; on the
+# public address it would let a visitor skip the edge and the WAF.
+proxyBindAddr = "172.18.0.1"
 
 auth.method = "token"
 auth.token = "@FRP_AUTH_TOKEN@"

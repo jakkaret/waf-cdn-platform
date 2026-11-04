@@ -30,13 +30,16 @@ dig_a() {  # dig_a <server> <name> [dig args...]
 
 # Precondition: both edges reach Main. PowerDNS starts health-checking a LUA
 # record's URLs at the first query for it and answers with the backup set
-# until that first check is done, so ask each server once, then wait.
+# until that first check is done, so ask each server once per branch of the
+# record (East Asia, everyone else), then wait.
 for ip in $EDGE_TH $EDGE_ASIA; do
   for _ in $(seq 1 60); do
     "${C[@]}" curl -fsS --max-time 3 -H 'Host: cdn.waf-it-kku.online' "http://$ip/healthz/deep" 2>/dev/null | grep -q OK && break
     sleep 2
   done
-  "${C[@]}" dig +short +time=2 +tries=1 @"$ip" x.cdn.waf-it-kku.online >/dev/null
+  for subnet in 133.0.0.0/24 8.8.8.0/24; do
+    "${C[@]}" dig +short +time=2 +tries=1 @"$ip" x.cdn.waf-it-kku.online +subnet=$subnet >/dev/null
+  done
 done
 sleep 10
 
@@ -82,6 +85,10 @@ done
 echo "== Main"
 check "dashboard /api/health"       200 "$("${C[@]}" curl -s -o /dev/null -w '%{http_code}' -H "Host: $MAIN" http://$MAIN/api/health)"
 check "unknown Host on Main refused" 403 "$("${C[@]}" curl -s -o /dev/null -w '%{http_code}' -H "Host: $SITE" http://$MAIN/)"
+for port in 8085 8060; do
+  check "tunnel vhost :$port not public" 000 \
+    "$("${C[@]}" curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: $SITE" http://$MAIN:$port/)"
+done
 last=$("${M[@]}" sh -c "grep '\"host\":\"$SITE\"' /root/waf_project/logs/nginx/access.json | tail -n 1")
 check "Main sees the visitor, not the edge" yes \
   "$(echo "$last" | grep -q '"remote_addr":"45.154.26.10"\|"remote_addr":"57.158.25.10"' && echo yes || echo "no: $(echo "$last" | jq -r .remote_addr 2>/dev/null)")"

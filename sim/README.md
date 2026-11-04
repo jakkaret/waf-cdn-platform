@@ -20,7 +20,7 @@ template และสคริปต์ของ repo จึงรันข้�
 
 ```sh
 bash sim/up.sh      # ครั้งแรก 15-25 นาที (ดึง image และ build ในแต่ละเครื่อง)
-bash sim/test.sh    # ตรวจ end-to-end 19 ข้อ
+bash sim/test.sh    # ตรวจ end-to-end 22 ข้อ
 bash sim/down.sh    # หยุด (down.sh -v ลบดิสก์ของทุกเครื่องด้วย)
 ```
 
@@ -55,7 +55,8 @@ Dashboard: เปิด http://localhost:8880 (ผ่าน Caddy ของ main
 4. ไฟล์ static ได้ `X-Cache-Status: HIT` ครั้งที่สอง, สั่ง purge (คิวเดียวกับ
    `POST /api/cdn/purge`) แล้วกลับเป็น MISS
 5. edge ทั้งสองรัน rule bundle ที่เซ็นแล้วจาก control-api
-6. dashboard `/api/health`, Host อื่นที่เข้า Main ตรงโดน 403, log ของ Main เห็น IP
+6. dashboard `/api/health`, Host อื่นที่เข้า Main ตรงโดน 403, vhost ของ tunnel
+   (:8085 frps, :8060 cloudwaf-tunnel) เข้าจาก IP สาธารณะไม่ได้, log ของ Main เห็น IP
    ผู้เข้าชม ไม่ใช่ IP ของ edge
 7. ปิด edge-asia แล้วผู้ใช้ญี่ปุ่นย้ายไป edge-th, เปิดคืนแล้วกลับมา
 
