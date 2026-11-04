@@ -208,3 +208,49 @@ sim จำลอง 5 เครื่อง (main, edge-th, edge-asia, lab, clie
 - ทำ compose แบบแบนสำหรับพัฒนาประจำวัน (ทุกบริการเป็น container บน Docker เดียว ไม่ต้องจำลองเครื่อง)
   และเก็บ `sim/` ไว้ทดสอบแบบหลายเครื่อง เช่น GeoDNS และ failover
 - ใส่ `sim/test.sh` ใน CI เพื่อให้ทุก commit ผ่าน end-to-end ก่อน merge
+
+## 51.9 รันบน PC (Windows หรือ Linux)
+
+### ระยะ 1 บน PC: ต้องมี SSH key ก่อน
+
+คำสั่งใน 51.3 ต้องใช้ SSH key ที่ตอนนี้อยู่บน Mac ของผู้วางแผน มีสองทาง
+
+- **ทาง ก (ง่ายกว่า):** รันระยะ 1 บน Mac ที่ SSH ได้อยู่แล้ว แล้วย้ายแค่ `waf-capture-*.tar.gpg` ไป PC
+- **ทาง ข:** ย้าย key ไป PC ผ่าน USB หรือที่เก็บที่เข้ารหัส ห้ามส่งทางแชตหรืออีเมล
+
+| ปลายทาง | ผู้ใช้ | key บน Mac |
+|---|---|---|
+| Main `178.104.53.123` | root | `~/.ssh/id_ed25519` |
+| edge-th `45.154.26.91` | root | `~/.ssh/id_ed25519` |
+| edge-asia (alias `waf-node-azure`, `57.158.25.236`) | azure | `~/.ssh/waf-node-us_key.pem` |
+| lab origin (alias `waf-lab-origin`, `20.189.113.148`) | Origin | `~/.ssh/waf-origin/origin_key.pem` |
+
+บน PC ให้วาง key ไว้ใน `~/.ssh/` ของ WSL หรือ Linux (ไม่ใช่ใต้ `/mnt/c` เพราะ ssh ปฏิเสธ key ที่สิทธิ์กว้าง)
+แล้ว `chmod 600` ทุกไฟล์ และสร้าง `~/.ssh/config` ให้มี alias `waf-node-azure` และ `waf-lab-origin` ตามตาราง
+ลบ key ออกจาก PC หลังปิดคลาวด์แล้ว เพราะไม่มีประโยชน์อีก
+
+บน Linux ใช้ `sha256sum` แทน `shasum -a 256` ได้ และต้องมี `gpg` (`sudo apt install gnupg`)
+
+### ระยะ 3 บน Windows
+
+1. ติดตั้ง WSL2 กับ Ubuntu (`wsl --install -d Ubuntu` ใน PowerShell แบบ admin) แล้วติดตั้ง Docker Desktop
+   เปิด Settings → Resources → WSL integration ให้ Ubuntu
+2. ให้ WSL ใช้ RAM พอ: สร้าง `%UserProfile%\.wslconfig`
+   ```ini
+   [wsl2]
+   memory=12GB
+   processors=6
+   ```
+   แล้ว `wsl --shutdown` หนึ่งครั้ง (ปรับตัวเลขตามเครื่อง sim ต้องการ RAM ว่างราว 6 GB)
+3. ทำทุกอย่างใน terminal ของ Ubuntu และ clone ไว้ใน home ของ WSL (`~/`) ไม่ใช่ `/mnt/c`
+   ซึ่งช้ามากและทำให้สิทธิ์ไฟล์กับปลายบรรทัดของสคริปต์ผิด
+   ```sh
+   git config --global core.autocrlf input
+   git clone https://github.com/jakkaret/waf-cdn-platform.git ~/waf-cdn-platform
+   cd ~/waf-cdn-platform && git checkout claude/project-thread-2vsr5p
+   bash sim/up.sh && bash sim/test.sh
+   ```
+4. เปิดแดชบอร์ดจากเบราว์เซอร์ของ Windows ที่ `http://localhost:8880`
+5. ถอดรหัส archive และนำเข้าข้อมูลใน Ubuntu ตาม 51.6 เก็บ archive ที่ถอดรหัสแล้วไว้นอกโฟลเดอร์ repo
+
+บน Linux ข้ามข้อ 1–2 ติดตั้ง Docker Engine แล้วทำข้อ 3–5 ได้เลย
